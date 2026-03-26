@@ -1,0 +1,64 @@
+input_dir: data/raw
+output_dir: data/processed
+
+datasets:
+  classla_web_sl:
+    extractor: jsonl
+    domain: web
+  classlawiki_sl:
+    extractor: conllu
+    domain: wiki
+  macocu_sl:
+    extractor: macocu
+    domain: web
+  parlamint_si:
+    extractor: tei
+    domain: parliamentary
+  kas:
+    extractor: tei
+    domain: academic
+  coleslaw:
+    extractor: tei
+    domain: legal
+  povejmo_vemo_med:
+    extractor: tei
+    domain: medical
+  oss:
+    extractor: conllu
+    domain: scientific
+  siparl:
+    extractor: tei
+    domain: parliamentary
+  janes_forum:
+    extractor: tei
+    domain: forum
+  janes_blog:
+    extractor: tei
+    domain: blog
+  janes_news:
+    extractor: tei
+    domain: news
+  kzb:
+    extractor: conllu
+    domain: scientific
+  solar:
+    extractor: conllu
+    domain: student
+  finepdf:
+    extractor: huggingface
+    domain: web
+  fineweb2:
+    extractor: huggingface
+    domain: web
+  culturax:
+    extractor: huggingface
+    domain: web
+  legal_mc4:
+    extractor: huggingface
+    domain: legal
+  c4:
+    extractor: huggingface
+    domain: web
+  hplt:
+    extractor: huggingface
+    domain: web
