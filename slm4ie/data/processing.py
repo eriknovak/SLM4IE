@@ -1,5 +1,6 @@
 """Data cleaning, formatting, and splitting utilities."""
 
+import gzip
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -99,13 +100,38 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
         logger.info("Extracting '%s' with %s extractor", key, extractor_name)
 
         extractor = get_extractor(extractor_name)
-        output_file = output_base / f"{key}.jsonl"
+        text_file = output_base / f"{key}.jsonl"
+        ann_file = output_base / f"{key}.annotations.jsonl.gz"
 
         count = 0
-        with open(output_file, "w", encoding="utf-8") as f:
-            for doc in extractor.extract(input_dir, key, domain):
-                f.write(doc.to_jsonl_line())
-                f.write("\n")
-                count += 1
+        has_annotations = False
 
-        logger.info("Extracted %d documents from '%s' -> %s", count, key, output_file)
+        with open(text_file, "w", encoding="utf-8") as tf:
+            ann_fh = None
+            try:
+                for doc in extractor.extract(input_dir, key, domain):
+                    tf.write(doc.to_jsonl_line())
+                    tf.write("\n")
+
+                    ann_line = doc.to_annotation_line()
+                    if ann_line is not None:
+                        if ann_fh is None:
+                            ann_fh = gzip.open(
+                                ann_file, "wt", encoding="utf-8"
+                            )
+                            has_annotations = True
+                        ann_fh.write(ann_line)
+                        ann_fh.write("\n")
+
+                    count += 1
+            finally:
+                if ann_fh is not None:
+                    ann_fh.close()
+
+        logger.info(
+            "Extracted %d documents from '%s' -> %s%s",
+            count,
+            key,
+            text_file,
+            f" + {ann_file}" if has_annotations else "",
+        )
