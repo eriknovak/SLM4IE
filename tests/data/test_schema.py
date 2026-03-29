@@ -15,11 +15,7 @@ class TestToken:
         assert token.form == "hello"
         assert token.lemma is None
         assert token.upos is None
-        assert token.xpos is None
         assert token.feats is None
-        assert token.deprel is None
-        assert token.ner is None
-        assert token.head is None
 
     def test_full_token(self):
         """Token with all fields populated."""
@@ -27,20 +23,12 @@ class TestToken:
             form="running",
             lemma="run",
             upos="VERB",
-            xpos="VBG",
             feats="Aspect=Prog",
-            deprel="root",
-            ner="O",
-            head=0,
         )
         assert token.form == "running"
         assert token.lemma == "run"
         assert token.upos == "VERB"
-        assert token.xpos == "VBG"
         assert token.feats == "Aspect=Prog"
-        assert token.deprel == "root"
-        assert token.ner == "O"
-        assert token.head == 0
 
     def test_to_dict_excludes_none(self):
         """to_dict should not include keys with None values."""
@@ -48,8 +36,6 @@ class TestToken:
         result = token.to_dict()
         assert result == {"form": "hello", "upos": "NOUN"}
         assert "lemma" not in result
-        assert "xpos" not in result
-        assert "head" not in result
 
     def test_to_dict_full_token(self):
         """to_dict includes all fields when all are set."""
@@ -57,22 +43,14 @@ class TestToken:
             form="running",
             lemma="run",
             upos="VERB",
-            xpos="VBG",
             feats="Aspect=Prog",
-            deprel="root",
-            ner="O",
-            head=2,
         )
         result = token.to_dict()
         assert result == {
             "form": "running",
             "lemma": "run",
             "upos": "VERB",
-            "xpos": "VBG",
             "feats": "Aspect=Prog",
-            "deprel": "root",
-            "ner": "O",
-            "head": 2,
         }
 
     def test_to_dict_minimal_token(self):

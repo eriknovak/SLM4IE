@@ -13,21 +13,13 @@ class Token:
         form (str): Surface form of the token.
         lemma (Optional[str]): Lemma of the token.
         upos (Optional[str]): Universal POS tag.
-        xpos (Optional[str]): Language-specific POS tag.
         feats (Optional[str]): Morphological features.
-        deprel (Optional[str]): Dependency relation label.
-        ner (Optional[str]): Named entity label.
-        head (Optional[int]): Index of the syntactic head token.
     """
 
     form: str
     lemma: Optional[str] = None
     upos: Optional[str] = None
-    xpos: Optional[str] = None
     feats: Optional[str] = None
-    deprel: Optional[str] = None
-    ner: Optional[str] = None
-    head: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a dict representation, excluding None fields.
