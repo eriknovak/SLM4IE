@@ -107,8 +107,7 @@ class TestConlluExtractor:
         assert docs[1].text == "Seja se je začela ob devetih."
 
     def test_extracts_tokens(self, tmp_path: Path) -> None:
-        """Token fields (form, lemma, upos, xpos, feats, head, deprel)
-        are correctly parsed from the first sentence."""
+        """Token fields (form, lemma, upos, feats) are parsed."""
         docs = _extract(tmp_path, TWO_SENTENCE_CONLLU)
         tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
         assert len(tokens) == 5
@@ -117,28 +116,11 @@ class TestConlluExtractor:
         assert t0.form == "Predsednik"
         assert t0.lemma == "predsednik"
         assert t0.upos == "NOUN"
-        assert t0.xpos == "Ncmsn"
         assert t0.feats == "Case=Nom|Gender=Masc|Number=Sing"
-        assert t0.head == 3
-        assert t0.deprel == "nsubj"
-
-        t2 = tokens[2]
-        assert t2.form == "odprl"
-        assert t2.head == 0
-        assert t2.deprel == "root"
 
         t4 = tokens[4]
         assert t4.form == "."
         assert t4.upos == "PUNCT"
-
-    def test_extracts_ner_tags(self, tmp_path: Path) -> None:
-        """NER tags are extracted from the MISC column."""
-        docs = _extract(tmp_path, NER_SENTENCE)
-        tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
-        assert tokens[0].ner == "B-PER"
-        assert tokens[1].ner == "I-PER"
-        assert tokens[2].ner == "O"
-        assert tokens[4].ner == "B-LOC"
 
     def test_doc_id_from_sent_id(self, tmp_path: Path) -> None:
         """doc_id is set from the # sent_id = comment."""
@@ -176,12 +158,10 @@ class TestConlluExtractor:
         assert len(docs) == 2
 
     def test_handles_underscore_feats(self, tmp_path: Path) -> None:
-        """_ in feats and misc columns are converted to None."""
+        """_ in feats column is converted to None."""
         docs = _extract(tmp_path, UNDERSCORE_SENTENCE)
         tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
         assert tokens[0].feats is None
-        assert tokens[0].ner is None
-        assert tokens[0].xpos is None
 
     def test_no_text_comment_empty_string(self, tmp_path: Path) -> None:
         """Document text is empty string when # text comment is absent."""

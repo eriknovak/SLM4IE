@@ -1,13 +1,10 @@
 """CoNLL-U format extractor for the SLM4IE pipeline."""
 
-import re
 from pathlib import Path
 from typing import Iterator, List, Optional
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
 from slm4ie.data.schema import Annotations, Document, Token
-
-_NER_RE = re.compile(r"NER=([^\s|]+)")
 
 
 def _blank_to_none(value: str) -> Optional[str]:
@@ -20,21 +17,6 @@ def _blank_to_none(value: str) -> Optional[str]:
         Optional[str]: None if value is ``_``, otherwise the value itself.
     """
     return None if value == "_" else value
-
-
-def _parse_ner(misc: str) -> Optional[str]:
-    """Extract NER tag from the MISC column.
-
-    Args:
-        misc (str): Contents of the MISC column.
-
-    Returns:
-        Optional[str]: NER label (e.g. ``"B-PER"``), or None if absent.
-    """
-    if misc == "_":
-        return None
-    m = _NER_RE.search(misc)
-    return m.group(1) if m else None
 
 
 def _parse_block(
@@ -79,26 +61,14 @@ def _parse_block(
         form = parts[1]
         lemma = _blank_to_none(parts[2])
         upos = _blank_to_none(parts[3])
-        xpos = _blank_to_none(parts[4])
         feats = _blank_to_none(parts[5])
-        head_raw = parts[6]
-        head: Optional[int] = (
-            int(head_raw) if head_raw != "_" else None
-        )
-        deprel = _blank_to_none(parts[7])
-        misc = parts[9]
-        ner = _parse_ner(misc)
 
         tokens.append(
             Token(
                 form=form,
                 lemma=lemma,
                 upos=upos,
-                xpos=xpos,
                 feats=feats,
-                head=head,
-                deprel=deprel,
-                ner=ner,
             )
         )
 
