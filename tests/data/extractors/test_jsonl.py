@@ -60,7 +60,7 @@ class TestJsonlExtractor:
         assert docs[1].text == "Kako si?"
 
     def test_preserves_annotations(self, tmp_path: Path) -> None:
-        """Tokens parsed from paragraphs have correct form, ner, upos."""
+        """Tokens parsed from paragraphs have correct form, lemma, upos, feats."""
         record = {
             "text": "Dober dan.",
             "doc_id": "d1",
@@ -73,31 +73,19 @@ class TestJsonlExtractor:
                                     "form": "Dober",
                                     "lemma": "dober",
                                     "upos": "ADJ",
-                                    "xpos": "Agpmsn",
                                     "feats": "Case=Nom",
-                                    "head": 1,
-                                    "deprel": "amod",
-                                    "ner": "O",
                                 },
                                 {
                                     "form": "dan",
                                     "lemma": "dan",
                                     "upos": "NOUN",
-                                    "xpos": "Ncmsn",
                                     "feats": "Case=Nom",
-                                    "head": 0,
-                                    "deprel": "root",
-                                    "ner": "O",
                                 },
                                 {
                                     "form": ".",
                                     "lemma": ".",
                                     "upos": "PUNCT",
-                                    "xpos": "Z",
                                     "feats": None,
-                                    "head": 1,
-                                    "deprel": "punct",
-                                    "ner": "O",
                                 },
                             ]
                         }
@@ -112,8 +100,9 @@ class TestJsonlExtractor:
         tokens = ann.tokens
         assert len(tokens) == 3
         assert tokens[0].form == "Dober"
+        assert tokens[0].lemma == "dober"
         assert tokens[0].upos == "ADJ"
-        assert tokens[0].ner == "O"
+        assert tokens[0].feats == "Case=Nom"
         assert tokens[1].form == "dan"
         assert tokens[1].upos == "NOUN"
         assert tokens[2].form == "."

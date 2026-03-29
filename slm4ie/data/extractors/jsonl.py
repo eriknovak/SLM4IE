@@ -45,11 +45,7 @@ def _parse_tokens_from_paragraphs(
                         form=tok["form"],
                         lemma=tok.get("lemma"),
                         upos=tok.get("upos"),
-                        xpos=tok.get("xpos"),
                         feats=tok.get("feats"),
-                        head=tok.get("head"),
-                        deprel=tok.get("deprel"),
-                        ner=tok.get("ner"),
                     )
                 )
             end = len(tokens) - 1
