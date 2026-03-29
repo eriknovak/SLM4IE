@@ -81,11 +81,11 @@ class Document:
     annotations: Optional[Annotations] = None
 
     def to_jsonl_line(self) -> str:
-        """Serializes the document to a single JSON line.
+        """Serializes the document to a single JSON line (text only).
 
-        None fields, empty metadata, and missing annotations are
-        excluded from the output. Uses ensure_ascii=False to
-        preserve Unicode characters.
+        Annotations are excluded — use to_annotation_line() for those.
+        None fields and empty metadata are excluded from the output.
+        Uses ensure_ascii=False to preserve Unicode characters.
 
         Returns:
             str: A single JSON line with no trailing newline.
@@ -99,6 +99,28 @@ class Document:
             data["doc_id"] = self.doc_id
         if self.metadata:
             data["metadata"] = self.metadata
-        if self.annotations is not None:
-            data["annotations"] = self.annotations.to_dict()
+        return json.dumps(data, ensure_ascii=False)
+
+    def to_annotation_line(self) -> Optional[str]:
+        """Serializes annotations as compact parallel arrays.
+
+        Returns None if the document has no annotations. Output
+        format uses parallel arrays (forms, lemmas, upos, feats)
+        instead of one dict per token to reduce storage size.
+
+        Returns:
+            Optional[str]: A single JSON line, or None.
+        """
+        if self.annotations is None:
+            return None
+
+        tokens = self.annotations.tokens
+        data: Dict[str, Any] = {}
+        if self.doc_id is not None:
+            data["doc_id"] = self.doc_id
+        data["forms"] = [t.form for t in tokens]
+        data["lemmas"] = [t.lemma for t in tokens]
+        data["upos"] = [t.upos for t in tokens]
+        data["feats"] = [t.feats for t in tokens]
+        data["sentences"] = self.annotations.sentences
         return json.dumps(data, ensure_ascii=False)

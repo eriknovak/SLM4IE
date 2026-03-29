@@ -179,8 +179,8 @@ class TestDocument:
         data = json.loads(line)
         assert data["metadata"] == {"year": 2020, "url": "http://example.com"}
 
-    def test_to_jsonl_line_with_annotations_roundtrip(self):
-        """Document with annotations roundtrips through JSON correctly."""
+    def test_to_jsonl_line_excludes_annotations(self):
+        """to_jsonl_line must NOT include annotations."""
         tokens = [
             Token(form="Zdravo", upos="INTJ"),
             Token(form="svet", upos="NOUN"),
@@ -195,9 +195,74 @@ class TestDocument:
         )
         line = doc.to_jsonl_line()
         data = json.loads(line)
-        assert data["annotations"]["sentences"] == [[0, 1]]
-        assert data["annotations"]["tokens"][0]["form"] == "Zdravo"
-        assert data["annotations"]["tokens"][1]["upos"] == "NOUN"
+        assert "annotations" not in data
+        assert data["text"] == "Zdravo svet"
+        assert data["doc_id"] == "doc-001"
+
+    def test_to_jsonl_line_with_annotations_still_excludes_them(self):
+        """Even with annotations set, to_jsonl_line excludes them."""
+        tokens = [
+            Token(form="Zdravo", upos="INTJ"),
+            Token(form="svet", upos="NOUN"),
+        ]
+        ann = Annotations(tokens=tokens, sentences=[[0, 1]])
+        doc = Document(
+            text="Zdravo svet",
+            source="ssj500k",
+            domain="web",
+            doc_id="doc-001",
+            annotations=ann,
+        )
+        line = doc.to_jsonl_line()
+        data = json.loads(line)
+        assert "annotations" not in data
+        assert data["text"] == "Zdravo svet"
+
+    def test_to_annotation_line_compact_format(self):
+        """to_annotation_line returns compact parallel-array format."""
+        tokens = [
+            Token(form="Zdravo", lemma="zdrav", upos="INTJ", feats=None),
+            Token(form="svet", lemma="svet", upos="NOUN", feats="Case=Nom"),
+        ]
+        ann = Annotations(tokens=tokens, sentences=[[0, 1]])
+        doc = Document(
+            text="Zdravo svet",
+            source="ssj500k",
+            domain="web",
+            doc_id="doc-001",
+            annotations=ann,
+        )
+        line = doc.to_annotation_line()
+        data = json.loads(line)
+        assert data["doc_id"] == "doc-001"
+        assert data["forms"] == ["Zdravo", "svet"]
+        assert data["lemmas"] == ["zdrav", "svet"]
+        assert data["upos"] == ["INTJ", "NOUN"]
+        assert data["feats"] == [None, "Case=Nom"]
+        assert data["sentences"] == [[0, 1]]
+
+    def test_to_annotation_line_none_when_no_annotations(self):
+        """to_annotation_line returns None when no annotations."""
+        doc = Document(
+            text="Zdravo svet",
+            source="ssj500k",
+            domain="web",
+        )
+        assert doc.to_annotation_line() is None
+
+    def test_to_annotation_line_no_newline(self):
+        """to_annotation_line output must not contain newlines."""
+        tokens = [Token(form="test")]
+        ann = Annotations(tokens=tokens, sentences=[[0, 0]])
+        doc = Document(
+            text="test",
+            source="t",
+            domain="t",
+            doc_id="d1",
+            annotations=ann,
+        )
+        line = doc.to_annotation_line()
+        assert "\n" not in line
 
     def test_to_jsonl_line_ensure_ascii_false(self):
         """Non-ASCII characters are not escaped."""
