@@ -1,3 +1,227 @@
-# Dataset download configuration
-# Add source URLs and dataset identifiers here
-sources: []
+output_dir: data/raw
+
+datasets:
+  classla_web_sl:
+    enabled: true
+    source: clarin
+    name: "CLASSLA-web.sl 2.0 (annotated)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2079/CLASSLA-web.sl.2.0.anno.jsonl.gz?sequence=19&isAllowed=y"
+    output_dir: classla_web_sl
+
+  classlawiki_sl:
+    enabled: true
+    source: clarin
+    name: "CLASSLAWiki-sl"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1427/classlawiki-sl.conllu.gz?sequence=6&isAllowed=y"
+    output_dir: classlawiki_sl
+
+  macocu_sl:
+    enabled: true
+    source: clarin
+    name: "MaCoCu-sl 2.0"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-sl-2.0.xml.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-monolingual.dtd?sequence=2&isAllowed=y"
+    output_dir: macocu_sl
+
+  parlamint_si:
+    enabled: true
+    source: clarin
+    name: "ParlaMint-SI 5.0"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2004/ParlaMint-SI.tgz?sequence=27&isAllowed=y"
+    output_dir: parlamint_si
+
+  kas:
+    enabled: false
+    source: clarin
+    name: "KAS 2.0 (Academic Writing Corpus)"
+    manual: true
+    urls:
+      - "https://www.clarin.si/repository/xmlui/handle/11356/1448"
+    output_dir: kas
+    note: >
+      Requires CLARIN.SI academic login (Shibboleth). Download kas.tei.tar.gz
+      manually from the repository page and place it in data/raw/kas/.
+
+  coleslaw:
+    enabled: true
+    source: clarin
+    name: "COLESLAW 1.0 (Slovenian Legal Texts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2095/COLESLAW.zip?sequence=3&isAllowed=y"
+    output_dir: coleslaw
+
+  povejmo_vemo_med:
+    enabled: true
+    source: clarin
+    name: "PoVeJMo-VeMo-Med 1.0 (Slovenian Medical Texts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1983/PoVeJMo-VeMo-Med_1.0.zip?sequence=1&isAllowed=y"
+    output_dir: povejmo_vemo_med
+
+  oss:
+    enabled: true
+    source: clarin
+    name: "OSS 1.0 (Corpus of Scientific Texts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.1.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.2.zip?sequence=2&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.3.zip?sequence=3&isAllowed=y"
+    output_dir: oss
+    note: >
+      2.59 billion words / 3.26 billion tokens from 151K scientific texts
+      (monographs, articles, theses) from Slovenian universities (2000-2022).
+
+  siparl:
+    enabled: true
+    source: clarin
+    name: "siParl 4.0 (Slovenian Parliamentary Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1936/siParl.4.0.TEI.ana.zip?sequence=8&isAllowed=y"
+    output_dir: siparl
+    note: >
+      239 million words from parliamentary minutes (1990-2022). Annotated TEI XML
+      format, text extraction required. May overlap with ParlaMint-SI 5.0.
+
+  janes_forum:
+    enabled: true
+    source: clarin
+    name: "Janes-Forum 1.0 (Slovenian Forum Posts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1139/Janes-Forum.TEI.zip?sequence=1&isAllowed=y"
+    output_dir: janes_forum
+    note: >
+      47 million tokens from Slovenian forum posts (2001-2015).
+      Informal register, user-generated content.
+
+  janes_blog:
+    enabled: true
+    source: clarin
+    name: "Janes-Blog 1.0 (Slovenian Blog Posts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1138/Janes-Blog.TEI.zip?sequence=1&isAllowed=y"
+    output_dir: janes_blog
+    note: >
+      34.5 million tokens from blog posts and comments (2006-2016).
+      Informal register, user-generated content.
+
+  janes_news:
+    enabled: true
+    source: clarin
+    name: "Janes-News 1.0 (Slovenian News Comments)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1140/Janes-News.TEI.zip?sequence=1&isAllowed=y"
+    output_dir: janes_news
+    note: >
+      14.8 million tokens from news article comments (2007-2015).
+      Informal register, user-generated content.
+
+  kzb:
+    enabled: true
+    source: clarin
+    name: "KZB 1.0 (Scientific Texts of Contemporary Slovenian)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1872/KZB.conll.zip?sequence=1&isAllowed=y"
+    output_dir: kzb
+    note: >
+      25 million words / 33.6 million tokens of curated scientific
+      monographs and papers (2000-2023).
+
+  solar:
+    enabled: true
+    source: clarin
+    name: "Solar 3.0 (Student Essays)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1589/Solar.CoNLL-U.zip?sequence=5&isAllowed=y"
+    output_dir: solar
+    note: >
+      1.6 million words from 5,485 student essays.
+
+  finepdf:
+    enabled: true
+    source: huggingface
+    name: "FinePDF"
+    repo_id: "HuggingFaceFW/finepdfs"
+    configs:
+      - "slv_Latn"
+    output_dir: finepdf
+
+  fineweb2:
+    enabled: true
+    source: huggingface
+    name: "FineWeb-2"
+    repo_id: "HuggingFaceFW/fineweb-2"
+    configs:
+      - "slv_Latn"
+    output_dir: fineweb2
+
+  culturax:
+    enabled: false
+    source: huggingface
+    name: "CulturaX"
+    repo_id: "uonlp/CulturaX"
+    configs:
+      - "sl"
+    output_dir: culturax
+    note: >
+      Gated dataset. Requires HF_TOKEN env var with a token that has
+      accepted the dataset terms at https://huggingface.co/datasets/uonlp/CulturaX.
+
+  legal_mc4:
+    enabled: false
+    source: huggingface
+    name: "Legal-mC4"
+    repo_id: "joelniklaus/legal-mc4"
+    configs:
+      - "sl"
+    output_dir: legal_mc4
+    note: >
+      Legal domain text filtered from mC4. ~32.5K documents, ~107M words.
+
+  c4:
+    enabled: true
+    source: huggingface
+    name: "mC4 (Slovenian)"
+    repo_id: "allenai/c4"
+    configs:
+      - "sl"
+    output_dir: c4
+    note: >
+      Cleaned multilingual Common Crawl corpus. ~5 GB+ for Slovenian.
+      May overlap with other Common Crawl-derived datasets.
+
+  hplt:
+    enabled: false
+    source: huggingface
+    name: "HPLT Monolingual v1.2"
+    repo_id: "HPLT/hplt_monolingual_v1_2"
+    configs:
+      - "sl"
+    output_dir: hplt
+    note: >
+      HPLT project web-crawled corpus from CommonCrawl + Internet Archive.
+      Multiple quality tiers available (sl). Requires trust_remote_code=True.
+
+  gigafida:
+    enabled: false
+    name: "Gigafida 2.0"
+    note: >
+      Not available for bulk download. Access via concordancers only
+      (NoSketchEngine/Kontext, SketchEngine).
+
+  metafida:
+    enabled: false
+    name: "Metafida 1.0"
+    note: >
+      Not available for bulk download. Access via concordancers only
+      (KonText, NoSketch Engine).
+
+  trendi:
+    enabled: false
+    name: "Trendi"
+    note: >
+      Not available for download due to copyright restrictions.
+      Contact: iztok.kosem@ijs.si.
