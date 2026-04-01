@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Small language models for zero-shot information extraction in Slovenian"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "requests>=2.31.0",
+    "tqdm>=4.66.0",
+    "pyyaml>=6.0",
+    "datasets>=3.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -20,5 +25,18 @@ build-backend = "hatchling.build"
 line-length = 80
 target-version = "py313"
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.6",
+    "xmlformatter>=0.2.6",
+    "jsbeautifier>=1.15.0",
+]
