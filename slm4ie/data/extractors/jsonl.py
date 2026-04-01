@@ -10,7 +10,7 @@ from slm4ie.data.schema import Annotations, Document, Token
 
 logger = logging.getLogger(__name__)
 
-_RESERVED_FIELDS = {"text", "paragraphs", "doc_id"}
+_RESERVED_FIELDS = {"text", "paragraphs", "doc_id", "conll"}
 
 
 def _parse_tokens_from_paragraphs(

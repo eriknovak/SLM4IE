@@ -21,9 +21,7 @@ def _find_project_root() -> Path:
     for parent in [current, *current.parents]:
         if (parent / "pyproject.toml").exists():
             return parent
-    raise FileNotFoundError(
-        "Could not find project root (no pyproject.toml)"
-    )
+    raise FileNotFoundError("Could not find project root (no pyproject.toml)")
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -36,27 +34,19 @@ def parse_args(argv=None) -> argparse.Namespace:
         argparse.Namespace: Parsed arguments.
     """
     parser = argparse.ArgumentParser(
-        description=(
-            "Extract raw datasets to unified JSONL format."
-        )
+        description=("Extract raw datasets to unified JSONL format.")
     )
     parser.add_argument(
         "--datasets",
         nargs="+",
         default=None,
-        help=(
-            "Dataset keys to extract "
-            "(default: all configured)."
-        ),
+        help=("Dataset keys to extract (default: all configured)."),
     )
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help=(
-            "Path to extraction YAML config "
-            "(default: configs/data/extract.yaml)."
-        ),
+        help=("Path to extraction YAML config (default: configs/data/extract.yaml)."),
     )
     return parser.parse_args(argv)
 
@@ -65,10 +55,7 @@ def main():
     """Run dataset extraction pipeline."""
     logging.basicConfig(
         level=logging.INFO,
-        format=(
-            "%(asctime)s %(levelname)s %(name)s: "
-            "%(message)s"
-        ),
+        format=("%(asctime)s %(levelname)s %(name)s: %(message)s"),
     )
 
     args = parse_args()
@@ -77,10 +64,7 @@ def main():
     config_path = (
         Path(args.config)
         if args.config
-        else project_root
-        / "configs"
-        / "data"
-        / "extract.yaml"
+        else project_root / "configs" / "data" / "extract.yaml"
     )
 
     try:
@@ -92,9 +76,7 @@ def main():
         logging.getLogger(__name__).error(str(e))
         sys.exit(1)
     except Exception as e:
-        logging.getLogger(__name__).error(
-            "Extraction failed: %s", e
-        )
+        logging.getLogger(__name__).error("Extraction failed: %s", e)
         sys.exit(1)
 
 
