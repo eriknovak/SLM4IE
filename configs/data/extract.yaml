@@ -1,5 +1,5 @@
-input_dir: data/raw
-output_dir: data/processed
+input_dir: /vault/data/SLM4IE/raw
+output_dir: /vault/data/SLM4IE/processed
 
 datasets:
   classla_web_sl:
@@ -60,5 +60,8 @@ datasets:
     extractor: huggingface
     domain: web
   hplt:
+    extractor: huggingface
+    domain: web
+  cc100:
     extractor: huggingface
     domain: web

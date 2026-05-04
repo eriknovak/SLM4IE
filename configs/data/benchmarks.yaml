@@ -1,0 +1,81 @@
+output_dir: /vault/data/SLM4IE/benchmarks
+
+datasets:
+  suk:
+    enabled: true
+    source: clarin
+    name: "SUK 1.1 (Slovene Training Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.TEI.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.CoNLL-U.zip?sequence=2&isAllowed=y"
+    output_dir: suk
+    tasks:
+      - POS
+      - LEMMA
+      - DEP
+      - NER
+      - SRL
+      - COREF
+      - WSD
+      - SA
+    note: >
+      ~1M tokens / 881K words / 48,594 sentences / 2,913 texts. Manually annotated
+      with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3,
+      Ambiga, ElexisWSD, and SentiCoref subcorpora. Gold-standard evaluation corpus
+      for IE tasks. License: CC BY-SA 4.0.
+
+  ssj500k:
+    enabled: true
+    source: clarin
+    name: "ssj500k 2.3 (Slovene Training Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1434/ssj500k.conllu.zip?sequence=10&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1434/ssj500k-en.TEI.zip?sequence=11&isAllowed=y"
+    output_dir: ssj500k
+    tasks:
+      - POS
+      - LEMMA
+      - DEP
+      - NER
+      - SRL
+    note: >
+      ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8),
+      named entities, and semantic role labels. Foundation corpus for SUK 1.1
+      (subset). Standalone version useful for direct comparison with prior work.
+      License: CC BY-NC-SA 4.0.
+
+  superglue_sl:
+    enabled: true
+    source: clarin
+    name: "Slovene SuperGLUE"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1380/SuperGLUE-HumanT.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1380/SuperGLUE-GoogleMT.zip?sequence=2&isAllowed=y"
+    output_dir: superglue_sl
+    tasks:
+      - QA
+      - NLI
+      - WSD
+      - COREF
+      - MRC
+    note: >
+      Slovene translation of SuperGLUE: BoolQ, CB, COPA, MultiRC, ReCoRD, RTE,
+      WiC, WSC. Mix of human and Google MT translation (COPA + WSC fully human).
+      Formats: JSONL, CSV, TXT. License: CC BY 4.0. Submit predictions to SloBENCH
+      for leaderboard evaluation.
+
+  twitter_sentiment_15eu:
+    enabled: true
+    source: clarin
+    name: "Twitter Sentiment for 15 European Languages (Slovenian)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1054/Slovenian_Twitter_sentiment.csv?sequence=14&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1054/README.txt?sequence=8&isAllowed=y"
+    output_dir: twitter_sentiment_15eu
+    tasks:
+      - SA
+    note: >
+      Slovenian slice of a 1.6M-tweet sentiment corpus across 15 European languages.
+      Three-class labels (Negative/Neutral/Positive), CSV format with TweetID,
+      HandLabel, AnnotatorID. Tweet text must be re-hydrated via Twitter/X API.
+      License: CC BY-SA 4.0.

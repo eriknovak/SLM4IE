@@ -1,4 +1,4 @@
-output_dir: data/raw
+output_dir: /vault/data/SLM4IE/raw
 
 datasets:
   classla_web_sl:
@@ -87,7 +87,7 @@ datasets:
       format, text extraction required. May overlap with ParlaMint-SI 5.0.
 
   janes_forum:
-    enabled: true
+    enabled: false
     source: clarin
     name: "Janes-Forum 1.0 (Slovenian Forum Posts)"
     urls:
@@ -98,7 +98,7 @@ datasets:
       Informal register, user-generated content.
 
   janes_blog:
-    enabled: true
+    enabled: false
     source: clarin
     name: "Janes-Blog 1.0 (Slovenian Blog Posts)"
     urls:
@@ -131,7 +131,7 @@ datasets:
       monographs and papers (2000-2023).
 
   solar:
-    enabled: true
+    enabled: false
     source: clarin
     name: "Solar 3.0 (Student Essays)"
     urls:
@@ -204,6 +204,18 @@ datasets:
     note: >
       HPLT project web-crawled corpus from CommonCrawl + Internet Archive.
       Multiple quality tiers available (sl). Requires trust_remote_code=True.
+
+  cc100:
+    enabled: true
+    source: huggingface
+    name: "CC100 (Slovenian)"
+    repo_id: "statmt/cc100"
+    configs:
+      - "sl"
+    output_dir: cc100
+    note: >
+      Monolingual data from CommonCrawl filtered using fastText language ID,
+      created by Facebook AI for the XLM-R paper. ~1.4 GB compressed for Slovenian.
 
   gigafida:
     enabled: false
