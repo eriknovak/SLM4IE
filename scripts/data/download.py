@@ -49,8 +49,18 @@ def parse_args(argv=None) -> argparse.Namespace:
         type=str,
         default=None,
         help=(
-            "Path to YAML config file "
-            "(default: configs/data/download.yaml)."
+            "Path to YAML config file. Overrides --config-name "
+            "if both are set."
+        ),
+    )
+    parser.add_argument(
+        "--config-name",
+        type=str,
+        default="download",
+        help=(
+            "Name of the config in configs/data/ to use, "
+            "without extension (default: 'download'). "
+            "Use 'benchmarks' for evaluation datasets."
         ),
     )
     parser.add_argument(
@@ -82,7 +92,10 @@ def main():
     config_path = (
         Path(args.config)
         if args.config
-        else project_root / "configs" / "data" / "download.yaml"
+        else project_root
+        / "configs"
+        / "data"
+        / f"{args.config_name}.yaml"
     )
 
     try:

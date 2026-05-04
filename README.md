@@ -108,6 +108,9 @@ uv run python scripts/data/download.py --datasets fineweb2 cc100
 
 # Force re-download with custom output directory
 uv run python scripts/data/download.py --force --output-dir /path/to/data
+
+# Download evaluation benchmarks (configs/data/benchmarks.yaml)
+uv run python scripts/data/download.py --config-name benchmarks
 ```
 
 Extract and convert raw downloads to unified JSONL using [`configs/data/extract.yaml`](configs/data/extract.yaml):
