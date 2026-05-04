@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Small language models for zero-shot information extraction in Slovenian"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     "requests>=2.31.0",
     "tqdm>=4.66.0",
