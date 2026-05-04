@@ -1,6 +1,6 @@
-# SLM4IE
-
-**Small Language Models for Zero-Shot Information Extraction in European Languages**
+<p align="center">
+  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/logo.png?raw=true" alt="logo" style="width: 100%;">
+</p>
 
 SLM4IE develops small language models (SLMs) for zero-shot information extraction across European languages, with emphasis on Slovenian. The project targets three limitations of current LLMs:
 
@@ -9,6 +9,153 @@ SLM4IE develops small language models (SLMs) for zero-shot information extractio
 - **Output inconsistency:** Unreliable structured extraction from generative models
 
 We build computationally efficient models optimized for commodity hardware, create multilingual benchmark datasets for sensitive domains, and evaluate against existing SLMs and LLMs. All artifacts (models, datasets, code) will be released publicly where possible.
+
+## Requirements
+
+- **Python** ≥ 3.13 (declared in [`pyproject.toml`](pyproject.toml) and [`.python-version`](.python-version))
+- **[uv](https://docs.astral.sh/uv/)** — recommended package and environment manager
+- **Git** — for cloning the repository and CLARIN.SI dataset access
+- **HuggingFace account** — required for gated datasets (e.g., `FineWeb-2`)
+- **Disk space** — pretraining corpora total tens of GB; plan accordingly
+- **GPU (optional)** — required for tokenizer/model training; CPU sufficient for data preparation
+
+## Setup
+
+### Install dependencies
+
+Clone the repository and create the virtual environment via `uv`:
+
+```bash
+git clone https://github.com/eriknovak/SLM4IE.git
+cd SLM4IE
+uv sync
+```
+
+
+This creates `.venv/` and installs both runtime and dev dependencies pinned in `uv.lock`. Activate the environment for ad-hoc commands:
+
+```bash
+source .venv/bin/activate
+```
+
+Or prefix individual commands with `uv run` to skip activation.
+
+### HuggingFace authentication
+
+Some datasets (e.g., `FineWeb-2`, gated corpora) require a HuggingFace access token. Authenticate once via the new unified `hf` CLI (shipped with `huggingface_hub` ≥ 0.34, which replaces the deprecated `huggingface-cli`):
+
+```bash
+hf auth login
+```
+
+Paste a token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) when prompted. The token is stored under `~/.cache/huggingface/` and picked up automatically by `huggingface_hub` and `datasets` — no `HF_TOKEN` environment variable or `.env` file needed.
+
+For non-interactive use (e.g., CI, SLURM), pass the token directly:
+
+```bash
+hf auth login --token "$HF_TOKEN"
+```
+
+To verify:
+
+```bash
+hf auth whoami
+```
+
+## Project Structure
+
+```
+SLM4IE/
+├── configs/                # YAML configuration files
+│   ├── data/                 # download, extract, processing, benchmarks, synthetic
+│   ├── models/               # model architecture configs
+│   ├── tokenizers/           # tokenizer training configs
+│   ├── training/             # pretrain.yaml, finetune_ner.yaml
+│   └── experiments/          # end-to-end experiment configs
+├── slm4ie/                 # Library source
+│   ├── data/                 # download, extract, processing, schema, synthetic
+│   ├── models/               # model components and registry
+│   ├── tokenizers/           # tokenizer training and analysis
+│   ├── training/             # trainer, callbacks, evaluation
+│   └── utils/                # config, I/O, MLflow helpers
+├── scripts/                # CLI entry points (thin wrappers around slm4ie/)
+│   ├── data/                 # download.py, extract.py, process.py, analyze.py, generate_synthetic.py
+│   ├── tokenizers/           # train.py, analyze.py
+│   ├── train.py              # model pretraining/fine-tuning
+│   └── evaluate.py           # benchmark evaluation
+├── slurm/                  # SLURM batch scripts for HPC training
+├── notebooks/              # exploratory Jupyter notebooks
+├── tests/                  # pytest test suite
+├── docs/                   # documentation and assets
+├── pyproject.toml          # project metadata and dependencies
+└── uv.lock                 # locked dependency versions
+```
+
+## Running Scripts
+
+All scripts are CLI wrappers around `slm4ie/` modules and read from YAML configs in `configs/`. Run them via `uv run` (recommended) or after activating `.venv/`.
+
+### Data pipeline
+
+Download raw corpora declared in [`configs/data/download.yaml`](configs/data/download.yaml):
+
+```bash
+# Download all enabled datasets
+uv run python scripts/data/download.py
+
+# Download specific datasets
+uv run python scripts/data/download.py --datasets fineweb2 cc100
+
+# Force re-download with custom output directory
+uv run python scripts/data/download.py --force --output-dir /path/to/data
+```
+
+Extract and convert raw downloads to unified JSONL using [`configs/data/extract.yaml`](configs/data/extract.yaml):
+
+```bash
+uv run python scripts/data/extract.py
+uv run python scripts/data/extract.py --datasets macocu_sl
+```
+
+Other data scripts (work-in-progress stubs):
+
+```bash
+uv run python scripts/data/process.py            # preprocessing pipeline
+uv run python scripts/data/analyze.py            # corpus statistics
+uv run python scripts/data/generate_synthetic.py # synthetic IE data via LLM APIs
+```
+
+### Tokenizer
+
+```bash
+uv run python scripts/tokenizers/train.py     # train tokenizer from config
+uv run python scripts/tokenizers/analyze.py   # compare tokenizers
+```
+
+### Model training and evaluation
+
+```bash
+uv run python scripts/train.py     # pretrain or fine-tune from configs/training/*.yaml
+uv run python scripts/evaluate.py  # evaluate on benchmarks/*.yaml
+```
+
+### SLURM (HPC)
+
+Batch scripts for cluster execution live under [`slurm/`](slurm/):
+
+```bash
+sbatch slurm/tokenizer_train.sbatch
+sbatch slurm/train.sbatch
+sbatch slurm/evaluate.sbatch
+sbatch slurm/generate.sbatch
+```
+
+### Tests
+
+```bash
+uv run pytest                # full test suite
+uv run pytest tests/data     # subset
+```
 
 ## Pretraining Corpora
 
@@ -72,5 +219,5 @@ Slovenian evaluation datasets used for downstream IE tasks (configured in [`conf
 The project is funded by ARIS (Slovenian Research and Innovation Agency) under the project number [Z2-70067](https://cris.cobiss.net/ecris/si/sl/project/24346).
 
 <figure>
-  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/funding/logo.jpg?raw=true" alt="ARIS Logo" width="420" />
+  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/aris.jpg?raw=true" alt="ARIS Logo" width="420" />
 </figure>
