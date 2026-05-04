@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
+from tqdm import tqdm
 
 # Import extractors to trigger registration
 import slm4ie.data.extractors.conllu  # noqa: F401
@@ -93,6 +94,17 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
             logger.warning("Input dir not found for '%s': %s", key, input_dir)
             continue
 
+        text_file = output_base / f"{key}.jsonl"
+        ann_file = output_base / f"{key}.annotations.jsonl.gz"
+
+        if text_file.exists():
+            logger.info(
+                "Skipping '%s', output already exists: %s",
+                key,
+                text_file,
+            )
+            continue
+
         # Decompress any archives before extraction
         for archive in sorted(input_dir.iterdir()):
             if archive.name.endswith(
@@ -103,8 +115,6 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
         logger.info("Extracting '%s' with %s extractor", key, extractor_name)
 
         extractor = get_extractor(extractor_name)
-        text_file = output_base / f"{key}.jsonl"
-        ann_file = output_base / f"{key}.annotations.jsonl.gz"
 
         count = 0
         has_annotations = False
@@ -112,7 +122,11 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
         with open(text_file, "w", encoding="utf-8") as tf:
             ann_fh = None
             try:
-                for doc in extractor.extract(input_dir, key, domain):
+                for doc in tqdm(
+                    extractor.extract(input_dir, key, domain),
+                    desc=key,
+                    unit="doc",
+                ):
                     tf.write(doc.to_jsonl_line())
                     tf.write("\n")
 

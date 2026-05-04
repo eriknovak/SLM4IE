@@ -8,6 +8,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+from tqdm import tqdm
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,9 +37,19 @@ def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
     logger.info(
         "Extracting %s -> %s", archive_path, output_path
     )
-    with gzip.open(archive_path, "rb") as f_in:
-        with open(output_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+    total = archive_path.stat().st_size
+    with open(archive_path, "rb") as raw_in:
+        with tqdm.wrapattr(
+            raw_in,
+            "read",
+            total=total,
+            unit="B",
+            unit_scale=True,
+            desc=archive_path.name,
+        ) as wrapped_in:
+            with gzip.GzipFile(fileobj=wrapped_in, mode="rb") as f_in:  # type: ignore[arg-type]
+                with open(output_path, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
 
     return output_path
 
@@ -66,9 +78,19 @@ def _extract_xz(archive_path: Path, output_dir: Path) -> Path:
     logger.info(
         "Extracting %s -> %s", archive_path, output_path
     )
-    with lzma.open(archive_path, "rb") as f_in:
-        with open(output_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+    total = archive_path.stat().st_size
+    with open(archive_path, "rb") as raw_in:
+        with tqdm.wrapattr(
+            raw_in,
+            "read",
+            total=total,
+            unit="B",
+            unit_scale=True,
+            desc=archive_path.name,
+        ) as wrapped_in:
+            with lzma.open(wrapped_in, "rb") as f_in:  # type: ignore[arg-type]
+                with open(output_path, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
 
     return output_path
 
@@ -87,7 +109,13 @@ def _extract_zip(archive_path: Path, output_dir: Path) -> Path:
         "Extracting %s -> %s", archive_path, output_dir
     )
     with zipfile.ZipFile(archive_path, "r") as zf:
-        zf.extractall(output_dir)
+        members = zf.infolist()
+        for member in tqdm(
+            members,
+            desc=archive_path.name,
+            unit="file",
+        ):
+            zf.extract(member, output_dir)
     return output_dir
 
 
@@ -107,7 +135,13 @@ def _extract_tar(archive_path: Path, output_dir: Path) -> Path:
         "Extracting %s -> %s", archive_path, output_dir
     )
     with tarfile.open(archive_path, "r:gz") as tf:
-        tf.extractall(output_dir, filter="data")
+        members = tf.getmembers()
+        for member in tqdm(
+            members,
+            desc=archive_path.name,
+            unit="file",
+        ):
+            tf.extract(member, output_dir, filter="data")
     return output_dir
 
 
