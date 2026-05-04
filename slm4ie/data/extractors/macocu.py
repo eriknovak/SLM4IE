@@ -32,23 +32,22 @@ class MacocuExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all MaCoCu XML files in *input_dir*.
+        """Yield Documents from all MaCoCu XML files under *input_dir*.
 
-        Scans only the top-level directory (not recursive). Parse
-        errors are logged as warnings and the file is skipped. ``<tu>``
-        elements with empty text are skipped silently.
+        Recursively discovers ``*.xml`` files. Parse errors are logged
+        as warnings and the file is skipped. ``<tu>`` elements with
+        empty text are skipped silently.
 
         Args:
-            input_dir (Path): Directory containing ``*.xml`` files.
+            input_dir (Path): Directory containing ``*.xml`` files
+                (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
 
         Yields:
             Document: One document per non-empty ``<tu>`` element.
         """
-        for filepath in sorted(
-            p for p in input_dir.iterdir() if p.suffix == ".xml"
-        ):
+        for filepath in sorted(input_dir.rglob("*.xml")):
             try:
                 tree = ElementTree.parse(filepath)
             except ElementTree.ParseError as exc:

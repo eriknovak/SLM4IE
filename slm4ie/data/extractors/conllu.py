@@ -92,8 +92,8 @@ class ConlluExtractor(BaseExtractor):
     """Extracts Documents from CoNLL-U / CoNLL files.
 
     One :class:`~slm4ie.data.schema.Document` is produced per sentence
-    block. Discovers all ``*.conllu`` and ``*.conll`` files in the given
-    directory (sorted).
+    block. Recursively discovers all ``*.conllu`` and ``*.conll`` files
+    under the given directory (sorted).
     """
 
     def extract(
@@ -102,11 +102,11 @@ class ConlluExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all CoNLL-U files in *input_dir*.
+        """Yield Documents from all CoNLL-U files under *input_dir*.
 
         Args:
             input_dir (Path): Directory containing ``.conllu``/``.conll``
-                files.
+                files (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
 
@@ -116,7 +116,7 @@ class ConlluExtractor(BaseExtractor):
         patterns = ["*.conllu", "*.conll"]
         files: List[Path] = []
         for pattern in patterns:
-            files.extend(input_dir.glob(pattern))
+            files.extend(input_dir.rglob(pattern))
         files.sort()
 
         for filepath in files:

@@ -129,12 +129,12 @@ class TestMacocuExtractor:
         docs = list(extractor.extract(tmp_path, "macocu", "web"))
         assert docs == []
 
-    def test_non_recursive_directory_scan(
+    def test_recursive_directory_scan(
         self, extractor: MacocuExtractor, tmp_path: Path
     ) -> None:
-        """Only top-level XML files are scanned (not recursive)."""
+        """XML files in nested subdirectories are also scanned."""
         subdir = tmp_path / "sub"
         subdir.mkdir()
         (subdir / "nested.xml").write_text(_SAMPLE_XML, encoding="utf-8")
         docs = list(extractor.extract(tmp_path, "macocu", "web"))
-        assert docs == []
+        assert len(docs) > 0

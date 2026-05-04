@@ -19,9 +19,9 @@ class TextExtractor(BaseExtractor):
     """Extracts Documents from plain ``.txt`` files.
 
     Documents are delimited by blank lines (the CC100 convention).
-    Discovers all ``*.txt`` files in *input_dir* (sorted) and yields
-    one :class:`~slm4ie.data.schema.Document` per non-empty block.
-    No annotations are produced.
+    Recursively discovers all ``*.txt`` files under *input_dir* (sorted)
+    and yields one :class:`~slm4ie.data.schema.Document` per non-empty
+    block. No annotations are produced.
     """
 
     def extract(
@@ -30,17 +30,18 @@ class TextExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all ``.txt`` files in *input_dir*.
+        """Yield Documents from all ``.txt`` files under *input_dir*.
 
         Args:
-            input_dir (Path): Directory containing ``.txt`` files.
+            input_dir (Path): Directory containing ``.txt`` files
+                (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
 
         Yields:
             Document: One document per blank-line-separated block.
         """
-        files: List[Path] = sorted(input_dir.glob("*.txt"))
+        files: List[Path] = sorted(input_dir.rglob("*.txt"))
 
         for filepath in files:
             yield from self._parse_file(filepath, source, domain)

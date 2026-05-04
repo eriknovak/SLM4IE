@@ -61,8 +61,8 @@ class JsonlExtractor(BaseExtractor):
     """Extracts Documents from CLASSLA-web JSONL files.
 
     One :class:`~slm4ie.data.schema.Document` is produced per JSONL line
-    with a non-empty ``text`` field. Discovers all ``*.jsonl`` files in
-    the given directory (sorted).
+    with a non-empty ``text`` field. Recursively discovers all
+    ``*.jsonl`` files under the given directory (sorted).
     """
 
     def extract(
@@ -71,17 +71,18 @@ class JsonlExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all JSONL files in *input_dir*.
+        """Yield Documents from all JSONL files under *input_dir*.
 
         Args:
-            input_dir (Path): Directory containing ``.jsonl`` files.
+            input_dir (Path): Directory containing ``.jsonl`` files
+                (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
 
         Yields:
             Document: One document per valid JSONL line.
         """
-        files: List[Path] = sorted(input_dir.glob("*.jsonl"))
+        files: List[Path] = sorted(input_dir.rglob("*.jsonl"))
 
         for filepath in files:
             yield from self._parse_file(filepath, source, domain)
