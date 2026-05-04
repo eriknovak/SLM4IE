@@ -14,6 +14,7 @@ import slm4ie.data.extractors.huggingface  # noqa: F401
 import slm4ie.data.extractors.jsonl  # noqa: F401
 import slm4ie.data.extractors.macocu  # noqa: F401
 import slm4ie.data.extractors.tei  # noqa: F401
+import slm4ie.data.extractors.text  # noqa: F401
 from slm4ie.data.extract import extract_archive
 from slm4ie.data.extractors import get_extractor
 
@@ -94,7 +95,9 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
 
         # Decompress any archives before extraction
         for archive in sorted(input_dir.iterdir()):
-            if archive.name.endswith((".gz", ".zip", ".tgz", ".tar.gz")):
+            if archive.name.endswith(
+                (".gz", ".xz", ".zip", ".tgz", ".tar.gz")
+            ):
                 extract_archive(archive, input_dir)
 
         logger.info("Extracting '%s' with %s extractor", key, extractor_name)

@@ -109,7 +109,7 @@ datasets:
       Informal register, user-generated content.
 
   janes_news:
-    enabled: true
+    enabled: false
     source: clarin
     name: "Janes-News 1.0 (Slovenian News Comments)"
     urls:
@@ -159,7 +159,7 @@ datasets:
     output_dir: fineweb2
 
   culturax:
-    enabled: false
+    enabled: true
     source: huggingface
     name: "CulturaX"
     repo_id: "uonlp/CulturaX"
@@ -171,15 +171,17 @@ datasets:
       accepted the dataset terms at https://huggingface.co/datasets/uonlp/CulturaX.
 
   legal_mc4:
-    enabled: false
-    source: huggingface
-    name: "Legal-mC4"
-    repo_id: "joelniklaus/legal-mc4"
-    configs:
-      - "sl"
+    enabled: true
+    source: http
+    name: "Legal-mC4 (Slovenian)"
+    urls:
+      - "https://huggingface.co/datasets/joelniklaus/legal-mc4/resolve/main/data/sl.train.0.jsonl.xz"
+      - "https://huggingface.co/datasets/joelniklaus/legal-mc4/resolve/main/data/sl.validation.0.jsonl.xz"
     output_dir: legal_mc4
     note: >
       Legal domain text filtered from mC4. ~32.5K documents, ~107M words.
+      Downloaded directly from the HuggingFace LFS endpoint (the repo's
+      loading script is no longer supported by the datasets library).
 
   c4:
     enabled: true
@@ -194,28 +196,30 @@ datasets:
       May overlap with other Common Crawl-derived datasets.
 
   hplt:
-    enabled: false
+    enabled: true
     source: huggingface
-    name: "HPLT Monolingual v1.2"
-    repo_id: "HPLT/hplt_monolingual_v1_2"
+    name: "HPLT 2.0 Cleaned (Slovenian)"
+    repo_id: "HPLT/HPLT2.0_cleaned"
     configs:
-      - "sl"
+      - "slv_Latn"
     output_dir: hplt
     note: >
-      HPLT project web-crawled corpus from CommonCrawl + Internet Archive.
-      Multiple quality tiers available (sl). Requires trust_remote_code=True.
+      HPLT project web-crawled corpus from CommonCrawl + Internet Archive,
+      cleaned tier. Parquet-based, loadable by datasets >= 4.0. Replaces the
+      v1.2 release, whose script-based loader is no longer supported.
 
   cc100:
     enabled: true
-    source: huggingface
+    source: http
     name: "CC100 (Slovenian)"
-    repo_id: "statmt/cc100"
-    configs:
-      - "sl"
+    urls:
+      - "https://data.statmt.org/cc-100/sl.txt.xz"
     output_dir: cc100
     note: >
       Monolingual data from CommonCrawl filtered using fastText language ID,
       created by Facebook AI for the XLM-R paper. ~1.4 GB compressed for Slovenian.
+      Downloaded directly from statmt.org (the HuggingFace mirror was script-based
+      and is no longer supported by the datasets library).
 
   gigafida:
     enabled: false

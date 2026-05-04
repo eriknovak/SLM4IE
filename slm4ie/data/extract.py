@@ -2,6 +2,7 @@
 
 import gzip
 import logging
+import lzma
 import shutil
 import tarfile
 import zipfile
@@ -35,6 +36,37 @@ def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
         "Extracting %s -> %s", archive_path, output_path
     )
     with gzip.open(archive_path, "rb") as f_in:
+        with open(output_path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+    return output_path
+
+
+def _extract_xz(archive_path: Path, output_dir: Path) -> Path:
+    """Extract a .xz file to output_dir.
+
+    Strips the .xz extension to determine the output filename.
+    Skips extraction if the output file already exists.
+
+    Args:
+        archive_path (Path): Path to the .xz file.
+        output_dir (Path): Directory to write the extracted file.
+
+    Returns:
+        Path: Path to the extracted file.
+    """
+    output_path = output_dir / archive_path.stem
+    if output_path.exists():
+        logger.info(
+            "Skipping extraction, output already exists: %s",
+            output_path,
+        )
+        return output_path
+
+    logger.info(
+        "Extracting %s -> %s", archive_path, output_path
+    )
+    with lzma.open(archive_path, "rb") as f_in:
         with open(output_path, "wb") as f_out:
             shutil.copyfileobj(f_in, f_out)
 
@@ -87,6 +119,8 @@ def extract_archive(
     Detects format by filename extension. Supported formats:
     - .gz (non-tar): gunzip to output_dir, strip .gz extension.
       Skips if output already exists.
+    - .xz: lzma-decompress to output_dir, strip .xz extension.
+      Skips if output already exists.
     - .zip: extract all contents to output_dir.
     - .tar.gz / .tgz: extract with filter="data" to output_dir.
 
@@ -95,8 +129,8 @@ def extract_archive(
         output_dir (Path): Directory to extract contents into.
 
     Returns:
-        Path: Path to the extracted file (for .gz) or output_dir
-            (for .zip, .tar.gz, .tgz).
+        Path: Path to the extracted file (for .gz / .xz) or
+            output_dir (for .zip, .tar.gz, .tgz).
 
     Raises:
         ValueError: If the archive format is not supported.
@@ -107,6 +141,8 @@ def extract_archive(
         return _extract_tar(archive_path, output_dir)
     elif name.endswith(".gz"):
         return _extract_gzip(archive_path, output_dir)
+    elif name.endswith(".xz"):
+        return _extract_xz(archive_path, output_dir)
     elif name.endswith(".zip"):
         return _extract_zip(archive_path, output_dir)
     else:

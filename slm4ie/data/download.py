@@ -114,18 +114,19 @@ class BaseDownloader(abc.ABC):
         """
 
 
-class ClarinDownloader(BaseDownloader):
-    """Downloads datasets from CLARIN.SI repository via HTTP.
+class HttpDownloader(BaseDownloader):
+    """Downloads dataset files over plain HTTP(S).
 
     Supports streaming downloads with progress bars, resume via
     HTTP Range headers, and retry with exponential backoff.
+    Used for CLARIN.SI and any other direct-URL source.
     """
 
     MAX_RETRIES = 3
     CHUNK_SIZE = 8192
 
     def download(self, config: DatasetConfig, output_dir: Path) -> Path:
-        """Download all URLs for a CLARIN dataset.
+        """Download all URLs for a dataset.
 
         Args:
             config: Dataset configuration with urls list.
@@ -338,7 +339,7 @@ def download_datasets(
     else:
         selected = {k: v for k, v in datasets.items() if v.enabled}
 
-    clarin_dl = ClarinDownloader()
+    http_dl = HttpDownloader()
     hf_dl = HuggingFaceDownloader()
 
     for key, config in selected.items():
@@ -380,8 +381,8 @@ def download_datasets(
             config.source,
         )
 
-        if config.source == "clarin":
-            clarin_dl.download(config, output_path)
+        if config.source in ("clarin", "http"):
+            http_dl.download(config, output_path)
         elif config.source == "huggingface":
             hf_dl.download(config, output_path)
         else:

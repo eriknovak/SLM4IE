@@ -186,11 +186,18 @@ Slovenian text corpora used for language model pretraining (configured in [`conf
 | [FinePDF](https://huggingface.co/datasets/HuggingFaceFW/finepdfs) | web | Slovenian (`slv_Latn`) PDF-derived text. |
 | [FineWeb-2](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2) | web | Slovenian (`slv_Latn`) high-quality web corpus. |
 | [mC4](https://huggingface.co/datasets/allenai/c4) | web | Cleaned multilingual Common Crawl, ~5 GB+ for Slovenian. |
-| [CC100](https://huggingface.co/datasets/statmt/cc100) | web | Monolingual CommonCrawl filtered with fastText (Facebook AI, XLM-R), ~1.4 GB compressed for Slovenian. |
+| [HPLT 2.0 Cleaned](https://huggingface.co/datasets/HPLT/HPLT2.0_cleaned) | web | HPLT project web crawl (CommonCrawl + Internet Archive), cleaned tier; Slovenian config `slv_Latn` (~10.3M rows). |
+
+### Direct HTTP sources
+
+| Dataset | Domain | Description |
+|---|---|---|
+| [CC100](https://data.statmt.org/cc-100/) | web | Monolingual CommonCrawl filtered with fastText (Facebook AI, XLM-R), ~1.4 GB compressed for Slovenian. Fetched directly from `statmt.org`; the HuggingFace mirror is script-based and no longer supported by `datasets`. |
+| [Legal-mC4](https://huggingface.co/datasets/joelniklaus/legal-mc4) | legal | Legal-domain text filtered from mC4, ~32.5K documents / ~107M words for Slovenian. Fetched directly from the HuggingFace LFS endpoint; the repo's loading script is no longer supported by `datasets`. |
 
 ### Disabled by default
 
-Optional sources requiring extra access (gated datasets, manual login, copyright restrictions): `KAS 2.0` (CLARIN academic login), `Janes-Forum/Blog`, `Solar 3.0`, `CulturaX` (HF gated), `Legal-mC4`, `HPLT`. Not bulk-downloadable: `Gigafida 2.x`, `Metafida 1.0`, `Trendi`.
+Optional sources requiring extra access (gated datasets, manual login, copyright restrictions): `KAS 2.0` (CLARIN academic login), `Janes-Forum/Blog`, `Solar 3.0`, `CulturaX` (HF gated). Not bulk-downloadable: `Gigafida 2.x`, `Metafida 1.0`, `Trendi`.
 
 ## Benchmarks
 

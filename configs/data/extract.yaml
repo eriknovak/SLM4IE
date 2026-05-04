@@ -54,7 +54,7 @@ datasets:
     extractor: huggingface
     domain: web
   legal_mc4:
-    extractor: huggingface
+    extractor: jsonl
     domain: legal
   c4:
     extractor: huggingface
@@ -63,5 +63,5 @@ datasets:
     extractor: huggingface
     domain: web
   cc100:
-    extractor: huggingface
+    extractor: text
     domain: web

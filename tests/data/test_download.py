@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from slm4ie.data.download import (
     BaseDownloader,
-    ClarinDownloader,
+    HttpDownloader,
     DatasetConfig,
     HuggingFaceDownloader,
     download_datasets,
@@ -138,15 +138,15 @@ class TestLoadConfig:
         assert datasets["ds2"].enabled is False
 
 
-class TestClarinDownloader:
-    """Tests for ClarinDownloader."""
+class TestHttpDownloader:
+    """Tests for HttpDownloader."""
 
     def test_is_base_downloader(self):
-        downloader = ClarinDownloader()
+        downloader = HttpDownloader()
         assert isinstance(downloader, BaseDownloader)
 
     def test_extract_filename_from_url(self):
-        downloader = ClarinDownloader()
+        downloader = HttpDownloader()
         url = (
             "https://www.clarin.si/repository/xmlui/bitstream/"
             "handle/11356/1427/classlawiki-sl.conllu.gz"
@@ -157,7 +157,7 @@ class TestClarinDownloader:
         )
 
     def test_extract_filename_no_query(self):
-        downloader = ClarinDownloader()
+        downloader = HttpDownloader()
         url = "https://example.com/path/to/file.tar.gz"
         assert downloader._extract_filename(url) == "file.tar.gz"
 
@@ -189,7 +189,7 @@ class TestClarinDownloader:
         )
         output_dir = tmp_path / "test"
 
-        downloader = ClarinDownloader()
+        downloader = HttpDownloader()
         result = downloader.download(config, output_dir)
 
         assert result == output_dir
@@ -226,7 +226,7 @@ class TestClarinDownloader:
         output_dir = tmp_path / "new_dir"
         assert not output_dir.exists()
 
-        downloader = ClarinDownloader()
+        downloader = HttpDownloader()
         downloader.download(config, output_dir)
 
         assert output_dir.exists()
@@ -336,7 +336,7 @@ class TestDownloadDatasets:
         config_file.write_text(yaml.dump(config_data))
         return config_file
 
-    @patch.object(ClarinDownloader, "download")
+    @patch.object(HttpDownloader, "download")
     def test_downloads_enabled_datasets(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
@@ -361,7 +361,7 @@ class TestDownloadDatasets:
         call_config = mock_dl.call_args[0][0]
         assert call_config.key == "ds1"
 
-    @patch.object(ClarinDownloader, "download")
+    @patch.object(HttpDownloader, "download")
     def test_skips_existing_directory(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
@@ -383,7 +383,7 @@ class TestDownloadDatasets:
         download_datasets(config_file)
         mock_dl.assert_not_called()
 
-    @patch.object(ClarinDownloader, "download")
+    @patch.object(HttpDownloader, "download")
     def test_force_redownloads(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
@@ -405,7 +405,7 @@ class TestDownloadDatasets:
         download_datasets(config_file, force=True)
         mock_dl.assert_called_once()
 
-    @patch.object(ClarinDownloader, "download")
+    @patch.object(HttpDownloader, "download")
     def test_select_specific_datasets(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
