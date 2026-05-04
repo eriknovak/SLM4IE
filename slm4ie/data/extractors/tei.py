@@ -23,6 +23,24 @@ _P_TAG = f"{{{_TEI_NS}}}p"
 _NAME_TAG = f"{{{_TEI_NS}}}name"
 _XML_ID = f"{{{_XML_NS}}}id"
 
+# MULTEXT-East v6 category code (1st char of compact MSD) → UPOS.
+# Refined by the 2nd char in `_mte_to_upos` for N/V/C distinctions.
+_MTE_CATEGORY_UPOS = {
+    "N": "NOUN",
+    "V": "VERB",
+    "A": "ADJ",
+    "P": "PRON",
+    "R": "ADV",
+    "S": "ADP",
+    "C": "CCONJ",
+    "M": "NUM",
+    "Q": "PART",
+    "I": "INTJ",
+    "Y": "X",
+    "X": "X",
+    "Z": "PUNCT",
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +77,87 @@ def _parse_msd(
     return upos, feats
 
 
+def _mte_to_upos(mte: str) -> Optional[str]:
+    """Map a MULTEXT-East v6 compact MSD to a UPOS tag.
+
+    Uses the first character (category) for the base mapping and the
+    second character (type) to refine NOUN↔PROPN, VERB↔AUX, and
+    CCONJ↔SCONJ.
+
+    Args:
+        mte (str): Compact MSD such as ``"Ncnsn"`` or ``"Z"``.
+
+    Returns:
+        Optional[str]: UPOS tag, or None if the category is unknown.
+    """
+    if not mte:
+        return None
+
+    cat = mte[0]
+    upos = _MTE_CATEGORY_UPOS.get(cat)
+    if upos is None:
+        return None
+
+    if len(mte) >= 2:
+        sub = mte[1]
+        if cat == "N" and sub == "p":
+            return "PROPN"
+        if cat == "V" and sub == "a":
+            return "AUX"
+        if cat == "C" and sub == "s":
+            return "SCONJ"
+
+    return upos
+
+
+def _parse_ana(
+    ana: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Parse a TEI ``ana`` attribute into UPOS and feats.
+
+    Looks for a ``mte:<descriptor>`` value (MULTEXT-East v6 compact
+    MSD, used by KAS) and maps it to UPOS. The raw descriptor is
+    preserved in feats as ``MTE=<descriptor>``.
+
+    Args:
+        ana (Optional[str]): The ``ana`` attribute value, or None.
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: ``(upos, feats)`` where
+            either may be None if no MTE descriptor is found.
+    """
+    if not ana:
+        return None, None
+
+    for part in ana.split():
+        if part.startswith("mte:"):
+            mte = part[len("mte:"):]
+            if not mte:
+                return None, None
+            return _mte_to_upos(mte), f"MTE={mte}"
+
+    return None, None
+
+
+def _parse_morph(
+    elem: "ElementTree.Element",
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract UPOS and feats from a token element.
+
+    Prefers ``msd`` (ParlaMint, siParl) over ``ana`` (KAS).
+
+    Args:
+        elem (ElementTree.Element): A ``<w>`` or ``<pc>`` element.
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: ``(upos, feats)``.
+    """
+    msd = elem.get("msd")
+    if msd:
+        return _parse_msd(msd)
+    return _parse_ana(elem.get("ana"))
+
+
 def _extract_tokens_from_sentence(
     s_elem: "ElementTree.Element",
 ) -> List[Token]:
@@ -77,7 +176,7 @@ def _extract_tokens_from_sentence(
 
     for child in s_elem:
         if child.tag in (_W_TAG, _PC_TAG):
-            upos, feats = _parse_msd(child.get("msd"))
+            upos, feats = _parse_morph(child)
             tokens.append(
                 Token(
                     form=child.text or "",
@@ -89,7 +188,7 @@ def _extract_tokens_from_sentence(
         elif child.tag == _NAME_TAG:
             for wc in child:
                 if wc.tag in (_W_TAG, _PC_TAG):
-                    upos, feats = _parse_msd(wc.get("msd"))
+                    upos, feats = _parse_morph(wc)
                     tokens.append(
                         Token(
                             form=wc.text or "",

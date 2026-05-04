@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.data.extractors.tei import TeiExtractor, _parse_msd
+from slm4ie.data.extractors.tei import (
+    TeiExtractor,
+    _mte_to_upos,
+    _parse_ana,
+    _parse_msd,
+)
 
 _ANNOTATED_TEI = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -22,6 +27,25 @@ _ANNOTATED_TEI = """\
           </s>
         </seg>
       </u>
+    </body>
+  </text>
+</TEI>
+"""
+
+_KAS_TEI = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <text>
+    <body>
+      <p xml:id="p1">
+        <s xml:id="kas.s1">
+          <w lemma="gospodarstvo" ana="mte:Ncnsn">Gospodarstvo</w>
+          <w lemma="in" ana="mte:Cc">in</w>
+          <w lemma="javen" ana="mte:Agpfsn">javna</w>
+          <w lemma="uprava" ana="mte:Ncfsn">uprava</w>
+          <pc ana="mte:Z" join="right">.</pc>
+        </s>
+      </p>
     </body>
   </text>
 </TEI>
@@ -60,6 +84,13 @@ def tmp_plain(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture()
+def tmp_kas(tmp_path: Path) -> Path:
+    """Write KAS-style annotated TEI to a temp dir and return it."""
+    (tmp_path / "kas.xml").write_text(_KAS_TEI, encoding="utf-8")
+    return tmp_path
+
+
 class TestParseMsd:
     """Unit tests for _parse_msd helper."""
 
@@ -87,6 +118,80 @@ class TestParseMsd:
         assert _parse_msd("") == (None, None)
 
 
+class TestMteToUpos:
+    """Unit tests for _mte_to_upos helper (MTE compact → UPOS)."""
+
+    def test_common_noun(self) -> None:
+        """Nc* → NOUN."""
+        assert _mte_to_upos("Ncnsn") == "NOUN"
+
+    def test_proper_noun(self) -> None:
+        """Np* → PROPN."""
+        assert _mte_to_upos("Npmsn") == "PROPN"
+
+    def test_main_verb(self) -> None:
+        """Vm* → VERB."""
+        assert _mte_to_upos("Vmpr3s-n") == "VERB"
+
+    def test_auxiliary_verb(self) -> None:
+        """Va* → AUX."""
+        assert _mte_to_upos("Va-r3s-n") == "AUX"
+
+    def test_coordinating_conjunction(self) -> None:
+        """Cc → CCONJ."""
+        assert _mte_to_upos("Cc") == "CCONJ"
+
+    def test_subordinating_conjunction(self) -> None:
+        """Cs → SCONJ."""
+        assert _mte_to_upos("Cs") == "SCONJ"
+
+    def test_punctuation(self) -> None:
+        """Z → PUNCT."""
+        assert _mte_to_upos("Z") == "PUNCT"
+
+    def test_adposition(self) -> None:
+        """S* → ADP."""
+        assert _mte_to_upos("Sl") == "ADP"
+
+    def test_unknown_category(self) -> None:
+        """Unknown first char yields None."""
+        assert _mte_to_upos("?") is None
+
+    def test_empty(self) -> None:
+        """Empty string yields None."""
+        assert _mte_to_upos("") is None
+
+
+class TestParseAna:
+    """Unit tests for _parse_ana helper."""
+
+    def test_mte_descriptor(self) -> None:
+        """ana="mte:Ncnsn" → (NOUN, MTE=Ncnsn)."""
+        upos, feats = _parse_ana("mte:Ncnsn")
+        assert upos == "NOUN"
+        assert feats == "MTE=Ncnsn"
+
+    def test_punctuation_pc(self) -> None:
+        """ana="mte:Z" → (PUNCT, MTE=Z)."""
+        upos, feats = _parse_ana("mte:Z")
+        assert upos == "PUNCT"
+        assert feats == "MTE=Z"
+
+    def test_multivalue_picks_mte(self) -> None:
+        """Space-separated values: pick the mte: one."""
+        upos, feats = _parse_ana("foo:bar mte:Cc")
+        assert upos == "CCONJ"
+        assert feats == "MTE=Cc"
+
+    def test_no_mte(self) -> None:
+        """Without an mte: value, returns (None, None)."""
+        assert _parse_ana("foo:bar") == (None, None)
+
+    def test_none(self) -> None:
+        """None input yields (None, None)."""
+        assert _parse_ana(None) == (None, None)
+
+
 class TestTeiExtractor:
     """Integration tests for TeiExtractor."""
 
@@ -103,6 +208,7 @@ class TestTeiExtractor:
     ) -> None:
         """Lemma and UPOS are parsed from annotated tokens."""
         docs = list(extractor.extract(tmp_annotated, "test", "parl"))
+        assert docs[0].annotations is not None
         tokens = docs[0].annotations.tokens
         assert tokens[0].lemma == "predsednik"
         assert tokens[0].upos == "NOUN"
@@ -150,3 +256,20 @@ class TestTeiExtractor:
         (subdir / "nested.xml").write_text(_PLAIN_TEI, encoding="utf-8")
         docs = list(extractor.extract(tmp_path, "test", "web"))
         assert len(docs) == 2
+
+    def test_extracts_kas_ana_annotations(
+        self, extractor: TeiExtractor, tmp_kas: Path
+    ) -> None:
+        """KAS-style ana="mte:..." tokens get UPOS + MTE feats."""
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
+        assert len(docs) == 1
+        assert docs[0].doc_id == "kas.s1"
+        assert docs[0].text == "Gospodarstvo in javna uprava ."
+        assert docs[0].annotations is not None
+        tokens = docs[0].annotations.tokens
+        assert [t.upos for t in tokens] == [
+            "NOUN", "CCONJ", "ADJ", "NOUN", "PUNCT",
+        ]
+        assert tokens[0].lemma == "gospodarstvo"
+        assert tokens[0].feats == "MTE=Ncnsn"
+        assert tokens[4].feats == "MTE=Z"
