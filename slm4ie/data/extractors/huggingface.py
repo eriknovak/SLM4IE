@@ -1,5 +1,6 @@
 """HuggingFace Arrow dataset extractor for the SLM4IE pipeline."""
 
+import datetime
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
@@ -10,6 +11,24 @@ from slm4ie.data.extractors import BaseExtractor, register_extractor
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
+
+
+def _to_jsonable(value: Any) -> Any:
+    """Converts non-JSON-native values to serializable equivalents.
+
+    Currently handles ``datetime``/``date`` (e.g. C4's ``timestamp``
+    column) by emitting ISO 8601 strings. Other values are returned
+    unchanged.
+
+    Args:
+        value (Any): Arbitrary value from a HuggingFace dataset row.
+
+    Returns:
+        Any: A JSON-serializable representation of *value*.
+    """
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    return value
 
 
 class HuggingFaceExtractor(BaseExtractor):
@@ -105,7 +124,7 @@ class HuggingFaceExtractor(BaseExtractor):
                 continue
 
             metadata: Dict[str, Any] = {
-                k: v
+                k: _to_jsonable(v)
                 for k, v in row.items()
                 if k != "text" and v is not None
             }
