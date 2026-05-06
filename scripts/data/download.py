@@ -74,6 +74,23 @@ def parse_args(argv=None) -> argparse.Namespace:
         default=None,
         help="Override base output directory.",
     )
+    benchmark_group = parser.add_mutually_exclusive_group()
+    benchmark_group.add_argument(
+        "--only-benchmarks",
+        action="store_true",
+        help=(
+            "Restrict default selection to datasets marked "
+            "`benchmark: true` in the config."
+        ),
+    )
+    benchmark_group.add_argument(
+        "--exclude-benchmarks",
+        action="store_true",
+        help=(
+            "Drop benchmark datasets from the default selection "
+            "(pretraining-only)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -104,6 +121,8 @@ def main():
             dataset_keys=args.datasets,
             force=args.force,
             output_dir_override=args.output_dir,
+            only_benchmarks=args.only_benchmarks,
+            exclude_benchmarks=args.exclude_benchmarks,
         )
     except ValueError as e:
         logging.getLogger(__name__).error(str(e))

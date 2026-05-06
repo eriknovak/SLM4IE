@@ -83,6 +83,32 @@ class TestDatasetConfig:
         assert config.source == ""
         assert config.output_dir == ""
 
+    def test_pretraining_dataset_defaults_benchmark_false(self):
+        data = {
+            "enabled": True,
+            "source": "clarin",
+            "name": "DS",
+            "urls": ["https://example.com/x.gz"],
+            "output_dir": "ds",
+        }
+        config = DatasetConfig.from_dict("ds", data)
+        assert config.benchmark is False
+        assert config.tasks == []
+
+    def test_benchmark_dataset_from_dict(self):
+        data = {
+            "enabled": True,
+            "benchmark": True,
+            "source": "clarin",
+            "name": "SUK",
+            "urls": ["https://example.com/suk.zip"],
+            "output_dir": "suk",
+            "tasks": ["POS", "NER", "DEP"],
+        }
+        config = DatasetConfig.from_dict("suk", data)
+        assert config.benchmark is True
+        assert config.tasks == ["POS", "NER", "DEP"]
+
 
 class TestLoadConfig:
     """Tests for load_config function."""
@@ -453,6 +479,85 @@ class TestDownloadDatasets:
         with pytest.raises(ValueError, match="unknown_ds"):
             download_datasets(
                 config_file, dataset_keys=["unknown_ds"]
+            )
+
+    @patch.object(HttpDownloader, "download")
+    def test_only_benchmarks_filters_default_selection(
+        self, mock_dl: MagicMock, tmp_path: Path
+    ):
+        config_file = self._make_config_file(
+            tmp_path,
+            {
+                "pretrain_ds": {
+                    "enabled": True,
+                    "source": "clarin",
+                    "name": "Pretrain",
+                    "urls": ["https://example.com/p.gz"],
+                    "output_dir": "pretrain_ds",
+                },
+                "bench_ds": {
+                    "enabled": True,
+                    "benchmark": True,
+                    "source": "clarin",
+                    "name": "Bench",
+                    "urls": ["https://example.com/b.gz"],
+                    "output_dir": "bench_ds",
+                    "tasks": ["NER"],
+                },
+            },
+        )
+        download_datasets(config_file, only_benchmarks=True)
+        mock_dl.assert_called_once()
+        assert mock_dl.call_args[0][0].key == "bench_ds"
+
+    @patch.object(HttpDownloader, "download")
+    def test_exclude_benchmarks_filters_default_selection(
+        self, mock_dl: MagicMock, tmp_path: Path
+    ):
+        config_file = self._make_config_file(
+            tmp_path,
+            {
+                "pretrain_ds": {
+                    "enabled": True,
+                    "source": "clarin",
+                    "name": "Pretrain",
+                    "urls": ["https://example.com/p.gz"],
+                    "output_dir": "pretrain_ds",
+                },
+                "bench_ds": {
+                    "enabled": True,
+                    "benchmark": True,
+                    "source": "clarin",
+                    "name": "Bench",
+                    "urls": ["https://example.com/b.gz"],
+                    "output_dir": "bench_ds",
+                },
+            },
+        )
+        download_datasets(config_file, exclude_benchmarks=True)
+        mock_dl.assert_called_once()
+        assert mock_dl.call_args[0][0].key == "pretrain_ds"
+
+    def test_only_and_exclude_benchmarks_mutually_exclusive(
+        self, tmp_path: Path
+    ):
+        config_file = self._make_config_file(
+            tmp_path,
+            {
+                "ds1": {
+                    "enabled": True,
+                    "source": "clarin",
+                    "name": "DS1",
+                    "urls": ["https://example.com/1.gz"],
+                    "output_dir": "ds1",
+                },
+            },
+        )
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            download_datasets(
+                config_file,
+                only_benchmarks=True,
+                exclude_benchmarks=True,
             )
 
     def test_manual_dataset_logs_note(

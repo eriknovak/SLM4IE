@@ -31,6 +31,11 @@ class DatasetConfig:
         repo_id: HuggingFace repository ID.
         configs: HuggingFace dataset config names.
         note: Informational note.
+        benchmark: True for evaluation benchmark datasets, False for
+            pretraining corpora. Used by downstream scripts to filter
+            which datasets to materialize.
+        tasks: Supported NLP tasks (e.g., POS, NER, SA, NLI). Empty
+            list for pretraining corpora.
     """
 
     key: str
@@ -43,6 +48,8 @@ class DatasetConfig:
     repo_id: Optional[str] = None
     configs: Optional[List[str]] = None
     note: Optional[str] = None
+    benchmark: bool = False
+    tasks: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, key: str, data: Dict) -> "DatasetConfig":
@@ -66,6 +73,8 @@ class DatasetConfig:
             repo_id=data.get("repo_id"),
             configs=data.get("configs"),
             note=data.get("note"),
+            benchmark=data.get("benchmark", False),
+            tasks=data.get("tasks", []),
         )
 
 
@@ -314,6 +323,8 @@ def download_datasets(
     dataset_keys: Optional[List[str]] = None,
     force: bool = False,
     output_dir_override: Optional[str] = None,
+    only_benchmarks: bool = False,
+    exclude_benchmarks: bool = False,
 ) -> None:
     """Download datasets according to configuration.
 
@@ -323,10 +334,22 @@ def download_datasets(
             If None, downloads all enabled datasets.
         force: Re-download even if output exists.
         output_dir_override: Override base output directory.
+        only_benchmarks: When True, restrict the default selection to
+            datasets with ``benchmark: true``. Ignored when
+            ``dataset_keys`` is provided.
+        exclude_benchmarks: When True, drop benchmark datasets from the
+            default selection. Ignored when ``dataset_keys`` is
+            provided. Mutually exclusive with ``only_benchmarks``.
 
     Raises:
-        ValueError: If any requested dataset key is unknown.
+        ValueError: If any requested dataset key is unknown, or if
+            both ``only_benchmarks`` and ``exclude_benchmarks`` are set.
     """
+    if only_benchmarks and exclude_benchmarks:
+        raise ValueError(
+            "only_benchmarks and exclude_benchmarks are mutually exclusive"
+        )
+
     base_output_dir, datasets = load_config(config_path)
     if output_dir_override:
         base_output_dir = output_dir_override
@@ -338,6 +361,10 @@ def download_datasets(
         selected = {k: v for k, v in datasets.items() if k in dataset_keys}
     else:
         selected = {k: v for k, v in datasets.items() if v.enabled}
+        if only_benchmarks:
+            selected = {k: v for k, v in selected.items() if v.benchmark}
+        elif exclude_benchmarks:
+            selected = {k: v for k, v in selected.items() if not v.benchmark}
 
     http_dl = HttpDownloader()
     hf_dl = HuggingFaceDownloader()

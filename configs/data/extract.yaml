@@ -65,3 +65,16 @@ datasets:
   cc100:
     extractor: text
     domain: web
+
+  # ---------------------------------------------------------------------------
+  # Evaluation benchmarks with span-level annotations (NER, etc.).
+  # SUK and ssj500k ship as CoNLL-U + TEI; the existing conllu extractor
+  # handles the CoNLL-U variant directly. After extraction, run
+  # scripts/data/to_spans.py to produce IE training files.
+  # ---------------------------------------------------------------------------
+  suk:
+    extractor: conllu
+    domain: mixed
+  ssj500k:
+    extractor: conllu
+    domain: mixed
