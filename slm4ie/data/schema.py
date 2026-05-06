@@ -80,6 +80,22 @@ class Document:
     metadata: Dict[str, Any] = dataclasses.field(default_factory=dict)
     annotations: Optional[Annotations] = None
 
+    @property
+    def uid(self) -> Optional[str]:
+        """Globally unique example identifier across datasets.
+
+        Combines ``source`` and ``doc_id`` so that documents from
+        different corpora can never collide even if they reuse the
+        same internal ``doc_id``. Returns None when ``doc_id`` is
+        absent (no stable per-document key from the source).
+
+        Returns:
+            Optional[str]: ``"{source}:{doc_id}"`` or None.
+        """
+        if self.doc_id is None:
+            return None
+        return f"{self.source}:{self.doc_id}"
+
     def to_jsonl_line(self) -> str:
         """Serializes the document to a single JSON line (text only).
 
@@ -97,6 +113,7 @@ class Document:
         }
         if self.doc_id is not None:
             data["doc_id"] = self.doc_id
+            data["uid"] = self.uid
         if self.metadata:
             data["metadata"] = self.metadata
         return json.dumps(data, ensure_ascii=False)
@@ -118,6 +135,7 @@ class Document:
         data: Dict[str, Any] = {}
         if self.doc_id is not None:
             data["doc_id"] = self.doc_id
+            data["uid"] = self.uid
         data["forms"] = [t.form for t in tokens]
         data["lemmas"] = [t.lemma for t in tokens]
         data["upos"] = [t.upos for t in tokens]

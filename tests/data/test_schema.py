@@ -167,6 +167,59 @@ class TestDocument:
         data = json.loads(line)
         assert data["doc_id"] == "doc-001"
 
+    def test_uid_combines_source_and_doc_id(self):
+        """uid is ``{source}:{doc_id}`` when doc_id is set."""
+        doc = Document(
+            text="Hello",
+            source="ssj500k",
+            domain="web",
+            doc_id="doc-001",
+        )
+        assert doc.uid == "ssj500k:doc-001"
+
+    def test_uid_none_without_doc_id(self):
+        """uid is None when doc_id is absent."""
+        doc = Document(text="Hello", source="ssj500k", domain="web")
+        assert doc.uid is None
+
+    def test_to_jsonl_line_includes_uid(self):
+        """uid is emitted alongside doc_id in JSONL output."""
+        doc = Document(
+            text="Hello",
+            source="ssj500k",
+            domain="web",
+            doc_id="doc-001",
+        )
+        data = json.loads(doc.to_jsonl_line())
+        assert data["uid"] == "ssj500k:doc-001"
+
+    def test_to_jsonl_line_uid_excluded_without_doc_id(self):
+        """uid is omitted when there is no doc_id."""
+        doc = Document(text="Hello", source="ssj500k", domain="web")
+        data = json.loads(doc.to_jsonl_line())
+        assert "uid" not in data
+
+    def test_to_annotation_line_includes_uid(self):
+        """uid is emitted in annotation output when doc_id is set."""
+        ann = Annotations(tokens=[Token(form="x")], sentences=[[0, 0]])
+        doc = Document(
+            text="x",
+            source="ssj500k",
+            domain="web",
+            doc_id="doc-001",
+            annotations=ann,
+        )
+        line = doc.to_annotation_line()
+        assert line is not None
+        data = json.loads(line)
+        assert data["uid"] == "ssj500k:doc-001"
+
+    def test_uid_disambiguates_across_sources(self):
+        """Same doc_id under different sources yields distinct uids."""
+        a = Document(text="x", source="ds_a", domain="web", doc_id="1")
+        b = Document(text="y", source="ds_b", domain="web", doc_id="1")
+        assert a.uid != b.uid
+
     def test_to_jsonl_line_with_metadata(self):
         """metadata preserved in JSONL output."""
         doc = Document(
