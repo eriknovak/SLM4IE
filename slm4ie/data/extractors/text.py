@@ -1,8 +1,26 @@
 """Plain-text extractor for line-oriented corpora (e.g. CC100).
 
-Treats each blank-line-separated block in a ``.txt`` file as a single
-document.  Streams files line-by-line so multi-GB inputs do not need
+Treats each blank-line-separated block in a .txt file as a single
+document. Streams files line-by-line so multi-GB inputs do not need
 to fit in memory.
+
+Example:
+    A .txt file with documents separated by blank lines:
+
+        Prvi dokument, prva vrstica.
+        Prvi dokument, druga vrstica.
+
+        Drugi dokument, ena sama vrstica.
+
+        Tretji dokument.
+
+    Schema mapping:
+        text:        joined non-empty lines of one block.
+        source:      provided by caller.
+        domain:      provided by caller.
+        doc_id:      not produced.
+        metadata:    not produced.
+        annotations: not produced.
 """
 
 import logging
@@ -16,12 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 class TextExtractor(BaseExtractor):
-    """Extracts Documents from plain ``.txt`` files.
+    """Extracts Documents from plain .txt files.
 
     Documents are delimited by blank lines (the CC100 convention).
-    Recursively discovers all ``*.txt`` files under *input_dir* (sorted)
-    and yields one :class:`~slm4ie.data.schema.Document` per non-empty
-    block. No annotations are produced.
+    Recursively discovers all .txt files under input_dir (sorted) and
+    yields one Document per non-empty block. No annotations are
+    produced.
     """
 
     def extract(
@@ -30,10 +48,10 @@ class TextExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all ``.txt`` files under *input_dir*.
+        """Yield Documents from all .txt files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing ``.txt`` files
+            input_dir (Path): Directory containing .txt files
                 (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
@@ -52,7 +70,7 @@ class TextExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Stream *filepath* and yield one Document per blank-line block.
+        """Stream a file and yield one Document per blank-line block.
 
         Args:
             filepath (Path): Path to the text file.

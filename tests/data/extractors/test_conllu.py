@@ -163,15 +163,32 @@ class TestConlluExtractor:
         tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
         assert tokens[0].feats is None
 
-    def test_no_text_comment_empty_string(self, tmp_path: Path) -> None:
-        """Document text is empty string when # text comment is absent."""
+    def test_text_reconstructed_when_comment_absent(
+        self, tmp_path: Path
+    ) -> None:
+        """Text is rebuilt from token forms when # text is absent."""
         content = textwrap.dedent("""\
             # sent_id = x.s1
-            1\tBeseda\tbeseda\tNOUN\t_\t_\t0\troot\t_\t_
+            1\tLepa\tlep\tADJ\t_\t_\t2\tamod\t_\t_
+            2\tbeseda\tbeseda\tNOUN\t_\t_\t0\troot\t_\tSpaceAfter=No
+            3\t.\t.\tPUNCT\t_\t_\t2\tpunct\t_\t_
         """)
         docs = _extract(tmp_path, content)
         assert len(docs) == 1
-        assert docs[0].text == ""
+        assert docs[0].text == "Lepa beseda."
+
+    def test_directory_named_like_conll_is_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """Glob must not return directories whose name ends in .conll."""
+        (tmp_path / "KZB.conll").mkdir()
+        _write_conllu(tmp_path / "KZB.conll", "inner.conllu", SENTENCE_1)
+        extractor = ConlluExtractor()
+        docs = list(
+            extractor.extract(tmp_path, source="kzb", domain="x")
+        )
+        # Should find the .conllu inside the directory and not crash.
+        assert len(docs) == 1
 
     def test_registered_as_conllu(self) -> None:
         """ConlluExtractor is registered under the 'conllu' key."""

@@ -1,4 +1,40 @@
-"""HuggingFace Arrow dataset extractor for the SLM4IE pipeline."""
+"""HuggingFace Arrow dataset extractor for the SLM4IE pipeline.
+
+Reads HuggingFace Dataset and DatasetDict objects that were
+serialized to disk via dataset.save_to_disk(). The input_dir must
+contain one subdirectory per dataset config (e.g. one per language
+shard or split group).
+
+Example:
+    On-disk layout:
+
+        input_dir/
+          sl/                    # config 1 (e.g. C4 Slovene)
+            dataset_info.json
+            state.json
+            data-00000-of-00001.arrow
+          hr/                    # config 2 (e.g. C4 Croatian)
+            ...
+
+    Each row is a dict, e.g. for AllenAI C4:
+
+        {
+          "text": "Dober dan, kako ste?",
+          "timestamp": datetime(2019, 4, 25, 12, 34, 56),
+          "url": "https://example.com/page"
+        }
+
+    Schema mapping:
+        text:        row["text"] (rows with empty/missing text
+                     are skipped).
+        source:      provided by caller.
+        domain:      provided by caller.
+        doc_id:      not produced.
+        metadata:    every other column (non-None), with
+                     datetime/date values converted to ISO 8601
+                     strings.
+        annotations: not produced.
+"""
 
 import datetime
 import logging
@@ -14,9 +50,9 @@ logger = logging.getLogger(__name__)
 
 
 def _to_jsonable(value: Any) -> Any:
-    """Converts non-JSON-native values to serializable equivalents.
+    """Convert non-JSON-native values to serializable equivalents.
 
-    Currently handles ``datetime``/``date`` (e.g. C4's ``timestamp``
+    Currently handles datetime and date values (e.g. C4's timestamp
     column) by emitting ISO 8601 strings. Other values are returned
     unchanged.
 
@@ -24,7 +60,7 @@ def _to_jsonable(value: Any) -> Any:
         value (Any): Arbitrary value from a HuggingFace dataset row.
 
     Returns:
-        Any: A JSON-serializable representation of *value*.
+        Any: A JSON-serializable representation of the value.
     """
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.isoformat()
@@ -34,10 +70,10 @@ def _to_jsonable(value: Any) -> Any:
 class HuggingFaceExtractor(BaseExtractor):
     """Extracts Documents from HuggingFace Arrow datasets saved to disk.
 
-    Expects *input_dir* to contain config subdirectories, each saved
-    via ``dataset.save_to_disk()``.  Handles both ``Dataset`` and
-    ``DatasetDict`` objects.  No annotations are produced; extra
-    columns are stored in ``metadata``.
+    Expects input_dir to contain config subdirectories, each saved
+    via dataset.save_to_disk(). Handles both Dataset and DatasetDict
+    objects. No annotations are produced; extra columns are stored
+    in metadata.
     """
 
     def extract(
@@ -46,16 +82,16 @@ class HuggingFaceExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all Arrow config dirs in *input_dir*.
+        """Yield Documents from all Arrow config dirs in input_dir.
 
-        Each immediate subdirectory of *input_dir* is treated as a
-        separate dataset config (e.g. a language shard).  If loading
+        Each immediate subdirectory of input_dir is treated as a
+        separate dataset config (e.g. a language shard). If loading
         a config dir fails, a warning is logged and that dir is
         skipped.
 
         Args:
-            input_dir (Path): Directory whose subdirectories are Arrow
-                datasets saved with ``save_to_disk()``.
+            input_dir (Path): Directory whose subdirectories are
+                Arrow datasets saved with save_to_disk().
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
 
@@ -86,7 +122,7 @@ class HuggingFaceExtractor(BaseExtractor):
         """Yield Documents from a Dataset or DatasetDict.
 
         Args:
-            ds (Any): A ``Dataset`` or ``DatasetDict`` instance.
+            ds (Any): A Dataset or DatasetDict instance.
             source (str): Dataset key.
             domain (str): Domain label.
 
@@ -111,7 +147,7 @@ class HuggingFaceExtractor(BaseExtractor):
         """Yield Documents from a single Dataset split.
 
         Args:
-            split (Any): A ``Dataset`` instance (single split).
+            split (Any): A Dataset instance (single split).
             source (str): Dataset key.
             domain (str): Domain label.
 

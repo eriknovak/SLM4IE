@@ -1,4 +1,51 @@
-"""JSONL format extractor for CLASSLA-web annotated data."""
+"""JSONL format extractor for CLASSLA-web annotated data.
+
+Reads .jsonl files where each line is a JSON object with a text
+field and optional nested paragraphs -> sentences -> tokens
+annotations (CLASSLA-web style).
+
+Example:
+    One line of a .jsonl file (formatted for readability):
+
+        {
+          "doc_id": "d1",
+          "text": "Dober dan.",
+          "url": "https://example.com",
+          "paragraphs": [
+            {
+              "sentences": [
+                {
+                  "tokens": [
+                    {"form": "Dober", "lemma": "dober",
+                     "upos": "ADJ",  "feats": "Case=Nom"},
+                    {"form": "dan",   "lemma": "dan",
+                     "upos": "NOUN", "feats": "Case=Nom"},
+                    {"form": ".",     "lemma": ".",
+                     "upos": "PUNCT", "feats": null}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+
+    Schema mapping:
+        text:        record["text"] (records with empty/missing
+                     text are skipped).
+        source:      provided by caller.
+        domain:      provided by caller.
+        doc_id:      record["doc_id"] if present.
+        metadata:    every other field of the record except text,
+                     paragraphs, doc_id, conll.
+        annotations:
+            tokens:    flattened across all paragraphs/sentences,
+                       reading form, lemma, upos, feats from each
+                       token dict.
+            sentences: [start, end] index pairs marking each
+                       sentence's span in the flattened token list.
+            Absent if the record has no paragraphs field or no
+            tokens.
+"""
 
 import json
 import logging
@@ -18,17 +65,17 @@ def _parse_tokens_from_paragraphs(
 ) -> Optional[Annotations]:
     """Parse nested paragraphs/sentences/tokens into Annotations.
 
-    Flattens all paragraphs → sentences → tokens into a single list,
-    tracking sentence boundaries as [start, end] index pairs.
+    Flattens all paragraphs, sentences, and tokens into a single
+    list, tracking sentence boundaries as [start, end] index pairs.
 
     Args:
-        paragraphs (List[Dict]): List of paragraph dicts, each containing
-            a ``sentences`` key with sentence dicts, each containing a
-            ``tokens`` key with token dicts.
+        paragraphs (List[Dict]): List of paragraph dicts, each
+            containing a sentences key with sentence dicts, each
+            containing a tokens key with token dicts.
 
     Returns:
-        Optional[Annotations]: Parsed annotations, or None if no tokens
-            were found.
+        Optional[Annotations]: Parsed annotations, or None if no
+            tokens were found.
     """
     tokens: List[Token] = []
     sentences: List[List[int]] = []
@@ -60,9 +107,9 @@ def _parse_tokens_from_paragraphs(
 class JsonlExtractor(BaseExtractor):
     """Extracts Documents from CLASSLA-web JSONL files.
 
-    One :class:`~slm4ie.data.schema.Document` is produced per JSONL line
-    with a non-empty ``text`` field. Recursively discovers all
-    ``*.jsonl`` files under the given directory (sorted).
+    One Document is produced per JSONL line with a non-empty text
+    field. Recursively discovers all .jsonl files under the given
+    directory (sorted).
     """
 
     def extract(
@@ -71,10 +118,10 @@ class JsonlExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all JSONL files under *input_dir*.
+        """Yield Documents from all JSONL files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing ``.jsonl`` files
+            input_dir (Path): Directory containing .jsonl files
                 (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.

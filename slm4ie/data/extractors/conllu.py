@@ -1,4 +1,40 @@
-"""CoNLL-U format extractor for the SLM4IE pipeline."""
+"""CoNLL-U format extractor for the SLM4IE pipeline.
+
+Reads .conllu and .conll files. One Document is produced per
+sentence block (blocks are separated by blank lines). Multiword
+tokens (ID containing "-") and empty nodes (ID containing ".") are
+skipped.
+
+Columns are tab-separated: ID, FORM, LEMMA, UPOS, XPOS, FEATS, HEAD,
+DEPREL, DEPS, MISC. An underscore ("_") denotes a missing value.
+
+Example:
+    Raw input (tab-separated columns):
+
+        # newdoc id = doc1
+        # sent_id = doc1.s1
+        # text = Predsednik je odprl sejo.
+        1	Predsednik	predsednik	NOUN	Ncmsn	Case=Nom	3	nsubj	_	NER=O
+        2	je	biti	AUX	Va-r3s-n	Tense=Pres	3	aux	_	NER=O
+        3	odprl	odpreti	VERB	Vmep-sm	VerbForm=Part	0	root	_	NER=O
+        4	sejo	seja	NOUN	Ncfsa	Case=Acc	3	obj	_	NER=O
+        5	.	.	PUNCT	Z	_	3	punct	_	NER=O
+
+    Schema mapping:
+        text:        "# text = ..." comment if present, otherwise
+                     reconstructed from FORM columns honouring
+                     SpaceAfter=No in MISC.
+        source:      provided by caller.
+        domain:      provided by caller.
+        doc_id:      "# sent_id = ..." comment.
+        metadata:    not produced.
+        annotations:
+            tokens.form:  column 2 (FORM).
+            tokens.lemma: column 3 (LEMMA).
+            tokens.upos:  column 4 (UPOS).
+            tokens.feats: column 6 (FEATS).
+            sentences:    single span [0, len(tokens)-1].
+"""
 
 from pathlib import Path
 from typing import Iterator, List, Optional
@@ -14,7 +50,8 @@ def _blank_to_none(value: str) -> Optional[str]:
         value (str): CoNLL-U field value.
 
     Returns:
-        Optional[str]: None if value is ``_``, otherwise the value itself.
+        Optional[str]: None if value is "_", otherwise the value
+            itself.
     """
     return None if value == "_" else value
 
@@ -26,7 +63,7 @@ def _parse_block(
 ) -> Optional[Document]:
     """Parse a single CoNLL-U sentence block into a Document.
 
-    Skips multiword and empty-node lines (ID contains ``-`` or ``.``).
+    Skips multiword and empty-node lines (ID contains "-" or ".").
 
     Args:
         lines (List[str]): Non-empty lines of the sentence block.
@@ -34,8 +71,8 @@ def _parse_block(
         domain (str): Domain label to assign to the Document.
 
     Returns:
-        Optional[Document]: Parsed Document, or None if the block had
-            no token lines.
+        Optional[Document]: Parsed Document, or None if the block
+            had no token lines.
     """
     text = ""
     sent_id: Optional[str] = None
@@ -75,6 +112,11 @@ def _parse_block(
     if not tokens:
         return None
 
+    # Reconstruct text from token forms when `# text = ...` is absent
+    # (e.g. Solar). SpaceAfter=No in MISC suppresses the trailing space.
+    if not text:
+        text = _reconstruct_text(lines)
+
     annotations = Annotations(
         tokens=tokens,
         sentences=[[0, len(tokens) - 1]],
@@ -88,12 +130,42 @@ def _parse_block(
     )
 
 
+def _reconstruct_text(lines: List[str]) -> str:
+    """Reconstruct sentence text from CoNLL-U token rows.
+
+    Joins token forms with spaces unless the token's MISC field
+    (column 10) contains SpaceAfter=No.
+
+    Args:
+        lines (List[str]): Non-empty lines of the sentence block.
+
+    Returns:
+        str: The reconstructed sentence text.
+    """
+    parts: List[str] = []
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        cols = line.split("\t")
+        if len(cols) < 10:
+            continue
+        token_id = cols[0]
+        if "-" in token_id or "." in token_id:
+            continue
+        form = cols[1]
+        misc = cols[9]
+        parts.append(form)
+        if "SpaceAfter=No" not in misc:
+            parts.append(" ")
+    return "".join(parts).rstrip()
+
+
 class ConlluExtractor(BaseExtractor):
     """Extracts Documents from CoNLL-U / CoNLL files.
 
-    One :class:`~slm4ie.data.schema.Document` is produced per sentence
-    block. Recursively discovers all ``*.conllu`` and ``*.conll`` files
-    under the given directory (sorted).
+    One Document is produced per sentence block. Recursively
+    discovers all .conllu and .conll files under the given directory
+    (sorted).
     """
 
     def extract(
@@ -102,11 +174,11 @@ class ConlluExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yield Documents from all CoNLL-U files under *input_dir*.
+        """Yield Documents from all CoNLL-U files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing ``.conllu``/``.conll``
-                files (searched recursively).
+            input_dir (Path): Directory containing .conllu and
+                .conll files (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
 
@@ -116,7 +188,7 @@ class ConlluExtractor(BaseExtractor):
         patterns = ["*.conllu", "*.conll"]
         files: List[Path] = []
         for pattern in patterns:
-            files.extend(input_dir.rglob(pattern))
+            files.extend(p for p in input_dir.rglob(pattern) if p.is_file())
         files.sort()
 
         for filepath in files:

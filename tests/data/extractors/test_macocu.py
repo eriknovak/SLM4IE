@@ -8,30 +8,20 @@ from slm4ie.data.extractors.macocu import MacocuExtractor
 
 _SAMPLE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE cesDoc SYSTEM "MaCoCu-monolingual.dtd">
-<cesDoc version="4">
-  <cesHeader/>
-  <text>
-    <group>
-      <tu id="1" score="0.95">
-        <tuv lang="sl">
-          <p>Dober dan.</p>
-          <p>Kako ste?</p>
-        </tuv>
-      </tu>
-      <tu id="2" score="0.42">
-        <tuv lang="sl">
-          <p>Hvala, dobro.</p>
-        </tuv>
-      </tu>
-      <tu id="3" score="0.80">
-        <tuv lang="sl">
-          <p>Nasvidenje.</p>
-        </tuv>
-      </tu>
-    </group>
-  </text>
-</cesDoc>
+<!DOCTYPE corpus SYSTEM "MaCoCu-monolingual.dtd">
+<corpus id="MaCoCu-sl-2.0">
+<doc id="macocu.sl.1" title="Page One" url="https://example.com/1" \
+crawl_date="2022-07-01" lm_score="0.95">
+<p id="macocu.sl.1.1" lang="sl">Dober dan.</p>
+<p id="macocu.sl.1.2" lang="sl">Kako ste?</p>
+</doc>
+<doc id="macocu.sl.2" title="Page Two" url="https://example.com/2">
+<p id="macocu.sl.2.1" lang="sl">Hvala, dobro.</p>
+</doc>
+<doc id="macocu.sl.3">
+<p></p>
+</doc>
+</corpus>
 """
 
 
@@ -43,7 +33,7 @@ def extractor() -> MacocuExtractor:
 
 @pytest.fixture()
 def tmp_xml(tmp_path: Path) -> Path:
-    """Write sample MaCoCu XML to a temp dir and return it."""
+    """Write a sample MaCoCu XML to *tmp_path* and return the dir."""
     (tmp_path / "sample.xml").write_text(_SAMPLE_XML, encoding="utf-8")
     return tmp_path
 
@@ -51,38 +41,42 @@ def tmp_xml(tmp_path: Path) -> Path:
 class TestMacocuExtractor:
     """Tests for MacocuExtractor."""
 
-    def test_extracts_all_tu_elements(
+    def test_extracts_one_doc_per_doc_element(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """One Document is produced per <tu> element."""
+        """One Document per non-empty <doc>; empty ones are skipped."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
-        assert len(docs) == 3
+        assert len(docs) == 2
 
-    def test_extracts_text_content(
+    def test_joins_paragraphs_with_newline(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """Text is joined from all <p> elements within a <tu>."""
+        """Multiple <p> children are joined with a newline."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
-        assert docs[0].text == "Dober dan. Kako ste?"
+        assert docs[0].text == "Dober dan.\nKako ste?"
 
-    def test_preserves_score_in_metadata(
+    def test_doc_id_from_doc_attribute(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """metadata['score'] holds the score attribute from <tu>."""
+        """``doc_id`` is read from the <doc> id attribute."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
-        assert docs[0].metadata["score"] == "0.95"
+        assert docs[0].doc_id == "macocu.sl.1"
+        assert docs[1].doc_id == "macocu.sl.2"
 
-    def test_doc_id_from_tu_id(
+    def test_metadata_includes_doc_attributes(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """doc_id is set from the id attribute of <tu>."""
+        """Selected <doc> attributes are surfaced as metadata."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
-        assert docs[0].doc_id == "1"
+        meta = docs[0].metadata
+        assert meta["title"] == "Page One"
+        assert meta["url"] == "https://example.com/1"
+        assert meta["lm_score"] == "0.95"
 
     def test_source_and_domain(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """source and domain are passed through to every Document."""
+        """``source`` and ``domain`` are passed through to every Document."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
         for doc in docs:
             assert doc.source == "macocu"
@@ -91,7 +85,7 @@ class TestMacocuExtractor:
     def test_no_annotations(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """Documents have no annotations (plain text only)."""
+        """MaCoCu Documents carry plain text only."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
         for doc in docs:
             assert doc.annotations is None
@@ -99,33 +93,8 @@ class TestMacocuExtractor:
     def test_skips_invalid_xml(
         self, extractor: MacocuExtractor, tmp_path: Path
     ) -> None:
-        """ParseError files are skipped with a warning."""
-        (tmp_path / "bad.xml").write_text(
-            "<unclosed>", encoding="utf-8"
-        )
-        docs = list(extractor.extract(tmp_path, "macocu", "web"))
-        assert docs == []
-
-    def test_skips_empty_tu_text(
-        self, extractor: MacocuExtractor, tmp_path: Path
-    ) -> None:
-        """<tu> elements with no text content are skipped."""
-        xml = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<cesDoc version="4">
-  <cesHeader/>
-  <text>
-    <group>
-      <tu id="1" score="0.5">
-        <tuv lang="sl">
-          <p></p>
-        </tuv>
-      </tu>
-    </group>
-  </text>
-</cesDoc>
-"""
-        (tmp_path / "empty.xml").write_text(xml, encoding="utf-8")
+        """Files with parse errors are skipped with a warning."""
+        (tmp_path / "bad.xml").write_text("<unclosed>", encoding="utf-8")
         docs = list(extractor.extract(tmp_path, "macocu", "web"))
         assert docs == []
 
@@ -137,4 +106,4 @@ class TestMacocuExtractor:
         subdir.mkdir()
         (subdir / "nested.xml").write_text(_SAMPLE_XML, encoding="utf-8")
         docs = list(extractor.extract(tmp_path, "macocu", "web"))
-        assert len(docs) > 0
+        assert len(docs) == 2
