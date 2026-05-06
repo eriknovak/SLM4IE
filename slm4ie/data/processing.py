@@ -10,8 +10,10 @@ import yaml
 from tqdm import tqdm
 
 # Import extractors to trigger registration
+import slm4ie.data.extractors.coleslaw  # noqa: F401
 import slm4ie.data.extractors.conllu  # noqa: F401
 import slm4ie.data.extractors.huggingface  # noqa: F401
+import slm4ie.data.extractors.json  # noqa: F401
 import slm4ie.data.extractors.jsonl  # noqa: F401
 import slm4ie.data.extractors.macocu  # noqa: F401
 import slm4ie.data.extractors.tei  # noqa: F401

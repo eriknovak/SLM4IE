@@ -18,10 +18,10 @@ datasets:
     extractor: tei
     domain: academic
   coleslaw:
-    extractor: tei
+    extractor: coleslaw
     domain: legal
   povejmo_vemo_med:
-    extractor: tei
+    extractor: json
     domain: medical
   oss:
     extractor: conllu
