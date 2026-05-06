@@ -103,6 +103,8 @@ All scripts are CLI wrappers around `slm4ie/` modules and read from YAML configs
 
 ### Data pipeline
 
+#### Download
+
 Download raw corpora declared in [`configs/data/download.yaml`](configs/data/download.yaml):
 
 ```bash
@@ -113,18 +115,100 @@ uv run python scripts/data/download.py
 uv run python scripts/data/download.py --datasets fineweb2 cc100
 
 # Force re-download with custom output directory
-uv run python scripts/data/download.py --force --output-dir /path/to/data
+uv run python scripts/data/download.py --output-dir /path/to/data --force
 
-# Download evaluation benchmarks (configs/data/benchmarks.yaml)
-uv run python scripts/data/download.py --config-name benchmarks
+# Download only evaluation benchmarks (datasets marked `benchmark: true`)
+uv run python scripts/data/download.py --only-benchmarks
+
+# Download only pretraining corpora (skip benchmarks)
+uv run python scripts/data/download.py --exclude-benchmarks
 ```
+
+#### Extract
 
 Extract and convert raw downloads to unified JSONL using [`configs/data/extract.yaml`](configs/data/extract.yaml):
 
 ```bash
 uv run python scripts/data/extract.py
 uv run python scripts/data/extract.py --datasets macocu_sl
+
+# re-extract a dataset whose output already exists
+uv run python scripts/data/extract.py --datasets macocu_sl --force
 ```
+
+For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW), extraction writes two files per dataset:
+
+- `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `metadata`, used directly for pretraining.
+- `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel arrays (`forms`, `lemmas`, `upos`, `feats`, `sentences`), kept separate to avoid loading them during text-only training.
+
+The downstream converters (`to_datatrove`, `to_spans`) join these two files on the fly via `slm4ie.data.io_utils.iter_joined_records`, so no intermediate merged file is materialized.
+
+#### Datatrove format
+
+Convert the per-dataset JSONL into the [datatrove](https://github.com/huggingface/datatrove) `Document` shape (`text` / `id` / `metadata`) so the corpus can be filtered, deduped, and sharded with datatrove pipelines:
+
+```bash
+# Convert one dataset
+uv run python scripts/data/to_datatrove.py kzb
+
+# Convert every dataset in extract.yaml
+uv run python scripts/data/to_datatrove.py --all
+
+# Re-convert every dataset in extract.yaml
+uv run python scripts/data/to_datatrove.py --all --force
+```
+
+Output goes to `<output_dir>/datatrove/<key>.jsonl.gz` (override with `--output-dir`). Existing outputs are skipped unless `--force` is passed. Every record carries `dataset` and `domain` at the top level so downstream filters and source-weighted sampling can use them via `document.metadata`. `JsonlReader("…/datatrove/*.jsonl.gz")` ingests the whole corpus in one go.
+
+#### Spans format
+
+Convert the per-dataset JSONL into span-level IE training files (GLiNER / CoNLL / generic) for fine-tuning encoder models on entity-style tasks:
+
+```bash
+# GLiNER training shape
+uv run python scripts/data/to_spans.py kzb --schema gliner
+
+# every dataset, lossless generic shape
+uv run python scripts/data/to_spans.py --all --schema generic
+```
+
+Output goes to `<output_dir>/spans/<schema>/<key>.jsonl.gz`. Existing outputs are skipped unless `--force` is passed. The converter expects each annotations payload to carry a `spans` field (`[start, end, label]` triples or `{start, end, label}` dicts with end-exclusive token indices); records without spans are skipped with a warning.
+
+#### Sentiment format
+
+Convert raw SA benchmark downloads (e.g. `sentinews`) into evaluation-ready JSONL with normalized `{negative, neutral, positive}` labels. The converter reads directly from the raw download tree (it bypasses the `extract.py` step) and emits one record per item with `id`, `text`, `label`, `label_id`, `level`, and `metadata`:
+
+```bash
+# Convert SentiNews (all annotation levels present in the download)
+uv run python scripts/data/to_sentiment.py sentinews
+
+# Restrict to document-level sentiment
+uv run python scripts/data/to_sentiment.py sentinews --levels document
+
+# Convert every SA-tagged benchmark dataset declared in download.yaml
+uv run python scripts/data/to_sentiment.py --all
+```
+
+Output goes to `<raw-dir>/eval/sentiment/<key>.jsonl.gz` (override with `--output-dir`), accompanied by a `label_map.json` so the integer `label_id` encoding is traceable. Existing outputs are skipped unless `--force` is passed.
+
+#### SuperGLUE format
+
+Convert the extracted Slovene SuperGLUE distribution into per-task per-split JSONL files for fine-tuning and SloBENCH-style evaluation. Each task is materialized in its native SuperGLUE schema (BoolQ, CB, COPA, RTE, ReCoRD, WiC, WSC pass through unchanged); MultiRC is flattened to one row per answer by default for classification convenience:
+
+```bash
+# All 8 tasks, all splits, HumanT variant
+uv run python scripts/data/to_superglue.py
+
+# Only CB and RTE, val split, GoogleMT variant
+uv run python scripts/data/to_superglue.py --tasks CB RTE --splits val --variant googlemt
+
+# Keep MultiRC in its native nested shape
+uv run python scripts/data/to_superglue.py --tasks MultiRC --no-flatten-multirc
+```
+
+Output goes to `<raw-dir>/eval/superglue_sl/<variant>/<task>/<split>.jsonl.gz` (override with `--output-dir`). The converter expects the raw download to contain a `SuperGLUE-HumanT/` or `SuperGLUE-GoogleMT/` directory with one subdirectory per task and `train.jsonl` / `val.jsonl` / `test.jsonl` inside. Existing outputs are skipped unless `--force` is passed.
+
+#### Analytics
 
 Other data scripts (work-in-progress stubs):
 
@@ -207,14 +291,14 @@ Optional sources requiring extra access (gated datasets, manual login, copyright
 
 ## Benchmarks
 
-Slovenian evaluation datasets used for downstream IE tasks (configured in [`configs/data/benchmarks.yaml`](configs/data/benchmarks.yaml)).
+Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are declared in [`configs/data/download.yaml`](configs/data/download.yaml) with `benchmark: true` and a `tasks:` list, so they share the download pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just the evaluation datasets.
 
 | Dataset | Source | Tasks | Description |
 |---|---|---|---|
 | [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959) | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0. |
 | [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434) | CLARIN.SI | POS, LEMMA, DEP, NER, SRL | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0. |
-| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. |
-| [Twitter Sentiment 15 EU](https://www.clarin.si/repository/xmlui/handle/11356/1054) | CLARIN.SI | SA | Slovenian slice of a 1.6M-tweet 3-class sentiment corpus across 15 European languages. Tweet text requires re-hydration via the X API. License: CC BY-SA 4.0. |
+| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`. |
+| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110) | CLARIN.SI | SA | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`. |
 
 ### Task abbreviations
 
@@ -235,5 +319,5 @@ Slovenian evaluation datasets used for downstream IE tasks (configured in [`conf
 The project is funded by ARIS (Slovenian Research and Innovation Agency) under the project number [Z2-70067](https://cris.cobiss.net/ecris/si/sl/project/24346).
 
 <figure>
-  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/aris.jpg?raw=true" alt="ARIS Logo" width="420" />
+  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/aris.png?raw=true" alt="ARIS Logo" width="460" />
 </figure>
