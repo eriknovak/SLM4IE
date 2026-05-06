@@ -1,4 +1,4 @@
-"""MaCoCu XML extractor for the SLM4IE pipeline.
+r"""MaCoCu XML extractor for the SLM4IE pipeline.
 
 Implements the MaCoCu monolingual DTD format (e.g. MaCoCu-sl-2.0): a
 <corpus> root containing <doc> elements, each holding one or more <p>
@@ -20,7 +20,7 @@ Example:
         </corpus>
 
     Schema mapping:
-        text:        paragraphs (<p> text content) joined with "\\n".
+        text:        paragraphs (<p> text content) joined with "\n".
         source:      provided by caller.
         domain:      provided by caller.
         doc_id:      id attribute on the <doc> element.
