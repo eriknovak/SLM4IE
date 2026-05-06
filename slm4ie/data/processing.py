@@ -64,12 +64,18 @@ def load_extraction_config(config_path: Path) -> ExtractionConfig:
     )
 
 
-def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None) -> None:
+def extract_datasets(
+    config_path: Path,
+    dataset_keys: Optional[List[str]] = None,
+    force: bool = False,
+) -> None:
     """Extract and convert datasets to unified JSONL.
 
     Args:
         config_path: Path to extraction YAML config.
         dataset_keys: Specific dataset keys to extract. If None, extracts all configured datasets.
+        force: When True, re-extract datasets whose output already
+            exists. Defaults to False (skip already-extracted datasets).
 
     Raises:
         ValueError: If any requested key is unknown.
@@ -99,9 +105,10 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
         text_file = output_base / f"{key}.jsonl"
         ann_file = output_base / f"{key}.annotations.jsonl.gz"
 
-        if text_file.exists():
+        if text_file.exists() and not force:
             logger.info(
-                "Skipping '%s', output already exists: %s",
+                "Skipping '%s', output already exists: %s "
+                "(use --force to re-extract)",
                 key,
                 text_file,
             )
@@ -124,11 +131,14 @@ def extract_datasets(config_path: Path, dataset_keys: Optional[List[str]] = None
         with open(text_file, "w", encoding="utf-8") as tf:
             ann_fh = None
             try:
-                for doc in tqdm(
+                for index, doc in enumerate(tqdm(
                     extractor.extract(input_dir, key, domain),
                     desc=key,
                     unit="doc",
-                ):
+                )):
+                    if doc.doc_id is None:
+                        doc.doc_id = f"idx-{index:014d}"
+
                     tf.write(doc.to_jsonl_line())
                     tf.write("\n")
 

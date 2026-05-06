@@ -48,6 +48,11 @@ def parse_args(argv=None) -> argparse.Namespace:
         default=None,
         help=("Path to extraction YAML config (default: configs/data/extract.yaml)."),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=("Re-extract datasets even if their output already exists."),
+    )
     return parser.parse_args(argv)
 
 
@@ -71,6 +76,7 @@ def main():
         extract_datasets(
             config_path=config_path,
             dataset_keys=args.datasets,
+            force=args.force,
         )
     except ValueError as e:
         logging.getLogger(__name__).error(str(e))

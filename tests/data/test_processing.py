@@ -94,6 +94,70 @@ class _AnnotatedStubExtractor(BaseExtractor):
 register_extractor("annotated_stub", _AnnotatedStubExtractor)
 
 
+class _IdlessStubExtractor(BaseExtractor):
+    """Yields three Documents with no ``doc_id``."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+    ) -> Iterator[Document]:
+        """Yields three documents lacking ``doc_id``.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+
+        Yields:
+            Document: A document without doc_id.
+        """
+        for n in range(3):
+            yield Document(
+                text=f"doc {n}",
+                source=source,
+                domain=domain,
+            )
+
+
+register_extractor("idless_stub", _IdlessStubExtractor)
+
+
+class _IdlessAnnotatedStubExtractor(BaseExtractor):
+    """Yields two annotated Documents with no ``doc_id``."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+    ) -> Iterator[Document]:
+        """Yields two annotated documents lacking ``doc_id``.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+
+        Yields:
+            Document: An annotated document without doc_id.
+        """
+        for n in range(2):
+            yield Document(
+                text=f"doc {n}",
+                source=source,
+                domain=domain,
+                annotations=Annotations(
+                    tokens=[Token(form=f"w{n}")],
+                    sentences=[[0, 0]],
+                ),
+            )
+
+
+register_extractor("idless_annotated_stub", _IdlessAnnotatedStubExtractor)
+
+
 def _write_config(tmp_path: Path, datasets: dict) -> Path:
     """Write a minimal extraction config YAML to tmp_path.
 
@@ -265,3 +329,129 @@ class TestExtractDatasets:
             extract_datasets(
                 config_file, dataset_keys=["unknown_ds"]
             )
+
+    def test_synthesizes_doc_id_when_missing(self, tmp_path: Path):
+        """Documents without doc_id receive a stable idx-based id."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "idless_stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        records = [json.loads(ln) for ln in output_file.read_text().splitlines()]
+        assert [r["doc_id"] for r in records] == [
+            "idx-00000000000000",
+            "idx-00000000000001",
+            "idx-00000000000002",
+        ]
+        assert [r["uid"] for r in records] == [
+            "ds1:idx-00000000000000",
+            "ds1:idx-00000000000001",
+            "ds1:idx-00000000000002",
+        ]
+
+    def test_synthesized_doc_ids_are_unique_across_sources(
+        self, tmp_path: Path
+    ):
+        """Two ID-less datasets produce distinct uids despite shared idx."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "idless_stub", "domain": "web"},
+                "ds2": {"extractor": "idless_stub", "domain": "news"},
+            },
+        )
+        (tmp_path / "raw" / "ds1").mkdir(parents=True)
+        (tmp_path / "raw" / "ds2").mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        ds1 = [
+            json.loads(ln)["uid"]
+            for ln in (tmp_path / "processed" / "ds1.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        ds2 = [
+            json.loads(ln)["uid"]
+            for ln in (tmp_path / "processed" / "ds2.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        assert set(ds1).isdisjoint(set(ds2))
+
+    def test_synthesized_doc_id_propagates_to_annotations(
+        self, tmp_path: Path
+    ):
+        """Synthesized doc_ids appear in the annotation file too."""
+        import gzip
+
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {
+                    "extractor": "idless_annotated_stub",
+                    "domain": "web",
+                },
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        ann_file = tmp_path / "processed" / "ds1.annotations.jsonl.gz"
+        with gzip.open(ann_file, "rt", encoding="utf-8") as f:
+            records = [json.loads(ln) for ln in f.read().splitlines()]
+        assert [r["doc_id"] for r in records] == [
+            "idx-00000000000000",
+            "idx-00000000000001",
+        ]
+        assert [r["uid"] for r in records] == [
+            "ds1:idx-00000000000000",
+            "ds1:idx-00000000000001",
+        ]
+
+    def test_skips_when_output_exists(self, tmp_path: Path):
+        """Without --force, existing output is left untouched."""
+        config_file = _write_config(
+            tmp_path,
+            {"ds1": {"extractor": "stub", "domain": "web"}},
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "dummy.txt").write_text("placeholder")
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text('{"sentinel": true}\n')
+
+        extract_datasets(config_file)
+
+        assert output_file.read_text() == '{"sentinel": true}\n'
+
+    def test_force_re_extracts(self, tmp_path: Path):
+        """With force=True, existing output is overwritten."""
+        config_file = _write_config(
+            tmp_path,
+            {"ds1": {"extractor": "stub", "domain": "web"}},
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "dummy.txt").write_text("placeholder")
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text('{"sentinel": true}\n')
+
+        extract_datasets(config_file, force=True)
+
+        new = output_file.read_text().strip().splitlines()
+        assert len(new) == 1
+        assert json.loads(new[0])["text"] == "stub text"
