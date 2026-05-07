@@ -168,7 +168,7 @@ class TestDocument:
         assert data["doc_id"] == "doc-001"
 
     def test_uid_combines_source_and_doc_id(self):
-        """uid is ``{source}:{doc_id}`` when doc_id is set."""
+        """The uid is `{source}:{doc_id}` when doc_id is set."""
         doc = Document(
             text="Hello",
             source="ssj500k",
@@ -178,12 +178,12 @@ class TestDocument:
         assert doc.uid == "ssj500k:doc-001"
 
     def test_uid_none_without_doc_id(self):
-        """uid is None when doc_id is absent."""
+        """The uid is None when doc_id is absent."""
         doc = Document(text="Hello", source="ssj500k", domain="web")
         assert doc.uid is None
 
     def test_to_jsonl_line_includes_uid(self):
-        """uid is emitted alongside doc_id in JSONL output."""
+        """The uid is emitted alongside doc_id in JSONL output."""
         doc = Document(
             text="Hello",
             source="ssj500k",
@@ -194,13 +194,13 @@ class TestDocument:
         assert data["uid"] == "ssj500k:doc-001"
 
     def test_to_jsonl_line_uid_excluded_without_doc_id(self):
-        """uid is omitted when there is no doc_id."""
+        """The uid is omitted when there is no doc_id."""
         doc = Document(text="Hello", source="ssj500k", domain="web")
         data = json.loads(doc.to_jsonl_line())
         assert "uid" not in data
 
     def test_to_annotation_line_includes_uid(self):
-        """uid is emitted in annotation output when doc_id is set."""
+        """The uid is emitted in annotation output when doc_id is set."""
         ann = Annotations(tokens=[Token(form="x")], sentences=[[0, 0]])
         doc = Document(
             text="x",
@@ -221,7 +221,7 @@ class TestDocument:
         assert a.uid != b.uid
 
     def test_to_jsonl_line_with_metadata(self):
-        """metadata preserved in JSONL output."""
+        """Metadata is preserved in JSONL output."""
         doc = Document(
             text="Hello world",
             source="ssj500k",

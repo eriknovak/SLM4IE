@@ -58,7 +58,7 @@ class TestMacocuExtractor:
     def test_doc_id_from_doc_attribute(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """``doc_id`` is read from the <doc> id attribute."""
+        """The doc_id is read from the <doc> id attribute."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
         assert docs[0].doc_id == "macocu.sl.1"
         assert docs[1].doc_id == "macocu.sl.2"
@@ -76,7 +76,7 @@ class TestMacocuExtractor:
     def test_source_and_domain(
         self, extractor: MacocuExtractor, tmp_xml: Path
     ) -> None:
-        """``source`` and ``domain`` are passed through to every Document."""
+        """The source and domain are passed through to every Document."""
         docs = list(extractor.extract(tmp_xml, "macocu", "web"))
         for doc in docs:
             assert doc.source == "macocu"

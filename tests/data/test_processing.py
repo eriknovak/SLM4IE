@@ -95,7 +95,7 @@ register_extractor("annotated_stub", _AnnotatedStubExtractor)
 
 
 class _IdlessStubExtractor(BaseExtractor):
-    """Yields three Documents with no ``doc_id``."""
+    """Yields three Documents with no `doc_id`."""
 
     def extract(
         self,
@@ -103,7 +103,7 @@ class _IdlessStubExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yields three documents lacking ``doc_id``.
+        """Yield three documents lacking `doc_id`.
 
         Args:
             input_dir (Path): Not used.
@@ -125,7 +125,7 @@ register_extractor("idless_stub", _IdlessStubExtractor)
 
 
 class _IdlessAnnotatedStubExtractor(BaseExtractor):
-    """Yields two annotated Documents with no ``doc_id``."""
+    """Yields two annotated Documents with no `doc_id`."""
 
     def extract(
         self,
@@ -133,7 +133,7 @@ class _IdlessAnnotatedStubExtractor(BaseExtractor):
         source: str,
         domain: str,
     ) -> Iterator[Document]:
-        """Yields two annotated documents lacking ``doc_id``.
+        """Yield two annotated documents lacking `doc_id`.
 
         Args:
             input_dir (Path): Not used.

@@ -129,7 +129,7 @@ class TestConlluExtractor:
         assert docs[1].doc_id == "doc1.s2"
 
     def test_sentence_boundaries(self, tmp_path: Path) -> None:
-        """sentences list is [[0, N-1]] for each document."""
+        """Sentences list is [[0, N-1]] for each document."""
         docs = _extract(tmp_path, TWO_SENTENCE_CONLLU)
         ann0 = docs[0].annotations  # type: ignore[union-attr]
         assert ann0.sentences == [[0, 4]]  # 5 tokens, indices 0-4
@@ -138,7 +138,7 @@ class TestConlluExtractor:
         assert ann1.sentences == [[0, 6]]  # 7 tokens, indices 0-6
 
     def test_source_and_domain(self, tmp_path: Path) -> None:
-        """source and domain are passed through to each Document."""
+        """Source and domain are passed through to each Document."""
         _write_conllu(tmp_path, "a.conllu", SENTENCE_1)
         extractor = ConlluExtractor()
         docs = list(

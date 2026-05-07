@@ -285,7 +285,7 @@ class TestParseArgs:
         assert args.schema == "gliner"
 
     def test_invalid_schema_rejected(self) -> None:
-        """argparse rejects unknown schema names."""
+        """The argparse layer rejects unknown schema names."""
         with pytest.raises(SystemExit):
             to_spans.parse_args(["kzb", "--schema", "bogus"])
 

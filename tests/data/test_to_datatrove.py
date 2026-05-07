@@ -259,7 +259,7 @@ class TestDatatroveRoundTrip:
     """Verifies that the produced JSONL is consumable by datatrove."""
 
     def test_jsonl_reader_round_trip(self, tmp_path: Path) -> None:
-        """datatrove's JsonlReader yields Documents matching our shape."""
+        """Datatrove's JsonlReader yields Documents matching our shape."""
         datatrove = pytest.importorskip("datatrove")
         from datatrove.pipeline.readers import JsonlReader
 
