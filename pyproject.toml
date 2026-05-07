@@ -18,10 +18,42 @@ dev = [
     "pytest>=8.0.0",
     "ruff>=0.4.0",
 ]
+curate = [
+    # We intentionally skip datatrove's `processing` and `multilingual`
+    # extras. They both transitively pull in fasttext-numpy2-wheel (no
+    # Python 3.13 wheel, requires a C++17 compiler to build) via
+    # `pyidaungsu-numpy2` (Burmese). For Slovenian we only need spaCy
+    # (used by datatrove's `SpaCyTokenizer` for `tok_code="sl"`), so we
+    # install datatrove bare and declare the actual runtime deps below.
+    "datatrove>=0.6.0",
+    "orjson>=3.9",                    # required by JsonlReader / JsonlWriter
+    "tokenizers>=0.20",               # imported by datatrove.pipeline.dedup.__init__
+    "spacy>=3.8",                    # backs load_word_tokenizer("sl")
+    "xxhash>=3.0",                   # HashConfig
+    "fasteners>=0.19",                # stage runners
+    "ftfy>=6.0",                      # TextNormConfig
+    "regex>=2024.0",                  # text normalization
+    "nltk>=3.8",                      # fallback sentence splitter
+    "pyahocorasick>=2.0",             # filters
+    "lingua-language-detector>=2.0.0",
+    "classla>=2.1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# classla pins ancient exact versions of tqdm/requests/protobuf/etc. that
+# conflict with datatrove[multilingual] and our own deps. classla itself
+# works with newer versions at runtime; override the resolver to match the
+# rest of the project's ecosystem.
+override-dependencies = [
+    "tqdm>=4.66.0",
+    "requests>=2.31.0",
+    "protobuf>=5.28.0",
+    "numpy>=1.26",
+]
 
 [tool.ruff]
 line-length = 120

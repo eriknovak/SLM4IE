@@ -1,0 +1,27 @@
+input_dir: /vault/data/SLM4IE/processed/datatrove
+output_dir: /vault/data/SLM4IE/processed
+
+language:
+  target: sl
+  candidates: [sl, hr, sr, bs, mk, en, de, it, hu]
+  threshold: 0.5
+  mode: tag
+
+dedup:
+  finder_workers: 1
+  exact:
+    enabled: true
+  sentence:
+    enabled: true
+    n_sentences: 3
+    min_doc_words: 50
+    min_num_sentences: 2
+    split_sentences: true
+
+stats:
+  top_k_words: 5000
+  top_k_ngrams: 5000
+  keyword_top_k: 200
+  ngram_orders: [2, 3]
+  compute_keywords: true
+  stopwords: configs/data/stopwords_sl.txt

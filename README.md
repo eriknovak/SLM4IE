@@ -37,7 +37,6 @@ cd SLM4IE
 uv sync
 ```
 
-
 This creates `.venv/` and installs both runtime and dev dependencies pinned in `uv.lock`. Activate the environment for ad-hoc commands:
 
 ```bash
@@ -208,13 +207,122 @@ uv run python scripts/data/to_superglue.py --tasks MultiRC --no-flatten-multirc
 
 Output goes to `<raw-dir>/eval/superglue_sl/<variant>/<task>/<split>.jsonl.gz` (override with `--output-dir`). The converter expects the raw download to contain a `SuperGLUE-HumanT/` or `SuperGLUE-GoogleMT/` directory with one subdirectory per task and `train.jsonl` / `val.jsonl` / `test.jsonl` inside. Existing outputs are skipped unless `--force` is passed.
 
-#### Analytics
+#### Curation (datatrove)
 
-Other data scripts (work-in-progress stubs):
+`curate.py` produces the **final pretraining corpus** in a single invocation: language verification, cross-dataset deduplication, and corpus statistics, all fused into one [datatrove](https://github.com/huggingface/datatrove) pipeline that reads `<output_dir>/datatrove/<key>.jsonl.gz` and writes `<output_dir>/final/`.
+
+##### Install the extra
 
 ```bash
-uv run python scripts/data/process.py            # preprocessing pipeline
-uv run python scripts/data/analyze.py            # corpus statistics
+uv sync --extra curate
+```
+
+The `curate` extra pulls in `datatrove`, `lingua-language-detector`, `spacy` (Slovenian word/sentence tokenization), `classla` (Slovenian lemmatizer for the keyword TF-IDF pass), `orjson`, `tokenizers`, `xxhash`, `nltk`, and a few smaller helpers. We deliberately skip datatrove's own `processing` and `multilingual` extras because those transitively pull in `fasttext-numpy2-wheel`, which has no Python 3.13 wheel and would require a C++17 toolchain to build.
+
+##### Canonical command
+
+```bash
+uv run python scripts/data/curate.py --all
+```
+
+This runs the full pipeline end-to-end on every dataset declared in `configs/data/extract.yaml`. The output is `<output_dir>/final/` and nothing else — every intermediate artifact lives in a `tempfile.TemporaryDirectory` that is removed at the end of the run.
+
+##### How the pipeline runs (5 datatrove executors)
+
+`build_curate_executors()` chains five `LocalPipelineExecutor`s with `depends=`. Calling `.run()` on the last executor walks the chain backwards and runs the rest in order. Find stages can't be merged with the rest because they consume all signatures from disk in a single pass; everything else fuses cleanly.
+
+```text
+TMP = tempfile.TemporaryDirectory()      (or final/_dedup/ with --debug)
+
+executor 1   (per-shard, parallel via --tasks)
+    JsonlReader(<output_dir>/datatrove)
+        → LinguaLanguageFilter            # tag metadata.language + score
+        → JsonlWriter(TMP/lang_tagged)    # tagged shards for executor 3
+        → ExactDedupSignature             # writes hashes to TMP/exact_sigs
+
+executor 2   (single worker — find stage)
+    ExactFindDedups
+        reads  TMP/exact_sigs
+        writes TMP/exact_dups
+
+executor 3   (per-shard, parallel via --tasks)
+    JsonlReader(TMP/lang_tagged)
+        → ExactDedupFilter                # drops whole-doc duplicates
+        → JsonlWriter(TMP/after_exact)    # filtered shards for executor 5
+        → SentenceDedupSignature          # writes 3-sent hashes to TMP/sent_sigs
+
+executor 4   (single worker — find stage)
+    SentenceFindDedups
+        reads  TMP/sent_sigs
+        writes TMP/sent_dups
+
+executor 5   (single worker — global stats)
+    JsonlReader(TMP/after_exact)
+        → SentenceDedupFilter             # drops duplicate sentence spans
+        → CorpusStats                     # accumulates global counters
+        → JsonlWriter(<output_dir>/final) # the training corpus
+```
+
+Both signature steps use `Languages.slovenian`, so datatrove dispatches to its bundled Slovenian `SpaCyTokenizer` for word and sentence boundaries. Running them with the English default would corrupt the dedup signature.
+
+##### Output layout
+
+```text
+<output_dir>/
+├── datatrove/                              upstream input (unchanged)
+│   └── <key>.jsonl.gz
+└── final/                                  curate.py owns this entire tree
+    ├── <key>.jsonl.gz                      ← deduplicated training corpus
+    ├── statistics/
+    │   ├── aggregate.json                  corpus-wide totals + tables
+    │   └── per_dataset/<key>.json          per-dataset doc/word breakdowns
+    └── _dedup/                             only with --debug
+        ├── lang_tagged/<key>.jsonl.gz       (executor 1 output)
+        ├── after_exact/<key>.jsonl.gz       (executor 3 output)
+        ├── exact_sigs/, exact_dups/         (datatrove dedup state)
+        ├── sent_sigs/, sent_dups/           (datatrove dedup state)
+        ├── exact_dropped/<key>.jsonl.gz     (whole-doc duplicates dropped)
+        └── sentence_dropped/<key>.jsonl.gz  (docs dropped post sentence-dedup)
+```
+
+##### Useful invocations
+
+```bash
+# Single dataset (still all three concerns; dedup operates within that
+# one shard only — for cross-dataset dedup, use --all).
+uv run python scripts/data/curate.py kzb
+
+# Re-run only the stats stage against the existing final/ corpus —
+# useful after editing top_k / keyword_top_k in configs/data/curate.yaml.
+uv run python scripts/data/curate.py --all --stage stats
+
+# Skip the (slow) classla-lemmatized TF-IDF keyword pass.
+uv run python scripts/data/curate.py --all --no-keywords
+
+# Debug: keep dedup state and dropped-duplicate JSONL shards under
+# <output_dir>/final/_dedup/ for inspection. Or --debug-dir <path>
+# to put them somewhere else.
+uv run python scripts/data/curate.py --all --debug
+
+# Parallelism: per-shard executors (1, 3) run with this many tasks.
+# Find and stats stages stay single-worker by design.
+uv run python scripts/data/curate.py --all --tasks 4
+
+# Rebuild from scratch (the existing final/ is preserved by default).
+uv run python scripts/data/curate.py --all --force
+```
+
+`--stage lang` and `--stage dedup` exist for debugging only — their outputs live in the auto-cleaned tempdir, so they vanish when the script exits. Combine with `--debug` to make those intermediates inspectable. `--stage stats` is the only single-stage mode that produces a real persistent artifact (it re-reads `<output_dir>/final/` and refreshes `final/statistics/`).
+
+##### Configuration
+
+`configs/data/curate.yaml` controls the language candidate set, dedup thresholds, n-gram orders, and stopword path. The default `final/statistics/aggregate.json` includes top-5000 word / bigram / trigram tables and top-200 TF-IDF keywords per (domain, dataset) bucket — adjust those numbers in the config rather than via CLI flags.
+
+The first run of the keyword stage downloads the Slovenian classla model (~200 MB) under `~/.classla_resources/`. Pass `--no-keywords` to skip it — the rest of the stats are populated from datatrove's bundled spaCy tokenizer and don't need any model download.
+
+#### Synthetic data
+
+```bash
 uv run python scripts/data/generate_synthetic.py # synthetic IE data via LLM APIs
 ```
 
@@ -256,34 +364,34 @@ Slovenian text corpora used for language model pretraining (configured in [`conf
 
 ### CLARIN.SI sources
 
-| Dataset | Domain | Description |
-|---|---|---|
-| [CLASSLA-web.sl 2.0](https://www.clarin.si/repository/xmlui/handle/11356/2079) | web | Annotated Slovenian web corpus from the CLASSLA project. |
-| [CLASSLAWiki-sl](https://www.clarin.si/repository/xmlui/handle/11356/1427) | wiki | Slovenian Wikipedia with linguistic annotations (CoNLL-U). |
-| [MaCoCu-sl 2.0](https://www.clarin.si/repository/xmlui/handle/11356/1795) | web | Slovenian web corpus from the MaCoCu project (XML/TEI). |
-| [ParlaMint-SI 5.0](https://www.clarin.si/repository/xmlui/handle/11356/2004) | parliamentary | Slovenian parliamentary minutes, annotated TEI. |
-| [COLESLAW 1.0](https://www.clarin.si/repository/xmlui/handle/11356/2095) | legal | Corpus of Slovenian legal texts. |
-| [PoVeJMo-VeMo-Med 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1983) | medical | Slovenian medical texts from the PoVeJMo project. |
-| [OSS 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1774) | scientific | 2.59B words / 3.26B tokens from 151K scientific texts (monographs, articles, theses) from Slovenian universities (2000–2022). |
-| [siParl 4.0](https://www.clarin.si/repository/xmlui/handle/11356/1936) | parliamentary | 239M words from parliamentary minutes (1990–2022), TEI XML. May overlap with ParlaMint-SI. |
-| [Janes-News 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1140) | news | 14.8M tokens from news article comments (2007–2015). Informal register. |
-| [KZB 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1872) | scientific | 25M words / 33.6M tokens of curated scientific monographs and papers (2000–2023). |
+| Dataset                                                                          | Domain        | Description                                                                                                                   |
+| -------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [CLASSLA-web.sl 2.0](https://www.clarin.si/repository/xmlui/handle/11356/2079)   | web           | Annotated Slovenian web corpus from the CLASSLA project.                                                                      |
+| [CLASSLAWiki-sl](https://www.clarin.si/repository/xmlui/handle/11356/1427)       | wiki          | Slovenian Wikipedia with linguistic annotations (CoNLL-U).                                                                    |
+| [MaCoCu-sl 2.0](https://www.clarin.si/repository/xmlui/handle/11356/1795)        | web           | Slovenian web corpus from the MaCoCu project (XML/TEI).                                                                       |
+| [ParlaMint-SI 5.0](https://www.clarin.si/repository/xmlui/handle/11356/2004)     | parliamentary | Slovenian parliamentary minutes, annotated TEI.                                                                               |
+| [COLESLAW 1.0](https://www.clarin.si/repository/xmlui/handle/11356/2095)         | legal         | Corpus of Slovenian legal texts.                                                                                              |
+| [PoVeJMo-VeMo-Med 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1983) | medical       | Slovenian medical texts from the PoVeJMo project.                                                                             |
+| [OSS 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1774)              | scientific    | 2.59B words / 3.26B tokens from 151K scientific texts (monographs, articles, theses) from Slovenian universities (2000–2022). |
+| [siParl 4.0](https://www.clarin.si/repository/xmlui/handle/11356/1936)           | parliamentary | 239M words from parliamentary minutes (1990–2022), TEI XML. May overlap with ParlaMint-SI.                                    |
+| [Janes-News 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1140)       | news          | 14.8M tokens from news article comments (2007–2015). Informal register.                                                       |
+| [KZB 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1872)              | scientific    | 25M words / 33.6M tokens of curated scientific monographs and papers (2000–2023).                                             |
 
 ### HuggingFace sources
 
-| Dataset | Domain | Description |
-|---|---|---|
-| [FinePDF](https://huggingface.co/datasets/HuggingFaceFW/finepdfs) | web | Slovenian (`slv_Latn`) PDF-derived text. |
-| [FineWeb-2](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2) | web | Slovenian (`slv_Latn`) high-quality web corpus. |
-| [mC4](https://huggingface.co/datasets/allenai/c4) | web | Cleaned multilingual Common Crawl, ~5 GB+ for Slovenian. |
-| [HPLT 2.0 Cleaned](https://huggingface.co/datasets/HPLT/HPLT2.0_cleaned) | web | HPLT project web crawl (CommonCrawl + Internet Archive), cleaned tier; Slovenian config `slv_Latn` (~10.3M rows). |
+| Dataset                                                                  | Domain | Description                                                                                                       |
+| ------------------------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------- |
+| [FinePDF](https://huggingface.co/datasets/HuggingFaceFW/finepdfs)        | web    | Slovenian (`slv_Latn`) PDF-derived text.                                                                          |
+| [FineWeb-2](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2)     | web    | Slovenian (`slv_Latn`) high-quality web corpus.                                                                   |
+| [mC4](https://huggingface.co/datasets/allenai/c4)                        | web    | Cleaned multilingual Common Crawl, ~5 GB+ for Slovenian.                                                          |
+| [HPLT 2.0 Cleaned](https://huggingface.co/datasets/HPLT/HPLT2.0_cleaned) | web    | HPLT project web crawl (CommonCrawl + Internet Archive), cleaned tier; Slovenian config `slv_Latn` (~10.3M rows). |
 
 ### Direct HTTP sources
 
-| Dataset | Domain | Description |
-|---|---|---|
-| [CC100](https://data.statmt.org/cc-100/) | web | Monolingual CommonCrawl filtered with fastText (Facebook AI, XLM-R), ~1.4 GB compressed for Slovenian. Fetched directly from `statmt.org`; the HuggingFace mirror is script-based and no longer supported by `datasets`. |
-| [Legal-mC4](https://huggingface.co/datasets/joelniklaus/legal-mc4) | legal | Legal-domain text filtered from mC4, ~32.5K documents / ~107M words for Slovenian. Fetched directly from the HuggingFace LFS endpoint; the repo's loading script is no longer supported by `datasets`. |
+| Dataset                                                            | Domain | Description                                                                                                                                                                                                              |
+| ------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [CC100](https://data.statmt.org/cc-100/)                           | web    | Monolingual CommonCrawl filtered with fastText (Facebook AI, XLM-R), ~1.4 GB compressed for Slovenian. Fetched directly from `statmt.org`; the HuggingFace mirror is script-based and no longer supported by `datasets`. |
+| [Legal-mC4](https://huggingface.co/datasets/joelniklaus/legal-mc4) | legal  | Legal-domain text filtered from mC4, ~32.5K documents / ~107M words for Slovenian. Fetched directly from the HuggingFace LFS endpoint; the repo's loading script is no longer supported by `datasets`.                   |
 
 ### Disabled by default
 
@@ -293,12 +401,12 @@ Optional sources requiring extra access (gated datasets, manual login, copyright
 
 Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are declared in [`configs/data/download.yaml`](configs/data/download.yaml) with `benchmark: true` and a `tasks:` list, so they share the download pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just the evaluation datasets.
 
-| Dataset | Source | Tasks | Description |
-|---|---|---|---|
-| [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959) | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0. |
-| [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434) | CLARIN.SI | POS, LEMMA, DEP, NER, SRL | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0. |
-| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`. |
-| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110) | CLARIN.SI | SA | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`. |
+| Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)           | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0.              |
+| [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                             |
+| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`. |
+| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`.    |
 
 ### Task abbreviations
 

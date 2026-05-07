@@ -144,3 +144,8 @@ slurm/logs/*.err
 *.ckpt
 *.pt
 *.bin
+
+# classla downloads its Slovenian model on first keyword pass.
+# Defensive entry — classla normally caches under ~/.classla_resources/,
+# but a user could redirect the cache root inside the repo.
+.classla_resources/
