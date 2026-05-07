@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/logo.png?raw=true" alt="logo" style="width: 100%;">
+  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/logo.png?raw=true" alt="logo" style="width: 60%;">
 </p>
 
 <p align="center">
