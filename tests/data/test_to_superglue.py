@@ -41,8 +41,8 @@ def _make_layout(
 
     Args:
         raw_dir: Top-level raw download directory.
-        variant_subdir: Variant root name (e.g. ``SuperGLUE-HumanT``).
-        tasks: Mapping from task name to ``{split: [records]}``.
+        variant_subdir: Variant root name (e.g. `SuperGLUE-HumanT`).
+        tasks: Mapping from task name to `{split: [records]}`.
 
     Returns:
         Path: The variant root that was created.
@@ -61,6 +61,7 @@ class TestVariantDiscovery:
     """Tests for the variant-root discovery helper."""
 
     def test_finds_humant(self, tmp_path: Path):
+        """The HumanT variant root is located by directory name."""
         _make_layout(
             tmp_path,
             "SuperGLUE-HumanT",
@@ -70,6 +71,7 @@ class TestVariantDiscovery:
         assert root.name == "SuperGLUE-HumanT"
 
     def test_finds_googlemt(self, tmp_path: Path):
+        """The GoogleMT variant root is located by directory name."""
         _make_layout(
             tmp_path,
             "SuperGLUE-GoogleMT",
@@ -79,6 +81,7 @@ class TestVariantDiscovery:
         assert root.name == "SuperGLUE-GoogleMT"
 
     def test_falls_back_to_raw_dir_when_flat(self, tmp_path: Path):
+        """A flat layout without a variant subdir uses the raw directory."""
         _write_jsonl(
             tmp_path / "BoolQ" / "train.jsonl",
             [{"idx": 0, "label": True}],
@@ -87,6 +90,7 @@ class TestVariantDiscovery:
         assert root == tmp_path
 
     def test_missing_raises(self, tmp_path: Path):
+        """A missing variant root raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError, match="SuperGLUE"):
             to_superglue._find_variant_root(tmp_path, "humant")
 
@@ -95,6 +99,7 @@ class TestPassthrough:
     """Pass-through tasks should preserve native shape verbatim."""
 
     def test_cb_passthrough(self, tmp_path: Path):
+        """CB records keep their native premise/hypothesis/label fields."""
         _make_layout(
             tmp_path,
             "SuperGLUE-HumanT",
@@ -127,6 +132,7 @@ class TestMultircFlatten:
     """MultiRC should flatten one row per answer by default."""
 
     def test_default_flattens(self, tmp_path: Path):
+        """MultiRC nested passages are flattened to one row per answer."""
         _make_layout(
             tmp_path,
             "SuperGLUE-HumanT",
@@ -167,6 +173,7 @@ class TestMultircFlatten:
             assert r["question"] == "Kam gre Janez?"
 
     def test_no_flatten_passes_through(self, tmp_path: Path):
+        """`flatten_multirc=False` keeps the original nested structure."""
         nested = {
             "idx": 0,
             "passage": {
@@ -199,6 +206,7 @@ class TestSplitFiltering:
     """--tasks and --splits should restrict what gets emitted."""
 
     def test_only_selected_splits_written(self, tmp_path: Path):
+        """`splits=[...]` writes only the requested split files."""
         _make_layout(
             tmp_path,
             "SuperGLUE-HumanT",
@@ -225,6 +233,7 @@ class TestForceOverwrite:
     """Existing outputs are skipped unless --force is passed."""
 
     def test_skip_existing(self, tmp_path: Path):
+        """An existing output file is left untouched without `force`."""
         _make_layout(
             tmp_path,
             "SuperGLUE-HumanT",
@@ -243,6 +252,7 @@ class TestForceOverwrite:
         assert written == {("CB", "train"): 0}
 
     def test_force_overwrites(self, tmp_path: Path):
+        """`force=True` replaces an existing output with freshly converted data."""
         _make_layout(
             tmp_path,
             "SuperGLUE-HumanT",

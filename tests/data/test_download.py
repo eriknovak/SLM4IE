@@ -24,6 +24,7 @@ class TestDatasetConfig:
     """Tests for DatasetConfig dataclass."""
 
     def test_clarin_dataset_from_dict(self):
+        """A clarin-source payload populates urls and output_dir."""
         data = {
             "enabled": True,
             "source": "clarin",
@@ -44,6 +45,7 @@ class TestDatasetConfig:
         assert config.note is None
 
     def test_huggingface_dataset_from_dict(self):
+        """A huggingface-source payload populates repo_id and configs."""
         data = {
             "enabled": True,
             "source": "huggingface",
@@ -59,6 +61,7 @@ class TestDatasetConfig:
         assert config.urls == []
 
     def test_manual_dataset_from_dict(self):
+        """`manual: true` and a note round-trip into the config."""
         data = {
             "enabled": True,
             "source": "clarin",
@@ -73,6 +76,7 @@ class TestDatasetConfig:
         assert config.note == "Download manually."
 
     def test_disabled_dataset_from_dict(self):
+        """A disabled entry defaults source and output_dir to empty strings."""
         data = {
             "enabled": False,
             "name": "Gigafida 2.0",
@@ -84,6 +88,7 @@ class TestDatasetConfig:
         assert config.output_dir == ""
 
     def test_pretraining_dataset_defaults_benchmark_false(self):
+        """Pretraining datasets default `benchmark` to False with empty tasks."""
         data = {
             "enabled": True,
             "source": "clarin",
@@ -96,6 +101,7 @@ class TestDatasetConfig:
         assert config.tasks == []
 
     def test_benchmark_dataset_from_dict(self):
+        """`benchmark: true` and tasks list survive into the config."""
         data = {
             "enabled": True,
             "benchmark": True,
@@ -114,6 +120,7 @@ class TestLoadConfig:
     """Tests for load_config function."""
 
     def test_load_valid_config(self, tmp_path: Path):
+        """`load_config` parses output_dir and the datasets mapping."""
         config_data = {
             "output_dir": "data/raw",
             "datasets": {
@@ -135,10 +142,12 @@ class TestLoadConfig:
         assert datasets["test_ds"].name == "Test"
 
     def test_load_config_file_not_found(self):
+        """A missing config path raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
             load_config(Path("/nonexistent/config.yaml"))
 
     def test_load_config_multiple_datasets(self, tmp_path: Path):
+        """Multiple datasets keep their individual enabled flags."""
         config_data = {
             "output_dir": "data/raw",
             "datasets": {
@@ -168,10 +177,12 @@ class TestHttpDownloader:
     """Tests for HttpDownloader."""
 
     def test_is_base_downloader(self):
+        """HttpDownloader is a BaseDownloader subclass."""
         downloader = HttpDownloader()
         assert isinstance(downloader, BaseDownloader)
 
     def test_extract_filename_from_url(self):
+        """Filename is extracted from a URL with query parameters."""
         downloader = HttpDownloader()
         url = (
             "https://www.clarin.si/repository/xmlui/bitstream/"
@@ -183,6 +194,7 @@ class TestHttpDownloader:
         )
 
     def test_extract_filename_no_query(self):
+        """Filename extraction handles URLs without query strings."""
         downloader = HttpDownloader()
         url = "https://example.com/path/to/file.tar.gz"
         assert downloader._extract_filename(url) == "file.tar.gz"
@@ -191,6 +203,7 @@ class TestHttpDownloader:
     def test_download_single_file(
         self, mock_get: MagicMock, tmp_path: Path
     ):
+        """A single URL streams to disk and the .part file is removed on success."""
         mock_response = MagicMock()
         mock_response.headers = {"content-length": "100"}
         mock_response.iter_content = MagicMock(
@@ -227,6 +240,7 @@ class TestHttpDownloader:
     def test_download_creates_output_dir(
         self, mock_get: MagicMock, tmp_path: Path
     ):
+        """Download creates the output directory if it does not exist."""
         mock_response = MagicMock()
         mock_response.headers = {"content-length": "10"}
         mock_response.iter_content = MagicMock(
@@ -262,6 +276,7 @@ class TestHuggingFaceDownloader:
     """Tests for HuggingFaceDownloader."""
 
     def test_is_base_downloader(self):
+        """HuggingFaceDownloader is a BaseDownloader subclass."""
         downloader = HuggingFaceDownloader()
         assert isinstance(downloader, BaseDownloader)
 
@@ -269,6 +284,7 @@ class TestHuggingFaceDownloader:
     def test_download_single_config(
         self, mock_load: MagicMock, tmp_path: Path
     ):
+        """A single HF config saves to a per-config subdirectory."""
         mock_ds = MagicMock()
         mock_load.return_value = mock_ds
 
@@ -300,6 +316,7 @@ class TestHuggingFaceDownloader:
     def test_download_multiple_configs(
         self, mock_load: MagicMock, tmp_path: Path
     ):
+        """Each declared HF config triggers its own load_dataset call."""
         mock_ds = MagicMock()
         mock_load.return_value = mock_ds
 
@@ -325,6 +342,7 @@ class TestHuggingFaceDownloader:
     def test_gated_dataset_missing_token_skips(
         self, mock_load: MagicMock, tmp_path: Path
     ):
+        """Unauthorized errors on gated datasets are swallowed gracefully."""
         mock_load.side_effect = Exception(
             "Unauthorized: gated dataset"
         )
@@ -366,6 +384,7 @@ class TestDownloadDatasets:
     def test_downloads_enabled_datasets(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
+        """Only enabled datasets are passed to the downloader."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -391,6 +410,7 @@ class TestDownloadDatasets:
     def test_skips_existing_directory(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
+        """An already-populated output directory short-circuits the download."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -413,6 +433,7 @@ class TestDownloadDatasets:
     def test_force_redownloads(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
+        """`force=True` re-downloads even when the output already exists."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -435,6 +456,7 @@ class TestDownloadDatasets:
     def test_select_specific_datasets(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
+        """`dataset_keys` restricts the run to the named datasets."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -464,6 +486,7 @@ class TestDownloadDatasets:
     def test_unknown_dataset_key_raises(
         self, tmp_path: Path
     ):
+        """An unknown dataset key in `dataset_keys` raises ValueError."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -485,6 +508,7 @@ class TestDownloadDatasets:
     def test_only_benchmarks_filters_default_selection(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
+        """`only_benchmarks=True` keeps benchmark datasets only."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -514,6 +538,7 @@ class TestDownloadDatasets:
     def test_exclude_benchmarks_filters_default_selection(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
+        """`exclude_benchmarks=True` drops benchmark datasets from the run."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -541,6 +566,7 @@ class TestDownloadDatasets:
     def test_only_and_exclude_benchmarks_mutually_exclusive(
         self, tmp_path: Path
     ):
+        """Passing both `only_benchmarks` and `exclude_benchmarks` raises."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -563,6 +589,7 @@ class TestDownloadDatasets:
     def test_manual_dataset_logs_note(
         self, tmp_path: Path, caplog
     ):
+        """Manual datasets emit their note as a warning instead of downloading."""
         config_file = self._make_config_file(
             tmp_path,
             {
@@ -591,6 +618,7 @@ class TestCLI:
     """Tests for the CLI entrypoint."""
 
     def test_cli_help(self):
+        """`--help` exits cleanly and lists the main flags."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -608,6 +636,7 @@ class TestCLI:
         assert "--force" in result.stdout
 
     def test_cli_unknown_dataset(self, tmp_path: Path):
+        """The CLI exits non-zero when `--datasets` names an unknown key."""
         config_data = {
             "output_dir": str(tmp_path / "raw"),
             "datasets": {

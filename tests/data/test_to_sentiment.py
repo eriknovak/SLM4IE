@@ -41,17 +41,21 @@ class TestNormalizeLabel:
     """Unit tests for to_sentiment._normalize_label."""
 
     def test_canonical_passes_through(self):
+        """Canonical labels are returned unchanged."""
         for label in ("negative", "neutral", "positive"):
             assert to_sentiment._normalize_label(label) == label
 
     def test_uppercase_normalized(self):
+        """Mixed-case labels are lowercased."""
         assert to_sentiment._normalize_label("Positive") == "positive"
 
     def test_short_form_normalized(self):
+        """`neg` and `pos` short forms expand to canonical labels."""
         assert to_sentiment._normalize_label("neg") == "negative"
         assert to_sentiment._normalize_label("pos") == "positive"
 
     def test_unknown_raises(self):
+        """An unrecognized label raises ValueError."""
         with pytest.raises(ValueError, match="Unrecognized SA label"):
             to_sentiment._normalize_label("very-positive")
 
@@ -60,6 +64,7 @@ class TestLabelId:
     """Unit tests for to_sentiment._label_id."""
 
     def test_encoding_is_stable(self):
+        """Label-to-id encoding is fixed at negative=0, neutral=1, positive=2."""
         assert to_sentiment._label_id("negative") == 0
         assert to_sentiment._label_id("neutral") == 1
         assert to_sentiment._label_id("positive") == 2
@@ -69,6 +74,7 @@ class TestReadSentinews:
     """Tests for the SentiNews reader."""
 
     def test_document_level(self, tmp_path: Path):
+        """Document-level rows are emitted with a `level=document` field."""
         raw_dir = tmp_path / "sentinews"
         _write_sentinews_file(
             raw_dir / "SentiNews_document-level.txt",
@@ -90,6 +96,7 @@ class TestReadSentinews:
         assert first["level"] == "document"
 
     def test_paragraph_level_id_includes_pid(self, tmp_path: Path):
+        """Paragraph-level ids encode the paragraph index as `<nid>-p<pid>`."""
         raw_dir = tmp_path / "sentinews"
         _write_sentinews_file(
             raw_dir / "SentiNews_paragraph-level.txt",
@@ -103,6 +110,7 @@ class TestReadSentinews:
         assert records[0]["level"] == "paragraph"
 
     def test_levels_filter(self, tmp_path: Path):
+        """`levels=[...]` selects only the requested annotation granularities."""
         raw_dir = tmp_path / "sentinews"
         _write_sentinews_file(
             raw_dir / "SentiNews_document-level.txt",
@@ -122,6 +130,7 @@ class TestReadSentinews:
         assert records[0]["level"] == "document"
 
     def test_unknown_label_skipped(self, tmp_path: Path):
+        """Rows with non-canonical labels are dropped silently."""
         raw_dir = tmp_path / "sentinews"
         _write_sentinews_file(
             raw_dir / "SentiNews_document-level.txt",
@@ -136,6 +145,7 @@ class TestReadSentinews:
         assert records[0]["id"] == "sentinews:1"
 
     def test_missing_files_raise(self, tmp_path: Path):
+        """An empty SentiNews directory raises FileNotFoundError."""
         raw_dir = tmp_path / "sentinews"
         raw_dir.mkdir()
         with pytest.raises(FileNotFoundError, match="No SentiNews"):
@@ -146,6 +156,7 @@ class TestConvertDataset:
     """End-to-end conversion via convert_dataset."""
 
     def test_writes_jsonl_gz_and_label_map(self, tmp_path: Path):
+        """`convert_dataset` writes the gzipped JSONL and the label_map.json."""
         raw_dir = tmp_path / "sentinews"
         _write_sentinews_file(
             raw_dir / "SentiNews_document-level.txt",
@@ -174,6 +185,7 @@ class TestConvertDataset:
         assert label_map == {"negative": 0, "neutral": 1, "positive": 2}
 
     def test_unknown_dataset_returns_none(self, tmp_path: Path):
+        """Unknown dataset keys return None instead of raising."""
         result = to_sentiment.convert_dataset(
             "nonexistent", tmp_path, tmp_path / "out",
         )
@@ -182,6 +194,7 @@ class TestConvertDataset:
     def test_existing_output_skipped_without_force(
         self, tmp_path: Path,
     ):
+        """An existing output file is preserved when `force=False`."""
         raw_dir = tmp_path / "sentinews"
         _write_sentinews_file(
             raw_dir / "SentiNews_document-level.txt",
@@ -205,6 +218,7 @@ class TestListSaDatasetsFromConfig:
     """Tests for filtering SA-tagged benchmark datasets."""
 
     def test_returns_only_sa_benchmarks(self, tmp_path: Path):
+        """Only benchmark datasets tagged with the SA task are returned."""
         config = {
             "output_dir": str(tmp_path / "raw"),
             "datasets": {
