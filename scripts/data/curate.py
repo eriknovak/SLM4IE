@@ -3,14 +3,17 @@
 `scripts/data/curate.py` is a thin CLI on top of **datatrove**: it builds
 a single five-executor pipeline that fuses language detection,
 cross-dataset exact and 3-sentence dedup, and corpus-statistics
-aggregation. The output is the deduplicated training corpus under
-`<output_dir>/final/<key>.jsonl.gz` plus a `final/statistics/` folder
+aggregation. Input and output paths come from `configs/data/curate.yaml`
+(`input_dir` and `output_dir`) or the matching CLI overrides; the
+dataset key list still comes from `configs/data/extract.yaml`. The
+output is the deduplicated training corpus under
+`<output_dir>/<key>.jsonl.gz` plus a `<output_dir>/statistics/` folder
 with the aggregate JSON and per-dataset breakdowns.
 
 All dedup intermediate state lives in a `tempfile.TemporaryDirectory`
 that is cleaned up at the end of the run. Pass `--debug` to keep that
-state under `<output_dir>/final/_dedup/` and route every dropped
-duplicate to inspectable JSONL shards.
+state under `<output_dir>/_dedup/` and route every dropped duplicate
+to inspectable JSONL shards.
 
 Examples:
     # Canonical: lang + dedup + stats on every dataset
@@ -20,7 +23,7 @@ Examples:
     # that one shard only)
     uv run python scripts/data/curate.py kzb
 
-    # Re-run only the stats stage on the existing final/ corpus
+    # Re-run only the stats stage on the existing output_dir corpus
     uv run python scripts/data/curate.py --all --stage stats
 
     # Debug: keep dedup state and dropped-duplicate shards on disk
@@ -34,7 +37,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import yaml
 
@@ -144,17 +147,25 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help=(
             "Run a single stage instead of the full pipeline. lang/dedup "
             "produce ephemeral output (warning issued); stats re-reads "
-            "<output_dir>/final/ and refreshes the statistics folder."
+            "<output_dir> and refreshes the statistics folder."
         ),
     )
     parser.add_argument(
-        "--processed-dir",
+        "--input-dir",
         type=Path,
         default=None,
         help=(
-            "Override the processed-data root from extract.yaml. "
-            "Inputs are read from <processed-dir>/datatrove and the "
-            "training corpus is written under <processed-dir>/final/."
+            "Override curate.yaml::input_dir. Folder of <key>.jsonl.gz "
+            "datatrove shards to read from."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Override curate.yaml::output_dir. Folder where the "
+            "deduplicated corpus and statistics/ are written."
         ),
     )
     parser.add_argument(
@@ -172,7 +183,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite the existing <output_dir>/final/ before running.",
+        help="Overwrite the existing <output_dir> before running.",
     )
     parser.add_argument(
         "--no-keywords",
@@ -185,8 +196,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Keep all dedup intermediate state and dropped-duplicate "
-            "shards under <output_dir>/final/_dedup/ instead of using "
-            "an auto-cleaning tempdir."
+            "shards under <output_dir>/_dedup/ instead of using an "
+            "auto-cleaning tempdir."
         ),
     )
     debug.add_argument(
@@ -211,40 +222,51 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _resolve_processed_dir(args: argparse.Namespace, project_root: Path) -> Path:
-    """Compute the processed-data root, honoring CLI overrides.
+def _resolve_curate_dirs(
+    args: argparse.Namespace, cfg: Dict[str, Any]
+) -> Tuple[Path, Path]:
+    """Resolve the curation input and output folders.
+
+    CLI flags `--input-dir` and `--output-dir` take precedence over the
+    matching keys in `curate.yaml`. Both must end up resolved; otherwise
+    the call fails with a message naming the missing source.
 
     Args:
         args: Parsed CLI namespace.
-        project_root: Project root directory.
+        cfg: Parsed curate config dict.
 
     Returns:
-        Filesystem path to the processed-data root (parent of
-        `datatrove/` and `final/`).
+        Tuple `(input_dir, output_dir)`. `input_dir` is the folder of
+        `<key>.jsonl.gz` datatrove shards. `output_dir` is the folder
+        where the deduplicated corpus and `statistics/` are written.
 
     Raises:
-        FileNotFoundError: If neither `--processed-dir` nor the extract
-            config is available.
+        FileNotFoundError: If neither the CLI flag nor the YAML key is
+            set for either side.
     """
-    if args.processed_dir is not None:
-        return args.processed_dir
-    extract_config = args.extract_config or (project_root / "configs" / "data" / "extract.yaml")
-    if not extract_config.exists():
+    raw_input = args.input_dir if args.input_dir is not None else cfg.get("input_dir")
+    raw_output = args.output_dir if args.output_dir is not None else cfg.get("output_dir")
+
+    missing: List[str] = []
+    if raw_input is None:
+        missing.append("--input-dir or curate.yaml::input_dir")
+    if raw_output is None:
+        missing.append("--output-dir or curate.yaml::output_dir")
+    if missing or raw_input is None or raw_output is None:
         raise FileNotFoundError(
-            f"Pass --processed-dir or place extract.yaml at {extract_config}"
+            "Curation paths are not set. Provide: " + "; ".join(missing) + "."
         )
-    with extract_config.open() as fh:
-        cfg = yaml.safe_load(fh) or {}
-    return Path(cfg.get("output_dir", "data/processed"))
+
+    return Path(raw_input), Path(raw_output)
 
 
 @contextlib.contextmanager
-def _scratch_root(args: argparse.Namespace, processed_dir: Path) -> Iterator[Path]:
+def _scratch_root(args: argparse.Namespace, output_dir: Path) -> Iterator[Path]:
     """Yield the folder used for dedup intermediate state.
 
     Args:
         args: Parsed CLI namespace.
-        processed_dir: Resolved processed-data root.
+        output_dir: Resolved curation output folder.
 
     Yields:
         A folder path. Cleaned up automatically unless `--debug` or
@@ -258,7 +280,7 @@ def _scratch_root(args: argparse.Namespace, processed_dir: Path) -> Iterator[Pat
         yield path
         return
     if args.debug:
-        path = processed_dir / "final" / "_dedup"
+        path = output_dir / "_dedup"
         path.mkdir(parents=True, exist_ok=True)
         logger.info("Debug mode: keeping intermediate state at %s", path)
         yield path
@@ -267,19 +289,18 @@ def _scratch_root(args: argparse.Namespace, processed_dir: Path) -> Iterator[Pat
         yield Path(td)
 
 
-def _drop_existing_final(processed_dir: Path) -> None:
-    """Remove the existing `final/` folder before re-running.
+def _drop_existing_output(output_dir: Path) -> None:
+    """Remove the existing curation output folder before re-running.
 
     Args:
-        processed_dir: Resolved processed-data root.
+        output_dir: Resolved curation output folder.
     """
-    target = processed_dir / "final"
-    if target.exists():
-        shutil.rmtree(target)
-        logger.info("Removed existing %s for --force re-run", target)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+        logger.info("Removed existing %s for --force re-run", output_dir)
 
 
-def _filter_input_keys(processed_dir: Path, key: str) -> Path:
+def _filter_input_keys(input_dir: Path, key: str) -> Path:
     """Materialize a folder containing only `<key>.jsonl.gz`.
 
     For single-dataset invocations we still feed a folder-glob to the
@@ -288,7 +309,7 @@ def _filter_input_keys(processed_dir: Path, key: str) -> Path:
     special-case single-key reads.
 
     Args:
-        processed_dir: Resolved processed-data root.
+        input_dir: Folder of datatrove `<key>.jsonl.gz` shards.
         key: Dataset key to keep.
 
     Returns:
@@ -298,7 +319,7 @@ def _filter_input_keys(processed_dir: Path, key: str) -> Path:
     Raises:
         FileNotFoundError: If the requested shard does not exist.
     """
-    src = processed_dir / "datatrove" / f"{key}.jsonl.gz"
+    src = input_dir / f"{key}.jsonl.gz"
     if not src.exists():
         raise FileNotFoundError(f"No datatrove shard for dataset {key!r} at {src}")
     holder = Path(tempfile.mkdtemp(prefix=f"slm4ie-curate-{key}-"))
@@ -307,21 +328,20 @@ def _filter_input_keys(processed_dir: Path, key: str) -> Path:
     return holder
 
 
-def _stats_only(processed_dir: Path, cfg: Dict[str, Any], no_keywords: bool) -> None:
-    """Re-run just the stats stage against the existing `final/` corpus.
+def _stats_only(output_dir: Path, cfg: Dict[str, Any], no_keywords: bool) -> None:
+    """Re-run just the stats stage against the existing curated corpus.
 
     Args:
-        processed_dir: Resolved processed-data root.
+        output_dir: Resolved curation output folder.
         cfg: Parsed curate config.
         no_keywords: When True, skip the classla TF-IDF pass.
     """
-    final_folder = processed_dir / "final"
-    statistics_folder = final_folder / "statistics"
-    if not any(final_folder.glob("*.jsonl.gz")):
+    statistics_folder = output_dir / "statistics"
+    if not any(output_dir.glob("*.jsonl.gz")):
         logger.error(
             "stats stage requires a deduplicated corpus in %s. Run the "
             "full pipeline first (drop --stage stats).",
-            final_folder,
+            output_dir,
         )
         return
 
@@ -337,7 +357,7 @@ def _stats_only(processed_dir: Path, cfg: Dict[str, Any], no_keywords: bool) -> 
     executor = LocalPipelineExecutor(
         pipeline=[
             JsonlReader(
-                str(final_folder),
+                str(output_dir),
                 glob_pattern="*.jsonl.gz",
                 shuffle_files=False,
                 recursive=False,
@@ -373,26 +393,26 @@ def main() -> None:
     extract_config = args.extract_config or (project_root / "configs" / "data" / "extract.yaml")
     curate_config = args.curate_config or (project_root / "configs" / "data" / "curate.yaml")
     cfg = load_curate_config(curate_config)
-    processed_dir = _resolve_processed_dir(args, project_root)
+    input_dir, output_dir = _resolve_curate_dirs(args, cfg)
 
     if args.stage == "stats":
-        _stats_only(processed_dir, cfg, args.no_keywords)
+        _stats_only(output_dir, cfg, args.no_keywords)
         return
 
     if args.all:
         all_keys = list_datasets_from_config(extract_config)
         logger.info("Running on all %d datasets from %s", len(all_keys), extract_config)
         single_key_holder: Optional[Path] = None
-        input_folder = processed_dir / "datatrove"
+        input_folder = input_dir
     else:
         logger.info("Running on single dataset: %s", args.dataset)
-        single_key_holder = _filter_input_keys(processed_dir, args.dataset)
+        single_key_holder = _filter_input_keys(input_dir, args.dataset)
         input_folder = single_key_holder
 
     if args.force:
-        _drop_existing_final(processed_dir)
+        _drop_existing_output(output_dir)
 
-    final_folder = processed_dir / "final"
+    final_folder = output_dir
     statistics_folder = final_folder / "statistics"
 
     lang_cfg = cfg.get("language") or {}
@@ -412,7 +432,7 @@ def main() -> None:
     )
 
     try:
-        with _scratch_root(args, processed_dir) as scratch:
+        with _scratch_root(args, output_dir) as scratch:
             paths = CuratePaths(
                 input_folder=input_folder,
                 final_folder=final_folder,

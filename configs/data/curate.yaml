@@ -1,5 +1,5 @@
 input_dir: /vault/data/SLM4IE/processed/datatrove
-output_dir: /vault/data/SLM4IE/processed
+output_dir: /vault/data/SLM4IE/final
 
 language:
   target: sl
