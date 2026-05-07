@@ -335,15 +335,15 @@ def download_datasets(
         force: Re-download even if output exists.
         output_dir_override: Override base output directory.
         only_benchmarks: When True, restrict the default selection to
-            datasets with ``benchmark: true``. Ignored when
-            ``dataset_keys`` is provided.
+            datasets with `benchmark: true`. Ignored when
+            `dataset_keys` is provided.
         exclude_benchmarks: When True, drop benchmark datasets from the
-            default selection. Ignored when ``dataset_keys`` is
-            provided. Mutually exclusive with ``only_benchmarks``.
+            default selection. Ignored when `dataset_keys` is
+            provided. Mutually exclusive with `only_benchmarks`.
 
     Raises:
         ValueError: If any requested dataset key is unknown, or if
-            both ``only_benchmarks`` and ``exclude_benchmarks`` are set.
+            both `only_benchmarks` and `exclude_benchmarks` are set.
     """
     if only_benchmarks and exclude_benchmarks:
         raise ValueError(

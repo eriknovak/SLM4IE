@@ -1,7 +1,7 @@
 """Convert raw SA benchmark downloads into evaluation-ready JSONL.
 
 Reads sentiment-analysis benchmark datasets directly from their raw
-download directories (i.e. it bypasses the unified ``<key>.jsonl``
+download directories (i.e. it bypasses the unified `<key>.jsonl`
 extraction layer used by to_datatrove.py and to_spans.py) and emits
 per-dataset JSONL files whose shape is suitable for downstream
 classification training and SloBENCH-style evaluation.
@@ -19,8 +19,8 @@ Each output line has this shape:
         "metadata": {...}
     }
 
-A sibling ``label_map.json`` is written next to the output file so the
-``label_id`` integer encoding is traceable.
+A sibling `label_map.json` is written next to the output file so the
+`label_id` integer encoding is traceable.
 
 Examples:
     Convert the SentiNews document-level split:
@@ -58,7 +58,7 @@ from slm4ie.data.io_utils import find_project_root, open_output
 logger = logging.getLogger(__name__)
 
 #: Canonical 3-class label vocabulary for sentiment analysis. Order
-#: defines the integer encoding used in the ``label_id`` field.
+#: defines the integer encoding used in the `label_id` field.
 CANONICAL_LABELS: Tuple[str, ...] = ("negative", "neutral", "positive")
 
 #: Map common SentiNews label spellings to canonical labels.
@@ -268,8 +268,8 @@ def list_sa_datasets_from_config(
         config_path (Path): Path to the download YAML config.
 
     Returns:
-        List[str]: Dataset keys whose ``benchmark`` field is true and
-            whose ``tasks`` list contains ``"SA"``.
+        List[str]: Dataset keys whose `benchmark` field is true and
+            whose `tasks` list contains `"SA"`.
 
     Raises:
         FileNotFoundError: If the config file does not exist.
@@ -308,7 +308,7 @@ def write_label_map(output_dir: Path) -> Path:
 
     Args:
         output_dir (Path): Directory the JSONL output is being written
-            to. The label map lands at ``<output_dir>/label_map.json``.
+            to. The label map lands at `<output_dir>/label_map.json`.
 
     Returns:
         Path: Path to the written label map.
@@ -330,7 +330,7 @@ def convert_dataset(
     levels: Optional[List[str]] = None,
     force: bool = False,
 ) -> Optional[int]:
-    """Convert one SA dataset to ``<output_dir>/<key>.jsonl.gz``.
+    """Convert one SA dataset to `<output_dir>/<key>.jsonl.gz`.
 
     Args:
         key (str): Dataset key (must be registered in _READERS).
@@ -388,7 +388,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
-        argv: Optional argument list (defaults to ``sys.argv``).
+        argv: Optional argument list (defaults to `sys.argv`).
 
     Returns:
         argparse.Namespace: Parsed arguments.
@@ -469,7 +469,7 @@ def _resolve_raw_dir(
 
     Args:
         config_path (Path): Path to download.yaml.
-        override (Optional[Path]): Explicit ``--raw-dir`` value.
+        override (Optional[Path]): Explicit `--raw-dir` value.
 
     Returns:
         Path: Directory containing per-dataset subdirectories.
@@ -497,7 +497,7 @@ def _resolve_dataset_dir(
         key (str): Dataset key.
 
     Returns:
-        Path: Per-dataset raw directory (``<base>/<output_dir>``).
+        Path: Per-dataset raw directory (`<base>/<output_dir>`).
     """
     _, datasets = load_config(config_path)
     cfg: Optional[DatasetConfig] = datasets.get(key)

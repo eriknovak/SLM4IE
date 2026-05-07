@@ -145,9 +145,7 @@ def extract_datasets(
                     ann_line = doc.to_annotation_line()
                     if ann_line is not None:
                         if ann_fh is None:
-                            ann_fh = gzip.open(
-                                ann_file, "wt", encoding="utf-8"
-                            )
+                            ann_fh = gzip.open(ann_file, "wt", encoding="utf-8")
                             has_annotations = True
                         ann_fh.write(ann_line)
                         ann_fh.write("\n")

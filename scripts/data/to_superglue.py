@@ -2,17 +2,17 @@
 
 The Slovene SuperGLUE distribution ships as a zip containing 8 task
 subdirectories (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC), each
-with its own ``train.jsonl`` / ``val.jsonl`` / ``test.jsonl`` files
+with its own `train.jsonl` / `val.jsonl` / `test.jsonl` files
 following the original SuperGLUE schemas. This script reads those raw
 JSONL files and emits gzipped copies under
-``<output_dir>/superglue_sl/<task>/<split>.jsonl.gz`` so they are easy
+`<output_dir>/superglue_sl/<task>/<split>.jsonl.gz` so they are easy
 to consume from training pipelines while remaining structurally
 faithful to the SloBENCH submission format.
 
 Records are passed through largely unchanged. MultiRC, which has
 deeply nested questions/answers, is flattened to one row per answer
-(``--flatten`` style is the default for MultiRC; pass
-``--no-flatten-multirc`` to disable).
+(`--flatten` style is the default for MultiRC; pass
+`--no-flatten-multirc` to disable).
 
 Examples:
     Convert every available task and split from the HumanT variant:
@@ -76,7 +76,7 @@ def _find_variant_root(raw_dir: Path, variant: str) -> Path:
 
     Args:
         raw_dir (Path): The dataset raw-download directory.
-        variant (str): One of ``humant`` / ``googlemt``.
+        variant (str): One of `humant` / `googlemt`.
 
     Returns:
         Path: The variant root directory containing per-task subdirs.
@@ -102,7 +102,7 @@ def _find_task_dir(variant_root: Path, task: str) -> Optional[Path]:
 
     Args:
         variant_root (Path): Variant root directory.
-        task (str): Canonical task name (e.g. ``BoolQ``).
+        task (str): Canonical task name (e.g. `BoolQ`).
 
     Returns:
         Optional[Path]: The task subdirectory, or None when not found.
@@ -118,7 +118,7 @@ def _find_split_file(task_dir: Path, split: str) -> Optional[Path]:
 
     Args:
         task_dir (Path): Task subdirectory.
-        split (str): One of ``train``/``val``/``test``.
+        split (str): One of `train`/`val`/`test`.
 
     Returns:
         Optional[Path]: Path to the source JSONL file, or None when
@@ -168,16 +168,16 @@ def _flatten_multirc(
     """Flatten MultiRC records to one row per answer candidate.
 
     The native MultiRC schema nests questions and answers inside each
-    passage. This helper emits one record per ``(passage, question,
-    answer)`` triple, which is more convenient for classification.
+    passage. This helper emits one record per `(passage, question,
+    answer)` triple, which is more convenient for classification.
 
     Args:
         records (Iterable[Dict[str, Any]]): Native MultiRC records
-            with the nested ``passage.questions[].answers[]`` shape.
+            with the nested `passage.questions[].answers[]` shape.
 
     Yields:
-        Dict[str, Any]: Flat records with keys ``idx``, ``paragraph``,
-            ``question``, ``answer``, and ``label`` (when available).
+        Dict[str, Any]: Flat records with keys `idx`, `paragraph`,
+            `question`, `answer`, and `label` (when available).
     """
     for record in records:
         passage = record.get("passage") or {}
@@ -248,11 +248,11 @@ def convert_split(
     flatten_multirc: bool = True,
     force: bool = False,
 ) -> Optional[int]:
-    """Convert one (task, split) pair to ``<out_path>``.
+    """Convert one (task, split) pair to `<out_path>`.
 
     Args:
         src_path (Path): Source JSONL path.
-        out_path (Path): Target ``.jsonl.gz`` path. Parent directories
+        out_path (Path): Target `.jsonl.gz` path. Parent directories
             are created if missing.
         task (str): Canonical task name (used for transform dispatch).
         flatten_multirc (bool): When True, apply the MultiRC flattener
@@ -301,15 +301,15 @@ def convert_dataset(
 
     Args:
         raw_dir (Path): Directory containing the extracted SuperGLUE
-            distribution (must contain a ``SuperGLUE-{HumanT,GoogleMT}``
+            distribution (must contain a `SuperGLUE-{HumanT,GoogleMT}`
             subdirectory).
         output_dir (Path): Base directory for outputs. Each (task,
-            split) lands at ``<output_dir>/<task>/<split>.jsonl.gz``.
-        variant (str): One of ``humant`` / ``googlemt``.
+            split) lands at `<output_dir>/<task>/<split>.jsonl.gz`.
+        variant (str): One of `humant` / `googlemt`.
         tasks (Optional[List[str]]): Subset of tasks to process
             (default: all eight).
         splits (Optional[List[str]]): Subset of splits to process
-            (default: ``train``/``val``/``test``).
+            (default: `train`/`val`/`test`).
         flatten_multirc (bool): Whether to flatten MultiRC.
         force (bool): When True, overwrite existing outputs.
 
@@ -354,7 +354,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
-        argv: Optional argument list (defaults to ``sys.argv``).
+        argv: Optional argument list (defaults to `sys.argv`).
 
     Returns:
         argparse.Namespace: Parsed arguments.
@@ -446,7 +446,7 @@ def _resolve_raw_dir(
 
     Args:
         config_path (Path): Path to download.yaml.
-        override (Optional[Path]): Explicit ``--raw-dir`` value.
+        override (Optional[Path]): Explicit `--raw-dir` value.
         dataset_key (str): Dataset key in the download config.
 
     Returns:

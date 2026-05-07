@@ -84,13 +84,13 @@ class Document:
     def uid(self) -> Optional[str]:
         """Globally unique example identifier across datasets.
 
-        Combines ``source`` and ``doc_id`` so that documents from
+        Combines `source` and `doc_id` so that documents from
         different corpora can never collide even if they reuse the
-        same internal ``doc_id``. Returns None when ``doc_id`` is
+        same internal `doc_id`. Returns None when `doc_id` is
         absent (no stable per-document key from the source).
 
         Returns:
-            Optional[str]: ``"{source}:{doc_id}"`` or None.
+            Optional[str]: `"{source}:{doc_id}"` or None.
         """
         if self.doc_id is None:
             return None

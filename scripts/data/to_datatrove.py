@@ -5,8 +5,8 @@ meaningful fields: text, id, and metadata (a free-form dict). Its
 built-in JsonlReader automatically funnels any JSONL keys other than
 text/id/media into Document.metadata.
 
-This script reads ``<key>.jsonl`` (and the optional
-``<key>.annotations.jsonl.gz`` sidecar) from the extraction output
+This script reads `<key>.jsonl` (and the optional
+`<key>.annotations.jsonl.gz` sidecar) from the extraction output
 directory, joins them on the fly, and writes a single per-dataset
 JSONL whose shape is directly consumable by datatrove while still
 carrying the dataset/domain provenance and annotation payloads we
@@ -67,17 +67,17 @@ def convert_record(
 
     Args:
         record (Dict[str, Any]): Input record from
-            ``iter_joined_records`` (text plus optional annotations).
+            `iter_joined_records` (text plus optional annotations).
         index (int): Zero-based record position; used to synthesize a
-            fallback ``id`` when ``uid`` is missing.
+            fallback `id` when `uid` is missing.
         collisions (Optional[Set[str]]): Mutable set used by the
             caller to deduplicate "metadata key shadows reserved
             field" warnings across a stream. Pass None when calling
             for a single record.
 
     Returns:
-        Dict[str, Any]: A flat dict with ``text``, ``id``, ``dataset``,
-            ``domain``, optional ``doc_id``, optional ``annotations``,
+        Dict[str, Any]: A flat dict with `text`, `id`, `dataset`,
+            `domain`, optional `doc_id`, optional `annotations`,
             and any flattened metadata entries.
     """
     source = record["source"]
@@ -136,7 +136,7 @@ def convert_stream(
 
 
 def list_datasets_from_config(config_path: Path) -> List[str]:
-    """Return the dataset keys declared in ``extract.yaml``.
+    """Return the dataset keys declared in `extract.yaml`.
 
     Args:
         config_path (Path): Path to the extraction YAML config.
@@ -160,13 +160,13 @@ def convert_dataset(
     output_dir: Path,
     force: bool = False,
 ) -> Optional[int]:
-    """Convert a single dataset, writing ``<output_dir>/<key>.jsonl.gz``.
+    """Convert a single dataset, writing `<output_dir>/<key>.jsonl.gz`.
 
     Args:
         key (str): Dataset key.
         processed_dir (Path): Directory containing processed input
-            files (``<key>.jsonl`` and optional
-            ``<key>.annotations.jsonl.gz``).
+            files (`<key>.jsonl` and optional
+            `<key>.annotations.jsonl.gz`).
         output_dir (Path): Directory to write datatrove-shaped output
             into. Created if it does not exist.
         force (bool): When True, overwrite an existing output file.
@@ -219,7 +219,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
-        argv: Optional argument list (defaults to ``sys.argv``).
+        argv: Optional argument list (defaults to `sys.argv`).
 
     Returns:
         argparse.Namespace: Parsed arguments.

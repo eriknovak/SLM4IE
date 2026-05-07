@@ -60,12 +60,12 @@ def _normalize_spans(
     """Normalize spans from list-of-lists or list-of-dicts to tuples.
 
     Args:
-        raw_spans (Iterable[Any]): Spans as either ``[s, e, label]``
-            triples or ``{"start": s, "end": e, "label": label}``
+        raw_spans (Iterable[Any]): Spans as either `[s, e, label]`
+            triples or `{"start": s, "end": e, "label": label}`
             dicts.
 
     Returns:
-        List[Tuple[int, int, str]]: Normalized ``(start, end, label)``
+        List[Tuple[int, int, str]]: Normalized `(start, end, label)`
             tuples with end-exclusive token indices.
 
     Raises:
@@ -93,11 +93,11 @@ def _record_id(record: Dict[str, Any], index: int) -> str:
     Args:
         record (Dict[str, Any]): Joined record.
         index (int): Zero-based record position used to synthesize a
-            fallback id when ``uid`` is missing.
+            fallback id when `uid` is missing.
 
     Returns:
-        str: ``uid`` from the record, or
-            ``"<source>:idx-<14-digit-index>"`` when absent.
+        str: `uid` from the record, or
+            `"<source>:idx-<14-digit-index>"` when absent.
     """
     source = record.get("source", "unknown")
     return record.get("uid") or f"{source}:idx-{index:014d}"
@@ -113,7 +113,7 @@ def _extract_spans_or_none(
 
     Returns:
         Optional[List[Tuple[int, int, str]]]: Normalized spans, or
-            None when the record carries no ``spans`` field.
+            None when the record carries no `spans` field.
     """
     annotations = record.get("annotations") or {}
     raw = annotations.get("spans")
@@ -123,7 +123,7 @@ def _extract_spans_or_none(
 
 
 def _tokens_for(record: Dict[str, Any]) -> List[str]:
-    """Returns the token list for *record* (the ``forms`` array).
+    """Returns the token list for *record* (the `forms` array).
 
     Args:
         record (Dict[str, Any]): Joined record.
@@ -132,7 +132,7 @@ def _tokens_for(record: Dict[str, Any]) -> List[str]:
         List[str]: Token surface forms.
 
     Raises:
-        ValueError: If the record has spans but no ``forms`` array.
+        ValueError: If the record has spans but no `forms` array.
     """
     annotations = record.get("annotations") or {}
     forms = annotations.get("forms")
@@ -155,8 +155,8 @@ def to_gliner(
         index (int): Zero-based record position.
 
     Returns:
-        Optional[Dict[str, Any]]: Dict with ``id``, ``tokenized_text``,
-            ``ner`` (with end-inclusive indices), or None when the
+        Optional[Dict[str, Any]]: Dict with `id`, `tokenized_text`,
+            `ner` (with end-inclusive indices), or None when the
             record has no spans.
     """
     spans = _extract_spans_or_none(record)
@@ -182,8 +182,8 @@ def to_conll(
         index (int): Zero-based record position.
 
     Returns:
-        Optional[Dict[str, Any]]: Dict with ``id``, ``tokens``, and
-            ``ner_tags`` (IOB2-tagged), or None when the record has
+        Optional[Dict[str, Any]]: Dict with `id`, `tokens`, and
+            `ner_tags` (IOB2-tagged), or None when the record has
             no spans.
     """
     spans = _extract_spans_or_none(record)
@@ -219,8 +219,8 @@ def to_generic(
         index (int): Zero-based record position.
 
     Returns:
-        Optional[Dict[str, Any]]: Dict with ``id``, ``text``,
-            ``tokens``, ``spans`` (as dicts), ``dataset``, ``domain``,
+        Optional[Dict[str, Any]]: Dict with `id`, `text`,
+            `tokens`, `spans` (as dicts), `dataset`, `domain`,
             or None when the record has no spans.
     """
     spans = _extract_spans_or_none(record)
@@ -259,7 +259,7 @@ def convert_record(
     Args:
         record (Dict[str, Any]): Joined record (text + annotations).
         index (int): Zero-based record position.
-        schema (str): One of ``gliner``, ``conll``, ``generic``.
+        schema (str): One of `gliner`, `conll`, `generic`.
 
     Returns:
         Optional[Dict[str, Any]]: Converted record, or None when the
@@ -287,10 +287,10 @@ def convert_stream(
     Args:
         records (Iterable[Dict[str, Any]]): Iterable of joined records.
         out_stream (IO[str]): Writable text stream for converted JSONL.
-        schema (str): One of ``gliner``, ``conll``, ``generic``.
+        schema (str): One of `gliner`, `conll`, `generic`.
 
     Returns:
-        Tuple[int, int]: ``(written, skipped)`` counts.
+        Tuple[int, int]: `(written, skipped)` counts.
     """
     written = 0
     skipped = 0
@@ -306,7 +306,7 @@ def convert_stream(
 
 
 def list_datasets_from_config(config_path: Path) -> List[str]:
-    """Returns the dataset keys declared in ``extract.yaml``.
+    """Returns the dataset keys declared in `extract.yaml`.
 
     Args:
         config_path (Path): Path to the extraction YAML config.
@@ -331,7 +331,7 @@ def convert_dataset(
     schema: str,
     force: bool = False,
 ) -> Optional[Tuple[int, int]]:
-    """Converts a single dataset, writing ``<output_dir>/<key>.jsonl.gz``.
+    """Converts a single dataset, writing `<output_dir>/<key>.jsonl.gz`.
 
     Args:
         key (str): Dataset key.
@@ -339,14 +339,14 @@ def convert_dataset(
             files.
         output_dir (Path): Directory to write span-shaped output into.
             Created if it does not exist.
-        schema (str): One of ``gliner``, ``conll``, ``generic``.
+        schema (str): One of `gliner`, `conll`, `generic`.
         force (bool): When True, overwrite an existing output file.
-            Defaults to False (skip and return ``(0, 0)``).
+            Defaults to False (skip and return `(0, 0)`).
 
     Returns:
-        Optional[Tuple[int, int]]: ``(written, skipped)`` counts, or
+        Optional[Tuple[int, int]]: `(written, skipped)` counts, or
             None when no input file exists for *key*. Returns
-            ``(0, 0)`` when the output already exists and *force* is
+            `(0, 0)` when the output already exists and *force* is
             False.
     """
     pair = _find_dataset_files(processed_dir, key)
@@ -394,7 +394,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     """Parses command-line arguments.
 
     Args:
-        argv: Optional argument list (defaults to ``sys.argv``).
+        argv: Optional argument list (defaults to `sys.argv`).
 
     Returns:
         argparse.Namespace: Parsed arguments.

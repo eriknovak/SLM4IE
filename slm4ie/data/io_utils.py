@@ -17,16 +17,16 @@ import yaml
 
 
 def find_project_root() -> Path:
-    """Find the project root by locating ``pyproject.toml``.
+    """Find the project root by locating `pyproject.toml`.
 
     Walks up the directory tree starting from this file until a
-    directory containing ``pyproject.toml`` is found.
+    directory containing `pyproject.toml` is found.
 
     Returns:
         Path: The project root directory.
 
     Raises:
-        FileNotFoundError: If no ``pyproject.toml`` is found in any
+        FileNotFoundError: If no `pyproject.toml` is found in any
             parent directory.
     """
     current = Path(__file__).resolve().parent
@@ -46,14 +46,14 @@ def resolve_processed_dir(
 
     Args:
         config_path (Path): Path to the extraction YAML config.
-        override (Optional[Path]): Explicit ``--processed-dir`` value;
+        override (Optional[Path]): Explicit `--processed-dir` value;
             takes precedence over the config when not None.
 
     Returns:
-        Path: Directory containing ``<key>.jsonl`` files.
+        Path: Directory containing `<key>.jsonl` files.
 
     Raises:
-        FileNotFoundError: If ``override`` is None and ``config_path``
+        FileNotFoundError: If `override` is None and `config_path`
             does not exist.
     """
     if override is not None:
@@ -74,8 +74,8 @@ def resolve_processed_dir(
 def open_output(path: Optional[Path]) -> Iterator[IO[str]]:
     """Yield a writable text stream for *path*.
 
-    Selects gzip vs. plain text based on the file suffix. ``None``
-    means write to ``sys.stdout``; in that case the underlying stream
+    Selects gzip vs. plain text based on the file suffix. `None`
+    means write to `sys.stdout`; in that case the underlying stream
     is **not** closed when the context exits.
 
     Args:
@@ -102,7 +102,7 @@ def open_text_stream(path: Path) -> IO[str]:
     The caller is responsible for closing the returned stream.
 
     Args:
-        path (Path): Path to a ``.jsonl`` or ``.jsonl.gz`` file.
+        path (Path): Path to a `.jsonl` or `.jsonl.gz` file.
 
     Returns:
         IO[str]: A readable text stream.
@@ -124,9 +124,9 @@ def find_dataset_files(
 
     Returns:
         Optional[Tuple[Path, Optional[Path]]]: A tuple of
-            ``(text_path, annotations_path)`` where ``annotations_path``
+            `(text_path, annotations_path)` where `annotations_path`
             is None when the dataset has no annotations sidecar.
-            Returns None when no ``<key>.jsonl`` exists.
+            Returns None when no `<key>.jsonl` exists.
     """
     text_path = processed_dir / f"{key}.jsonl"
     if not text_path.exists():
@@ -142,21 +142,21 @@ def iter_joined_records(
     """Iterate records from *text_path*, attaching annotations when present.
 
     Both files are assumed to share document order. When the text and
-    annotation records both carry a ``doc_id`` (or ``uid``) and they
+    annotation records both carry a `doc_id` (or `uid`) and they
     disagree, this is treated as a hard error: a mismatch indicates
     the files were produced by different runs.
 
     Args:
-        text_path (Path): Path to ``<key>.jsonl``.
+        text_path (Path): Path to `<key>.jsonl`.
         annotations_path (Optional[Path]): Path to the annotations
             file, or None if the dataset has no annotations.
 
     Yields:
         Dict[str, Any]: A text record with, when available, an
-            ``annotations`` field carrying the parallel-array payload.
+            `annotations` field carrying the parallel-array payload.
 
     Raises:
-        ValueError: If a ``doc_id``/``uid`` mismatch is detected or
+        ValueError: If a `doc_id`/`uid` mismatch is detected or
             the two streams differ in length.
     """
     if annotations_path is None:
