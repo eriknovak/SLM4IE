@@ -334,3 +334,23 @@ datasets:
       ~10K documents from Slovenian news outlets. Tab-separated text files,
       directly downloadable (no API rehydration needed). License: CC BY-SA 4.0.
       Use scripts/data/to_sentiment.py to convert to evaluation JSONL.
+
+  sloleks:
+    enabled: true
+    benchmark: true
+    source: clarin
+    name: "Sloleks 3.1 (Slovenian Inflectional Lexicon)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2080/Sloleks.3.1.zip?sequence=1&isAllowed=y"
+    output_dir: sloleks
+    tasks:
+      - TOKENIZER
+    note: >
+      Slovenian inflectional lexicon with lemmas and morphological forms
+      (MULTEXT-East V6 / JOS MSDs). Used for *tokenizer / morphology*
+      evaluation only -- NOT running text and must not enter the
+      pretraining corpus. Distributed as a single 263 MB zip with ~100
+      split TEI XML files. Intentionally absent from
+      configs/data/extract.yaml so the extract -> datatrove -> curate
+      pipeline never sees it. Convert via scripts/data/to_tokenizer_eval.py.
+      License: CC BY-SA 4.0.

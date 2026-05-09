@@ -411,6 +411,7 @@ Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are decla
 | [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                             |
 | [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`. |
 | [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`.    |
+| [Sloleks 3.1](https://www.clarin.si/repository/xmlui/handle/11356/2080)       | CLARIN.SI | TOKENIZER                                 | Slovenian inflectional lexicon (lemmas + word forms with MULTEXT-East V6 / JOS MSDs). **Tokenizer / morphology evaluation only** — intentionally absent from `extract.yaml`, never enters the pretraining corpus. Distributed as TEI XML. License: CC BY-SA 4.0. Convert with `scripts/data/to_tokenizer_eval.py`. |
 
 ### Task abbreviations
 
@@ -425,6 +426,7 @@ Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are decla
 - **NLI** — natural language inference
 - **QA** — question answering
 - **MRC** — machine reading comprehension
+- **TOKENIZER** — tokenizer / morphology evaluation (lexicon-based, not a downstream IE task)
 
 ## Acknowledgments
 
