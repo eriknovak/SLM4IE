@@ -2,7 +2,7 @@
 
 These tests don't actually run the dedup pipeline (which is slow and
 filesystem-heavy). They verify the structural contract of
-`build_curate_executors`: five executors in the correct order, each
+`build_curate_executors`: six executors in the correct order, each
 chained via `depends=` to the previous, the language argument
 threaded through to the sentence-dedup blocks, and `finder_workers`
 propagated everywhere it matters.
@@ -24,6 +24,8 @@ from datatrove.pipeline.dedup import (  # noqa: E402
     SentenceDedupSignature,
     SentenceFindDedups,
 )
+from datatrove.pipeline.readers import JsonlReader  # noqa: E402
+from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 from datatrove.utils.typeshelper import Languages  # noqa: E402
 
 from slm4ie.data.curate.dedup import default_exact_config, doc_text  # noqa: E402
@@ -59,14 +61,14 @@ class TestExactDedupHelpers:
 
 
 class TestBuildCurateExecutors:
-    """Structure of the five-executor ladder."""
+    """Structure of the six-executor ladder."""
 
-    def test_five_executors_chained_via_depends(self, tmp_path: Path) -> None:
-        """We get exactly five executors and each one depends on the prior."""
+    def test_six_executors_chained_via_depends(self, tmp_path: Path) -> None:
+        """We get exactly six executors and each one depends on the prior."""
         execs = build_curate_executors(_paths(tmp_path))
-        assert len(execs) == 5
+        assert len(execs) == 6
         assert execs[0].depends is None
-        for i in range(1, 5):
+        for i in range(1, 6):
             assert execs[i].depends is execs[i - 1]
 
     def test_each_executor_carries_the_right_blocks(self, tmp_path: Path) -> None:
@@ -84,9 +86,14 @@ class TestBuildCurateExecutors:
         assert SentenceDedupSignature in types_per_executor[2]
         # Executor 4: sentence-find.
         assert SentenceFindDedups in types_per_executor[3]
-        # Executor 5: sentence-filter + stats.
+        # Executor 5: sentence-filter + write final corpus.
         assert SentenceDedupFilter in types_per_executor[4]
-        assert CorpusStats in types_per_executor[4]
+        assert JsonlWriter in types_per_executor[4]
+        assert CorpusStats not in types_per_executor[4]
+        # Executor 6: read final corpus + stats (single-process).
+        assert JsonlReader in types_per_executor[5]
+        assert CorpusStats in types_per_executor[5]
+        assert execs[5].tasks == 1
 
     def test_sentence_blocks_run_in_slovenian(self, tmp_path: Path) -> None:
         """The sentence-dedup blocks must use Languages.slovenian, not English."""
