@@ -131,7 +131,7 @@ datasets:
       monographs and papers (2000-2023).
 
   solar:
-    enabled: false
+    enabled: true
     source: clarin
     name: "Solar 3.0 (Student Essays)"
     urls:
