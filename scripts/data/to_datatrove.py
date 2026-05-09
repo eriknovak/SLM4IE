@@ -36,6 +36,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any, Dict, Iterable, List, Optional, Set
 
@@ -48,6 +49,13 @@ from slm4ie.data.io_utils import (
     iter_joined_records as _iter_joined_records,
     open_output as _open_output,
     resolve_processed_dir as _resolve_processed_dir,
+)
+from slm4ie.data.parallel import (
+    configure_script_logging,
+    cpu_default,
+    resolve_workers,
+    run_parallel,
+    workers_quiet,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,7 +213,7 @@ def convert_dataset(
         out_path,
     )
     records = _iter_joined_records(text_path, ann_path)
-    progress = tqdm(records, desc=key, unit="doc")
+    progress = tqdm(records, desc=key, unit="doc", disable=workers_quiet())
     with _open_output(out_path) as out_stream:
         try:
             count = convert_stream(progress, out_stream)
@@ -274,16 +282,20 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="Overwrite existing <key>.jsonl.gz outputs.",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=0,
+        help=(
+            "Process datasets in parallel. 0=auto (cpu_count // 2), "
+            "1=serial, N=N workers. Capped at the number of datasets."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main():
     """Run the conversion from CLI arguments."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
     args = parse_args()
     project_root = _find_project_root()
 
@@ -304,21 +316,41 @@ def main():
     else:
         keys = [args.dataset]
 
-    total = 0
-    skipped: List[str] = []
-    for key in keys:
-        result = convert_dataset(
-            key, processed_dir, output_dir, force=args.force
-        )
-        if result is None:
-            skipped.append(key)
-        else:
-            total += result
+    workers = resolve_workers(args.max_workers, len(keys), cpu_default(len(keys)))
+    configure_script_logging(parallel=workers > 1)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_dir = project_root / "logs" / Path(__file__).stem / stamp
+
+    def kwargs_for(_key: str) -> Dict[str, Any]:
+        return {
+            "processed_dir": processed_dir,
+            "output_dir": output_dir,
+            "force": args.force,
+        }
+
+    results, failures = run_parallel(
+        convert_dataset,
+        keys,
+        max_workers=workers,
+        desc="datatrove",
+        pool="process",
+        kwargs_for=kwargs_for,
+        log_dir=log_dir,
+    )
+
+    skipped: List[str] = [k for k, v in results.items() if v is None]
+    total = sum(v for v in results.values() if v is not None)
 
     logger.info(
-        "Done. Converted %d dataset(s), %d records total. Skipped: %s",
-        len(keys) - len(skipped), total, skipped or "none",
+        "Done. Converted %d dataset(s), %d records total. "
+        "Skipped: %s. Failed: %s",
+        len(results) - len(skipped),
+        total,
+        skipped or "none",
+        [k for k, _ in failures] or "none",
     )
+    if failures:
+        sys.exit(2)
     if not args.all and skipped:
         sys.exit(1)
 

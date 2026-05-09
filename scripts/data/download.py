@@ -3,9 +3,11 @@
 import argparse
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from slm4ie.data.download import download_datasets
+from slm4ie.data.parallel import configure_script_logging
 
 
 def _find_project_root() -> Path:
@@ -91,18 +93,21 @@ def parse_args(argv=None) -> argparse.Namespace:
             "(pretraining-only)."
         ),
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=0,
+        help=(
+            "Download datasets in parallel using a thread pool. "
+            "0=auto (min(4, n_datasets), polite to remote servers), "
+            "1=serial, N=N threads. Capped at the number of datasets."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main():
     """Run dataset download pipeline."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format=(
-            "%(asctime)s %(levelname)s %(name)s: %(message)s"
-        ),
-    )
-
     args = parse_args()
     project_root = _find_project_root()
 
@@ -115,6 +120,10 @@ def main():
         / f"{args.config_name}.yaml"
     )
 
+    configure_script_logging(parallel=args.max_workers > 1)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_dir = project_root / "logs" / Path(__file__).stem / stamp
+
     try:
         download_datasets(
             config_path=config_path,
@@ -123,6 +132,8 @@ def main():
             output_dir_override=args.output_dir,
             only_benchmarks=args.only_benchmarks,
             exclude_benchmarks=args.exclude_benchmarks,
+            max_workers=args.max_workers,
+            log_dir=log_dir,
         )
     except ValueError as e:
         logging.getLogger(__name__).error(str(e))

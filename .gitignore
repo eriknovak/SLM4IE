@@ -140,6 +140,9 @@ mlruns/
 slurm/logs/*.out
 slurm/logs/*.err
 
+# Per-run logs from scripts/data/*
+/logs/
+
 # Model binaries
 *.ckpt
 *.pt

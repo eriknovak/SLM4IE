@@ -3,8 +3,10 @@
 import argparse
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
+from slm4ie.data.parallel import configure_script_logging
 from slm4ie.data.processing import extract_datasets
 
 
@@ -53,16 +55,20 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help=("Re-extract datasets even if their output already exists."),
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=0,
+        help=(
+            "Extract datasets in parallel. 0=auto (cpu_count // 2), "
+            "1=serial, N=N workers. Capped at the number of datasets."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main():
     """Run dataset extraction pipeline."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format=("%(asctime)s %(levelname)s %(name)s: %(message)s"),
-    )
-
     args = parse_args()
     project_root = _find_project_root()
 
@@ -72,11 +78,17 @@ def main():
         else project_root / "configs" / "data" / "extract.yaml"
     )
 
+    configure_script_logging(parallel=args.max_workers > 1)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_dir = project_root / "logs" / Path(__file__).stem / stamp
+
     try:
         extract_datasets(
             config_path=config_path,
             dataset_keys=args.datasets,
             force=args.force,
+            max_workers=args.max_workers,
+            log_dir=log_dir,
         )
     except ValueError as e:
         logging.getLogger(__name__).error(str(e))

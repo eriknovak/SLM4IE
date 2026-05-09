@@ -5,13 +5,15 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
 import yaml
 from datasets import load_dataset
 from tqdm import tqdm
+
+from slm4ie.data.parallel import io_default, resolve_workers, run_parallel
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +320,70 @@ class HuggingFaceDownloader(BaseDownloader):
         return output_dir
 
 
+def _download_one(
+    key: str,
+    config: "DatasetConfig",
+    base_output_dir: str,
+    force: bool,
+) -> Optional[str]:
+    """Download a single dataset and return the output path string.
+
+    Args:
+        key: Dataset key (used for log messages).
+        config: Per-dataset configuration loaded from the YAML.
+        base_output_dir: Base directory under which the dataset's
+            ``output_dir`` subdirectory will live.
+        force: Re-download even if the destination already has files.
+
+    Returns:
+        Optional[str]: String form of the output path on success, or
+            None for skipped/disabled/manual datasets.
+    """
+    output_path = Path(base_output_dir) / config.output_dir
+
+    if not config.enabled:
+        note = config.note or "No details available."
+        logger.warning("Dataset '%s' is disabled: %s", key, note)
+        return None
+
+    if config.manual:
+        if _dir_has_files(output_path):
+            logger.info(
+                "Manual dataset '%s' found at %s", key, output_path,
+            )
+        else:
+            note = config.note or "Manual download required."
+            logger.warning(
+                "Dataset '%s' requires manual download: %s", key, note,
+            )
+        return None
+
+    if not force and _dir_has_files(output_path):
+        logger.info(
+            "Dataset '%s' already exists at %s, skipping", key, output_path,
+        )
+        return None
+
+    logger.info(
+        "Downloading '%s' (%s) from %s",
+        config.name,
+        key,
+        config.source,
+    )
+
+    if config.source in ("clarin", "http"):
+        HttpDownloader().download(config, output_path)
+    elif config.source == "huggingface":
+        HuggingFaceDownloader().download(config, output_path)
+    else:
+        logger.error(
+            "Unknown source '%s' for dataset '%s'", config.source, key,
+        )
+        return None
+
+    return str(output_path)
+
+
 def download_datasets(
     config_path: Path,
     dataset_keys: Optional[List[str]] = None,
@@ -325,6 +391,8 @@ def download_datasets(
     output_dir_override: Optional[str] = None,
     only_benchmarks: bool = False,
     exclude_benchmarks: bool = False,
+    max_workers: int = 0,
+    log_dir: Optional[Path] = None,
 ) -> None:
     """Download datasets according to configuration.
 
@@ -340,10 +408,18 @@ def download_datasets(
         exclude_benchmarks: When True, drop benchmark datasets from the
             default selection. Ignored when `dataset_keys` is
             provided. Mutually exclusive with `only_benchmarks`.
+        max_workers: Number of datasets to download in parallel.
+            ``0`` (default) picks ``min(4, n_datasets)`` to stay polite
+            to remote servers; ``1`` runs serially; ``N > 1`` uses that
+            many threads (capped at the number of selected datasets).
+        log_dir: When set, per-dataset logs are written to
+            ``<log_dir>/<key>.log``. The directory is created if it
+            does not exist.
 
     Raises:
         ValueError: If any requested dataset key is unknown, or if
             both `only_benchmarks` and `exclude_benchmarks` are set.
+        RuntimeError: If one or more downloads failed.
     """
     if only_benchmarks and exclude_benchmarks:
         raise ValueError(
@@ -366,58 +442,31 @@ def download_datasets(
         elif exclude_benchmarks:
             selected = {k: v for k, v in selected.items() if not v.benchmark}
 
-    http_dl = HttpDownloader()
-    hf_dl = HuggingFaceDownloader()
+    keys = list(selected.keys())
+    workers = resolve_workers(max_workers, len(keys), io_default(len(keys)))
 
-    for key, config in selected.items():
-        output_path = Path(base_output_dir) / config.output_dir
+    def kwargs_for(key: str) -> Dict[str, Any]:
+        return {
+            "config": selected[key],
+            "base_output_dir": base_output_dir,
+            "force": force,
+        }
 
-        if not config.enabled:
-            note = config.note or "No details available."
-            logger.warning("Dataset '%s' is disabled: %s", key, note)
-            continue
+    _, failures = run_parallel(
+        _download_one,
+        keys,
+        max_workers=workers,
+        desc="download",
+        pool="thread",
+        kwargs_for=kwargs_for,
+        log_dir=log_dir,
+    )
 
-        if config.manual:
-            if _dir_has_files(output_path):
-                logger.info(
-                    "Manual dataset '%s' found at %s",
-                    key,
-                    output_path,
-                )
-            else:
-                note = config.note or "Manual download required."
-                logger.warning(
-                    "Dataset '%s' requires manual " "download: %s",
-                    key,
-                    note,
-                )
-            continue
-
-        if not force and _dir_has_files(output_path):
-            logger.info(
-                "Dataset '%s' already exists at %s, " "skipping",
-                key,
-                output_path,
-            )
-            continue
-
-        logger.info(
-            "Downloading '%s' (%s) from %s",
-            config.name,
-            key,
-            config.source,
+    if failures:
+        failed_keys = ", ".join(k for k, _ in failures)
+        raise RuntimeError(
+            f"Download failed for {len(failures)} dataset(s): {failed_keys}"
         )
-
-        if config.source in ("clarin", "http"):
-            http_dl.download(config, output_path)
-        elif config.source == "huggingface":
-            hf_dl.download(config, output_path)
-        else:
-            logger.error(
-                "Unknown source '%s' for dataset '%s'",
-                config.source,
-                key,
-            )
 
 
 def _dir_has_files(path: Path) -> bool:
