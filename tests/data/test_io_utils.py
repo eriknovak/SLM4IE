@@ -100,6 +100,30 @@ class TestIterJoinedRecords:
         assert [r["text"] for r in records] == ["a", "b"]
         assert all("annotations" not in r for r in records)
 
+    def test_stub_annotation_drops_empty_payload(
+        self, tmp_path: Path
+    ) -> None:
+        """A stub annotation line yields a record without `annotations`."""
+        text = tmp_path / "k.jsonl"
+        ann = tmp_path / "k.annotations.jsonl.gz"
+        _write_jsonl(text, [
+            {"text": "plain", "source": "k", "domain": "x",
+             "doc_id": "p1", "uid": "k:p1"},
+            {"text": "annotated", "source": "k", "domain": "x",
+             "doc_id": "a1", "uid": "k:a1"},
+        ])
+        _write_gz_jsonl(ann, [
+            {"doc_id": "p1", "uid": "k:p1"},
+            {"doc_id": "a1", "uid": "k:a1", "forms": ["annotated"],
+             "lemmas": [None], "upos": [None], "feats": [None],
+             "sentences": [[0, 0]]},
+        ])
+
+        records = list(iter_joined_records(text, ann))
+        assert len(records) == 2
+        assert "annotations" not in records[0]
+        assert records[1]["annotations"]["forms"] == ["annotated"]
+
     def test_doc_id_mismatch_raises(self, tmp_path: Path) -> None:
         """A doc_id mismatch is treated as a hard error."""
         text = tmp_path / "k.jsonl"

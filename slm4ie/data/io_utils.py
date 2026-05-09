@@ -202,5 +202,6 @@ def iter_joined_records(
 
             ann_record.pop("doc_id", None)
             ann_record.pop("uid", None)
-            text_record["annotations"] = ann_record
+            if ann_record:
+                text_record["annotations"] = ann_record
             yield text_record

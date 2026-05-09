@@ -158,6 +158,67 @@ class _IdlessAnnotatedStubExtractor(BaseExtractor):
 register_extractor("idless_annotated_stub", _IdlessAnnotatedStubExtractor)
 
 
+class _MixedStubExtractor(BaseExtractor):
+    """Yields a mix of annotated and unannotated documents.
+
+    Order: text-only, annotated, text-only, annotated. The leading
+    text-only doc forces the writer to backfill stubs the moment
+    annotations begin, exercising the lockstep contract.
+    """
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+    ) -> Iterator[Document]:
+        """Yield four documents alternating annotated and plain.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+
+        Yields:
+            Document: Mixed annotated/unannotated documents.
+        """
+        yield Document(
+            text="plain-0",
+            source=source,
+            domain=domain,
+            doc_id="plain-0",
+        )
+        yield Document(
+            text="ann-1",
+            source=source,
+            domain=domain,
+            doc_id="ann-1",
+            annotations=Annotations(
+                tokens=[Token(form="ann-1")],
+                sentences=[[0, 0]],
+            ),
+        )
+        yield Document(
+            text="plain-2",
+            source=source,
+            domain=domain,
+            doc_id="plain-2",
+        )
+        yield Document(
+            text="ann-3",
+            source=source,
+            domain=domain,
+            doc_id="ann-3",
+            annotations=Annotations(
+                tokens=[Token(form="ann-3")],
+                sentences=[[0, 0]],
+            ),
+        )
+
+
+register_extractor("mixed_stub", _MixedStubExtractor)
+
+
 def _write_config(tmp_path: Path, datasets: dict) -> Path:
     """Write a minimal extraction config YAML to tmp_path.
 
@@ -417,6 +478,49 @@ class TestExtractDatasets:
             "ds1:idx-00000000000000",
             "ds1:idx-00000000000001",
         ]
+
+    def test_mixed_dataset_keeps_streams_aligned(self, tmp_path: Path):
+        """Annotation stubs preserve doc_id alignment for plain docs."""
+        import gzip
+
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "mixed_stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        text_file = tmp_path / "processed" / "ds1.jsonl"
+        ann_file = tmp_path / "processed" / "ds1.annotations.jsonl.gz"
+
+        text_records = [
+            json.loads(ln) for ln in text_file.read_text().splitlines()
+        ]
+        with gzip.open(ann_file, "rt", encoding="utf-8") as f:
+            ann_records = [json.loads(ln) for ln in f.read().splitlines()]
+
+        assert len(text_records) == len(ann_records) == 4
+        assert [r["doc_id"] for r in text_records] == [
+            "plain-0",
+            "ann-1",
+            "plain-2",
+            "ann-3",
+        ]
+        assert [r["doc_id"] for r in ann_records] == [
+            "plain-0",
+            "ann-1",
+            "plain-2",
+            "ann-3",
+        ]
+        # Stubs must carry only doc_id and uid, no parallel-array fields.
+        assert set(ann_records[0].keys()) == {"doc_id", "uid"}
+        assert set(ann_records[2].keys()) == {"doc_id", "uid"}
+        assert "forms" in ann_records[1]
+        assert "forms" in ann_records[3]
 
     def test_skips_when_output_exists(self, tmp_path: Path):
         """Without --force, existing output is left untouched."""
