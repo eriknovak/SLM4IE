@@ -1,7 +1,7 @@
 """Build the final SLM4IE pretraining corpus from the per-dataset shards.
 
 `scripts/data/curate.py` is a thin CLI on top of **datatrove**: it builds
-a single five-executor pipeline that fuses language detection,
+a single six-executor pipeline that fuses language detection,
 cross-dataset exact and 3-sentence dedup, and corpus-statistics
 aggregation. Input and output paths come from `configs/data/curate.yaml`
 (`input_dir` and `output_dir`) or the matching CLI overrides; the
@@ -19,6 +19,9 @@ Examples:
     # Canonical: lang + dedup + stats on every dataset
     uv run python scripts/data/curate.py --all
 
+    # Saturate the box: parallel lang/dedup/write across all cores
+    uv run python scripts/data/curate.py --all --workers 0
+
     # Single dataset (still all three concerns; dedup operates within
     # that one shard only)
     uv run python scripts/data/curate.py kzb
@@ -33,6 +36,7 @@ Examples:
 import argparse
 import contextlib
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -210,16 +214,38 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--workers",
         "--tasks",
+        dest="workers",
         type=int,
         default=1,
         help=(
-            "Parallel tasks for the per-shard executors (lang+sig, "
-            "exact-filter+sent-sig). Stats stay single-worker. "
+            "Number of parallel CPU workers for the per-shard "
+            "executors (lang+sig, exact-filter+sent-sig, "
+            "sent-filter+write). Pass 0 to use every available core "
+            "(`os.cpu_count()`). The dedup find stages and the "
+            "corpus-stats stage stay single-worker by design. "
+            "`--tasks` is accepted as a back-compat alias. "
             "Default: 1."
         ),
     )
     return parser.parse_args(argv)
+
+
+def _resolve_worker_count(requested: int) -> int:
+    """Translate the `--workers` CLI value into a concrete count.
+
+    Args:
+        requested: User-requested worker count. Any value below `1`
+            selects `os.cpu_count()`, falling back to `1` if the OS
+            does not report a CPU count.
+
+    Returns:
+        The number of parallel workers to use, always at least `1`.
+    """
+    if requested < 1:
+        return os.cpu_count() or 1
+    return requested
 
 
 def _resolve_curate_dirs(
@@ -381,13 +407,40 @@ def _stats_only(output_dir: Path, cfg: Dict[str, Any], no_keywords: bool) -> Non
     logger.info("Refreshed stats under %s", statistics_folder)
 
 
+def _suppress_writer_rank_warning() -> None:
+    """Drop datatrove's `${rank}`-template warning from the loguru sink.
+
+    `JsonlWriter.__init__` warns when the output filename template lacks
+    `${rank}`, on the grounds that parallel workers may overwrite each
+    other. With our round-robin file sharding (datatrove's `get_shard`)
+    and a 1:1 mapping from input file to dataset, two ranks never share
+    a `${dataset}` value, so the warning is a false positive whether
+    `--workers` is `1` or higher. Adding `${rank}` would either bury the
+    documented `<output_dir>/<key>.jsonl.gz` final-corpus layout under
+    per-rank subfolders or rename it to `<key>_00000.jsonl.gz`. Replace
+    datatrove's default loguru sink with one that filters out this
+    specific message.
+    """
+    from datatrove.utils.logging import DATATROVE_COLORIZE_LOGS
+    from loguru import logger as loguru_logger
+
+    loguru_logger.remove()
+    loguru_logger.add(
+        sys.stderr,
+        colorize=DATATROVE_COLORIZE_LOGS,
+        filter=lambda record: "does not include ${rank}" not in record["message"],
+    )
+
+
 def main() -> None:
     """Entry point for the `curate.py` CLI."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    _suppress_writer_rank_warning()
     args = parse_args()
+    workers = _resolve_worker_count(args.workers)
 
     project_root = _find_project_root()
     extract_config = args.extract_config or (project_root / "configs" / "data" / "extract.yaml")
@@ -401,11 +454,20 @@ def main() -> None:
 
     if args.all:
         all_keys = list_datasets_from_config(extract_config)
-        logger.info("Running on all %d datasets from %s", len(all_keys), extract_config)
+        logger.info(
+            "Running on all %d datasets from %s with %d worker(s)",
+            len(all_keys),
+            extract_config,
+            workers,
+        )
         single_key_holder: Optional[Path] = None
         input_folder = input_dir
     else:
-        logger.info("Running on single dataset: %s", args.dataset)
+        logger.info(
+            "Running on single dataset: %s with %d worker(s)",
+            args.dataset,
+            workers,
+        )
         single_key_holder = _filter_input_keys(input_dir, args.dataset)
         input_folder = single_key_holder
 
@@ -442,7 +504,7 @@ def main() -> None:
             )
             executors = build_curate_executors(
                 paths,
-                tasks=args.tasks,
+                tasks=workers,
                 finder_workers=int(dedup_cfg.get("finder_workers", 1)),
                 sentence_config=sent_dedup,
                 target_language_iso2=lang_cfg.get("target", "sl"),

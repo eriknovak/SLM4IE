@@ -1,12 +1,17 @@
-"""Builders for the merged five-executor datatrove curation pipeline.
+"""Builders for the merged six-executor datatrove curation pipeline.
 
 The full ladder is:
 
-    1. lang + exact-sig         -> tempdir/lang_tagged
+    1. lang + exact-sig         -> tempdir/lang_tagged    (parallel)
     2. exact-find               (single worker)
-    3. exact-filter + sent-sig  -> tempdir/after_exact
+    3. exact-filter + sent-sig  -> tempdir/after_exact    (parallel)
     4. sent-find                (single worker)
-    5. sent-filter + stats      -> final/
+    5. sent-filter + write      -> final/                 (parallel)
+    6. corpus-stats             -> final/statistics       (single)
+
+Stages 1, 3 and 5 scale with the `tasks` argument; stages 2 and 4
+scale with `finder_workers`; stage 6 is single-process by design
+because `CorpusStats` keeps global counters on its instance.
 
 Each builder function returns a `LocalPipelineExecutor` chained to the
 previous one via `depends=`. The CLI calls `build_curate_executors`
@@ -88,15 +93,15 @@ def build_curate_executors(
     compute_keywords: bool = True,
     logging_dir: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
-    """Build the chained five-executor curation pipeline.
+    """Build the chained six-executor curation pipeline.
 
     Args:
         paths: Resolved input/output/scratch locations.
         tasks: Parallel tasks for the per-shard executors (1, 3, 5).
             `finder_workers` controls the dedicated find stages
-            (executors 2 and 4) separately. Stats run with `tasks=1`
-            regardless because `CorpusStats` keeps global counters on
-            its instance.
+            (executors 2 and 4) separately. The corpus-stats stage
+            (executor 6) runs single-process because `CorpusStats`
+            keeps global counters on its instance.
         finder_workers: Number of finder tasks for the dedup find
             stages. Must match the corresponding signature stage's
             `finder_workers` argument; both are wired here.
@@ -121,7 +126,7 @@ def build_curate_executors(
             created under this path.
 
     Returns:
-        The five executors in execution order. The CLI typically runs
+        The six executors in execution order. The CLI typically runs
         only the last one; datatrove follows `depends` to invoke
         upstream stages first.
     """
@@ -244,8 +249,10 @@ def build_curate_executors(
         skip_completed=False,
     )
 
-    # Executor 5: sentence-filter → CorpusStats → write final corpus.
-    # Single worker because CorpusStats keeps global counters.
+    # Executor 5: sentence-filter → write final corpus. Parallel-safe:
+    # files are sharded round-robin across ranks and each input file
+    # maps to a single dataset, so the `${dataset}.jsonl.gz` template
+    # does not collide across ranks.
     exec5 = LocalPipelineExecutor(
         pipeline=[
             JsonlReader(
@@ -262,6 +269,28 @@ def build_curate_executors(
                     JsonlWriter(output_folder=str(sentence_dropped)) if sentence_dropped else None
                 ),
             ),
+            JsonlWriter(
+                output_folder=str(paths.final_folder),
+                output_filename="${dataset}.jsonl.gz",
+            ),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(base_logs / "05_sent_filter_write"),
+        depends=exec4,
+        skip_completed=False,
+    )
+
+    # Executor 6: read final corpus → CorpusStats. Single-process
+    # because CorpusStats keeps global counters on its instance.
+    exec6 = LocalPipelineExecutor(
+        pipeline=[
+            JsonlReader(
+                str(paths.final_folder),
+                glob_pattern="*.jsonl.gz",
+                shuffle_files=False,
+                recursive=False,
+            ),
             CorpusStats(
                 output_path=paths.statistics_folder / "aggregate.json",
                 per_dataset_dir=paths.statistics_folder / "per_dataset",
@@ -272,16 +301,12 @@ def build_curate_executors(
                 keyword_top_k=keyword_top_k,
                 compute_keywords=compute_keywords,
             ),
-            JsonlWriter(
-                output_folder=str(paths.final_folder),
-                output_filename="${dataset}.jsonl.gz",
-            ),
         ],
         tasks=1,
         workers=1,
-        logging_dir=str(base_logs / "05_sent_filter_stats"),
-        depends=exec4,
+        logging_dir=str(base_logs / "06_corpus_stats"),
+        depends=exec5,
         skip_completed=False,
     )
 
-    return [exec1, exec2, exec3, exec4, exec5]
+    return [exec1, exec2, exec3, exec4, exec5, exec6]
