@@ -56,7 +56,11 @@ B2_TEXT = (
 
 
 def _write_shard(path: Path, dataset: str, domain: str, docs: List[dict]) -> None:
-    """Gzip-write a list of (id, text) docs as datatrove JSONL."""
+    """Gzip-write a list of (id, text) docs as datatrove JSONL.
+
+    *path* must point at a `<dataset>/<NNNNN>.jsonl.gz` file inside the
+    new sharded layout; the parent folder is created if missing.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8") as fh:
         for d in docs:
@@ -74,7 +78,7 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     """Two shards with one full-doc dup and one shared span produce 5 survivors."""
     input_folder = tmp_path / "datatrove"
     _write_shard(
-        input_folder / "alpha.jsonl.gz",
+        input_folder / "alpha" / "00000.jsonl.gz",
         dataset="alpha",
         domain="scientific",
         docs=[
@@ -84,7 +88,7 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
         ],
     )
     _write_shard(
-        input_folder / "beta.jsonl.gz",
+        input_folder / "beta" / "00000.jsonl.gz",
         dataset="beta",
         domain="legal",
         docs=[
@@ -118,7 +122,9 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     executors[-1].run()
 
     survivors: List[str] = []
-    for shard in sorted(final_folder.glob("*.jsonl.gz")):
+    survivor_dirs: set = set()
+    for shard in sorted(final_folder.glob("**/*.jsonl.gz")):
+        survivor_dirs.add(shard.parent.name)
         with gzip.open(shard, "rt", encoding="utf-8") as fh:
             for line in fh:
                 rec = json.loads(line)
@@ -128,6 +134,9 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     assert len(survivors) == 5
     assert "alpha:1" in survivors
     assert "beta:1" not in survivors  # whole-doc dup dropped
+    # Final corpus is sharded as <final>/<dataset>/<rank>.jsonl.gz —
+    # both datasets must show up as their own subfolders.
+    assert survivor_dirs == {"alpha", "beta"}
 
     bundle = json.loads((final_folder / "statistics" / "aggregate.json").read_text(encoding="utf-8"))
     assert bundle["total_docs"] == 5

@@ -18,6 +18,13 @@ previous one via `depends=`. The CLI calls `build_curate_executors`
 inside a `TemporaryDirectory` (or, in debug mode, a persistent
 `final/_dedup/`) and then runs the last executor; datatrove walks the
 `depends` chain and runs the rest in order.
+
+I/O layout — every reader walks per-dataset folders recursively
+(`<root>/<dataset>/<part>.jsonl.gz`) and every writer emits one file
+per rank per dataset (`<root>/<dataset>/<rank>.jsonl.gz`). This lets
+the upstream `to_datatrove.py` shard each dataset across many small
+files, so `tasks > 1` actually parallelizes the heavy datasets that
+used to be bound to a single rank.
 """
 
 import logging
@@ -156,9 +163,9 @@ def build_curate_executors(
         pipeline=[
             JsonlReader(
                 str(paths.input_folder),
-                glob_pattern="*.jsonl.gz",
+                glob_pattern="**/*.jsonl.gz",
                 shuffle_files=False,
-                recursive=False,
+                recursive=True,
             ),
             LinguaLanguageFilter(
                 target=target_language_iso2,
@@ -168,7 +175,7 @@ def build_curate_executors(
             ),
             JsonlWriter(
                 output_folder=str(lang_tagged),
-                output_filename="${dataset}.jsonl.gz",
+                output_filename="${dataset}/${rank}.jsonl.gz",
             ),
             ExactDedupSignature(
                 output_folder=str(exact_sigs),
@@ -204,9 +211,9 @@ def build_curate_executors(
         pipeline=[
             JsonlReader(
                 str(lang_tagged),
-                glob_pattern="*.jsonl.gz",
+                glob_pattern="**/*.jsonl.gz",
                 shuffle_files=False,
-                recursive=False,
+                recursive=True,
             ),
             ExactDedupFilter(
                 data_folder=str(exact_dups),
@@ -217,7 +224,7 @@ def build_curate_executors(
             ),
             JsonlWriter(
                 output_folder=str(after_exact),
-                output_filename="${dataset}.jsonl.gz",
+                output_filename="${dataset}/${rank}.jsonl.gz",
             ),
             SentenceDedupSignature(
                 output_folder=str(sent_sigs),
@@ -250,16 +257,17 @@ def build_curate_executors(
     )
 
     # Executor 5: sentence-filter → write final corpus. Parallel-safe:
-    # files are sharded round-robin across ranks and each input file
-    # maps to a single dataset, so the `${dataset}.jsonl.gz` template
-    # does not collide across ranks.
+    # input shards are sharded round-robin across ranks; multiple ranks
+    # may now touch the same dataset (one dataset spans many shards), so
+    # the writer routes each rank's per-dataset output into a distinct
+    # file via `${dataset}/${rank}.jsonl.gz`.
     exec5 = LocalPipelineExecutor(
         pipeline=[
             JsonlReader(
                 str(after_exact),
-                glob_pattern="*.jsonl.gz",
+                glob_pattern="**/*.jsonl.gz",
                 shuffle_files=False,
-                recursive=False,
+                recursive=True,
             ),
             SentenceDedupFilter(
                 data_folder=str(sent_dups),
@@ -271,7 +279,7 @@ def build_curate_executors(
             ),
             JsonlWriter(
                 output_folder=str(paths.final_folder),
-                output_filename="${dataset}.jsonl.gz",
+                output_filename="${dataset}/${rank}.jsonl.gz",
             ),
         ],
         tasks=tasks,
@@ -287,9 +295,9 @@ def build_curate_executors(
         pipeline=[
             JsonlReader(
                 str(paths.final_folder),
-                glob_pattern="*.jsonl.gz",
+                glob_pattern="**/*.jsonl.gz",
                 shuffle_files=False,
-                recursive=False,
+                recursive=True,
             ),
             CorpusStats(
                 output_path=paths.statistics_folder / "aggregate.json",

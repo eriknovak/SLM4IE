@@ -214,11 +214,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--workers",
+        "--max-workers",
         "--tasks",
         dest="workers",
         type=int,
-        default=1,
+        default=0,
         help=(
             "Number of parallel CPU workers for the per-shard "
             "executors (lang+sig, exact-filter+sent-sig, "
@@ -226,7 +226,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "(`os.cpu_count()`). The dedup find stages and the "
             "corpus-stats stage stay single-worker by design. "
             "`--tasks` is accepted as a back-compat alias. "
-            "Default: 1."
+            "Default: 0."
         ),
     )
     return parser.parse_args(argv)
@@ -327,30 +327,36 @@ def _drop_existing_output(output_dir: Path) -> None:
 
 
 def _filter_input_keys(input_dir: Path, key: str) -> Path:
-    """Materialize a folder containing only `<key>.jsonl.gz`.
+    """Materialize a folder mirroring `<input_dir>/<key>/` with symlinks.
 
     For single-dataset invocations we still feed a folder-glob to the
-    pipeline's `JsonlReader`. We therefore symlink the one shard into
-    a fresh tempdir so the rest of the pipeline doesn't have to
-    special-case single-key reads.
+    pipeline's `JsonlReader`. We mirror the per-dataset shard folder
+    via symlinks into a fresh tempdir so the rest of the pipeline
+    doesn't have to special-case single-key reads.
 
     Args:
-        input_dir: Folder of datatrove `<key>.jsonl.gz` shards.
+        input_dir: Folder of datatrove `<key>/<NNNNN>.jsonl.gz` shards.
         key: Dataset key to keep.
 
     Returns:
-        A folder containing exactly `<key>.jsonl.gz`. The caller is
-        responsible for removing it once the pipeline finishes.
+        A folder containing exactly `<key>/<NNNNN>.jsonl.gz` symlinks.
+        The caller is responsible for removing it once the pipeline
+        finishes.
 
     Raises:
-        FileNotFoundError: If the requested shard does not exist.
+        FileNotFoundError: If the requested shard folder is missing or
+            empty.
     """
-    src = input_dir / f"{key}.jsonl.gz"
-    if not src.exists():
-        raise FileNotFoundError(f"No datatrove shard for dataset {key!r} at {src}")
+    src = input_dir / key
+    if not src.is_dir() or not any(src.glob("*.jsonl.gz")):
+        raise FileNotFoundError(
+            f"No datatrove shard folder for dataset {key!r} at {src}"
+        )
     holder = Path(tempfile.mkdtemp(prefix=f"slm4ie-curate-{key}-"))
-    target = holder / f"{key}.jsonl.gz"
-    target.symlink_to(src.resolve())
+    holder_key = holder / key
+    holder_key.mkdir()
+    for shard in src.glob("*.jsonl.gz"):
+        (holder_key / shard.name).symlink_to(shard.resolve())
     return holder
 
 
@@ -363,7 +369,7 @@ def _stats_only(output_dir: Path, cfg: Dict[str, Any], no_keywords: bool) -> Non
         no_keywords: When True, skip the classla TF-IDF pass.
     """
     statistics_folder = output_dir / "statistics"
-    if not any(output_dir.glob("*.jsonl.gz")):
+    if not any(output_dir.glob("**/*.jsonl.gz")):
         logger.error(
             "stats stage requires a deduplicated corpus in %s. Run the "
             "full pipeline first (drop --stage stats).",
@@ -384,9 +390,9 @@ def _stats_only(output_dir: Path, cfg: Dict[str, Any], no_keywords: bool) -> Non
         pipeline=[
             JsonlReader(
                 str(output_dir),
-                glob_pattern="*.jsonl.gz",
+                glob_pattern="**/*.jsonl.gz",
                 shuffle_files=False,
-                recursive=False,
+                recursive=True,
             ),
             CorpusStats(
                 output_path=statistics_folder / "aggregate.json",

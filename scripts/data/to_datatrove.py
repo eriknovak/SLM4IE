@@ -7,12 +7,27 @@ text/id/media into Document.metadata.
 
 This script reads `<key>.jsonl` (and the optional
 `<key>.annotations.jsonl.gz` sidecar) from the extraction output
-directory, joins them on the fly, and writes a single per-dataset
-JSONL whose shape is directly consumable by datatrove while still
-carrying the dataset/domain provenance and annotation payloads we
-need downstream.
+directory, joins them on the fly, and writes a per-dataset *folder*
+of gzipped JSONL shards whose shape is directly consumable by
+datatrove while still carrying the dataset/domain provenance and
+annotation payloads we need downstream.
 
-Output line shape:
+Output layout — one folder per dataset, each containing one or more
+shards no larger than `--max-shard-bytes` compressed:
+
+    <output_dir>/
+    └── <key>/
+        ├── 00000.jsonl.gz
+        ├── 00001.jsonl.gz
+        └── ...
+
+Sharding the output lets datatrove's `JsonlReader` distribute shards
+round-robin across worker ranks (`get_shard` returns
+`all_files[rank::world_size]`), which is the only way to parallelize a
+single dataset — gzip streams are not seekable, so each file is bound
+to one rank.
+
+Output line shape per shard:
 
     {
         "text":        "<document text>",
@@ -30,24 +45,27 @@ Examples:
 
     # all datasets configured in extract.yaml
     uv run python scripts/data/to_datatrove.py --all
+
+    # tighter shards (e.g. 250 MB) for smaller datasets / more parallelism
+    uv run python scripts/data/to_datatrove.py --all --max-shard-bytes 250000000
 """
 
 import argparse
-import json
 import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import yaml
 from tqdm import tqdm
 
 from slm4ie.data.io_utils import (
+    DEFAULT_MAX_SHARD_BYTES,
+    ShardedJsonlWriter,
     find_dataset_files as _find_dataset_files,
     find_project_root as _find_project_root,
     iter_joined_records as _iter_joined_records,
-    open_output as _open_output,
     resolve_processed_dir as _resolve_processed_dir,
 )
 from slm4ie.data.parallel import (
@@ -121,14 +139,15 @@ def convert_record(
 
 def convert_stream(
     records: Iterable[Dict[str, Any]],
-    out_stream: IO[str],
+    writer: ShardedJsonlWriter,
 ) -> int:
-    """Convert each input record and write it as a JSONL line.
+    """Convert each input record and write it through *writer*.
 
     Args:
         records (Iterable[Dict[str, Any]]): Iterable of joined records
             (text plus optional annotations).
-        out_stream (IO[str]): Writable text stream for converted JSONL.
+        writer (ShardedJsonlWriter): Active sharded writer that handles
+            gzip compression and shard rollover.
 
     Returns:
         int: Number of records written.
@@ -137,8 +156,7 @@ def convert_stream(
     count = 0
     for index, record in enumerate(records):
         converted = convert_record(record, index, collisions)
-        out_stream.write(json.dumps(converted, ensure_ascii=False))
-        out_stream.write("\n")
+        writer.write_record(converted)
         count += 1
     return count
 
@@ -167,24 +185,28 @@ def convert_dataset(
     processed_dir: Path,
     output_dir: Path,
     force: bool = False,
+    max_shard_bytes: int = DEFAULT_MAX_SHARD_BYTES,
 ) -> Optional[int]:
-    """Convert a single dataset, writing `<output_dir>/<key>.jsonl.gz`.
+    """Convert a single dataset, writing `<output_dir>/<key>/<NNNNN>.jsonl.gz`.
 
     Args:
         key (str): Dataset key.
         processed_dir (Path): Directory containing processed input
             files (`<key>.jsonl` and optional
             `<key>.annotations.jsonl.gz`).
-        output_dir (Path): Directory to write datatrove-shaped output
-            into. Created if it does not exist.
-        force (bool): When True, overwrite an existing output file.
+        output_dir (Path): Parent directory for the per-dataset shard
+            folders. Created if it does not exist.
+        force (bool): When True, overwrite an existing output folder.
             Defaults to False (skip and return 0).
+        max_shard_bytes (int): Compressed-byte ceiling per shard.
+            `ShardedJsonlWriter` rolls over to a new file when this is
+            crossed. Defaults to `DEFAULT_MAX_SHARD_BYTES` (900 MB).
 
     Returns:
         Optional[int]: Number of records written, or None when no
             input file exists for *key* (caller should treat this as
-            a skip, not an error). Returns 0 when the output already
-            exists and *force* is False.
+            a skip, not an error). Returns 0 when the output folder
+            already contains shards and *force* is False.
     """
     pair = _find_dataset_files(processed_dir, key)
     if pair is None:
@@ -196,30 +218,36 @@ def convert_dataset(
     text_path, ann_path = pair
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"{key}.jsonl.gz"
+    shard_folder = output_dir / key
 
-    if out_path.exists() and not force:
-        logger.info(
-            "Skipping %r, output already exists: %s "
-            "(use --force to overwrite)",
-            key, out_path,
-        )
-        return 0
+    if shard_folder.is_dir() and any(shard_folder.glob("*.jsonl.gz")):
+        if not force:
+            logger.info(
+                "Skipping %r, output folder already populated: %s "
+                "(use --force to overwrite)",
+                key, shard_folder,
+            )
+            return 0
+        # Force overwrite: drop the previous shards so we don't mix
+        # shards from a prior run with shards from this run.
+        for stale in shard_folder.glob("*.jsonl.gz"):
+            stale.unlink()
 
     logger.info(
-        "Converting %s%s → %s",
+        "Converting %s%s → %s/ (max_shard_bytes=%d)",
         text_path,
         f" + {ann_path}" if ann_path else "",
-        out_path,
+        shard_folder, max_shard_bytes,
     )
     records = _iter_joined_records(text_path, ann_path)
     progress = tqdm(records, desc=key, unit="doc", disable=workers_quiet())
-    with _open_output(out_path) as out_stream:
+    with ShardedJsonlWriter(shard_folder, max_shard_bytes=max_shard_bytes) as writer:
         try:
-            count = convert_stream(progress, out_stream)
+            count = convert_stream(progress, writer)
         finally:
             progress.close()
-    logger.info("Wrote %d records to %s", count, out_path)
+    n_shards = len(list(shard_folder.glob("*.jsonl.gz")))
+    logger.info("Wrote %d records across %d shard(s) to %s", count, n_shards, shard_folder)
     return count
 
 
@@ -280,7 +308,18 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing <key>.jsonl.gz outputs.",
+        help="Overwrite existing <key>/ shard folders.",
+    )
+    parser.add_argument(
+        "--max-shard-bytes",
+        type=int,
+        default=DEFAULT_MAX_SHARD_BYTES,
+        help=(
+            "Compressed-byte ceiling per output shard. The writer "
+            "rolls over to <key>/00001.jsonl.gz, 00002.jsonl.gz, ... "
+            "as soon as the current shard reaches this size. Default: "
+            "%(default)d bytes (~900 MB)."
+        ),
     )
     parser.add_argument(
         "--max-workers",
@@ -326,6 +365,7 @@ def main():
             "processed_dir": processed_dir,
             "output_dir": output_dir,
             "force": args.force,
+            "max_shard_bytes": args.max_shard_bytes,
         }
 
     results, failures = run_parallel(
