@@ -102,6 +102,18 @@ All scripts are CLI wrappers around `slm4ie/` modules and read from YAML configs
 
 ### Data pipeline
 
+#### Parallelism and per-dataset logs
+
+`download.py`, `extract.py`, `to_datatrove.py`, `to_spans.py`, `to_sentiment.py`, and `to_tokenizer_eval.py` all accept a `--max-workers` flag and process multiple datasets concurrently:
+
+- `--max-workers 0` (default) — auto: `min(cpu_count // 2, n_datasets)` for CPU-bound steps, capped at 4 for `download.py` to stay polite to remote servers.
+- `--max-workers 1` — serial path; tracebacks are unwrapped, console keeps today's verbose output, and the inner per-dataset progress bar is shown.
+- `--max-workers N` — that many workers, capped at the number of selected datasets.
+
+Per-dataset logs are always written to `logs/<script>/<UTC-timestamp>/<key>.log`, regardless of worker count. In parallel mode (`> 1`) the console only prints a periodic summary line (`running=R done=D skipped=S failed=F waiting=W`) every 30 seconds — the per-dataset INFO lines and inner tqdm bars are routed to the log files instead, so concurrent workers don't garble each other on stderr.
+
+`curate.py` is the exception: it parallelizes internally via datatrove's `LocalPipelineExecutor` (see `--workers` below) and is not wrapped by `--max-workers`.
+
 #### Download
 
 Download raw corpora declared in [`configs/data/download.yaml`](configs/data/download.yaml):
@@ -121,6 +133,9 @@ uv run python scripts/data/download.py --only-benchmarks
 
 # Download only pretraining corpora (skip benchmarks)
 uv run python scripts/data/download.py --exclude-benchmarks
+
+# Download four datasets in parallel (thread pool; default cap is 4)
+uv run python scripts/data/download.py --datasets fineweb2 cc100 mc4 hplt --max-workers 4
 ```
 
 #### Extract
@@ -133,6 +148,9 @@ uv run python scripts/data/extract.py --datasets macocu_sl
 
 # re-extract a dataset whose output already exists
 uv run python scripts/data/extract.py --datasets macocu_sl --force
+
+# extract several datasets in parallel (process pool)
+uv run python scripts/data/extract.py --datasets macocu_sl classla_web_sl kzb --max-workers 3
 ```
 
 For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW), extraction writes two files per dataset:
@@ -155,6 +173,9 @@ uv run python scripts/data/to_datatrove.py --all
 
 # Re-convert every dataset in extract.yaml
 uv run python scripts/data/to_datatrove.py --all --force
+
+# Convert every dataset in parallel
+uv run python scripts/data/to_datatrove.py --all --max-workers 4
 ```
 
 Output goes to `<output_dir>/datatrove/<key>.jsonl.gz` (override with `--output-dir`). Existing outputs are skipped unless `--force` is passed. Every record carries `dataset` and `domain` at the top level so downstream filters and source-weighted sampling can use them via `document.metadata`. `JsonlReader("…/datatrove/*.jsonl.gz")` ingests the whole corpus in one go.
@@ -169,6 +190,9 @@ uv run python scripts/data/to_spans.py kzb --schema gliner
 
 # every dataset, lossless generic shape
 uv run python scripts/data/to_spans.py --all --schema generic
+
+# parallel
+uv run python scripts/data/to_spans.py --all --schema gliner --max-workers 4
 ```
 
 Output goes to `<output_dir>/spans/<schema>/<key>.jsonl.gz`. Existing outputs are skipped unless `--force` is passed. The converter expects each annotations payload to carry a `spans` field (`[start, end, label]` triples or `{start, end, label}` dicts with end-exclusive token indices); records without spans are skipped with a warning.
@@ -186,6 +210,9 @@ uv run python scripts/data/to_sentiment.py sentinews --levels document
 
 # Convert every SA-tagged benchmark dataset declared in download.yaml
 uv run python scripts/data/to_sentiment.py --all
+
+# parallel
+uv run python scripts/data/to_sentiment.py --all --max-workers 4
 ```
 
 Output goes to `<raw-dir>/eval/sentiment/<key>.jsonl.gz` (override with `--output-dir`), accompanied by a `label_map.json` so the integer `label_id` encoding is traceable. Existing outputs are skipped unless `--force` is passed.
@@ -227,14 +254,14 @@ uv run python scripts/data/curate.py --all
 
 This runs the full pipeline end-to-end on every dataset declared in `configs/data/extract.yaml`. The output is the `output_dir` from `configs/data/curate.yaml` and nothing else — every intermediate artifact lives in a `tempfile.TemporaryDirectory` that is removed at the end of the run.
 
-##### How the pipeline runs (5 datatrove executors)
+##### How the pipeline runs (6 datatrove executors)
 
-`build_curate_executors()` chains five `LocalPipelineExecutor`s with `depends=`. Calling `.run()` on the last executor walks the chain backwards and runs the rest in order. Find stages can't be merged with the rest because they consume all signatures from disk in a single pass; everything else fuses cleanly.
+`build_curate_executors()` chains six `LocalPipelineExecutor`s with `depends=`. Calling `.run()` on the last executor walks the chain backwards and runs the rest in order. Find stages can't be merged with the rest because they consume all signatures from disk in a single pass; the corpus-stats stage stays single-process because `CorpusStats` keeps global counters on its instance.
 
 ```text
 TMP = tempfile.TemporaryDirectory()      (or <output_dir>/_dedup/ with --debug)
 
-executor 1   (per-shard, parallel via --tasks)
+executor 1   (per-shard, parallel via --workers)
     JsonlReader(<input_dir>)
         → LinguaLanguageFilter            # tag metadata.language + score
         → JsonlWriter(TMP/lang_tagged)    # tagged shards for executor 3
@@ -245,7 +272,7 @@ executor 2   (single worker — find stage)
         reads  TMP/exact_sigs
         writes TMP/exact_dups
 
-executor 3   (per-shard, parallel via --tasks)
+executor 3   (per-shard, parallel via --workers)
     JsonlReader(TMP/lang_tagged)
         → ExactDedupFilter                # drops whole-doc duplicates
         → JsonlWriter(TMP/after_exact)    # filtered shards for executor 5
@@ -256,11 +283,15 @@ executor 4   (single worker — find stage)
         reads  TMP/sent_sigs
         writes TMP/sent_dups
 
-executor 5   (single worker — global stats)
+executor 5   (per-shard, parallel via --workers)
     JsonlReader(TMP/after_exact)
         → SentenceDedupFilter             # drops duplicate sentence spans
-        → CorpusStats                     # accumulates global counters
         → JsonlWriter(<output_dir>)       # the training corpus
+
+executor 6   (single worker — global stats)
+    JsonlReader(<output_dir>)
+        → CorpusStats                     # accumulates global counters
+                                          # writes <output_dir>/statistics/
 ```
 
 Both signature steps use `Languages.slovenian`, so datatrove dispatches to its bundled Slovenian `SpaCyTokenizer` for word and sentence boundaries. Running them with the English default would corrupt the dedup signature.
@@ -304,9 +335,10 @@ uv run python scripts/data/curate.py --all --no-keywords
 # them somewhere else.
 uv run python scripts/data/curate.py --all --debug
 
-# Parallelism: per-shard executors (1, 3) run with this many tasks.
-# Find and stats stages stay single-worker by design.
-uv run python scripts/data/curate.py --all --tasks 4
+# Parallelism: per-shard executors (1, 3, 5) run with this many workers.
+# Find stages and the final stats stage stay single-worker by design.
+# Pass --workers 0 to use every available core. --tasks is a back-compat alias.
+uv run python scripts/data/curate.py --all --workers 4
 
 # Rebuild from scratch (the existing <output_dir> is preserved by default).
 uv run python scripts/data/curate.py --all --force
