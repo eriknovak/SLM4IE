@@ -1,0 +1,115 @@
+site_name: SLM4IE
+site_author: Erik Novak
+site_description: Small language models for zero-shot information extraction in Slovenian.
+site_url: https://eriknovak.github.io/SLM4IE/
+repo_name: eriknovak/SLM4IE
+repo_url: https://github.com/eriknovak/SLM4IE
+edit_uri: ""
+
+docs_dir: docs
+
+theme:
+  name: material
+  logo: assets/imgs/logo.png
+  favicon: assets/imgs/logo.png
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+    - navigation.indexes
+    - navigation.tabs
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+plugins:
+  - search:
+      separator: '[\s\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - blog:
+      blog_dir: blog
+      post_url_format: "{slug}"
+  - autorefs
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: date
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.critic
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - getting-started/index.md
+      - Installation: getting-started/installation.md
+      - HuggingFace Authentication: getting-started/huggingface-auth.md
+      - Project Structure: getting-started/project-structure.md
+  - User Guide:
+      - user-guide/index.md
+      - Data Pipeline:
+          - user-guide/data-pipeline/index.md
+          - Download: user-guide/data-pipeline/download.md
+          - Extract: user-guide/data-pipeline/extract.md
+          - Datatrove format: user-guide/data-pipeline/datatrove.md
+          - Spans format: user-guide/data-pipeline/spans.md
+          - Sentiment format: user-guide/data-pipeline/sentiment.md
+          - SuperGLUE format: user-guide/data-pipeline/superglue.md
+          - Tokenizer eval format: user-guide/data-pipeline/tokenizer-eval.md
+          - Curation: user-guide/data-pipeline/curate.md
+          - Synthetic data: user-guide/data-pipeline/synthetic.md
+      - Tokenizers: user-guide/tokenizers.md
+      - Training: user-guide/training.md
+      - Evaluation: user-guide/evaluation.md
+      - SLURM / HPC: user-guide/slurm.md
+      - Tests: user-guide/tests.md
+  - Datasets:
+      - datasets/index.md
+      - Pretraining Corpora: datasets/pretraining-corpora.md
+      - Benchmarks: datasets/benchmarks.md
+  - Blog:
+      - blog/index.md
+  - Development: development.md
+  - Changelog: changelog.md
