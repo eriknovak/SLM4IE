@@ -1,14 +1,16 @@
 """Build the final SLM4IE pretraining corpus from the per-dataset shards.
 
 `scripts/data/curate.py` is a thin CLI on top of **datatrove**: it builds
-a single six-executor pipeline that fuses language detection,
-cross-dataset exact and 3-sentence dedup, and corpus-statistics
-aggregation. Input and output paths come from `configs/data/curate.yaml`
-(`input_dir` and `output_dir`) or the matching CLI overrides; the
-dataset key list still comes from `configs/data/extract.yaml`. The
-output is the deduplicated training corpus under
-`<output_dir>/<key>.jsonl.gz` plus a `<output_dir>/statistics/` folder
-with the aggregate JSON and per-dataset breakdowns.
+a single six-executor pipeline that fuses lingua-py language
+filtering, Gopher-style quality and repetition heuristics, two
+cumulative cross-dataset dedup passes (exact, 3-sentence), and
+corpus-statistics aggregation. Input and output paths come from
+`configs/data/curate.yaml` (`input_dir` and `output_dir`) or the
+matching CLI overrides; the dataset key list still comes from
+`configs/data/extract.yaml`. The output is the deduplicated training
+corpus under `<output_dir>/<key>.jsonl.gz` plus a
+`<output_dir>/statistics/` folder with the aggregate JSON and
+per-dataset breakdowns.
 
 All dedup intermediate state lives in a `tempfile.TemporaryDirectory`
 that is cleaned up at the end of the run. Pass `--debug` to keep that
@@ -22,9 +24,9 @@ Examples:
     # Saturate the box: parallel lang/dedup/write across all cores
     uv run python scripts/data/curate.py --all --workers 0
 
-    # Single dataset (still all three concerns; dedup operates within
-    # that one shard only)
-    uv run python scripts/data/curate.py kzb
+    # Subset of datasets (still all three concerns; dedup operates
+    # within the given subset only)
+    uv run python scripts/data/curate.py kzb solar
 
     # Re-run only the stats stage on the existing output_dir corpus
     uv run python scripts/data/curate.py --all --stage stats
@@ -45,7 +47,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import yaml
 
-from slm4ie.data.curate.pipeline import CuratePaths, build_curate_executors
+from slm4ie.data.curate.pipeline import CuratePaths, QualityConfig, build_curate_executors
 from slm4ie.data.curate.stats import CorpusStats
 from slm4ie.data.io_utils import find_project_root as _find_project_root
 
@@ -130,13 +132,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument(
-        "dataset",
-        nargs="?",
+        "datasets",
+        nargs="*",
+        default=[],
         help=(
-            "Dataset key (e.g. 'kzb'). Single-key invocations still run "
-            "all three concerns; dedup operates within that one shard "
-            "only. For the canonical training corpus, use --all so "
-            "dedup is cross-dataset."
+            "Dataset keys (e.g. 'kzb' or 'kzb solar'). Subset invocations "
+            "still run all three concerns; dedup operates within the "
+            "given subset only — for the canonical training corpus, "
+            "use --all so dedup is cross-dataset."
         ),
     )
     target.add_argument(
@@ -221,15 +224,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=0,
         help=(
             "Number of parallel CPU workers for the per-shard "
-            "executors (lang+sig, exact-filter+sent-sig, "
-            "sent-filter+write). Pass 0 to use every available core "
-            "(`os.cpu_count()`). The dedup find stages and the "
-            "corpus-stats stage stay single-worker by design. "
-            "`--tasks` is accepted as a back-compat alias. "
+            "executors (lang+quality+exact-sig, exact-filter+sent-sig, "
+            "sent-filter+write). Pass 0 to use "
+            "every available core (`os.cpu_count()`). The dedup find "
+            "stages and the corpus-stats stage stay single-worker by "
+            "design. `--tasks` is accepted as a back-compat alias. "
             "Default: 0."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # argparse's `required=True` on a mutex group accepts a positional
+    # with `nargs="*"`, but treats an empty positional as "provided" —
+    # so bare invocation can slip through. Validate the xor by hand.
+    if args.all and args.datasets:
+        parser.error("argument --all: not allowed with positional datasets")
+    if not args.all and not args.datasets:
+        parser.error("one of the arguments datasets --all is required")
+    return args
 
 
 def _resolve_worker_count(requested: int) -> int:
@@ -246,6 +257,41 @@ def _resolve_worker_count(requested: int) -> int:
     if requested < 1:
         return os.cpu_count() or 1
     return requested
+
+
+def _resolve_target_languages(lang_cfg: Dict[str, Any]) -> List[str]:
+    """Normalize the lingua target-language list from the curate config.
+
+    Accepts either the new `targets` (list of ISO 639-1 codes) or the
+    deprecated singular `target` (a single code) and returns a non-empty
+    list. A `DeprecationWarning`-style message is logged when the old
+    key is used.
+
+    Args:
+        lang_cfg: The `language:` subsection of `curate.yaml`.
+
+    Returns:
+        List of lowercased ISO 639-1 codes. Defaults to `["sl"]` when
+        neither key is present.
+
+    Raises:
+        ValueError: If `targets` is set to an empty list.
+    """
+    raw_targets = lang_cfg.get("targets")
+    if raw_targets is None:
+        raw_target = lang_cfg.get("target")
+        if raw_target is not None:
+            logger.warning(
+                "curate.yaml::language.target (singular) is deprecated; "
+                "use targets: [%s] instead.",
+                raw_target,
+            )
+            raw_targets = [raw_target]
+        else:
+            raw_targets = ["sl"]
+    if not raw_targets:
+        raise ValueError("curate.yaml::language.targets must be a non-empty list")
+    return [str(code).lower() for code in raw_targets]
 
 
 def _resolve_curate_dirs(
@@ -326,37 +372,44 @@ def _drop_existing_output(output_dir: Path) -> None:
         logger.info("Removed existing %s for --force re-run", output_dir)
 
 
-def _filter_input_keys(input_dir: Path, key: str) -> Path:
-    """Materialize a folder mirroring `<input_dir>/<key>/` with symlinks.
+def _filter_input_keys(input_dir: Path, keys: List[str]) -> Path:
+    """Materialize a folder mirroring the requested `<key>/` subdirs with symlinks.
 
-    For single-dataset invocations we still feed a folder-glob to the
-    pipeline's `JsonlReader`. We mirror the per-dataset shard folder
-    via symlinks into a fresh tempdir so the rest of the pipeline
-    doesn't have to special-case single-key reads.
+    For subset-of-datasets invocations we still feed a folder-glob to
+    the pipeline's `JsonlReader`. We mirror each per-dataset shard
+    folder via symlinks into a fresh tempdir so the rest of the
+    pipeline doesn't have to special-case subset reads.
 
     Args:
         input_dir: Folder of datatrove `<key>/<NNNNN>.jsonl.gz` shards.
-        key: Dataset key to keep.
+        keys: Dataset keys to keep.
 
     Returns:
-        A folder containing exactly `<key>/<NNNNN>.jsonl.gz` symlinks.
-        The caller is responsible for removing it once the pipeline
-        finishes.
+        A folder containing `<key>/<NNNNN>.jsonl.gz` symlinks for each
+        requested key. The caller is responsible for removing it once
+        the pipeline finishes.
 
     Raises:
-        FileNotFoundError: If the requested shard folder is missing or
-            empty.
+        FileNotFoundError: If any of the requested shard folders is
+            missing or empty. The error message lists all such keys.
     """
-    src = input_dir / key
-    if not src.is_dir() or not any(src.glob("*.jsonl.gz")):
+    missing: List[str] = []
+    for key in keys:
+        src = input_dir / key
+        if not src.is_dir() or not any(src.glob("*.jsonl.gz")):
+            missing.append(key)
+    if missing:
         raise FileNotFoundError(
-            f"No datatrove shard folder for dataset {key!r} at {src}"
+            f"No datatrove shard folder(s) under {input_dir} for dataset(s): "
+            + ", ".join(repr(k) for k in missing)
         )
-    holder = Path(tempfile.mkdtemp(prefix=f"slm4ie-curate-{key}-"))
-    holder_key = holder / key
-    holder_key.mkdir()
-    for shard in src.glob("*.jsonl.gz"):
-        (holder_key / shard.name).symlink_to(shard.resolve())
+    holder = Path(tempfile.mkdtemp(prefix="slm4ie-curate-subset-"))
+    for key in keys:
+        src = input_dir / key
+        holder_key = holder / key
+        holder_key.mkdir()
+        for shard in src.glob("*.jsonl.gz"):
+            (holder_key / shard.name).symlink_to(shard.resolve())
     return holder
 
 
@@ -466,16 +519,17 @@ def main() -> None:
             extract_config,
             workers,
         )
-        single_key_holder: Optional[Path] = None
+        subset_holder: Optional[Path] = None
         input_folder = input_dir
     else:
         logger.info(
-            "Running on single dataset: %s with %d worker(s)",
-            args.dataset,
+            "Running on %d dataset(s): %s with %d worker(s)",
+            len(args.datasets),
+            ", ".join(args.datasets),
             workers,
         )
-        single_key_holder = _filter_input_keys(input_dir, args.dataset)
-        input_folder = single_key_holder
+        subset_holder = _filter_input_keys(input_dir, args.datasets)
+        input_folder = subset_holder
 
     if args.force:
         _drop_existing_output(output_dir)
@@ -484,8 +538,10 @@ def main() -> None:
     statistics_folder = final_folder / "statistics"
 
     lang_cfg = cfg.get("language") or {}
+    target_languages = _resolve_target_languages(lang_cfg)
     dedup_cfg = cfg.get("dedup") or {}
     sentence_cfg = dedup_cfg.get("sentence") or {}
+    quality_cfg = cfg.get("quality") or {}
     stats_cfg = cfg.get("stats") or {}
     stopword_rel = stats_cfg.get("stopwords")
     stopwords = load_stopwords((project_root / stopword_rel) if stopword_rel else None)
@@ -497,6 +553,17 @@ def main() -> None:
         min_doc_words=int(sentence_cfg.get("min_doc_words", 50)),
         min_num_sentences=int(sentence_cfg.get("min_num_sentences", 2)),
         split_sentences=bool(sentence_cfg.get("split_sentences", True)),
+    )
+    quality_conf = QualityConfig(
+        min_doc_words=int(quality_cfg.get("min_doc_words", 50)),
+        max_doc_words=int(quality_cfg.get("max_doc_words", 100_000)),
+        min_avg_word_length=int(quality_cfg.get("min_avg_word_length", 3)),
+        max_avg_word_length=int(quality_cfg.get("max_avg_word_length", 10)),
+        max_symbol_word_ratio=float(quality_cfg.get("max_symbol_word_ratio", 0.1)),
+        max_bullet_lines_ratio=float(quality_cfg.get("max_bullet_lines_ratio", 0.9)),
+        max_ellipsis_lines_ratio=float(quality_cfg.get("max_ellipsis_lines_ratio", 0.3)),
+        max_non_alpha_words_ratio=float(quality_cfg.get("max_non_alpha_words_ratio", 0.8)),
+        min_stop_words=int(quality_cfg.get("min_stop_words", 2)),
     )
 
     try:
@@ -513,10 +580,15 @@ def main() -> None:
                 tasks=workers,
                 finder_workers=int(dedup_cfg.get("finder_workers", 1)),
                 sentence_config=sent_dedup,
-                target_language_iso2=lang_cfg.get("target", "sl"),
+                quality_config=quality_conf,
+                target_languages=target_languages,
                 candidate_languages=lang_cfg.get("candidates"),
-                lang_threshold=float(lang_cfg.get("threshold", 0.5)),
                 lang_mode=lang_cfg.get("mode", "tag"),
+                lang_minimum_relative_distance=float(
+                    lang_cfg.get("minimum_relative_distance", 0.0)
+                ),
+                lang_low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
+                lang_max_chars=lang_cfg.get("max_chars"),
                 stopwords=stopwords,
                 top_k_words=int(stats_cfg.get("top_k_words", 5_000)),
                 top_k_ngrams=int(stats_cfg.get("top_k_ngrams", 5_000)),
@@ -528,7 +600,7 @@ def main() -> None:
                 logger.warning(
                     "--stage lang produces ephemeral output that is "
                     "discarded with the scratch directory. Use --debug "
-                    "to inspect the lang-tagged shards."
+                    "to inspect the lang-tagged and quality-filtered shards."
                 )
                 executors[0].run()
             elif args.stage == "dedup":
@@ -537,12 +609,15 @@ def main() -> None:
                     "discarded with the scratch directory. Use --debug "
                     "to inspect intermediate dedup state."
                 )
+                # Run through the sentence-find stage (executor index 3).
+                # The downstream sentence-filter + write stage is the
+                # final materialization step and lives at index 4.
                 executors[3].run()
             else:
                 executors[-1].run()
     finally:
-        if single_key_holder is not None:
-            shutil.rmtree(single_key_holder, ignore_errors=True)
+        if subset_holder is not None:
+            shutil.rmtree(subset_holder, ignore_errors=True)
 
     logger.info("Final corpus written to %s", final_folder)
 

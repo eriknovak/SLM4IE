@@ -2,17 +2,48 @@ input_dir: /vault/data/SLM4IE/processed/datatrove
 output_dir: /vault/data/SLM4IE/final
 
 language:
-  target: sl
+  # ISO 639-1 codes considered "in-language" by the lingua filter. In
+  # mode: filter, only docs whose detected top-1 language is in this
+  # list survive. Add more codes here to build a multilingual corpus.
+  targets: [sl]
   candidates: [sl, hr, sr, bs, mk, en, de, it, hu]
-  threshold: 0.5
-  mode: tag
+  # Required gap between the top language and the runner-up before
+  # lingua commits to a prediction. Critical for South Slavic
+  # disambiguation, where raw confidence is softmax-normalized over
+  # the candidate set and a doc that scores 0.7 for sl can still have
+  # ~0.2 each for hr/sr. Setting this gates `detect_language_of` so a
+  # too-close call returns None instead of guessing.
+  minimum_relative_distance: 0.1
+  mode: filter
+  # Use lingua's trigram-only model (~5-10x faster than the default
+  # 1-5-gram model). Negligible accuracy loss on long European-language
+  # web text; flip off for short or noisy edge documents where every
+  # gram counts.
+  low_accuracy: true
+  # Truncate doc text to this many chars before language detection.
+  # ~2 KB is plenty of signal for a small candidate set; saves work
+  # proportional to doc length on giant web docs (c4, fineweb2). Set
+  # to null to disable truncation.
+  max_chars: 2048
+
+# Gopher-style quality heuristics applied between language ID and
+# exact dedup. Stopwords come from `stats.stopwords` below — passing
+# Slovenian stopwords is essential because GopherQualityFilter's
+# built-in defaults are English and would reject most Slovenian docs.
+quality:
+  min_doc_words: 50
+  max_doc_words: 100000
+  min_avg_word_length: 3
+  max_avg_word_length: 10
+  max_symbol_word_ratio: 0.1
+  max_bullet_lines_ratio: 0.9
+  max_ellipsis_lines_ratio: 0.3
+  max_non_alpha_words_ratio: 0.8
+  min_stop_words: 2
 
 dedup:
   finder_workers: 1
-  exact:
-    enabled: true
   sentence:
-    enabled: true
     n_sentences: 3
     min_doc_words: 50
     min_num_sentences: 2

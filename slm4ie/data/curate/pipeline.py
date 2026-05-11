@@ -1,13 +1,13 @@
-"""Builders for the merged six-executor datatrove curation pipeline.
+r"""Builders for the merged six-executor datatrove curation pipeline.
 
 The full ladder is:
 
-    1. lang + exact-sig         -> tempdir/lang_tagged    (parallel)
-    2. exact-find               (single worker)
-    3. exact-filter + sent-sig  -> tempdir/after_exact    (parallel)
-    4. sent-find                (single worker)
-    5. sent-filter + write      -> final/                 (parallel)
-    6. corpus-stats             -> final/statistics       (single)
+    1. lang(filter) + quality + repetition + exact-sig  -> tempdir/lang_tagged    (parallel)
+    2. exact-find                                       (single worker)
+    3. exact-filter + sent-sig                          -> tempdir/after_exact    (parallel)
+    4. sent-find                                        (single worker)
+    5. sent-filter + write                              -> final/                 (parallel)
+    6. corpus-stats                                     -> final/statistics       (single)
 
 Stages 1, 3 and 5 scale with the `tasks` argument; stages 2 and 4
 scale with `finder_workers`; stage 6 is single-process by design
@@ -30,7 +30,7 @@ used to be bound to a single rank.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Sequence, Set
 
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.dedup import (
@@ -43,6 +43,7 @@ from datatrove.pipeline.dedup import (
     SentenceDedupSignature,
     SentenceFindDedups,
 )
+from datatrove.pipeline.filters import GopherQualityFilter, GopherRepetitionFilter
 from datatrove.pipeline.readers import JsonlReader
 from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.typeshelper import Languages
@@ -70,8 +71,8 @@ class CuratePaths:
             `TemporaryDirectory` path in normal use, or
             `<output_dir>/final/_dedup` when debug mode is on.
         debug: Whether scratch state is preserved after the run and
-            whether dropped duplicates are routed to inspectable JSONL
-            shards.
+            whether dropped documents are routed to inspectable JSONL
+            shards (one folder per drop stage).
     """
 
     input_folder: Path
@@ -81,6 +82,45 @@ class CuratePaths:
     debug: bool = False
 
 
+@dataclass
+class QualityConfig:
+    """Knobs for the Gopher quality heuristic filter.
+
+    Mirrors `GopherQualityFilter.__init__` defaults so the CLI can
+    override individual values from `curate.yaml` without listing
+    every parameter explicitly.
+
+    Attributes:
+        min_doc_words: Minimum word count; shorter docs are dropped.
+        max_doc_words: Maximum word count; longer docs are dropped.
+        min_avg_word_length: Minimum average word length in chars.
+        max_avg_word_length: Maximum average word length in chars.
+        max_symbol_word_ratio: Max fraction of word-like tokens that
+            are pure symbols (e.g. `#`, `…`).
+        max_bullet_lines_ratio: Max fraction of lines starting with a
+            bullet glyph.
+        max_ellipsis_lines_ratio: Max fraction of lines ending in an
+            ellipsis.
+        max_non_alpha_words_ratio: Despite its name, this is the
+            *minimum* fraction of words that must contain at least one
+            alphabetic character (datatrove keeps the legacy name from
+            the upstream Gopher paper). Documents below this fraction
+            are dropped.
+        min_stop_words: Minimum number of stopword tokens that must
+            appear in the document.
+    """
+
+    min_doc_words: int = 50
+    max_doc_words: int = 100_000
+    min_avg_word_length: int = 3
+    max_avg_word_length: int = 10
+    max_symbol_word_ratio: float = 0.1
+    max_bullet_lines_ratio: float = 0.9
+    max_ellipsis_lines_ratio: float = 0.3
+    max_non_alpha_words_ratio: float = 0.8
+    min_stop_words: int = 2
+
+
 def build_curate_executors(
     paths: CuratePaths,
     *,
@@ -88,11 +128,14 @@ def build_curate_executors(
     finder_workers: int = 1,
     sentence_config: Optional[SentDedupConfig] = None,
     exact_config: Optional[ExactDedupConfig] = None,
+    quality_config: Optional[QualityConfig] = None,
     language: str = Languages.slovenian,
-    target_language_iso2: str = "sl",
+    target_languages: Sequence[str] = ("sl",),
     candidate_languages: Optional[List[str]] = None,
-    lang_threshold: float = 0.5,
     lang_mode: str = "tag",
+    lang_minimum_relative_distance: float = 0.0,
+    lang_low_accuracy: bool = False,
+    lang_max_chars: Optional[int] = None,
     stopwords: Optional[Set[str]] = None,
     top_k_words: int = 5_000,
     top_k_ngrams: int = 5_000,
@@ -106,7 +149,7 @@ def build_curate_executors(
         paths: Resolved input/output/scratch locations.
         tasks: Parallel tasks for the per-shard executors (1, 3, 5).
             `finder_workers` controls the dedicated find stages
-            (executors 2 and 4) separately. The corpus-stats stage
+            (executors 2, 4) separately. The corpus-stats stage
             (executor 6) runs single-process because `CorpusStats`
             keeps global counters on its instance.
         finder_workers: Number of finder tasks for the dedup find
@@ -115,16 +158,33 @@ def build_curate_executors(
         sentence_config: Optional sentence-dedup config override.
         exact_config: Optional exact-dedup config override; defaults
             to one whose `content_getter` hashes `doc.text`.
+        quality_config: Optional `GopherQualityFilter` knob bundle;
+            defaults to Gopher paper values. The Slovenian stopword
+            set is passed to the filter via `stopwords`.
         language: ISO-3 code for the sentence/word tokenizer
-            (`Languages.slovenian` by default).
-        target_language_iso2: ISO 639-1 code for the language to
-            verify with lingua-py.
+            (`Languages.slovenian` by default). Also drives Gopher
+            filter tokenization.
+        target_languages: ISO 639-1 codes considered "in-language" by
+            the lingua filter. In `lang_mode="filter"`, only documents
+            whose detected language is in this set are kept. Defaults
+            to `("sl",)` for backwards compatibility.
         candidate_languages: ISO 639-1 candidate set for lingua.
-        lang_threshold: Threshold passed to the lingua filter when
-            `lang_mode="filter"`.
         lang_mode: `"tag"` keeps every document and only adds metadata;
-            `"filter"` drops sub-threshold documents.
-        stopwords: Stopword set passed to `CorpusStats`.
+            `"filter"` drops out-of-target documents.
+        lang_minimum_relative_distance: Required confidence gap between
+            the top language and the runner-up before lingua will
+            commit to a prediction. `0.0` disables the check. Useful
+            for high-precision South Slavic disambiguation; `0.1` is
+            a reasonable starting point.
+        lang_low_accuracy: Use lingua's trigram-only model. ~5-10x
+            faster than the default; recommended for full corpus runs.
+        lang_max_chars: Truncate doc text to this many chars before
+            language detection. ~2 KB of signal is plenty for a small
+            candidate set; `None` disables truncation.
+        stopwords: Stopword set used by both `CorpusStats` and
+            `GopherQualityFilter`. Pass the Slovenian list — Gopher's
+            built-in defaults are English-only and would reject most
+            Slovenian documents on `min_stop_words`.
         top_k_words: Word-frequency table size.
         top_k_ngrams: Per-order n-gram table size.
         keyword_top_k: TF-IDF keywords per bucket.
@@ -139,6 +199,8 @@ def build_curate_executors(
     """
     sent_cfg = sentence_config or SentDedupConfig()
     exact_cfg = exact_config or default_exact_config()
+    quality_cfg = quality_config or QualityConfig()
+    stopwords = stopwords if stopwords is not None else set()
 
     paths.final_folder.mkdir(parents=True, exist_ok=True)
     paths.statistics_folder.mkdir(parents=True, exist_ok=True)
@@ -150,15 +212,21 @@ def build_curate_executors(
     exact_dups = paths.scratch_folder / "exact_dups"
     sent_sigs = paths.scratch_folder / "sent_sigs"
     sent_dups = paths.scratch_folder / "sent_dups"
-    base_logs = (logging_dir or paths.scratch_folder / "_logs")
+    base_logs = logging_dir or paths.scratch_folder / "_logs"
 
+    lang_dropped = paths.scratch_folder / "lang_dropped" if paths.debug else None
+    quality_dropped = paths.scratch_folder / "quality_dropped" if paths.debug else None
+    repetition_dropped = paths.scratch_folder / "repetition_dropped" if paths.debug else None
     exact_dropped = paths.scratch_folder / "exact_dropped" if paths.debug else None
     sentence_dropped = paths.scratch_folder / "sentence_dropped" if paths.debug else None
 
-    # Executor 1: read raw → lingua tag → write tagged shards → exact-sig.
+    # Executor 1: read raw → lingua filter → Gopher quality → Gopher
+    # repetition → write tagged shards → exact-sig. Dropping
+    # low-quality docs *before* the exact-sig sink saves hashing work.
     # Order matters: `ExactDedupSignature` is a sink that consumes the
-    # stream without yielding, so it must be the last block. Putting the
-    # `JsonlWriter` before it lets the sig step still see every doc.
+    # stream without yielding, so it must be the last block. The
+    # `JsonlWriter` between the filters and the sink lets the sig step
+    # still see every surviving doc.
     exec1 = LocalPipelineExecutor(
         pipeline=[
             JsonlReader(
@@ -168,10 +236,37 @@ def build_curate_executors(
                 recursive=True,
             ),
             LinguaLanguageFilter(
-                target=target_language_iso2,
+                targets=list(target_languages),
                 candidates=candidate_languages,
-                threshold=lang_threshold,
                 mode=lang_mode,
+                minimum_relative_distance=lang_minimum_relative_distance,
+                low_accuracy=lang_low_accuracy,
+                max_chars=lang_max_chars,
+                exclusion_writer=(
+                    JsonlWriter(output_folder=str(lang_dropped)) if lang_dropped else None
+                ),
+            ),
+            GopherQualityFilter(
+                language=language,
+                stop_words=sorted(stopwords) if stopwords else None,
+                min_doc_words=quality_cfg.min_doc_words,
+                max_doc_words=quality_cfg.max_doc_words,
+                min_avg_word_length=quality_cfg.min_avg_word_length,
+                max_avg_word_length=quality_cfg.max_avg_word_length,
+                max_symbol_word_ratio=quality_cfg.max_symbol_word_ratio,
+                max_bullet_lines_ratio=quality_cfg.max_bullet_lines_ratio,
+                max_ellipsis_lines_ratio=quality_cfg.max_ellipsis_lines_ratio,
+                max_non_alpha_words_ratio=quality_cfg.max_non_alpha_words_ratio,
+                min_stop_words=quality_cfg.min_stop_words,
+                exclusion_writer=(
+                    JsonlWriter(output_folder=str(quality_dropped)) if quality_dropped else None
+                ),
+            ),
+            GopherRepetitionFilter(
+                language=language,
+                exclusion_writer=(
+                    JsonlWriter(output_folder=str(repetition_dropped)) if repetition_dropped else None
+                ),
             ),
             JsonlWriter(
                 output_folder=str(lang_tagged),
@@ -185,7 +280,7 @@ def build_curate_executors(
         ],
         tasks=tasks,
         workers=tasks,
-        logging_dir=str(base_logs / "01_lang_exact_sig"),
+        logging_dir=str(base_logs / "01_lang_quality_exact_sig"),
         skip_completed=False,
     )
 
@@ -258,7 +353,7 @@ def build_curate_executors(
 
     # Executor 5: sentence-filter → write final corpus. Parallel-safe:
     # input shards are sharded round-robin across ranks; multiple ranks
-    # may now touch the same dataset (one dataset spans many shards), so
+    # may touch the same dataset (one dataset spans many shards), so
     # the writer routes each rank's per-dataset output into a distinct
     # file via `${dataset}/${rank}.jsonl.gz`.
     exec5 = LocalPipelineExecutor(

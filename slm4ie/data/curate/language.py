@@ -8,7 +8,10 @@ either detector — only the class name in the pipeline differs.
 The detector is built lazily once per worker (`LanguageDetectorBuilder`
 is expensive to construct) and the candidate set is restricted to South
 Slavic plus common European languages, which sharply improves both
-accuracy and throughput on Slovenian text.
+accuracy and throughput on Slovenian text. Long inputs can be truncated
+via `max_chars` and the trigram-only `low_accuracy` mode is exposed as
+a knob — both tradeoffs trade a sliver of accuracy for an order-of-
+magnitude throughput win on web-scale corpora.
 """
 
 # Datatrove probes installed dependencies via importlib.metadata at class
@@ -17,7 +20,7 @@ accuracy and throughput on Slovenian text.
 # spurious ImportError. Keep these imports above the datatrove imports.
 import importlib.metadata  # noqa: F401
 import importlib.util  # noqa: F401
-from typing import List, Optional
+from typing import List, Optional, Sequence, Set
 
 from datatrove.data import Document, DocumentsPipeline
 from datatrove.pipeline.base import PipelineStep
@@ -29,27 +32,45 @@ DEFAULT_CANDIDATE_LANGUAGES: List[str] = [
     "sl", "hr", "sr", "bs", "mk", "en", "de", "it", "hu",
 ]
 
+#: Default target language set used when no `targets` argument is given.
+DEFAULT_TARGET_LANGUAGES: List[str] = ["sl"]
+
 
 class LinguaLanguageFilter(PipelineStep):
     """Tag (and optionally drop) documents based on lingua-py detection.
 
-    Each document gets `metadata.language` (ISO 639-1 code) and
-    `metadata.language_score` (lingua confidence in the *target*
-    language, in `[0, 1]`). When `mode="filter"` and the score is
-    below `threshold`, the document is routed to
-    `exclusion_writer` instead of being yielded downstream.
+    Each document gets `metadata.language` set to lingua's predicted
+    ISO 639-1 code (or `None` when lingua refuses to commit). When
+    `mode="filter"`, documents whose predicted language is not in the
+    `targets` set are routed to `exclusion_writer` instead of being
+    yielded downstream.
 
     Attributes:
-        target: ISO 639-1 code for the language we want to keep.
+        targets: ISO 639-1 codes considered "in-language". Documents
+            whose predicted language is in this set pass the filter;
+            others are dropped (in `"filter"` mode).
         candidates: ISO 639-1 codes that lingua should consider. A
             small candidate set is much faster and more accurate than
-            the full lingua language list.
-        threshold: Minimum confidence in `target` to pass the filter
-            in `"filter"` mode.
+            the full lingua language list. All target codes are
+            automatically added to the candidate set.
+        minimum_relative_distance: Required gap between the top
+            language's confidence and the runner-up's. `0.0` disables
+            the check (lingua's default). Useful for high-precision
+            South Slavic disambiguation, where a raw threshold alone
+            tolerates substantial cross-language mass because the
+            confidence scores are softmax-normalized over the
+            candidate set.
         mode: Either `"tag"` (keep all docs, only annotate) or
-            `"filter"` (drop below-threshold docs).
+            `"filter"` (drop out-of-target docs).
         exclusion_writer: Optional `DiskWriter` that receives docs
             dropped in `"filter"` mode.
+        low_accuracy: Use lingua's trigram-only model instead of the
+            default 1-5-gram model. ~5-10x faster with negligible
+            accuracy loss on long European-language web text.
+        max_chars: Truncate `doc.text` to this many characters before
+            running lingua. The first ~2 KB is plenty of signal for a
+            small candidate set; saves work proportional to doc length
+            on giant web docs. `None` disables truncation.
     """
 
     type = "🌍 - LANGUAGE"
@@ -58,39 +79,74 @@ class LinguaLanguageFilter(PipelineStep):
 
     def __init__(
         self,
-        target: str = "sl",
+        targets: Optional[Sequence[str]] = None,
         candidates: Optional[List[str]] = None,
-        threshold: float = 0.5,
         mode: str = "tag",
         exclusion_writer: Optional[DiskWriter] = None,
+        minimum_relative_distance: float = 0.0,
+        low_accuracy: bool = False,
+        max_chars: Optional[int] = None,
     ) -> None:
         """Build a filter; the lingua detector itself is lazily constructed.
 
         Args:
-            target: ISO 639-1 code for the language we want to keep.
+            targets: ISO 639-1 codes considered "in-language". Defaults
+                to `DEFAULT_TARGET_LANGUAGES` (`["sl"]`). Must be
+                non-empty.
             candidates: ISO 639-1 codes that lingua should consider.
                 Defaults to `DEFAULT_CANDIDATE_LANGUAGES` (Slovenian
-                + likely confounders).
-            threshold: Minimum confidence in `target` to pass the
-                filter in `"filter"` mode. Ignored in `"tag"` mode.
+                + likely confounders). Target codes are added to this
+                set automatically.
             mode: Either `"tag"` or `"filter"`.
             exclusion_writer: Optional sink for dropped documents.
+            minimum_relative_distance: Required confidence gap between
+                the top language and the runner-up before lingua will
+                commit to a prediction. `0.0` disables the check
+                (lingua's default). Recommend `~0.1` for Slovenian
+                vs South Slavic neighbours; higher values trade recall
+                for precision.
+            low_accuracy: Use lingua's trigram-only model. Much faster
+                and accurate enough for long web-text inputs.
+            max_chars: Truncate `doc.text` to this many chars before
+                detection. Pass `None` to disable.
 
         Raises:
-            ValueError: If `mode` is not `"tag"` or `"filter"`.
+            ValueError: If `mode` is not `"tag"` or `"filter"`, if
+                `targets` is empty, if `minimum_relative_distance` is
+                outside `[0, 1)`, or if `max_chars` is not `None` and
+                not a positive int.
         """
         super().__init__()
         if mode not in {"tag", "filter"}:
             raise ValueError(f"mode must be 'tag' or 'filter', got {mode!r}")
-        self.target = target
+        if not 0.0 <= minimum_relative_distance < 1.0:
+            raise ValueError(
+                "minimum_relative_distance must be in [0, 1), got "
+                f"{minimum_relative_distance!r}"
+            )
+        if max_chars is not None and (not isinstance(max_chars, int) or max_chars <= 0):
+            raise ValueError(
+                f"max_chars must be a positive int or None, got {max_chars!r}"
+            )
+
+        target_list = list(targets) if targets is not None else list(DEFAULT_TARGET_LANGUAGES)
+        if not target_list:
+            raise ValueError("targets must be a non-empty sequence of ISO 639-1 codes")
+
+        self.targets: List[str] = [code.lower() for code in target_list]
+        self._target_codes: Set[str] = set(self.targets)
+
         self.candidates = list(candidates) if candidates is not None else list(DEFAULT_CANDIDATE_LANGUAGES)
-        if self.target not in self.candidates:
-            self.candidates.append(self.target)
-        self.threshold = threshold
+        for code in self.targets:
+            if code not in self.candidates:
+                self.candidates.append(code)
+
+        self.minimum_relative_distance = minimum_relative_distance
         self.mode = mode
         self.exclusion_writer = exclusion_writer
+        self.low_accuracy = low_accuracy
+        self.max_chars = max_chars
         self._detector = None
-        self._target_lang = None
 
     def _ensure_detector(self) -> None:
         """Build the lingua detector on first use; cached on the instance."""
@@ -105,31 +161,36 @@ class LinguaLanguageFilter(PipelineStep):
         except KeyError as exc:
             raise ValueError(f"Unknown lingua language code: {exc.args[0]!r}") from exc
 
-        self._target_lang = code_to_language[self.target]
-        self._detector = (
-            LanguageDetectorBuilder.from_languages(*languages).with_preloaded_language_models().build()
-        )
+        builder = LanguageDetectorBuilder.from_languages(*languages).with_preloaded_language_models()
+        if self.low_accuracy:
+            builder = builder.with_low_accuracy_mode()
+        if self.minimum_relative_distance > 0.0:
+            builder = builder.with_minimum_relative_distance(self.minimum_relative_distance)
+        self._detector = builder.build()
 
-    def _classify(self, doc: Document) -> tuple[Optional[str], float]:
-        """Run lingua on `doc.text` and return (predicted_code, target_score).
+    def _classify(self, doc: Document) -> Optional[str]:
+        """Return lingua's predicted ISO 639-1 code for `doc.text`, or None.
+
+        The doc is truncated to `self.max_chars` (when set) before
+        detection; the first ~2 KB is sufficient signal for a small
+        candidate set and avoids paying lingua's per-char cost on very
+        long web docs. `None` means lingua refused to commit (extremely
+        short input or below `minimum_relative_distance`).
 
         Args:
             doc: The document to classify.
 
         Returns:
-            A tuple `(predicted_iso_639_1_or_None, target_confidence)`.
-            `predicted` is `None` when lingua refuses to commit
-            (e.g. extremely short input).
+            ISO 639-1 code (lowercased) for the predicted language, or
+            `None` if lingua did not commit to a prediction.
         """
         self._ensure_detector()
-        text = doc.text
+        text = doc.text if self.max_chars is None else doc.text[: self.max_chars]
         predicted = self._detector.detect_language_of(text)
-        score = self._detector.compute_language_confidence(text, self._target_lang)
-        code = predicted.iso_code_639_1.name.lower() if predicted is not None else None
-        return code, float(score)
+        return predicted.iso_code_639_1.name.lower() if predicted is not None else None
 
     def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
-        """Tag each document with detected language metadata.
+        """Tag each document with its detected language.
 
         Args:
             data: Input document stream.
@@ -138,27 +199,21 @@ class LinguaLanguageFilter(PipelineStep):
             world_size: Total number of workers. Unused.
 
         Yields:
-            Documents with `metadata.language` and
-            `metadata.language_score` set. In `"filter"` mode,
-            below-threshold documents are routed to
+            Documents with `metadata.language` set to the predicted
+            ISO 639-1 code (or `None`). In `"filter"` mode, documents
+            whose predicted language is not in `targets` are routed to
             `exclusion_writer` instead of being yielded.
         """
         with self.exclusion_writer if self.exclusion_writer is not None else _NullContext():
             for doc in data:
                 with self.track_time():
-                    code, score = self._classify(doc)
+                    code = self._classify(doc)
                     doc.metadata["language"] = code
-                    doc.metadata["language_score"] = score
 
                     self.stat_update("docs")
-                    if code == self.target:
-                        self.stat_update(f"language_{self.target}")
-                    elif code is not None:
-                        self.stat_update(f"language_{code}")
-                    else:
-                        self.stat_update("language_unknown")
+                    self.stat_update(f"language_{code}" if code else "language_unknown")
 
-                    keep = self.mode == "tag" or score >= self.threshold
+                    keep = self.mode == "tag" or (code is not None and code in self._target_codes)
 
                 if keep:
                     yield doc
