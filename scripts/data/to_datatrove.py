@@ -1,16 +1,38 @@
 """Convert SLM4IE processed JSONL into datatrove-compatible JSONL.
 
+Each successful per-dataset conversion writes a `.complete` sentinel
+file alongside the shards. The skip-if-populated check looks for that
+sentinel rather than for any `*.jsonl.gz`, so a crash mid-conversion
+leaves a folder that future runs correctly recognise as incomplete
+and re-convert from scratch (or that callers can list to find
+truncated outputs). Folders that contain shards but no sentinel —
+including any produced by older versions of this script — are
+treated as incomplete and re-converted on next run.
+
 The HuggingFace datatrove library represents documents with three
 meaningful fields: text, id, and metadata (a free-form dict). Its
 built-in JsonlReader automatically funnels any JSONL keys other than
 text/id/media into Document.metadata.
 
-This script reads `<key>.jsonl` (and the optional
-`<key>.annotations.jsonl.gz` sidecar) from the extraction output
-directory, joins them on the fly, and writes a per-dataset *folder*
-of gzipped JSONL shards whose shape is directly consumable by
-datatrove while still carrying the dataset/domain provenance and
-annotation payloads we need downstream.
+This script reads `<key>.jsonl` from the extraction output directory
+and writes a per-dataset *folder* of gzipped JSONL shards whose shape
+is directly consumable by datatrove while still carrying the
+dataset/domain provenance we need for source-weighted sampling.
+
+By default the annotations sidecar (`<key>.annotations.jsonl.gz`) is
+**not** read. Annotations are positionally aligned to the original
+text, so they silently desync from `text` after any datatrove step
+that rewrites it (line/paragraph dedup, boilerplate removal, etc.).
+For task-specific fine-tuning use the dedicated converters
+(`to_spans`, `to_sentiment`, `to_superglue`) which start from the
+extraction directory directly.
+
+Pass `--include-annotations` to opt in: the sidecar is then joined on
+the fly and the parallel-array payload is emitted as a nested
+`annotations` field on each line. The output then lands in a sibling
+`datatrove_annotated/` folder (when `--output-dir` is not overridden)
+to keep the cheap pretraining shards and the fat annotated shards
+side by side.
 
 Output layout — one folder per dataset, each containing one or more
 shards no larger than `--max-shard-bytes` compressed:
@@ -36,18 +58,21 @@ Output line shape per shard:
         "domain":      "scientific",
         "doc_id":      "s1",
         "<other md>":  "<value>",
-        "annotations": { "forms": [...], ... }       # if present
+        "annotations": { "forms": [...], ... }       # only with --include-annotations
     }
 
 Examples:
-    # one dataset
+    # one dataset (text + provenance only)
     uv run python scripts/data/to_datatrove.py kzb
 
     # all datasets configured in extract.yaml
     uv run python scripts/data/to_datatrove.py --all
 
-    # tighter shards (e.g. 250 MB) for smaller datasets / more parallelism
-    uv run python scripts/data/to_datatrove.py --all --max-shard-bytes 250000000
+    # opt in to annotations (writes to <processed-dir>/datatrove_annotated/)
+    uv run python scripts/data/to_datatrove.py --all --include-annotations
+
+    # larger shards (e.g. 1 GB) when fewer files per dataset are preferred
+    uv run python scripts/data/to_datatrove.py --all --max-shard-bytes 1000000000
 """
 
 import argparse
@@ -83,10 +108,15 @@ RESERVED_OUT_KEYS: Set[str] = {
     "text", "id", "dataset", "domain", "doc_id", "annotations",
 }
 
+#: Marker file written into a per-dataset shard folder once conversion
+#: finishes cleanly. Its presence is the only signal future runs use to
+#: decide whether output is complete; absence (with shards present)
+#: means a prior run crashed and the folder must be re-converted.
+SENTINEL_NAME: str = ".complete"
+
 
 def convert_record(
     record: Dict[str, Any],
-    index: int,
     collisions: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Convert one joined record to the datatrove output shape.
@@ -94,8 +124,9 @@ def convert_record(
     Args:
         record (Dict[str, Any]): Input record from
             `iter_joined_records` (text plus optional annotations).
-        index (int): Zero-based record position; used to synthesize a
-            fallback `id` when `uid` is missing.
+            Must carry a non-empty `uid`; the extraction pipeline
+            (`scripts/data/extract.py`) always sets one, derived from
+            `<source>:<doc_id>`.
         collisions (Optional[Set[str]]): Mutable set used by the
             caller to deduplicate "metadata key shadows reserved
             field" warnings across a stream. Pass None when calling
@@ -105,11 +136,23 @@ def convert_record(
         Dict[str, Any]: A flat dict with `text`, `id`, `dataset`,
             `domain`, optional `doc_id`, optional `annotations`,
             and any flattened metadata entries.
+
+    Raises:
+        KeyError: If `uid` is missing or empty. This indicates the
+            input was not produced by `extract.py`; re-run extraction
+            so each record carries a stable, source-prefixed id.
     """
     source = record["source"]
+    uid = record.get("uid")
+    if not uid:
+        raise KeyError(
+            f"Record from source {source!r} is missing 'uid'. "
+            f"Re-run scripts/data/extract.py to (re)generate "
+            f"<key>.jsonl with uid populated."
+        )
     out: Dict[str, Any] = {
         "text": record["text"],
-        "id": record.get("uid") or f"{source}:idx-{index:014d}",
+        "id": uid,
         "dataset": source,
         "domain": record["domain"],
     }
@@ -154,8 +197,8 @@ def convert_stream(
     """
     collisions: Set[str] = set()
     count = 0
-    for index, record in enumerate(records):
-        converted = convert_record(record, index, collisions)
+    for record in records:
+        converted = convert_record(record, collisions)
         writer.write_record(converted)
         count += 1
     return count
@@ -186,6 +229,7 @@ def convert_dataset(
     output_dir: Path,
     force: bool = False,
     max_shard_bytes: int = DEFAULT_MAX_SHARD_BYTES,
+    include_annotations: bool = False,
 ) -> Optional[int]:
     """Convert a single dataset, writing `<output_dir>/<key>/<NNNNN>.jsonl.gz`.
 
@@ -200,13 +244,20 @@ def convert_dataset(
             Defaults to False (skip and return 0).
         max_shard_bytes (int): Compressed-byte ceiling per shard.
             `ShardedJsonlWriter` rolls over to a new file when this is
-            crossed. Defaults to `DEFAULT_MAX_SHARD_BYTES` (900 MB).
+            crossed. Defaults to `DEFAULT_MAX_SHARD_BYTES` (200 MB),
+            sized for the curate stage's typical 16–40-way parallelism.
+        include_annotations (bool): When True, join the annotations
+            sidecar and emit a nested `annotations` field per record.
+            Defaults to False; the sidecar is then ignored (skipped,
+            no I/O).
 
     Returns:
         Optional[int]: Number of records written, or None when no
             input file exists for *key* (caller should treat this as
             a skip, not an error). Returns 0 when the output folder
-            already contains shards and *force* is False.
+            is already complete (sentinel present) and *force* is
+            False. A folder with shards but no sentinel is treated
+            as incomplete and re-converted, regardless of *force*.
     """
     pair = _find_dataset_files(processed_dir, key)
     if pair is None:
@@ -216,28 +267,46 @@ def convert_dataset(
         )
         return None
     text_path, ann_path = pair
+    if not include_annotations:
+        ann_path = None
 
     output_dir.mkdir(parents=True, exist_ok=True)
     shard_folder = output_dir / key
+    sentinel = shard_folder / SENTINEL_NAME
 
-    if shard_folder.is_dir() and any(shard_folder.glob("*.jsonl.gz")):
-        if not force:
-            logger.info(
-                "Skipping %r, output folder already populated: %s "
-                "(use --force to overwrite)",
-                key, shard_folder,
+    if shard_folder.is_dir():
+        if sentinel.exists():
+            if not force:
+                logger.info(
+                    "Skipping %r, output folder already complete: %s "
+                    "(use --force to overwrite)",
+                    key, shard_folder,
+                )
+                return 0
+            # Forced rebuild of a previously-complete folder: clear
+            # the sentinel before any shards drop, so a crash during
+            # cleanup leaves the folder visibly incomplete.
+            sentinel.unlink()
+            for stale in shard_folder.glob("*.jsonl.gz"):
+                stale.unlink()
+        elif any(shard_folder.glob("*.jsonl.gz")):
+            # Shards present without a sentinel ⇒ either a prior run
+            # crashed or the folder predates the sentinel scheme. In
+            # both cases the on-disk content is not trusted; re-convert.
+            logger.warning(
+                "Output folder %s contains shards but no %s sentinel; "
+                "treating as incomplete and re-converting.",
+                shard_folder, SENTINEL_NAME,
             )
-            return 0
-        # Force overwrite: drop the previous shards so we don't mix
-        # shards from a prior run with shards from this run.
-        for stale in shard_folder.glob("*.jsonl.gz"):
-            stale.unlink()
+            for stale in shard_folder.glob("*.jsonl.gz"):
+                stale.unlink()
 
     logger.info(
-        "Converting %s%s → %s/ (max_shard_bytes=%d)",
+        "Converting %s%s → %s/ (max_shard_bytes=%d, annotations=%s)",
         text_path,
         f" + {ann_path}" if ann_path else "",
         shard_folder, max_shard_bytes,
+        "on" if include_annotations else "off",
     )
     records = _iter_joined_records(text_path, ann_path)
     progress = tqdm(records, desc=key, unit="doc", disable=workers_quiet())
@@ -246,6 +315,21 @@ def convert_dataset(
             count = convert_stream(progress, writer)
         finally:
             progress.close()
+    # Stamp completion only after the writer's __exit__ has flushed
+    # the final gzip footer; any earlier exception leaves the folder
+    # visibly incomplete for the next run to recover from.
+    sentinel.touch()
+    if count == 0:
+        # Almost always indicates an upstream problem (empty source,
+        # over-aggressive extractor filter, schema mismatch). The
+        # sentinel is still written — the run did finish cleanly with
+        # zero documents — but the warning makes it visible in --all
+        # runs across many datasets.
+        logger.warning(
+            "Dataset %r produced 0 records — input %s appears empty. "
+            "Sentinel still written; the folder is considered complete.",
+            key, text_path,
+        )
     n_shards = len(list(shard_folder.glob("*.jsonl.gz")))
     logger.info("Wrote %d records across %d shard(s) to %s", count, n_shards, shard_folder)
     return count
@@ -311,6 +395,20 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Overwrite existing <key>/ shard folders.",
     )
     parser.add_argument(
+        "--include-annotations",
+        action="store_true",
+        help=(
+            "Join the annotations sidecar and emit a nested "
+            "'annotations' field per record. Off by default because "
+            "annotations are positionally aligned to the original "
+            "text and become stale after any datatrove step that "
+            "rewrites it. When set (and --output-dir is not "
+            "overridden) the default output folder switches to "
+            "<processed-dir>/datatrove_annotated/ so the cheap and "
+            "annotated shard sets can coexist."
+        ),
+    )
+    parser.add_argument(
         "--max-shard-bytes",
         type=int,
         default=DEFAULT_MAX_SHARD_BYTES,
@@ -318,7 +416,8 @@ def parse_args(argv=None) -> argparse.Namespace:
             "Compressed-byte ceiling per output shard. The writer "
             "rolls over to <key>/00001.jsonl.gz, 00002.jsonl.gz, ... "
             "as soon as the current shard reaches this size. Default: "
-            "%(default)d bytes (~900 MB)."
+            "%(default)d bytes (~200 MB), sized for 16–40-way curate "
+            "parallelism."
         ),
     )
     parser.add_argument(
@@ -344,10 +443,13 @@ def main():
         else project_root / "configs" / "data" / "extract.yaml"
     )
     processed_dir = _resolve_processed_dir(config_path, args.processed_dir)
+    default_output_name = (
+        "datatrove_annotated" if args.include_annotations else "datatrove"
+    )
     output_dir = (
         args.output_dir
         if args.output_dir is not None
-        else processed_dir / "datatrove"
+        else processed_dir / default_output_name
     )
 
     if args.all:
@@ -360,12 +462,23 @@ def main():
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
 
+    if args.include_annotations and args.output_dir is not None:
+        # The default sibling-folder rule (datatrove/ vs datatrove_annotated/)
+        # only kicks in when --output-dir is omitted. Surface this so users
+        # who pass both flags don't expect the auto-redirect.
+        logger.info(
+            "Writing annotated shards to user-specified --output-dir %s; "
+            "the default sibling 'datatrove_annotated/' folder is bypassed.",
+            output_dir,
+        )
+
     def kwargs_for(_key: str) -> Dict[str, Any]:
         return {
             "processed_dir": processed_dir,
             "output_dir": output_dir,
             "force": args.force,
             "max_shard_bytes": args.max_shard_bytes,
+            "include_annotations": args.include_annotations,
         }
 
     results, failures = run_parallel(

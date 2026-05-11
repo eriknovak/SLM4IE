@@ -53,7 +53,7 @@ class TestConvertRecord:
                 "sentences": [[0, 2]],
             },
         }
-        out = to_datatrove.convert_record(record, 0)
+        out = to_datatrove.convert_record(record)
 
         assert out["text"] == "Lepa beseda."
         assert out["id"] == "kzb:s1"
@@ -76,7 +76,7 @@ class TestConvertRecord:
             "uid": "macocu_sl:d-1",
             "metadata": {"url": "https://x", "lm_score": 0.9},
         }
-        out = to_datatrove.convert_record(record, 0)
+        out = to_datatrove.convert_record(record)
 
         assert out["id"] == "macocu_sl:d-1"
         assert out["dataset"] == "macocu_sl"
@@ -84,16 +84,26 @@ class TestConvertRecord:
         assert out["lm_score"] == 0.9
         assert "annotations" not in out
 
-    def test_fallback_id_when_uid_missing(self) -> None:
-        """Without uid, id falls back to '<source>:idx-<index>'."""
+    def test_missing_uid_raises(self) -> None:
+        """Records without a uid fail loudly, pointing at extract.py."""
         record = {
             "text": "no uid here",
             "source": "ds",
             "domain": "web",
         }
-        out = to_datatrove.convert_record(record, 7)
+        with pytest.raises(KeyError, match="extract.py"):
+            to_datatrove.convert_record(record)
 
-        assert out["id"] == "ds:idx-00000000000007"
+    def test_empty_uid_raises(self) -> None:
+        """An empty-string uid is treated the same as a missing one."""
+        record = {
+            "text": "x",
+            "source": "ds",
+            "domain": "web",
+            "uid": "",
+        }
+        with pytest.raises(KeyError, match="extract.py"):
+            to_datatrove.convert_record(record)
 
     def test_metadata_key_collision_renamed(self) -> None:
         """Metadata keys clashing with reserved fields get a meta_ prefix."""
@@ -110,7 +120,7 @@ class TestConvertRecord:
                 "url": "ok",
             },
         }
-        out = to_datatrove.convert_record(record, 0)
+        out = to_datatrove.convert_record(record)
 
         assert out["dataset"] == "ds"
         assert out["domain"] == "web"
@@ -159,10 +169,10 @@ class TestConvertStream:
 class TestConvertDataset:
     """Tests for end-to-end per-dataset conversion."""
 
-    def test_joins_text_and_annotations_on_the_fly(
+    def test_joins_text_and_annotations_when_opted_in(
         self, tmp_path: Path
     ) -> None:
-        """Text + annotations are joined and converted to datatrove shape."""
+        """With include_annotations=True, sidecar is joined into output."""
         processed = tmp_path / "processed"
         out_dir = tmp_path / "out"
         _write_jsonl(processed / "kzb.jsonl", [
@@ -178,7 +188,9 @@ class TestConvertDataset:
              "sentences": [[0, 2]]},
         ])
 
-        n = to_datatrove.convert_dataset("kzb", processed, out_dir)
+        n = to_datatrove.convert_dataset(
+            "kzb", processed, out_dir, include_annotations=True
+        )
         assert n == 1
 
         shard_folder = out_dir / "kzb"
@@ -188,6 +200,27 @@ class TestConvertDataset:
         assert len(rows) == 1
         assert rows[0]["id"] == "kzb:s1"
         assert rows[0]["annotations"]["forms"] == ["Lepa", "beseda", "."]
+
+    def test_annotations_dropped_by_default(self, tmp_path: Path) -> None:
+        """Default run ignores the annotations sidecar entirely."""
+        processed = tmp_path / "processed"
+        out_dir = tmp_path / "out"
+        _write_jsonl(processed / "kzb.jsonl", [
+            {"text": "Lepa beseda.", "source": "kzb", "domain": "sci",
+             "doc_id": "s1", "uid": "kzb:s1"},
+        ])
+        _write_gz_jsonl(processed / "kzb.annotations.jsonl.gz", [
+            {"doc_id": "s1", "uid": "kzb:s1",
+             "forms": ["Lepa", "beseda", "."]},
+        ])
+
+        n = to_datatrove.convert_dataset("kzb", processed, out_dir)
+        assert n == 1
+
+        rows = _read_all_shard_records(out_dir / "kzb")
+        assert len(rows) == 1
+        assert rows[0]["text"] == "Lepa beseda."
+        assert "annotations" not in rows[0]
 
     def test_unannotated_dataset_passes_through(self, tmp_path: Path) -> None:
         """Without annotations sidecar, text records flow through unchanged."""
@@ -216,8 +249,8 @@ class TestConvertDataset:
         )
         assert result is None
 
-    def test_skips_when_output_folder_populated(self, tmp_path: Path) -> None:
-        """Without force, an existing populated <key>/ folder is left untouched."""
+    def test_skips_when_sentinel_present(self, tmp_path: Path) -> None:
+        """Without force, a folder marked complete is left untouched."""
         processed = tmp_path / "processed"
         out_dir = tmp_path / "out"
         _write_jsonl(processed / "kzb.jsonl", [
@@ -226,16 +259,17 @@ class TestConvertDataset:
         ])
         shard_folder = out_dir / "kzb"
         shard_folder.mkdir(parents=True, exist_ok=True)
-        sentinel = shard_folder / "00000.jsonl.gz"
-        sentinel.write_bytes(b"sentinel-content")
+        existing_shard = shard_folder / "00000.jsonl.gz"
+        existing_shard.write_bytes(b"prior-content")
+        (shard_folder / to_datatrove.SENTINEL_NAME).touch()
 
         result = to_datatrove.convert_dataset("kzb", processed, out_dir)
 
         assert result == 0
-        assert sentinel.read_bytes() == b"sentinel-content"
+        assert existing_shard.read_bytes() == b"prior-content"
 
-    def test_force_overwrites_existing_shards(self, tmp_path: Path) -> None:
-        """With force=True the existing <key>/ folder is rewritten cleanly."""
+    def test_reconverts_when_sentinel_missing(self, tmp_path: Path) -> None:
+        """Shards without a sentinel are treated as incomplete and rebuilt."""
         processed = tmp_path / "processed"
         out_dir = tmp_path / "out"
         _write_jsonl(processed / "kzb.jsonl", [
@@ -244,9 +278,72 @@ class TestConvertDataset:
         ])
         shard_folder = out_dir / "kzb"
         shard_folder.mkdir(parents=True, exist_ok=True)
-        # Stale shards from a prior run; --force must drop them.
-        (shard_folder / "00000.jsonl.gz").write_bytes(b"sentinel-content")
+        # Half-written prior run: shards on disk, no sentinel.
+        (shard_folder / "00000.jsonl.gz").write_bytes(b"stale")
+        (shard_folder / "00007.jsonl.gz").write_bytes(b"also-stale")
+
+        result = to_datatrove.convert_dataset("kzb", processed, out_dir)
+
+        assert result == 1
+        rows = _read_all_shard_records(shard_folder)
+        assert len(rows) == 1
+        assert rows[0]["id"] == "kzb:1"
+        # Stale shard from the gap-numbered prior run is gone.
+        assert not (shard_folder / "00007.jsonl.gz").exists()
+        # Sentinel was written on success.
+        assert (shard_folder / to_datatrove.SENTINEL_NAME).exists()
+
+    def test_empty_input_warns_but_completes(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Zero-record input still completes (sentinel written) and warns loudly."""
+        processed = tmp_path / "processed"
+        out_dir = tmp_path / "out"
+        # Empty <key>.jsonl: file exists, yields zero records.
+        _write_jsonl(processed / "kzb.jsonl", [])
+
+        with caplog.at_level("WARNING", logger=to_datatrove.logger.name):
+            n = to_datatrove.convert_dataset("kzb", processed, out_dir)
+
+        assert n == 0
+        # Sentinel is written even on empty input — the run finished cleanly.
+        assert (out_dir / "kzb" / to_datatrove.SENTINEL_NAME).exists()
+        # Warning surfaces the upstream-empty case.
+        assert any(
+            "appears empty" in rec.message and rec.levelname == "WARNING"
+            for rec in caplog.records
+        )
+
+    def test_writes_sentinel_after_successful_run(
+        self, tmp_path: Path
+    ) -> None:
+        """Sentinel file appears only after the writer closes cleanly."""
+        processed = tmp_path / "processed"
+        out_dir = tmp_path / "out"
+        _write_jsonl(processed / "kzb.jsonl", [
+            {"text": "a", "source": "kzb", "domain": "sci",
+             "doc_id": "1", "uid": "kzb:1"},
+        ])
+
+        result = to_datatrove.convert_dataset("kzb", processed, out_dir)
+
+        assert result == 1
+        assert (out_dir / "kzb" / to_datatrove.SENTINEL_NAME).exists()
+
+    def test_force_overwrites_complete_folder(self, tmp_path: Path) -> None:
+        """With force=True, an existing complete folder is rewritten cleanly."""
+        processed = tmp_path / "processed"
+        out_dir = tmp_path / "out"
+        _write_jsonl(processed / "kzb.jsonl", [
+            {"text": "a", "source": "kzb", "domain": "sci",
+             "doc_id": "1", "uid": "kzb:1"},
+        ])
+        shard_folder = out_dir / "kzb"
+        shard_folder.mkdir(parents=True, exist_ok=True)
+        # Stale shards + sentinel from a prior run; --force must drop them.
+        (shard_folder / "00000.jsonl.gz").write_bytes(b"stale-content")
         (shard_folder / "00007.jsonl.gz").write_bytes(b"more-stale")
+        (shard_folder / to_datatrove.SENTINEL_NAME).touch()
 
         result = to_datatrove.convert_dataset(
             "kzb", processed, out_dir, force=True
@@ -255,8 +352,10 @@ class TestConvertDataset:
         rows = _read_all_shard_records(shard_folder)
         assert len(rows) == 1
         assert rows[0]["id"] == "kzb:1"
-        # Stale shards from previous run are gone.
+        # Stale shard from previous run is gone.
         assert not (shard_folder / "00007.jsonl.gz").exists()
+        # Sentinel was re-stamped on the new successful run.
+        assert (shard_folder / to_datatrove.SENTINEL_NAME).exists()
 
     def test_rolls_over_when_shard_size_exceeded(self, tmp_path: Path) -> None:
         """A tiny max_shard_bytes forces multiple shards on a small fixture."""
@@ -312,6 +411,16 @@ class TestParseArgs:
         """--max-shard-bytes accepts an integer override."""
         args = to_datatrove.parse_args(["kzb", "--max-shard-bytes", "1000"])
         assert args.max_shard_bytes == 1000
+
+    def test_include_annotations_default_false(self) -> None:
+        """--include-annotations defaults to False when omitted."""
+        args = to_datatrove.parse_args(["kzb"])
+        assert args.include_annotations is False
+
+    def test_include_annotations_flag_sets_true(self) -> None:
+        """Passing --include-annotations sets the flag to True."""
+        args = to_datatrove.parse_args(["kzb", "--include-annotations"])
+        assert args.include_annotations is True
 
 
 class TestDatatroveRoundTrip:

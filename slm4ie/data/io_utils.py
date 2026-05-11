@@ -17,10 +17,16 @@ from typing import IO, Any, Dict, Iterator, Optional, Tuple, Type
 import yaml
 
 #: Default ceiling on the compressed size of one shard produced by
-#: `ShardedJsonlWriter` (in bytes). 900 MB keeps a safety margin under
-#: a 1 GB target because the writer only checks compressed size between
-#: records, never mid-record.
-DEFAULT_MAX_SHARD_BYTES: int = 900_000_000
+#: `ShardedJsonlWriter` (in bytes). 200 MB is sized for the curate
+#: stage's typical 16–40-way parallelism: a 5 GB compressed dataset
+#: yields ~25 shards (saturates 16 ranks), an 8 GB dataset ~40 shards
+#: (saturates 40 ranks), while a 50 GB dataset still produces only
+#: ~250 shards — trivial filesystem-metadata cost on any modern FS.
+#: Per-shard fixed overhead in datatrove (open + JsonlReader setup) is
+#: microseconds, so the per-document work dominates regardless. Override
+#: with `--max-shard-bytes` when a specific dataset wants different
+#: granularity.
+DEFAULT_MAX_SHARD_BYTES: int = 200_000_000
 
 
 def find_project_root() -> Path:

@@ -120,19 +120,19 @@ Download raw corpora declared in [`configs/data/download.yaml`](configs/data/dow
 
 ```bash
 # Download all enabled datasets
-uv run python scripts/data/download.py
+uv run python scripts/data/download.py --all
 
 # Download specific datasets
 uv run python scripts/data/download.py --datasets fineweb2 cc100
 
 # Force re-download with custom output directory
-uv run python scripts/data/download.py --output-dir /path/to/data --force
+uv run python scripts/data/download.py --all --output-dir /path/to/data --force
 
 # Download only evaluation benchmarks (datasets marked `benchmark: true`)
-uv run python scripts/data/download.py --only-benchmarks
+uv run python scripts/data/download.py --all --only-benchmarks
 
 # Download only pretraining corpora (skip benchmarks)
-uv run python scripts/data/download.py --exclude-benchmarks
+uv run python scripts/data/download.py --all --exclude-benchmarks
 
 # Download four datasets in parallel (thread pool; default cap is 4)
 uv run python scripts/data/download.py --datasets fineweb2 cc100 mc4 hplt --max-workers 4
@@ -176,9 +176,14 @@ uv run python scripts/data/to_datatrove.py --all --force
 
 # Convert every dataset in parallel
 uv run python scripts/data/to_datatrove.py --all --max-workers 4
+
+# Opt in to annotations (writes to <output_dir>/datatrove_annotated/)
+uv run python scripts/data/to_datatrove.py --all --include-annotations
 ```
 
-Output goes to `<output_dir>/datatrove/<key>.jsonl.gz` (override with `--output-dir`). Existing outputs are skipped unless `--force` is passed. Every record carries `dataset` and `domain` at the top level so downstream filters and source-weighted sampling can use them via `document.metadata`. `JsonlReader("…/datatrove/*.jsonl.gz")` ingests the whole corpus in one go.
+Output goes to `<output_dir>/datatrove/<key>/<NNNNN>.jsonl.gz` (override with `--output-dir`). Existing outputs are skipped unless `--force` is passed. Every record carries `dataset` and `domain` at the top level so downstream filters and source-weighted sampling can use them via `document.metadata`. `JsonlReader("…/datatrove/*/*.jsonl.gz")` ingests the whole corpus in one go.
+
+By default the annotations sidecar is **not** read: annotations are positionally aligned to the original text and silently desync after any datatrove step that rewrites it (line/paragraph dedup, boilerplate removal, etc.). For task-specific fine-tuning use the dedicated `to_spans` / `to_sentiment` / `to_superglue` converters, which read the extraction directory directly. Pass `--include-annotations` to opt in to annotation-aware pretraining experiments — output then lands in a sibling `datatrove_annotated/` folder so the cheap and annotated shard sets can coexist.
 
 #### Spans format
 
@@ -437,12 +442,12 @@ Optional sources requiring extra access (gated datasets, manual login, copyright
 
 Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are declared in [`configs/data/download.yaml`](configs/data/download.yaml) with `benchmark: true` and a `tasks:` list, so they share the download pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just the evaluation datasets.
 
-| Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                               |
-| ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)           | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0.              |
-| [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                             |
-| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`. |
-| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`.    |
+| Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)           | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0.                                                                                                       |
+| [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                                                                                                                      |
+| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`.                                                                                          |
+| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`.                                                                                             |
 | [Sloleks 3.1](https://www.clarin.si/repository/xmlui/handle/11356/2080)       | CLARIN.SI | TOKENIZER                                 | Slovenian inflectional lexicon (lemmas + word forms with MULTEXT-East V6 / JOS MSDs). **Tokenizer / morphology evaluation only** — intentionally absent from `extract.yaml`, never enters the pretraining corpus. Distributed as TEI XML. License: CC BY-SA 4.0. Convert with `scripts/data/to_tokenizer_eval.py`. |
 
 ### Task abbreviations
