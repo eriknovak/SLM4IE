@@ -118,12 +118,14 @@ Per-dataset logs are always written to `logs/<script>/<UTC-timestamp>/<key>.log`
 
 Download raw corpora declared in [`configs/data/download.yaml`](configs/data/download.yaml):
 
+Selection is explicit: pass one or more dataset keys as positional arguments, or pass `--all`. Bare invocation errors out.
+
 ```bash
-# Download all enabled datasets
+# Download every enabled dataset in the config
 uv run python scripts/data/download.py --all
 
-# Download specific datasets
-uv run python scripts/data/download.py --datasets fineweb2 cc100
+# Download specific datasets (positional, mutually exclusive with --all)
+uv run python scripts/data/download.py fineweb2 cc100
 
 # Force re-download with custom output directory
 uv run python scripts/data/download.py --all --output-dir /path/to/data --force
@@ -134,23 +136,38 @@ uv run python scripts/data/download.py --all --only-benchmarks
 # Download only pretraining corpora (skip benchmarks)
 uv run python scripts/data/download.py --all --exclude-benchmarks
 
+# Use a different YAML in configs/data/ — `--config-name benchmarks` reads
+# configs/data/benchmarks.yaml instead of the default `download.yaml`.
+uv run python scripts/data/download.py --all --config-name benchmarks
+
 # Download four datasets in parallel (thread pool; default cap is 4)
-uv run python scripts/data/download.py --datasets fineweb2 cc100 mc4 hplt --max-workers 4
+uv run python scripts/data/download.py fineweb2 cc100 mc4 hplt --max-workers 4
 ```
 
 #### Extract
 
-Extract and convert raw downloads to unified JSONL using [`configs/data/extract.yaml`](configs/data/extract.yaml):
+Extract and convert raw downloads to unified JSONL using [`configs/data/extract.yaml`](configs/data/extract.yaml). Selection is explicit: pass dataset keys as positional arguments, or pass `--all`.
 
 ```bash
-uv run python scripts/data/extract.py
-uv run python scripts/data/extract.py --datasets macocu_sl
+# Extract every dataset declared in extract.yaml
+uv run python scripts/data/extract.py --all
 
-# re-extract a dataset whose output already exists
-uv run python scripts/data/extract.py --datasets macocu_sl --force
+# Extract specific datasets (positional, mutually exclusive with --all)
+uv run python scripts/data/extract.py macocu_sl
 
-# extract several datasets in parallel (process pool)
-uv run python scripts/data/extract.py --datasets macocu_sl classla_web_sl kzb --max-workers 3
+# Re-extract a dataset whose output already exists
+uv run python scripts/data/extract.py macocu_sl --force
+
+# Extract several datasets in parallel (process pool)
+uv run python scripts/data/extract.py macocu_sl classla_web_sl kzb --max-workers 3
+
+# Use a different YAML in configs/data/ (without the .yaml suffix)
+uv run python scripts/data/extract.py --all --config-name extract_dev
+
+# Override the configured input/output directories from the CLI
+uv run python scripts/data/extract.py --all \
+    --input-dir /vault/data/SLM4IE/raw \
+    --output-dir /vault/data/SLM4IE/processed
 ```
 
 For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW), extraction writes two files per dataset:
@@ -181,9 +198,11 @@ uv run python scripts/data/to_datatrove.py --all --max-workers 4
 uv run python scripts/data/to_datatrove.py --all --include-annotations
 ```
 
-Output goes to `<output_dir>/datatrove/<key>/<NNNNN>.jsonl.gz` (override with `--output-dir`). Existing outputs are skipped unless `--force` is passed. Every record carries `dataset` and `domain` at the top level so downstream filters and source-weighted sampling can use them via `document.metadata`. `JsonlReader("…/datatrove/*/*.jsonl.gz")` ingests the whole corpus in one go.
+Output goes to `<output_dir>/datatrove/<key>/<NNNNN>.jsonl.gz` (override with `--output-dir`). Each shard is capped at ~200 MB compressed by default — sized for the curate stage's typical 16–40-way parallelism; override with `--max-shard-bytes` if a specific dataset wants different granularity. Every record carries `dataset` and `domain` at the top level so downstream filters and source-weighted sampling can use them via `document.metadata`. `JsonlReader("…/datatrove/*/*.jsonl.gz")` ingests the whole corpus in one go.
 
-By default the annotations sidecar is **not** read: annotations are positionally aligned to the original text and silently desync after any datatrove step that rewrites it (line/paragraph dedup, boilerplate removal, etc.). For task-specific fine-tuning use the dedicated `to_spans` / `to_sentiment` / `to_superglue` converters, which read the extraction directory directly. Pass `--include-annotations` to opt in to annotation-aware pretraining experiments — output then lands in a sibling `datatrove_annotated/` folder so the cheap and annotated shard sets can coexist.
+Each per-dataset folder is stamped with a `.complete` sentinel after the final gzip footer flushes; on re-run the sentinel — not the presence of any `*.jsonl.gz` — is what gates the skip. Folders containing shards but no sentinel (a crashed run, or any layout produced before this scheme) are treated as incomplete and re-converted automatically. Pass `--force` to rebuild a folder that's already marked complete. An empty input dataset still completes (sentinel written) but emits a `WARNING` so silent zero-doc conversions don't hide in `--all` runs.
+
+By default the annotations sidecar is **not** read: annotations are positionally aligned to the original text and silently desync after any datatrove step that rewrites it (line/paragraph dedup, boilerplate removal, etc.). For task-specific fine-tuning use the dedicated `to_spans` / `to_sentiment` / `to_superglue` converters, which read the extraction directory directly. Pass `--include-annotations` to opt in to annotation-aware pretraining experiments — output then lands in a sibling `datatrove_annotated/` folder so the cheap and annotated shard sets can coexist. If you also pass `--output-dir`, the sibling-folder convention is bypassed and a log line surfaces that.
 
 #### Spans format
 
