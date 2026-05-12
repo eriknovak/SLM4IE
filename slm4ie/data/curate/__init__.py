@@ -22,3 +22,23 @@ submodule import) works under Python 3.13.
 
 import importlib.metadata  # noqa: F401  (eager import; see module docstring)
 import importlib.util  # noqa: F401  (eager import; see module docstring)
+
+from slm4ie.data.curate.stages import (
+    ALL_STAGE_NAMES,
+    STAGE_DIRS,
+    STAGE_NAMES,
+    cascade_from,
+    config_slice_keys,
+    final_corpus_dir,
+    stats_dir,
+)
+
+__all__ = [
+    "ALL_STAGE_NAMES",
+    "STAGE_DIRS",
+    "STAGE_NAMES",
+    "cascade_from",
+    "config_slice_keys",
+    "final_corpus_dir",
+    "stats_dir",
+]
