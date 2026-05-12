@@ -32,6 +32,15 @@ from slm4ie.data.curate.stages import (
     final_corpus_dir,
     stats_dir,
 )
+from slm4ie.data.curate.sentinel import (
+    Sentinel,
+    SENTINEL_NAME,
+    cascade_invalidate,
+    config_hash,
+    read_sentinel,
+    sentinel_is_current,
+    write_sentinel,
+)
 
 __all__ = [
     "ALL_STAGE_NAMES",
@@ -41,4 +50,14 @@ __all__ = [
     "config_slice_keys",
     "final_corpus_dir",
     "stats_dir",
+]
+
+__all__ += [
+    "Sentinel",
+    "SENTINEL_NAME",
+    "cascade_invalidate",
+    "config_hash",
+    "read_sentinel",
+    "sentinel_is_current",
+    "write_sentinel",
 ]
