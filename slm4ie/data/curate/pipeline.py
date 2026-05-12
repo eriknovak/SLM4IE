@@ -1,30 +1,15 @@
-r"""Builders for the merged six-executor datatrove curation pipeline.
+"""Per-stage executor builders for the curate pipeline.
 
-The full ladder is:
+Each builder function returns the `LocalPipelineExecutor`(s) needed to
+run one user-facing stage. Builders are independent — a caller can run
+just the language stage, just the quality stage, etc. Cross-stage
+ordering (and downstream invalidation when one stage's output is stale)
+is owned by the CLI runner, not by the builders.
 
-    1. lang(filter) + quality + repetition + exact-sig  -> tempdir/lang_tagged    (parallel)
-    2. exact-find                                       (single worker)
-    3. exact-filter + sent-sig                          -> tempdir/after_exact    (parallel)
-    4. sent-find                                        (single worker)
-    5. sent-filter + write                              -> final/                 (parallel)
-    6. corpus-stats                                     -> final/statistics       (single)
-
-Stages 1, 3 and 5 scale with the `tasks` argument; stages 2 and 4
-scale with `finder_workers`; stage 6 is single-process by design
-because `CorpusStats` keeps global counters on its instance.
-
-Each builder function returns a `LocalPipelineExecutor` chained to the
-previous one via `depends=`. The CLI calls `build_curate_executors`
-inside a `TemporaryDirectory` (or, in debug mode, a persistent
-`final/_dedup/`) and then runs the last executor; datatrove walks the
-`depends` chain and runs the rest in order.
-
-I/O layout — every reader walks per-dataset folders recursively
-(`<root>/<dataset>/<part>.jsonl.gz`) and every writer emits one file
-per rank per dataset (`<root>/<dataset>/<rank>.jsonl.gz`). This lets
-the upstream `to_datatrove.py` shard each dataset across many small
-files, so `tasks > 1` actually parallelizes the heavy datasets that
-used to be bound to a single rank.
+I/O layout — every reader walks `<input_folder>/<dataset>/<part>.jsonl.gz`
+recursively, and every writer emits `<output_folder>/<dataset>/<rank>.jsonl.gz`,
+matching the upstream `to_datatrove.py` per-dataset shard layout. This
+preserves dataset provenance through every stage.
 """
 
 import logging
@@ -50,6 +35,7 @@ from datatrove.utils.typeshelper import Languages
 
 from slm4ie.data.curate.dedup import default_exact_config
 from slm4ie.data.curate.language import LinguaLanguageFilter
+from slm4ie.data.curate.stages import STAGE_DIRS
 from slm4ie.data.curate.stats import CorpusStats
 
 logger = logging.getLogger(__name__)
@@ -57,29 +43,41 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CuratePaths:
-    """Resolved filesystem locations for one curation run.
+    """Filesystem locations for one curation run.
 
     Attributes:
-        input_folder: Where the upstream `<key>.jsonl.gz` shards live
-            (`<output_dir>/datatrove` in normal use).
-        final_folder: Where the deduplicated training corpus is
-            written (`<output_dir>/final`).
-        statistics_folder: Where `aggregate.json` and
-            `per_dataset/<key>.json` are written
-            (`<output_dir>/final/statistics`).
-        scratch_folder: Root for all dedup intermediate state. A
-            `TemporaryDirectory` path in normal use, or
-            `<output_dir>/final/_dedup` when debug mode is on.
-        debug: Whether scratch state is preserved after the run and
-            whether dropped documents are routed to inspectable JSONL
-            shards (one folder per drop stage).
+        input_folder: Upstream `<key>/<part>.jsonl.gz` shards
+            (typically the output of `to_datatrove.py`).
+        output_dir: Curation output root. Stage folders
+            (`01_language/`, `02_quality/`, ...) live directly under
+            this path, alongside `_dedup_state/` and `_logs/`.
     """
 
     input_folder: Path
-    final_folder: Path
-    statistics_folder: Path
-    scratch_folder: Path
-    debug: bool = False
+    output_dir: Path
+
+    def stage_dir(self, stage: str) -> Path:
+        """Return the folder under `output_dir` that holds *stage*'s output.
+
+        Args:
+            stage: Stage name (see `slm4ie.data.curate.stages.STAGE_NAMES`).
+
+        Returns:
+            Absolute path to the stage's output folder.
+
+        Raises:
+            KeyError: If *stage* is not a known stage name.
+        """
+        return self.output_dir / STAGE_DIRS[stage]
+
+    @property
+    def dedup_state_dir(self) -> Path:
+        """Folder holding the dedup sig/dup scratch between dedup sub-stages."""
+        return self.output_dir / "_dedup_state"
+
+    def logs_dir(self, stage: str) -> Path:
+        """Per-stage logging directory under `<output_dir>/_logs/<stage>/`."""
+        return self.output_dir / "_logs" / stage
 
 
 @dataclass
@@ -88,7 +86,7 @@ class QualityConfig:
 
     Mirrors `GopherQualityFilter.__init__` defaults so the CLI can
     override individual values from `curate.yaml` without listing
-    every parameter explicitly.
+    every parameter.
 
     Attributes:
         min_doc_words: Minimum word count; shorter docs are dropped.
@@ -96,16 +94,14 @@ class QualityConfig:
         min_avg_word_length: Minimum average word length in chars.
         max_avg_word_length: Maximum average word length in chars.
         max_symbol_word_ratio: Max fraction of word-like tokens that
-            are pure symbols (e.g. `#`, `…`).
+            are pure symbols.
         max_bullet_lines_ratio: Max fraction of lines starting with a
             bullet glyph.
         max_ellipsis_lines_ratio: Max fraction of lines ending in an
             ellipsis.
-        max_non_alpha_words_ratio: Despite its name, this is the
-            *minimum* fraction of words that must contain at least one
-            alphabetic character (datatrove keeps the legacy name from
-            the upstream Gopher paper). Documents below this fraction
-            are dropped.
+        max_non_alpha_words_ratio: *Minimum* fraction of words that
+            must contain at least one alphabetic character (datatrove
+            keeps the legacy Gopher name).
         min_stop_words: Minimum number of stopword tokens that must
             appear in the document.
     """
@@ -121,120 +117,58 @@ class QualityConfig:
     min_stop_words: int = 2
 
 
-def build_curate_executors(
+def _writer(stage_folder: Path) -> JsonlWriter:
+    """Return a JsonlWriter that emits `<stage_folder>/<dataset>/<rank>.jsonl.gz`."""
+    stage_folder.mkdir(parents=True, exist_ok=True)
+    return JsonlWriter(
+        output_folder=str(stage_folder),
+        output_filename="${dataset}/${rank}.jsonl.gz",
+    )
+
+
+def _reader(folder: Path) -> JsonlReader:
+    """Return a JsonlReader that walks `<folder>/**/*.jsonl.gz` recursively."""
+    return JsonlReader(
+        str(folder),
+        glob_pattern="**/*.jsonl.gz",
+        shuffle_files=False,
+        recursive=True,
+    )
+
+
+def build_language_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    finder_workers: int = 1,
-    sentence_config: Optional[SentDedupConfig] = None,
-    exact_config: Optional[ExactDedupConfig] = None,
-    quality_config: Optional[QualityConfig] = None,
-    language: str = Languages.slovenian,
     target_languages: Sequence[str] = ("sl",),
     candidate_languages: Optional[List[str]] = None,
-    lang_mode: str = "tag",
+    lang_mode: str = "filter",
     lang_minimum_relative_distance: float = 0.0,
     lang_low_accuracy: bool = False,
     lang_max_chars: Optional[int] = None,
-    stopwords: Optional[Set[str]] = None,
-    top_k_words: int = 5_000,
-    top_k_ngrams: int = 5_000,
-    keyword_top_k: int = 200,
-    compute_keywords: bool = True,
-    logging_dir: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
-    """Build the chained six-executor curation pipeline.
+    """Build the language stage: read input → lingua filter → write 01_language/.
 
     Args:
-        paths: Resolved input/output/scratch locations.
-        tasks: Parallel tasks for the per-shard executors (1, 3, 5).
-            `finder_workers` controls the dedicated find stages
-            (executors 2, 4) separately. The corpus-stats stage
-            (executor 6) runs single-process because `CorpusStats`
-            keeps global counters on its instance.
-        finder_workers: Number of finder tasks for the dedup find
-            stages. Must match the corresponding signature stage's
-            `finder_workers` argument; both are wired here.
-        sentence_config: Optional sentence-dedup config override.
-        exact_config: Optional exact-dedup config override; defaults
-            to one whose `content_getter` hashes `doc.text`.
-        quality_config: Optional `GopherQualityFilter` knob bundle;
-            defaults to Gopher paper values. The Slovenian stopword
-            set is passed to the filter via `stopwords`.
-        language: ISO-3 code for the sentence/word tokenizer
-            (`Languages.slovenian` by default). Also drives Gopher
-            filter tokenization.
-        target_languages: ISO 639-1 codes considered "in-language" by
-            the lingua filter. In `lang_mode="filter"`, only documents
-            whose detected language is in this set are kept. Defaults
-            to `("sl",)` for backwards compatibility.
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count for this stage.
+        target_languages: ISO 639-1 codes considered "in-language".
         candidate_languages: ISO 639-1 candidate set for lingua.
-        lang_mode: `"tag"` keeps every document and only adds metadata;
-            `"filter"` drops out-of-target documents.
-        lang_minimum_relative_distance: Required confidence gap between
-            the top language and the runner-up before lingua will
-            commit to a prediction. `0.0` disables the check. Useful
-            for high-precision South Slavic disambiguation; `0.1` is
-            a reasonable starting point.
-        lang_low_accuracy: Use lingua's trigram-only model. ~5-10x
-            faster than the default; recommended for full corpus runs.
+        lang_mode: `"tag"` keeps every doc; `"filter"` drops
+            out-of-target docs.
+        lang_minimum_relative_distance: Required confidence gap before
+            lingua commits. `0.0` disables.
+        lang_low_accuracy: Use lingua's trigram-only model.
         lang_max_chars: Truncate doc text to this many chars before
-            language detection. ~2 KB of signal is plenty for a small
-            candidate set; `None` disables truncation.
-        stopwords: Stopword set used by both `CorpusStats` and
-            `GopherQualityFilter`. Pass the Slovenian list — Gopher's
-            built-in defaults are English-only and would reject most
-            Slovenian documents on `min_stop_words`.
-        top_k_words: Word-frequency table size.
-        top_k_ngrams: Per-order n-gram table size.
-        keyword_top_k: TF-IDF keywords per bucket.
-        compute_keywords: Disable to skip the classla pass.
-        logging_dir: Datatrove logging root. Stage subdirectories are
-            created under this path.
+            detection. `None` disables truncation.
 
     Returns:
-        The six executors in execution order. The CLI typically runs
-        only the last one; datatrove follows `depends` to invoke
-        upstream stages first.
+        A list with one `LocalPipelineExecutor`.
     """
-    sent_cfg = sentence_config or SentDedupConfig()
-    exact_cfg = exact_config or default_exact_config()
-    quality_cfg = quality_config or QualityConfig()
-    stopwords = stopwords if stopwords is not None else set()
-
-    paths.final_folder.mkdir(parents=True, exist_ok=True)
-    paths.statistics_folder.mkdir(parents=True, exist_ok=True)
-    paths.scratch_folder.mkdir(parents=True, exist_ok=True)
-
-    lang_tagged = paths.scratch_folder / "lang_tagged"
-    after_exact = paths.scratch_folder / "after_exact"
-    exact_sigs = paths.scratch_folder / "exact_sigs"
-    exact_dups = paths.scratch_folder / "exact_dups"
-    sent_sigs = paths.scratch_folder / "sent_sigs"
-    sent_dups = paths.scratch_folder / "sent_dups"
-    base_logs = logging_dir or paths.scratch_folder / "_logs"
-
-    lang_dropped = paths.scratch_folder / "lang_dropped" if paths.debug else None
-    quality_dropped = paths.scratch_folder / "quality_dropped" if paths.debug else None
-    repetition_dropped = paths.scratch_folder / "repetition_dropped" if paths.debug else None
-    exact_dropped = paths.scratch_folder / "exact_dropped" if paths.debug else None
-    sentence_dropped = paths.scratch_folder / "sentence_dropped" if paths.debug else None
-
-    # Executor 1: read raw → lingua filter → Gopher quality → Gopher
-    # repetition → write tagged shards → exact-sig. Dropping
-    # low-quality docs *before* the exact-sig sink saves hashing work.
-    # Order matters: `ExactDedupSignature` is a sink that consumes the
-    # stream without yielding, so it must be the last block. The
-    # `JsonlWriter` between the filters and the sink lets the sig step
-    # still see every surviving doc.
-    exec1 = LocalPipelineExecutor(
+    out = paths.stage_dir("language")
+    executor = LocalPipelineExecutor(
         pipeline=[
-            JsonlReader(
-                str(paths.input_folder),
-                glob_pattern="**/*.jsonl.gz",
-                shuffle_files=False,
-                recursive=True,
-            ),
+            _reader(paths.input_folder),
             LinguaLanguageFilter(
                 targets=list(target_languages),
                 candidates=candidate_languages,
@@ -242,174 +176,312 @@ def build_curate_executors(
                 minimum_relative_distance=lang_minimum_relative_distance,
                 low_accuracy=lang_low_accuracy,
                 max_chars=lang_max_chars,
-                exclusion_writer=(
-                    JsonlWriter(output_folder=str(lang_dropped)) if lang_dropped else None
-                ),
             ),
+            _writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("language")),
+        skip_completed=False,
+    )
+    return [executor]
+
+
+def build_quality_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    quality_config: Optional[QualityConfig] = None,
+    language: str = Languages.slovenian,
+    stopwords: Optional[Set[str]] = None,
+) -> List[LocalPipelineExecutor]:
+    """Build the quality stage: read 01_language/ → Gopher quality → write 02_quality/.
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count.
+        quality_config: `GopherQualityFilter` knob bundle; defaults to
+            Gopher paper values.
+        language: ISO-3 code for the word/sentence tokenizer.
+        stopwords: Stopword set used by `GopherQualityFilter`.
+
+    Returns:
+        A list with one `LocalPipelineExecutor`.
+    """
+    cfg = quality_config or QualityConfig()
+    in_ = paths.stage_dir("language")
+    out = paths.stage_dir("quality")
+    executor = LocalPipelineExecutor(
+        pipeline=[
+            _reader(in_),
             GopherQualityFilter(
                 language=language,
                 stop_words=sorted(stopwords) if stopwords else None,
-                min_doc_words=quality_cfg.min_doc_words,
-                max_doc_words=quality_cfg.max_doc_words,
-                min_avg_word_length=quality_cfg.min_avg_word_length,
-                max_avg_word_length=quality_cfg.max_avg_word_length,
-                max_symbol_word_ratio=quality_cfg.max_symbol_word_ratio,
-                max_bullet_lines_ratio=quality_cfg.max_bullet_lines_ratio,
-                max_ellipsis_lines_ratio=quality_cfg.max_ellipsis_lines_ratio,
-                max_non_alpha_words_ratio=quality_cfg.max_non_alpha_words_ratio,
-                min_stop_words=quality_cfg.min_stop_words,
-                exclusion_writer=(
-                    JsonlWriter(output_folder=str(quality_dropped)) if quality_dropped else None
-                ),
+                min_doc_words=cfg.min_doc_words,
+                max_doc_words=cfg.max_doc_words,
+                min_avg_word_length=cfg.min_avg_word_length,
+                max_avg_word_length=cfg.max_avg_word_length,
+                max_symbol_word_ratio=cfg.max_symbol_word_ratio,
+                max_bullet_lines_ratio=cfg.max_bullet_lines_ratio,
+                max_ellipsis_lines_ratio=cfg.max_ellipsis_lines_ratio,
+                max_non_alpha_words_ratio=cfg.max_non_alpha_words_ratio,
+                min_stop_words=cfg.min_stop_words,
             ),
-            GopherRepetitionFilter(
-                language=language,
-                exclusion_writer=(
-                    JsonlWriter(output_folder=str(repetition_dropped)) if repetition_dropped else None
-                ),
-            ),
-            JsonlWriter(
-                output_folder=str(lang_tagged),
-                output_filename="${dataset}/${rank}.jsonl.gz",
-            ),
+            _writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("quality")),
+        skip_completed=False,
+    )
+    return [executor]
+
+
+def build_repetition_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    language: str = Languages.slovenian,
+) -> List[LocalPipelineExecutor]:
+    """Build the repetition stage: read 02_quality/ → Gopher repetition → write 03_repetition/.
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count.
+        language: ISO-3 code for the word/sentence tokenizer the
+            repetition filter uses.
+
+    Returns:
+        A list with one `LocalPipelineExecutor`.
+    """
+    in_ = paths.stage_dir("quality")
+    out = paths.stage_dir("repetition")
+    executor = LocalPipelineExecutor(
+        pipeline=[
+            _reader(in_),
+            GopherRepetitionFilter(language=language),
+            _writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("repetition")),
+        skip_completed=False,
+    )
+    return [executor]
+
+
+def build_exact_dedup_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    finder_workers: int = 1,
+    exact_config: Optional[ExactDedupConfig] = None,
+) -> List[LocalPipelineExecutor]:
+    """Build the exact-dedup stage: sig → find → filter+write 04_1_dedup/.
+
+    Three executors chained via `depends`:
+        1. (parallel) read 03_repetition/ → ExactDedupSignature → exact_sigs/
+        2. (single)   ExactFindDedups(exact_sigs/) → exact_dups/
+        3. (parallel) read 03_repetition/ → ExactDedupFilter → write 04_1_dedup/
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count for executors 1 and 3.
+        finder_workers: Worker count for the single-worker find
+            executor 2 (and the `finder_workers` argument of the sig
+            executor 1).
+        exact_config: Optional `ExactDedupConfig`; defaults to one whose
+            `content_getter` hashes `doc.text`.
+
+    Returns:
+        Three chained `LocalPipelineExecutor`s.
+    """
+    cfg = exact_config or default_exact_config()
+    in_ = paths.stage_dir("repetition")
+    out = paths.stage_dir("exact_dedup")
+    sigs = paths.dedup_state_dir / "exact_sigs"
+    dups = paths.dedup_state_dir / "exact_dups"
+
+    sig = LocalPipelineExecutor(
+        pipeline=[
+            _reader(in_),
             ExactDedupSignature(
-                output_folder=str(exact_sigs),
-                config=exact_cfg,
-                finder_workers=finder_workers,
+                output_folder=str(sigs), config=cfg, finder_workers=finder_workers
             ),
         ],
         tasks=tasks,
         workers=tasks,
-        logging_dir=str(base_logs / "01_lang_quality_exact_sig"),
+        logging_dir=str(paths.logs_dir("exact_dedup") / "1_sig"),
         skip_completed=False,
     )
-
-    # Executor 2: exact-find. Single worker (or `finder_workers`).
-    exec2 = LocalPipelineExecutor(
-        pipeline=[
-            ExactFindDedups(
-                data_folder=str(exact_sigs),
-                output_folder=str(exact_dups),
-                config=exact_cfg,
-            ),
-        ],
+    find = LocalPipelineExecutor(
+        pipeline=[ExactFindDedups(data_folder=str(sigs), output_folder=str(dups), config=cfg)],
         tasks=finder_workers,
         workers=finder_workers,
-        logging_dir=str(base_logs / "02_exact_find"),
-        depends=exec1,
+        logging_dir=str(paths.logs_dir("exact_dedup") / "2_find"),
+        depends=sig,
         skip_completed=False,
     )
-
-    # Executor 3: read tagged shards → exact-filter → write filtered →
-    # sentence-sig (sink, must come last for the same reason as exec 1).
-    exec3 = LocalPipelineExecutor(
+    filt = LocalPipelineExecutor(
         pipeline=[
-            JsonlReader(
-                str(lang_tagged),
-                glob_pattern="**/*.jsonl.gz",
-                shuffle_files=False,
-                recursive=True,
-            ),
-            ExactDedupFilter(
-                data_folder=str(exact_dups),
-                config=exact_cfg,
-                exclusion_writer=(
-                    JsonlWriter(output_folder=str(exact_dropped)) if exact_dropped else None
-                ),
-            ),
-            JsonlWriter(
-                output_folder=str(after_exact),
-                output_filename="${dataset}/${rank}.jsonl.gz",
-            ),
+            _reader(in_),
+            ExactDedupFilter(data_folder=str(dups), config=cfg),
+            _writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("exact_dedup") / "3_filter"),
+        depends=find,
+        skip_completed=False,
+    )
+    return [sig, find, filt]
+
+
+def build_sentence_dedup_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    finder_workers: int = 1,
+    sentence_config: Optional[SentDedupConfig] = None,
+    language: str = Languages.slovenian,
+) -> List[LocalPipelineExecutor]:
+    """Build the sentence-dedup stage: sig → find → filter+write 04_2_dedup/.
+
+    Three executors chained via `depends`, mirroring the exact stage:
+        1. (parallel) read 04_1_dedup/ → SentenceDedupSignature → sent_sigs/
+        2. (single)   SentenceFindDedups(sent_sigs/) → sent_dups/
+        3. (parallel) read 04_1_dedup/ → SentenceDedupFilter → write 04_2_dedup/
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count for executors 1 and 3.
+        finder_workers: Worker count for the find executor.
+        sentence_config: Optional `SentDedupConfig`.
+        language: ISO-3 code for the sentence tokenizer.
+
+    Returns:
+        Three chained `LocalPipelineExecutor`s.
+    """
+    cfg = sentence_config or SentDedupConfig()
+    in_ = paths.stage_dir("exact_dedup")
+    out = paths.stage_dir("sentence_dedup")
+    sigs = paths.dedup_state_dir / "sent_sigs"
+    dups = paths.dedup_state_dir / "sent_dups"
+
+    sig = LocalPipelineExecutor(
+        pipeline=[
+            _reader(in_),
             SentenceDedupSignature(
-                output_folder=str(sent_sigs),
-                config=sent_cfg,
+                output_folder=str(sigs),
+                config=cfg,
                 finder_workers=finder_workers,
                 language=language,
             ),
         ],
         tasks=tasks,
         workers=tasks,
-        logging_dir=str(base_logs / "03_exact_filter_sent_sig"),
-        depends=exec2,
+        logging_dir=str(paths.logs_dir("sentence_dedup") / "1_sig"),
         skip_completed=False,
     )
-
-    # Executor 4: sentence-find. Single worker (or `finder_workers`).
-    exec4 = LocalPipelineExecutor(
-        pipeline=[
-            SentenceFindDedups(
-                data_folder=str(sent_sigs),
-                output_folder=str(sent_dups),
-                config=sent_cfg,
-            ),
-        ],
+    find = LocalPipelineExecutor(
+        pipeline=[SentenceFindDedups(data_folder=str(sigs), output_folder=str(dups), config=cfg)],
         tasks=finder_workers,
         workers=finder_workers,
-        logging_dir=str(base_logs / "04_sent_find"),
-        depends=exec3,
+        logging_dir=str(paths.logs_dir("sentence_dedup") / "2_find"),
+        depends=sig,
         skip_completed=False,
     )
-
-    # Executor 5: sentence-filter → write final corpus. Parallel-safe:
-    # input shards are sharded round-robin across ranks; multiple ranks
-    # may touch the same dataset (one dataset spans many shards), so
-    # the writer routes each rank's per-dataset output into a distinct
-    # file via `${dataset}/${rank}.jsonl.gz`.
-    exec5 = LocalPipelineExecutor(
+    filt = LocalPipelineExecutor(
         pipeline=[
-            JsonlReader(
-                str(after_exact),
-                glob_pattern="**/*.jsonl.gz",
-                shuffle_files=False,
-                recursive=True,
-            ),
-            SentenceDedupFilter(
-                data_folder=str(sent_dups),
-                config=sent_cfg,
-                language=language,
-                exclusion_writer=(
-                    JsonlWriter(output_folder=str(sentence_dropped)) if sentence_dropped else None
-                ),
-            ),
-            JsonlWriter(
-                output_folder=str(paths.final_folder),
-                output_filename="${dataset}/${rank}.jsonl.gz",
-            ),
+            _reader(in_),
+            SentenceDedupFilter(data_folder=str(dups), config=cfg, language=language),
+            _writer(out),
         ],
         tasks=tasks,
         workers=tasks,
-        logging_dir=str(base_logs / "05_sent_filter_write"),
-        depends=exec4,
+        logging_dir=str(paths.logs_dir("sentence_dedup") / "3_filter"),
+        depends=find,
         skip_completed=False,
     )
+    return [sig, find, filt]
 
-    # Executor 6: read final corpus → CorpusStats. Single-process
-    # because CorpusStats keeps global counters on its instance.
-    exec6 = LocalPipelineExecutor(
+
+def build_curate_executors(*args: object, **kwargs: object) -> List[LocalPipelineExecutor]:
+    """Removed: replaced by per-stage builder functions.
+
+    This name is kept only so that the old `scripts/data/curate.py` can
+    be imported during test collection without a hard `ImportError`. Any
+    call will raise `NotImplementedError` immediately; the CLI is
+    rewritten in Task 6.
+
+    Args:
+        *args: Ignored.
+        **kwargs: Ignored.
+
+    Returns:
+        Never returns — always raises.
+
+    Raises:
+        NotImplementedError: Always. Use the per-stage builders instead.
+    """
+    raise NotImplementedError(
+        "build_curate_executors has been replaced by per-stage builders "
+        "(build_language_executors, build_quality_executors, etc.). "
+        "The CLI is rewritten in Task 6."
+    )
+
+
+def build_stats_executors(
+    paths: CuratePaths,
+    *,
+    language: str = Languages.slovenian,
+    stopwords: Optional[Set[str]] = None,
+    top_k_words: int = 5_000,
+    top_k_ngrams: int = 5_000,
+    keyword_top_k: int = 200,
+    compute_keywords: bool = True,
+    ngram_orders: Sequence[int] = (2, 3),
+) -> List[LocalPipelineExecutor]:
+    """Build the stats stage: read 04_2_dedup/ → CorpusStats → 05_statistics/.
+
+    Single-process by design: `CorpusStats` keeps every counter on the
+    instance, so worker fan-out is not supported.
+
+    Args:
+        paths: Resolved input/output locations.
+        language: ISO-3 code for the tokenizer.
+        stopwords: Stopword set used by `CorpusStats`.
+        top_k_words: Word-frequency table size.
+        top_k_ngrams: Per-order n-gram table size.
+        keyword_top_k: TF-IDF keywords per bucket.
+        compute_keywords: Disable to skip the classla pass.
+        ngram_orders: N-gram orders to compute.
+
+    Returns:
+        A list with one single-process `LocalPipelineExecutor`.
+    """
+    in_ = paths.stage_dir("sentence_dedup")
+    out = paths.stage_dir("stats")
+    out.mkdir(parents=True, exist_ok=True)
+
+    executor = LocalPipelineExecutor(
         pipeline=[
-            JsonlReader(
-                str(paths.final_folder),
-                glob_pattern="**/*.jsonl.gz",
-                shuffle_files=False,
-                recursive=True,
-            ),
+            _reader(in_),
             CorpusStats(
-                output_path=paths.statistics_folder / "aggregate.json",
-                per_dataset_dir=paths.statistics_folder / "per_dataset",
+                output_path=out / "aggregate.json",
+                per_dataset_dir=out / "per_dataset",
                 language=language,
-                stopwords=stopwords,
+                stopwords=stopwords or set(),
                 top_k_words=top_k_words,
                 top_k_ngrams=top_k_ngrams,
                 keyword_top_k=keyword_top_k,
                 compute_keywords=compute_keywords,
+                ngram_orders=ngram_orders,
             ),
         ],
         tasks=1,
         workers=1,
-        logging_dir=str(base_logs / "06_corpus_stats"),
-        depends=exec5,
+        logging_dir=str(paths.logs_dir("stats")),
         skip_completed=False,
     )
-
-    return [exec1, exec2, exec3, exec4, exec5, exec6]
+    return [executor]

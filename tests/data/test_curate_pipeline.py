@@ -1,11 +1,7 @@
-"""Tests for the merged datatrove curation pipeline.
+"""Tests for the per-stage curate pipeline builders.
 
-These tests don't actually run the dedup pipeline (which is slow and
-filesystem-heavy). They verify the structural contract of
-`build_curate_executors`: six executors in the correct order, each
-chained via `depends=` to the previous, the language argument
-threaded through to the sentence-dedup blocks, and `finder_workers`
-propagated everywhere it matters.
+Structural assertions only; the heavy end-to-end smoke test lives at
+the bottom of this file (marked `@pytest.mark.slow`).
 """
 
 import importlib.metadata  # noqa: F401  (datatrove workaround)
@@ -32,12 +28,17 @@ from datatrove.pipeline.readers import JsonlReader  # noqa: E402
 from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 from datatrove.utils.typeshelper import Languages  # noqa: E402
 
-from slm4ie.data.curate.dedup import default_exact_config, doc_text  # noqa: E402
 from slm4ie.data.curate.language import LinguaLanguageFilter  # noqa: E402
 from slm4ie.data.curate.pipeline import (  # noqa: E402
     CuratePaths,
     QualityConfig,
     build_curate_executors,
+    build_exact_dedup_executors,
+    build_language_executors,
+    build_quality_executors,
+    build_repetition_executors,
+    build_sentence_dedup_executors,
+    build_stats_executors,
 )
 from slm4ie.data.curate.stats import CorpusStats  # noqa: E402
 
@@ -46,174 +47,183 @@ def _paths(tmp_path: Path) -> CuratePaths:
     """Build a CuratePaths anchored under *tmp_path* for structural tests."""
     return CuratePaths(
         input_folder=tmp_path / "datatrove",
-        final_folder=tmp_path / "final",
-        statistics_folder=tmp_path / "final" / "statistics",
-        scratch_folder=tmp_path / "scratch",
+        output_dir=tmp_path / "curated",
     )
 
 
-class TestExactDedupHelpers:
-    """Tiny helpers that pipeline.py composes."""
+class TestLanguageStage:
+    """The language stage is a single parallel executor."""
 
-    def test_doc_text_returns_text_payload(self) -> None:
-        """`doc_text` extracts the text body for hashing."""
-        from datatrove.data import Document
-
-        d = Document(text="hello", id="1", metadata={})
-        assert doc_text(d) == "hello"
-
-    def test_default_exact_config_uses_doc_text(self) -> None:
-        """The default ExactDedupConfig hashes `doc.text`, not metadata."""
-        cfg = default_exact_config()
-        assert cfg.content_getter is doc_text
-
-
-class TestBuildCurateExecutors:
-    """Structure of the six-executor ladder."""
-
-    def test_six_executors_chained_via_depends(self, tmp_path: Path) -> None:
-        """We get exactly six executors and each one depends on the prior."""
-        execs = build_curate_executors(_paths(tmp_path))
-        assert len(execs) == 6
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """The language stage runs as a single executor."""
+        execs = build_language_executors(_paths(tmp_path))
+        assert len(execs) == 1
         assert execs[0].depends is None
-        for i in range(1, 6):
-            assert execs[i].depends is execs[i - 1]
 
-    def test_each_executor_carries_the_right_blocks(self, tmp_path: Path) -> None:
-        """Every executor's pipeline contains the datatrove blocks the plan promised."""
-        execs = build_curate_executors(_paths(tmp_path))
-        types_per_executor = [[type(step) for step in ex.pipeline] for ex in execs]
+    def test_pipeline_contains_lingua_and_writer(self, tmp_path: Path) -> None:
+        """The pipeline reads input, applies lingua, writes to 01_language/."""
+        execs = build_language_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert JsonlReader in types_
+        assert LinguaLanguageFilter in types_
+        assert JsonlWriter in types_
 
-        # Executor 1: lang + quality + repetition + exact-sig.
-        assert LinguaLanguageFilter in types_per_executor[0]
-        assert GopherQualityFilter in types_per_executor[0]
-        assert GopherRepetitionFilter in types_per_executor[0]
-        assert ExactDedupSignature in types_per_executor[0]
-        # Executor 2: exact-find.
-        assert ExactFindDedups in types_per_executor[1]
-        # Executor 3: exact-filter + sentence-sig.
-        assert ExactDedupFilter in types_per_executor[2]
-        assert SentenceDedupSignature in types_per_executor[2]
-        # Executor 4: sentence-find.
-        assert SentenceFindDedups in types_per_executor[3]
-        # Executor 5: sentence-filter + write final corpus.
-        assert SentenceDedupFilter in types_per_executor[4]
-        assert JsonlWriter in types_per_executor[4]
-        assert CorpusStats not in types_per_executor[4]
-        # Executor 6: read final corpus + stats (single-process).
-        assert JsonlReader in types_per_executor[5]
-        assert CorpusStats in types_per_executor[5]
-        assert execs[5].tasks == 1
+    def test_writes_to_language_folder(self, tmp_path: Path) -> None:
+        """The writer's output_folder is `<output_dir>/01_language`."""
+        paths = _paths(tmp_path)
+        execs = build_language_executors(paths)
+        writer = next(s for s in execs[0].pipeline if isinstance(s, JsonlWriter))
+        assert str(paths.stage_dir("language")) in writer.output_folder.path
 
-    def test_sentence_blocks_run_in_slovenian(self, tmp_path: Path) -> None:
-        """The sentence dedup blocks must use Languages.slovenian."""
-        execs = build_curate_executors(_paths(tmp_path))
-        sent_sig = next(
-            step for step in execs[2].pipeline if isinstance(step, SentenceDedupSignature)
+    def test_lang_minimum_relative_distance_is_threaded(self, tmp_path: Path) -> None:
+        """`minimum_relative_distance` reaches the LinguaLanguageFilter."""
+        execs = build_language_executors(
+            _paths(tmp_path), lang_minimum_relative_distance=0.15
         )
-        sent_filter = next(
-            step for step in execs[4].pipeline if isinstance(step, SentenceDedupFilter)
-        )
-        assert sent_sig.language == Languages.slovenian
-        assert sent_filter.language == Languages.slovenian
+        lang = next(s for s in execs[0].pipeline if isinstance(s, LinguaLanguageFilter))
+        assert lang.minimum_relative_distance == 0.15
 
-    def test_finder_workers_propagates_to_sig_and_find(self, tmp_path: Path) -> None:
-        """`finder_workers` reaches every signature and find executor."""
-        execs = build_curate_executors(_paths(tmp_path), finder_workers=4)
-        exact_sig = next(
-            step for step in execs[0].pipeline if isinstance(step, ExactDedupSignature)
-        )
-        sent_sig = next(
-            step for step in execs[2].pipeline if isinstance(step, SentenceDedupSignature)
-        )
-        assert exact_sig.finder_workers == 4
-        assert sent_sig.finder_workers == 4
-        assert execs[1].tasks == 4  # exact-find
-        assert execs[3].tasks == 4  # sentence-find
 
-    def test_debug_mode_wires_exclusion_writers(self, tmp_path: Path) -> None:
-        """When debug=True, every drop stage gets an exclusion_writer."""
-        paths = CuratePaths(
-            input_folder=tmp_path / "datatrove",
-            final_folder=tmp_path / "final",
-            statistics_folder=tmp_path / "final" / "statistics",
-            scratch_folder=tmp_path / "scratch",
-            debug=True,
-        )
-        execs = build_curate_executors(paths)
-        lang = next(
-            step for step in execs[0].pipeline if isinstance(step, LinguaLanguageFilter)
-        )
-        quality = next(
-            step for step in execs[0].pipeline if isinstance(step, GopherQualityFilter)
-        )
-        repetition = next(
-            step for step in execs[0].pipeline if isinstance(step, GopherRepetitionFilter)
-        )
-        exact_filter = next(
-            step for step in execs[2].pipeline if isinstance(step, ExactDedupFilter)
-        )
-        sent_filter = next(
-            step for step in execs[4].pipeline if isinstance(step, SentenceDedupFilter)
-        )
-        assert lang.exclusion_writer is not None
-        assert quality.exclusion_writer is not None
-        assert repetition.exclusion_writer is not None
-        assert exact_filter.exclusion_writer is not None
-        assert sent_filter.exclusion_writer is not None
+class TestQualityStage:
+    """The quality stage reads 01_language/ and writes 02_quality/."""
 
-    def test_default_mode_skips_exclusion_writers(self, tmp_path: Path) -> None:
-        """Without --debug we don't materialize exclusion writers."""
-        execs = build_curate_executors(_paths(tmp_path))
-        lang = next(
-            step for step in execs[0].pipeline if isinstance(step, LinguaLanguageFilter)
-        )
-        quality = next(
-            step for step in execs[0].pipeline if isinstance(step, GopherQualityFilter)
-        )
-        repetition = next(
-            step for step in execs[0].pipeline if isinstance(step, GopherRepetitionFilter)
-        )
-        exact_filter = next(
-            step for step in execs[2].pipeline if isinstance(step, ExactDedupFilter)
-        )
-        sent_filter = next(
-            step for step in execs[4].pipeline if isinstance(step, SentenceDedupFilter)
-        )
-        assert lang.exclusion_writer is None
-        assert quality.exclusion_writer is None
-        assert repetition.exclusion_writer is None
-        assert exact_filter.exclusion_writer is None
-        assert sent_filter.exclusion_writer is None
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """The quality stage runs as a single executor."""
+        execs = build_quality_executors(_paths(tmp_path))
+        assert len(execs) == 1
 
-    def test_quality_config_is_threaded_to_gopher_filter(self, tmp_path: Path) -> None:
-        """`QualityConfig` overrides reach the underlying GopherQualityFilter."""
+    def test_pipeline_contains_gopher_quality(self, tmp_path: Path) -> None:
+        """The pipeline runs GopherQualityFilter but NOT the repetition filter."""
+        execs = build_quality_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert GopherQualityFilter in types_
+        assert GopherRepetitionFilter not in types_
+
+    def test_quality_config_threaded(self, tmp_path: Path) -> None:
+        """QualityConfig overrides reach the underlying GopherQualityFilter."""
         cfg = QualityConfig(min_doc_words=10, max_doc_words=200, min_stop_words=0)
-        execs = build_curate_executors(_paths(tmp_path), quality_config=cfg)
-        quality = next(
-            step for step in execs[0].pipeline if isinstance(step, GopherQualityFilter)
-        )
+        execs = build_quality_executors(_paths(tmp_path), quality_config=cfg)
+        quality = next(s for s in execs[0].pipeline if isinstance(s, GopherQualityFilter))
         assert quality.min_doc_words == 10
         assert quality.max_doc_words == 200
         assert quality.min_stop_words == 0
 
     def test_stopwords_become_gopher_stop_words(self, tmp_path: Path) -> None:
-        """The Slovenian stopword set is wired into GopherQualityFilter."""
-        execs = build_curate_executors(_paths(tmp_path), stopwords={"in", "je", "na"})
-        quality = next(
-            step for step in execs[0].pipeline if isinstance(step, GopherQualityFilter)
-        )
+        """Stopwords are wired into GopherQualityFilter."""
+        execs = build_quality_executors(_paths(tmp_path), stopwords={"in", "je", "na"})
+        quality = next(s for s in execs[0].pipeline if isinstance(s, GopherQualityFilter))
         assert {"in", "je", "na"}.issubset(quality.stop_words)
 
-    def test_lang_minimum_relative_distance_is_threaded(self, tmp_path: Path) -> None:
-        """The minimum_relative_distance reaches LinguaLanguageFilter."""
-        execs = build_curate_executors(
-            _paths(tmp_path), lang_minimum_relative_distance=0.15
+
+class TestRepetitionStage:
+    """The repetition stage reads 02_quality/ and writes 03_repetition/."""
+
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """The repetition stage runs as a single executor."""
+        execs = build_repetition_executors(_paths(tmp_path))
+        assert len(execs) == 1
+
+    def test_pipeline_contains_repetition_filter(self, tmp_path: Path) -> None:
+        """The pipeline runs GopherRepetitionFilter but NOT the quality filter."""
+        execs = build_repetition_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert GopherRepetitionFilter in types_
+        assert GopherQualityFilter not in types_
+
+
+class TestExactDedupStage:
+    """Exact dedup is three internal executors: sig -> find -> filter+write."""
+
+    def test_returns_three_executors_chained(self, tmp_path: Path) -> None:
+        """The stage returns three executors chained via `depends`."""
+        execs = build_exact_dedup_executors(_paths(tmp_path))
+        assert len(execs) == 3
+        assert execs[0].depends is None
+        assert execs[1].depends is execs[0]
+        assert execs[2].depends is execs[1]
+
+    def test_executor_blocks(self, tmp_path: Path) -> None:
+        """Each internal executor carries the right datatrove block."""
+        execs = build_exact_dedup_executors(_paths(tmp_path))
+        types_ = [[type(s) for s in ex.pipeline] for ex in execs]
+        assert ExactDedupSignature in types_[0]
+        assert ExactFindDedups in types_[1]
+        assert ExactDedupFilter in types_[2]
+        assert JsonlWriter in types_[2]
+        assert SentenceDedupSignature not in types_[0] + types_[1] + types_[2]
+        assert SentenceDedupFilter not in types_[0] + types_[1] + types_[2]
+
+    def test_finder_workers_propagates(self, tmp_path: Path) -> None:
+        """`finder_workers` reaches the signature stage and the find executor."""
+        execs = build_exact_dedup_executors(_paths(tmp_path), finder_workers=4)
+        sig = next(s for s in execs[0].pipeline if isinstance(s, ExactDedupSignature))
+        assert sig.finder_workers == 4
+        assert execs[1].tasks == 4
+
+
+class TestSentenceDedupStage:
+    """Sentence dedup is three internal executors: sig -> find -> filter+write."""
+
+    def test_returns_three_executors_chained(self, tmp_path: Path) -> None:
+        """The stage returns three executors chained via `depends`."""
+        execs = build_sentence_dedup_executors(_paths(tmp_path))
+        assert len(execs) == 3
+        assert execs[0].depends is None
+        assert execs[1].depends is execs[0]
+        assert execs[2].depends is execs[1]
+
+    def test_executor_blocks(self, tmp_path: Path) -> None:
+        """Each internal executor carries the right datatrove block."""
+        execs = build_sentence_dedup_executors(_paths(tmp_path))
+        types_ = [[type(s) for s in ex.pipeline] for ex in execs]
+        assert SentenceDedupSignature in types_[0]
+        assert SentenceFindDedups in types_[1]
+        assert SentenceDedupFilter in types_[2]
+        assert JsonlWriter in types_[2]
+        assert ExactDedupSignature not in types_[0] + types_[1] + types_[2]
+        assert ExactDedupFilter not in types_[0] + types_[1] + types_[2]
+
+    def test_sentence_blocks_run_in_slovenian(self, tmp_path: Path) -> None:
+        """Sentence sig/filter use Languages.slovenian by default."""
+        execs = build_sentence_dedup_executors(_paths(tmp_path))
+        sent_sig = next(s for s in execs[0].pipeline if isinstance(s, SentenceDedupSignature))
+        sent_filter = next(s for s in execs[2].pipeline if isinstance(s, SentenceDedupFilter))
+        assert sent_sig.language == Languages.slovenian
+        assert sent_filter.language == Languages.slovenian
+
+    def test_sentence_config_threaded(self, tmp_path: Path) -> None:
+        """SentDedupConfig overrides reach the sig stage."""
+        cfg = SentDedupConfig(
+            n_sentences=4, min_doc_words=10, min_num_sentences=1, split_sentences=True
         )
-        lang = next(
-            step for step in execs[0].pipeline if isinstance(step, LinguaLanguageFilter)
-        )
-        assert lang.minimum_relative_distance == 0.15
+        execs = build_sentence_dedup_executors(_paths(tmp_path), sentence_config=cfg)
+        sig = next(s for s in execs[0].pipeline if isinstance(s, SentenceDedupSignature))
+        assert sig.config.n_sentences == 4
+
+
+class TestStatsStage:
+    """The stats stage runs single-process and reads 04_2_dedup/."""
+
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """Stats is a single, single-worker executor."""
+        execs = build_stats_executors(_paths(tmp_path))
+        assert len(execs) == 1
+        assert execs[0].tasks == 1
+        assert execs[0].workers == 1
+
+    def test_pipeline_contains_corpus_stats(self, tmp_path: Path) -> None:
+        """The pipeline reads JSONL and runs CorpusStats."""
+        execs = build_stats_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert JsonlReader in types_
+        assert CorpusStats in types_
+
+    def test_stats_reads_from_final_corpus_folder(self, tmp_path: Path) -> None:
+        """The reader's data_folder is `<output_dir>/04_2_dedup`."""
+        paths = _paths(tmp_path)
+        execs = build_stats_executors(paths)
+        reader = next(s for s in execs[0].pipeline if isinstance(s, JsonlReader))
+        assert str(paths.stage_dir("sentence_dedup")) in reader.data_folder.path
 
 
 # --- End-to-end smoke test ----------------------------------------------------
