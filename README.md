@@ -110,9 +110,9 @@ All scripts are CLI wrappers around `slm4ie/` modules and read from YAML configs
 - `--max-workers 1` — serial path; tracebacks are unwrapped, console keeps today's verbose output, and the inner per-dataset progress bar is shown.
 - `--max-workers N` — that many workers, capped at the number of selected datasets.
 
-Per-dataset logs are always written to `logs/<script>/<UTC-timestamp>/<key>.log`, regardless of worker count. In parallel mode (`> 1`) the console only prints a periodic summary line (`running=R done=D skipped=S failed=F waiting=W`) every 30 seconds — the per-dataset INFO lines and inner tqdm bars are routed to the log files instead, so concurrent workers don't garble each other on stderr.
+Per-dataset logs are always written to `logs/<script>/<UTC-timestamp>/<key>.log`, regardless of worker count. The log directory is printed to stderr at startup. In parallel mode (`> 1`) the console only prints a periodic summary line (`running=R done=D skipped=S failed=F waiting=W`) every 30 seconds — the per-dataset INFO lines and inner tqdm bars are routed to the log files instead, so concurrent workers don't garble each other on stderr.
 
-`curate.py` is the exception: it parallelizes internally via datatrove's `LocalPipelineExecutor` (see `--workers` below) and is not wrapped by `--max-workers`.
+`curate.py` accepts the same `--max-workers` flag but is **whole-pipeline**, not per-dataset — every parallel datatrove executor inside one stage uses the same worker count, so the per-dataset log routing above does not apply. Its default is `--max-workers 1` (serial) so a casual `--all` invocation does not silently saturate the box; `--max-workers 0` falls back to `cpu_count // 2` and `--tasks` is accepted as a back-compat alias.
 
 #### Download
 
