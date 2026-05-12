@@ -1,35 +1,23 @@
 input_dir: /vault/data/SLM4IE/processed/datatrove
 output_dir: /vault/data/SLM4IE/final
 
+# Stopword file used by both the quality stage (Gopher's min_stop_words)
+# and the stats stage (word/n-gram/keyword filtering).
+stopwords: configs/data/stopwords_sl.txt
+
+# 01_language: lingua-py language detection. In `mode: filter`, only
+# docs whose detected top-1 language is in `targets` survive.
 language:
-  # ISO 639-1 codes considered "in-language" by the lingua filter. In
-  # mode: filter, only docs whose detected top-1 language is in this
-  # list survive. Add more codes here to build a multilingual corpus.
   targets: [sl]
   candidates: [sl, hr, sr, bs, mk, en, de, it, hu]
-  # Required gap between the top language and the runner-up before
-  # lingua commits to a prediction. Critical for South Slavic
-  # disambiguation, where raw confidence is softmax-normalized over
-  # the candidate set and a doc that scores 0.7 for sl can still have
-  # ~0.2 each for hr/sr. Setting this gates `detect_language_of` so a
-  # too-close call returns None instead of guessing.
   minimum_relative_distance: 0.1
   mode: filter
-  # Use lingua's trigram-only model (~5-10x faster than the default
-  # 1-5-gram model). Negligible accuracy loss on long European-language
-  # web text; flip off for short or noisy edge documents where every
-  # gram counts.
   low_accuracy: true
-  # Truncate doc text to this many chars before language detection.
-  # ~2 KB is plenty of signal for a small candidate set; saves work
-  # proportional to doc length on giant web docs (c4, fineweb2). Set
-  # to null to disable truncation.
   max_chars: 2048
 
-# Gopher-style quality heuristics applied between language ID and
-# exact dedup. Stopwords come from `stats.stopwords` below — passing
-# Slovenian stopwords is essential because GopherQualityFilter's
-# built-in defaults are English and would reject most Slovenian docs.
+# 02_quality: Gopher WITHIN-DOCUMENT quality heuristics. Drops docs
+# based on length, word-length, symbol/bullet/ellipsis ratios,
+# alphabetic content, and stopword floor. Never compares across docs.
 quality:
   min_doc_words: 50
   max_doc_words: 100000
@@ -41,18 +29,34 @@ quality:
   max_non_alpha_words_ratio: 0.8
   min_stop_words: 2
 
-dedup:
-  finder_workers: 1
-  sentence:
-    n_sentences: 3
-    min_doc_words: 50
-    min_num_sentences: 2
-    split_sentences: true
+# 03_repetition: Gopher WITHIN-DOCUMENT repetition heuristics. Drops
+# docs whose own text repeats too much internally (duplicate
+# paragraphs/lines, top-n-gram saturation, dup-n-gram fractions).
+# datatrove's defaults from the Gopher paper are used.
+repetition: {}
 
+# 04_1_dedup: whole-document exact dedup ACROSS THE CORPUS. Two docs
+# with byte-identical text collapse to one. `precision` and `hash_fc`
+# rarely change — 64-bit xxhash is collision-safe up to ~10B docs.
+exact_dedup:
+  precision: 64
+  hash_fc: xxhash
+  only_dedup_in_index: true
+
+# 04_2_dedup: N-sentence sliding-window dedup ACROSS THE CORPUS.
+# Removes windows that recur across docs; drops docs whose surviving
+# text falls below the floors.
+sentence_dedup:
+  n_sentences: 3
+  min_doc_words: 50
+  min_num_sentences: 2
+  split_sentences: true
+
+# 05_statistics: word/n-gram tables and (optional) classla TF-IDF
+# keywords. Single-process by design.
 stats:
   top_k_words: 5000
   top_k_ngrams: 5000
   keyword_top_k: 200
   ngram_orders: [2, 3]
   compute_keywords: true
-  stopwords: configs/data/stopwords_sl.txt
