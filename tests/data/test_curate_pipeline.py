@@ -403,10 +403,10 @@ from scripts.data import curate as curate_cli  # noqa: E402
 
 
 class TestCurateCLISelection:
-    """`parse_args` and `_filter_input_keys` accept multiple dataset keys."""
+    """parse_args contract for the new --stage CLI."""
 
     def test_parse_args_accepts_single_key(self) -> None:
-        """A single positional still resolves into `args.datasets`."""
+        """A single positional resolves into `args.datasets`."""
         args = curate_cli.parse_args(["kzb"])
         assert args.datasets == ["kzb"]
         assert args.all is False
@@ -428,6 +428,40 @@ class TestCurateCLISelection:
         with pytest.raises(SystemExit):
             curate_cli.parse_args([])
 
+    def test_parse_args_default_stage_is_all(self) -> None:
+        """No `--stage` flag means run every stage in order."""
+        args = curate_cli.parse_args(["--all"])
+        assert args.stage == "all"
+
+    def test_parse_args_accepts_each_stage_name(self) -> None:
+        """Every documented `--stage` value parses."""
+        for name in (
+            "language", "quality", "repetition",
+            "exact_dedup", "sentence_dedup", "stats", "all",
+        ):
+            args = curate_cli.parse_args(["--all", "--stage", name])
+            assert args.stage == name
+
+    def test_parse_args_rejects_unknown_stage(self) -> None:
+        """An unknown `--stage` value is rejected by argparse."""
+        with pytest.raises(SystemExit):
+            curate_cli.parse_args(["--all", "--stage", "lang"])
+
+    def test_parse_args_default_workers_is_serial(self) -> None:
+        """The default worker count is 1 (serial)."""
+        args = curate_cli.parse_args(["--all"])
+        assert args.workers == 1
+
+    def test_parse_args_max_workers_zero(self) -> None:
+        """`--max-workers 0` is the cpu_default sentinel."""
+        args = curate_cli.parse_args(["--all", "--max-workers", "0"])
+        assert args.workers == 0
+
+    def test_parse_args_tasks_alias(self) -> None:
+        """`--tasks N` is accepted as a back-compat alias for `--max-workers N`."""
+        args = curate_cli.parse_args(["--all", "--tasks", "4"])
+        assert args.workers == 4
+
     def test_filter_input_keys_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
         """`_filter_input_keys` builds symlinks for every requested key."""
         input_dir = tmp_path / "datatrove"
@@ -442,7 +476,6 @@ class TestCurateCLISelection:
             assert (holder / "solar" / "00000.jsonl.gz").is_symlink()
         finally:
             import shutil
-
             shutil.rmtree(holder, ignore_errors=True)
 
     def test_filter_input_keys_lists_all_missing_keys(self, tmp_path: Path) -> None:
