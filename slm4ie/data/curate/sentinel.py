@@ -21,6 +21,7 @@ Conventions:
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,8 +72,14 @@ def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
         Lower-case hex digest prefixed with `"sha256:"`.
     """
     h = hashlib.sha256()
-    h.update(json.dumps(slice_, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    # default=str coerces non-JSON-native YAML values (datetime, date, etc.)
+    # to a stable string form so the hash remains computable.
+    h.update(
+        json.dumps(slice_, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    )
     if extra is not None:
+        # NUL-separate the slice from `extra` so byte boundaries can't collide
+        # between (slice ending in null bytes) and (slice + extra=b"...").
         h.update(b"\x00")
         h.update(extra)
     return "sha256:" + h.hexdigest()
@@ -108,10 +115,15 @@ def write_sentinel(
         "records_in": records_in,
         "records_out": records_out,
     }
-    sentinel_path.write_text(
+    # Atomic write: render the payload to a sibling .tmp file, then rename.
+    # os.replace is atomic on POSIX so a partially-written sentinel can never
+    # be observed by a concurrent reader (or a future run after a crash).
+    tmp_path = sentinel_path.with_suffix(sentinel_path.suffix + ".tmp")
+    tmp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    os.replace(tmp_path, sentinel_path)
     return sentinel_path
 
 
@@ -130,15 +142,15 @@ def read_sentinel(stage_folder: Path) -> Optional[Sentinel]:
         return None
     try:
         data = json.loads(sentinel_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        return Sentinel(
+            completed_at=str(data.get("completed_at", "")),
+            config_hash=str(data.get("config_hash", "")),
+            config_slice=dict(data.get("config_slice") or {}),
+            records_in=int(data.get("records_in", 0)),
+            records_out=int(data.get("records_out", 0)),
+        )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
-    return Sentinel(
-        completed_at=str(data.get("completed_at", "")),
-        config_hash=str(data.get("config_hash", "")),
-        config_slice=dict(data.get("config_slice") or {}),
-        records_in=int(data.get("records_in", 0)),
-        records_out=int(data.get("records_out", 0)),
-    )
 
 
 def sentinel_is_current(stage_folder: Path, expected_hash: str) -> bool:
@@ -166,12 +178,12 @@ def cascade_invalidate(output_dir: Path, stage: str) -> Tuple[str, ...]:
             to compute the downstream set.
 
     Returns:
-        Tuple of stage names whose sentinels were targeted (regardless
-        of whether the sentinel file actually existed beforehand).
+        Tuple of stage names considered for invalidation (i.e.
+        `cascade_from(stage)`), regardless of whether each sentinel
+        file existed.
     """
     affected = cascade_from(stage)
     for name in affected:
         sentinel_path = output_dir / STAGE_DIRS[name] / SENTINEL_NAME
-        if sentinel_path.exists():
-            sentinel_path.unlink()
+        sentinel_path.unlink(missing_ok=True)
     return affected

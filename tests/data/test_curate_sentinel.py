@@ -120,3 +120,60 @@ def test_sentinel_filename_is_complete(tmp_path: Path) -> None:
         records_out=0,
     )
     assert (folder / ".complete").exists()
+
+
+def test_config_hash_handles_yaml_datetime_values(tmp_path: Path) -> None:
+    """config_hash does not raise on YAML-style non-JSON values like datetime."""
+    from datetime import datetime, timezone
+
+    a = config_hash({"created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)})
+    b = config_hash({"created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)})
+    assert a == b
+
+
+def test_config_hash_handles_non_ascii_values() -> None:
+    """Non-ASCII characters in the slice influence the hash predictably."""
+    a = config_hash({"stopwords_path": "stopwords_sl.txt"})
+    b = config_hash({"stopwords_path": "stopwords_žirovski.txt"})
+    assert a != b
+
+
+def test_read_sentinel_returns_none_on_malformed_json(tmp_path: Path) -> None:
+    """A corrupt sentinel file returns None instead of raising."""
+    folder = tmp_path / "02_quality"
+    folder.mkdir()
+    (folder / ".complete").write_text("not json at all {[")
+    assert read_sentinel(folder) is None
+
+
+def test_read_sentinel_returns_none_on_bad_field_types(tmp_path: Path) -> None:
+    """A sentinel with non-coercible numeric fields returns None."""
+    import json as _json
+
+    folder = tmp_path / "02_quality"
+    folder.mkdir()
+    (folder / ".complete").write_text(
+        _json.dumps({
+            "completed_at": "2026-05-12T00:00:00Z",
+            "config_hash": "sha256:abc",
+            "config_slice": {},
+            "records_in": "not_a_number",
+            "records_out": 0,
+        })
+    )
+    assert read_sentinel(folder) is None
+
+
+def test_write_sentinel_does_not_leave_tmp_artifact(tmp_path: Path) -> None:
+    """The atomic write replaces the final path and leaves no .tmp sibling."""
+    folder = tmp_path / "02_quality"
+    folder.mkdir()
+    write_sentinel(
+        folder,
+        config_slice={},
+        config_hash_value="sha256:x",
+        records_in=0,
+        records_out=0,
+    )
+    assert (folder / ".complete").exists()
+    assert not (folder / ".complete.tmp").exists()
