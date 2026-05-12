@@ -38,7 +38,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, cast
 
 import yaml
 
@@ -376,9 +376,23 @@ def _stage_runner(
 
     if stage == "exact_dedup":
         edcfg = cfg.get("exact_dedup") or {}
+        raw_precision = int(edcfg.get("precision", 64))
+        if raw_precision not in (32, 64):
+            raise ValueError(
+                f"curate.yaml::exact_dedup.precision must be 32 or 64, got {raw_precision}"
+            )
+        raw_hash_fc = str(edcfg.get("hash_fc", "xxhash"))
+        if raw_hash_fc not in ("sha1", "xxhash"):
+            raise ValueError(
+                f"curate.yaml::exact_dedup.hash_fc must be 'sha1' or 'xxhash', got {raw_hash_fc!r}"
+            )
+        # Both values are now narrowed by the runtime checks above; cast to
+        # keep static type-checkers happy without losing the Literal contract.
+        precision = cast(Literal[32, 64], raw_precision)
+        hash_fc = cast(Literal["sha1", "xxhash"], raw_hash_fc)
         exact_cfg = make_exact_config(
-            precision=int(edcfg.get("precision", 64)),
-            hash_fc=str(edcfg.get("hash_fc", "xxhash")),
+            precision=precision,
+            hash_fc=hash_fc,
             only_dedup_in_index=bool(edcfg.get("only_dedup_in_index", True)),
         )
 
