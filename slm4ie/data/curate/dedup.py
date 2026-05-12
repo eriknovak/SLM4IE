@@ -6,8 +6,11 @@ exposes the small bits the pipeline builder needs: the
 implementation that hashes `doc.text`.
 """
 
+from typing import Literal
+
 from datatrove.data import Document
 from datatrove.pipeline.dedup import ExactDedupConfig
+from datatrove.utils.hashing import HashConfig
 
 
 def doc_text(doc: Document) -> str:
@@ -34,3 +37,37 @@ def default_exact_config() -> ExactDedupConfig:
         datatrove defaults.
     """
     return ExactDedupConfig(content_getter=doc_text)
+
+
+def make_exact_config(
+    *,
+    precision: Literal[32, 64] = 64,
+    hash_fc: Literal["sha1", "xxhash"] = "xxhash",
+    only_dedup_in_index: bool = True,
+) -> ExactDedupConfig:
+    """Build an `ExactDedupConfig` parameterized for the curate pipeline.
+
+    Wraps datatrove's `ExactDedupConfig` so the CLI can pass through the
+    output-affecting knobs declared under `exact_dedup:` in `curate.yaml`.
+    The content getter is always `doc_text` — exact dedup operates on
+    document text, never on metadata.
+
+    Args:
+        precision: Hash width in bits. Choose `32` only for very small
+            corpora (collision risk grows past ~10M docs); `64` is the
+            collision-safe default up to ~10B docs.
+        hash_fc: Hash function. `"xxhash"` is faster; `"sha1"` is
+            cryptographically strong but unnecessary for dedup.
+        only_dedup_in_index: When True, only deduplicate within the
+            current run's index (datatrove default). Set to False when
+            extending an existing dedup index across runs.
+
+    Returns:
+        A configured `ExactDedupConfig` with `doc_text` as the content
+        getter.
+    """
+    return ExactDedupConfig(
+        content_getter=doc_text,
+        hash_config=HashConfig(precision=precision, hash_fc=hash_fc),
+        only_dedup_in_index=only_dedup_in_index,
+    )
