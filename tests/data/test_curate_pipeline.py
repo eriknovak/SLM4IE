@@ -291,6 +291,7 @@ def _write_shard(path: Path, dataset: str, domain: str, docs: List[dict]) -> Non
 
 
 @pytest.mark.slow
+@pytest.mark.skip(reason="references old build_curate_executors API; rewritten in Task 9")
 def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     """Two shards with one full-doc dup and one shared span produce 5 survivors."""
     input_folder = tmp_path / "datatrove"

@@ -10,6 +10,11 @@ I/O layout — every reader walks `<input_folder>/<dataset>/<part>.jsonl.gz`
 recursively, and every writer emits `<output_folder>/<dataset>/<rank>.jsonl.gz`,
 matching the upstream `to_datatrove.py` per-dataset shard layout. This
 preserves dataset provenance through every stage.
+
+Every builder sets `skip_completed=False` on every executor: per-stage
+skip is owned by the sentinel system in `slm4ie.data.curate.sentinel`,
+not by datatrove's built-in completion tracking. Builders are pure
+factories — they do not check, write, or honor sentinels.
 """
 
 import logging
@@ -72,11 +77,24 @@ class CuratePaths:
 
     @property
     def dedup_state_dir(self) -> Path:
-        """Folder holding the dedup sig/dup scratch between dedup sub-stages."""
+        """Return the folder holding dedup sig/dup scratch between dedup sub-stages.
+
+        Returns:
+            `<output_dir>/_dedup_state`. The CLI runner purges its
+            contents after each dedup sub-stage's sentinel lands.
+        """
         return self.output_dir / "_dedup_state"
 
     def logs_dir(self, stage: str) -> Path:
-        """Per-stage logging directory under `<output_dir>/_logs/<stage>/`."""
+        """Return the per-stage logging directory.
+
+        Args:
+            stage: Stage name (one of `STAGE_NAMES`).
+
+        Returns:
+            `<output_dir>/_logs/<stage>` — datatrove's `logging_dir`
+            for that stage's executor chain.
+        """
         return self.output_dir / "_logs" / stage
 
 
@@ -118,8 +136,17 @@ class QualityConfig:
 
 
 def _writer(stage_folder: Path) -> JsonlWriter:
-    """Return a JsonlWriter that emits `<stage_folder>/<dataset>/<rank>.jsonl.gz`."""
-    stage_folder.mkdir(parents=True, exist_ok=True)
+    """Return a JsonlWriter that emits `<stage_folder>/<dataset>/<rank>.jsonl.gz`.
+
+    Args:
+        stage_folder: Folder to write the shards into. datatrove's
+            writer creates it on first write, so callers do not need
+            to mkdir beforehand.
+
+    Returns:
+        A `JsonlWriter` whose output filename template routes each
+        dataset's shards into its own subfolder per rank.
+    """
     return JsonlWriter(
         output_folder=str(stage_folder),
         output_filename="${dataset}/${rank}.jsonl.gz",
@@ -424,6 +451,9 @@ def build_curate_executors(*args: object, **kwargs: object) -> List[LocalPipelin
     Raises:
         NotImplementedError: Always. Use the per-stage builders instead.
     """
+    # TODO(task-6): remove this shim once scripts/data/curate.py no longer
+    # imports build_curate_executors. Kept only so test collection succeeds
+    # while the CLI is being rewritten.
     raise NotImplementedError(
         "build_curate_executors has been replaced by per-stage builders "
         "(build_language_executors, build_quality_executors, etc.). "
