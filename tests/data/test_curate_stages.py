@@ -74,3 +74,20 @@ def test_cascade_from_rejects_unknown_stage() -> None:
 
     with pytest.raises(KeyError):
         cascade_from("not_a_stage")
+
+
+def test_stage_keysets_are_consistent() -> None:
+    """STAGE_NAMES, STAGE_DIRS, and the slice-key map cover the same stages."""
+    assert set(STAGE_DIRS) == set(STAGE_NAMES)
+    for name in STAGE_NAMES:
+        # Indirect probe of the private slice-key map via the public accessor:
+        # the call must not raise and must return a non-empty tuple.
+        assert config_slice_keys(name)
+
+
+def test_config_slice_keys_rejects_unknown_stage() -> None:
+    """An unknown stage name raises KeyError."""
+    import pytest
+
+    with pytest.raises(KeyError):
+        config_slice_keys("not_a_stage")

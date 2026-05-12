@@ -9,7 +9,7 @@ hash. Consumers should import from here rather than hard-coding stage
 names or folder paths.
 """
 
-from typing import Tuple
+from typing import Dict, Tuple
 
 
 #: Stage names in pipeline execution order.
@@ -29,7 +29,7 @@ ALL_STAGE_NAMES: Tuple[str, ...] = STAGE_NAMES + ("all",)
 
 
 #: Mapping from stage name to the folder under `<output_dir>/` it writes.
-STAGE_DIRS = {
+STAGE_DIRS: Dict[str, str] = {
     "language": "01_language",
     "quality": "02_quality",
     "repetition": "03_repetition",
@@ -40,7 +40,7 @@ STAGE_DIRS = {
 
 
 #: Per-stage top-level YAML keys that go into the sentinel config hash.
-_CONFIG_SLICE_KEYS = {
+_CONFIG_SLICE_KEYS: Dict[str, Tuple[str, ...]] = {
     "language": ("language",),
     "quality": ("quality",),
     "repetition": ("repetition",),
