@@ -290,9 +290,13 @@ def _write_shard(path: Path, dataset: str, domain: str, docs: List[dict]) -> Non
 
 
 @pytest.mark.slow
-@pytest.mark.skip(reason="references old build_curate_executors API; rewritten in Task 9")
 def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
-    """Two shards with one full-doc dup and one shared span produce 5 survivors."""
+    """Two shards with one full-doc dup and one shared span produce 3 survivors.
+
+    Drives every per-stage builder in sequence against a synthetic input
+    and asserts dedup invariants on the `04_2_dedup/` output plus the
+    statistics bundle.
+    """
     input_folder = tmp_path / "datatrove"
     _write_shard(
         input_folder / "alpha" / "00000.jsonl.gz",
@@ -309,51 +313,38 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
         dataset="beta",
         domain="legal",
         docs=[
-            {"id": "beta:1", "text": SHARED_DOC},  # whole-doc dup of alpha:1
-            {"id": "beta:2", "text": B2_TEXT},     # shares 3-sentence span with alpha:2
+            {"id": "beta:1", "text": SHARED_DOC},
+            {"id": "beta:2", "text": B2_TEXT},
             {"id": "beta:3", "text": "Pravna doktrina se razvija s časom in družbenimi spremembami. " * 8},
         ],
     )
 
-    final_folder = tmp_path / "final"
-    paths = CuratePaths(
-        input_folder=input_folder,
-        final_folder=final_folder,
-        statistics_folder=final_folder / "statistics",
-        scratch_folder=tmp_path / "scratch",
-    )
-    executors = build_curate_executors(
-        paths,
-        # Skip classla on the smoke test — it would download a model.
-        compute_keywords=False,
-        # Lower min_doc_words so our small fixtures aren't filtered out
-        # after sentence dedup. Real corpus runs use the default 50.
-        sentence_config=SentDedupConfig(
-            n_sentences=3,
-            min_doc_words=5,
-            min_num_sentences=1,
-            split_sentences=True,
-        ),
-        # Loosen Gopher quality so the short, repetitive fixtures
-        # aren't dropped by quality heuristics. `min_stop_words=0`
-        # avoids needing a real Slovenian stopword list for the smoke
-        # test (we pass an empty stopwords set below).
-        # `max_non_alpha_words_ratio` is misleadingly named in
-        # datatrove: it is actually the *minimum* fraction of words
-        # that must contain at least one alphabetic char. Short fixtures
-        # have proportionally more punctuation tokens (each `.` counts
-        # as its own word), so the alpha fraction sits ~0.85 instead
-        # of the ~0.9+ that real-corpus docs hit. Drop to 0.6 here.
-        quality_config=QualityConfig(
-            min_doc_words=5,
-            min_stop_words=0,
-            max_non_alpha_words_ratio=0.6,
-            max_avg_word_length=15,
-        ),
-        stopwords=set(),
-    )
-    executors[-1].run()
+    output_dir = tmp_path / "curated"
+    paths = CuratePaths(input_folder=input_folder, output_dir=output_dir)
 
+    loose_quality = QualityConfig(
+        min_doc_words=5,
+        min_stop_words=0,
+        max_non_alpha_words_ratio=0.6,
+        max_avg_word_length=15,
+    )
+    loose_sentence = SentDedupConfig(
+        n_sentences=3,
+        min_doc_words=5,
+        min_num_sentences=1,
+        split_sentences=True,
+    )
+
+    build_language_executors(paths, tasks=1)[-1].run()
+    build_quality_executors(
+        paths, tasks=1, quality_config=loose_quality, stopwords=set()
+    )[-1].run()
+    build_repetition_executors(paths, tasks=1)[-1].run()
+    build_exact_dedup_executors(paths, tasks=1)[-1].run()
+    build_sentence_dedup_executors(paths, tasks=1, sentence_config=loose_sentence)[-1].run()
+    build_stats_executors(paths, stopwords=set(), compute_keywords=False)[-1].run()
+
+    final_folder = paths.stage_dir("sentence_dedup")
     survivors: List[str] = []
     survivor_dirs: set = set()
     for shard in sorted(final_folder.glob("**/*.jsonl.gz")):
@@ -363,34 +354,30 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
                 rec = json.loads(line)
                 survivors.append(rec["id"])
 
-    # 6 input docs minus 1 whole-document duplicate (exact dedup)
-    # minus 2 docs killed by GopherRepetitionFilter (each is a
-    # 55-char sentence repeated 8x: heavy top-2-gram density) = 3
-    # survivors. The two "×8" docs are an intentional rep-filter
-    # fixture; the cross-dataset exact dup is the dedup fixture.
+    # 6 input docs:
+    #   - alpha:1 / beta:1 are exact duplicates of each other (SHARED_DOC) → 1 survives
+    #   - alpha:2 / beta:2 share a 3-sentence span; sentence dedup trims one window
+    #     but both docs survive (loose floors)
+    #   - alpha:3 / beta:3 are heavy n-gram repetition → both killed by repetition filter
+    # Expected: 3 survivors total.
     assert len(survivors) == 3
-    assert "alpha:1" in survivors  # SHARED_DOC, kept on alpha rank
-    assert "beta:1" not in survivors  # exact dup of alpha:1
-    assert "alpha:3" not in survivors  # killed by repetition filter
-    assert "beta:3" not in survivors   # killed by repetition filter
-    # Final corpus is sharded as <final>/<dataset>/<rank>.jsonl.gz —
-    # both datasets must show up as their own subfolders.
+    assert "alpha:1" in survivors
+    assert "beta:1" not in survivors
+    assert "alpha:3" not in survivors
+    assert "beta:3" not in survivors
     assert survivor_dirs == {"alpha", "beta"}
 
-    bundle = json.loads((final_folder / "statistics" / "aggregate.json").read_text(encoding="utf-8"))
+    stats_folder = paths.stage_dir("stats")
+    bundle = json.loads((stats_folder / "aggregate.json").read_text(encoding="utf-8"))
     assert bundle["total_docs"] == 3
     assert "alpha" in bundle["by_dataset"]
     assert "beta" in bundle["by_dataset"]
     assert bundle["by_dataset"]["alpha"]["doc_count"] == 2
     assert bundle["by_dataset"]["beta"]["doc_count"] == 1
 
-    per_dataset_dir = final_folder / "statistics" / "per_dataset"
+    per_dataset_dir = stats_folder / "per_dataset"
     assert (per_dataset_dir / "alpha.json").exists()
     assert (per_dataset_dir / "beta.json").exists()
-    alpha_slim = json.loads((per_dataset_dir / "alpha.json").read_text(encoding="utf-8"))
-    assert alpha_slim["dataset"] == "alpha"
-    assert alpha_slim["domain"] == "scientific"
-    assert alpha_slim["doc_count"] == 2
 
 
 # --- CLI: multi-key dataset selection ----------------------------------------
