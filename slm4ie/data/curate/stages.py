@@ -9,7 +9,7 @@ hash. Consumers should import from here rather than hard-coding stage
 names or folder paths.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 
 #: Stage names in pipeline execution order.
@@ -107,3 +107,23 @@ def cascade_from(stage: str) -> Tuple[str, ...]:
         raise KeyError(stage)
     idx = STAGE_NAMES.index(stage)
     return STAGE_NAMES[idx:]
+
+
+def upstream_stage(stage: str) -> Optional[str]:
+    """Return the stage that produces *stage*'s input, or None for the first stage.
+
+    Args:
+        stage: One of the values in `STAGE_NAMES`.
+
+    Returns:
+        The preceding stage's name, or `None` when *stage* is the first
+        stage (`language`) and therefore reads from the run's input
+        folder rather than a previous stage's output.
+
+    Raises:
+        KeyError: If *stage* is not a known stage name.
+    """
+    if stage not in STAGE_NAMES:
+        raise KeyError(stage)
+    idx = STAGE_NAMES.index(stage)
+    return STAGE_NAMES[idx - 1] if idx > 0 else None

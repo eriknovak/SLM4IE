@@ -48,9 +48,11 @@ from slm4ie.data.curate import (
     ALL_STAGE_NAMES,
     STAGE_DIRS,
     STAGE_NAMES,
+    cascade_from,
     cascade_invalidate,
     config_hash,
     sentinel_is_current,
+    upstream_stage,
     write_sentinel,
 )
 from slm4ie.data.curate.dedup import make_exact_config
@@ -267,24 +269,18 @@ def _count_records(folder: Path) -> int:
 
 
 def _stage_input_dir(paths: CuratePaths, stage: str) -> Path:
-    """Return the folder *stage* reads from.
+    """Return the folder a stage reads from.
 
     Args:
         paths: Resolved curation paths.
         stage: Stage name.
 
     Returns:
-        Folder path the stage's first executor reads.
+        The previous stage's output folder, or `paths.input_folder`
+        when *stage* is the first stage in the pipeline.
     """
-    upstream = {
-        "language": paths.input_folder,
-        "quality": paths.stage_dir("language"),
-        "repetition": paths.stage_dir("quality"),
-        "exact_dedup": paths.stage_dir("repetition"),
-        "sentence_dedup": paths.stage_dir("exact_dedup"),
-        "stats": paths.stage_dir("sentence_dedup"),
-    }
-    return upstream[stage]
+    prev = upstream_stage(stage)
+    return paths.input_folder if prev is None else paths.stage_dir(prev)
 
 
 def _purge_dedup_state(paths: CuratePaths, which: str) -> None:
@@ -465,21 +461,43 @@ def _stage_slice(stage: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
     return dict(cfg.get(stage) or {})
 
 
-def _stage_extra(stage: str, stopwords_bytes: bytes) -> bytes:
-    """Return extra bytes folded into the hash for stages with side files.
+def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
+    """Return canonical bytes for the dataset key list (for hashing).
+
+    Args:
+        dataset_keys: Dataset keys this run will process. Order is
+            normalized via `sorted` so positional `kzb solar` and
+            `solar kzb` produce the same hash.
+
+    Returns:
+        UTF-8 JSON bytes of the sorted key list.
+    """
+    import json as _json
+
+    return _json.dumps(sorted(dataset_keys), ensure_ascii=False).encode("utf-8")
+
+
+def _stage_extra(stage: str, stopwords_bytes: bytes, dataset_keys_bytes: bytes) -> bytes:
+    """Return extra bytes folded into the hash for a stage.
+
+    The dataset key list is included for every stage so that switching
+    between `--all` and a positional subset (or adding/removing a
+    dataset from `extract.yaml`) invalidates the sentinels. Stopword
+    file contents are included only for stages that consume them
+    (`quality`, `stats`).
 
     Args:
         stage: Stage name.
         stopwords_bytes: Raw bytes of the stopword file.
+        dataset_keys_bytes: Canonical JSON bytes of the sorted dataset
+            key list.
 
     Returns:
-        Bytes to fold into the sentinel hash. Only the `quality` and
-        `stats` stages consume the stopword file, so other stages
-        return `b""`.
+        Bytes to fold into the sentinel hash.
     """
     if stage in ("quality", "stats"):
-        return stopwords_bytes
-    return b""
+        return stopwords_bytes + b"\x00" + dataset_keys_bytes
+    return dataset_keys_bytes
 
 
 def main() -> None:
@@ -500,16 +518,18 @@ def main() -> None:
 
     subset_holder: Optional[Path] = None
     if args.all:
-        all_keys = _list_datasets(extract_path)
-        logger.info("Running on all %d datasets (workers=%d)", len(all_keys), workers)
+        dataset_keys = _list_datasets(extract_path)
+        logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
         input_folder = input_dir
     else:
+        dataset_keys = list(args.datasets)
         logger.info(
             "Running on %d dataset(s): %s (workers=%d)",
-            len(args.datasets), ", ".join(args.datasets), workers,
+            len(dataset_keys), ", ".join(dataset_keys), workers,
         )
-        subset_holder = _filter_input_keys(input_dir, args.datasets)
+        subset_holder = _filter_input_keys(input_dir, dataset_keys)
         input_folder = subset_holder
+    dataset_keys_bytes = _dataset_keys_payload(dataset_keys)
 
     paths = CuratePaths(input_folder=input_folder, output_dir=output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -524,34 +544,59 @@ def main() -> None:
             logger.warning("--force: cleared %s", output_dir)
 
     if args.force and args.stage != "all":
-        removed = cascade_invalidate(output_dir, args.stage)
-        logger.warning("--force --stage %s: invalidated %s", args.stage, removed)
+        affected = cascade_from(args.stage)
+        for name in affected:
+            folder = paths.stage_dir(name)
+            if folder.exists():
+                shutil.rmtree(folder)
+        if any(s in affected for s in ("exact_dedup", "sentence_dedup")):
+            if paths.dedup_state_dir.exists():
+                shutil.rmtree(paths.dedup_state_dir)
+        cascade_invalidate(output_dir, args.stage)
+        logger.warning(
+            "--force --stage %s: removed data folders and sentinels for %s",
+            args.stage, list(affected),
+        )
 
     requested_stages = STAGE_NAMES if args.stage == "all" else (args.stage,)
 
     try:
         cascaded = False
+        last_records_out: Optional[int] = None
         for stage in requested_stages:
             slice_ = _stage_slice(stage, cfg)
-            extra = _stage_extra(stage, stopwords_raw)
+            extra = _stage_extra(stage, stopwords_raw, dataset_keys_bytes)
             current_hash = config_hash(slice_, extra=extra)
             stage_folder = paths.stage_dir(stage)
 
             if not cascaded and sentinel_is_current(stage_folder, current_hash):
                 logger.info("[%s] sentinel current; skipping.", stage)
+                # Skipped — next running stage must re-derive its input count
+                # from disk since we did not just produce this stage's output.
+                last_records_out = None
                 continue
 
             if not cascaded:
-                removed = cascade_invalidate(output_dir, stage)
-                if any((output_dir / STAGE_DIRS[r] / ".complete").exists() for r in removed):
-                    logger.warning("[%s] cascade-invalidating %s", stage, removed)
+                pre_existing = [
+                    s for s in cascade_from(stage)
+                    if (output_dir / STAGE_DIRS[s] / ".complete").exists()
+                ]
+                cascade_invalidate(output_dir, stage)
+                if pre_existing:
+                    logger.warning(
+                        "[%s] cascade-invalidating sentinels for %s", stage, pre_existing
+                    )
                 cascaded = True
 
-            records_in_before = _count_records(_stage_input_dir(paths, stage))
+            if last_records_out is not None:
+                records_in_before = last_records_out
+            else:
+                records_in_before = _count_records(_stage_input_dir(paths, stage))
             logger.info("[%s] starting (input records ~%d)", stage, records_in_before)
             runner = _stage_runner(stage, paths, cfg, workers, stopwords)
             runner()
-            records_out = _count_records(stage_folder) if stage != "stats" else 0
+            records_out = 0 if stage == "stats" else _count_records(stage_folder)
+            last_records_out = records_out
             write_sentinel(
                 stage_folder,
                 config_slice=slice_,

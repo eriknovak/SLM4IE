@@ -91,3 +91,31 @@ def test_config_slice_keys_rejects_unknown_stage() -> None:
 
     with pytest.raises(KeyError):
         config_slice_keys("not_a_stage")
+
+
+def test_upstream_stage_for_first_stage_is_none() -> None:
+    """The first stage has no upstream stage."""
+    from slm4ie.data.curate.stages import upstream_stage
+
+    assert upstream_stage("language") is None
+
+
+def test_upstream_stage_returns_predecessor() -> None:
+    """upstream_stage returns the preceding stage in execution order."""
+    from slm4ie.data.curate.stages import upstream_stage
+
+    assert upstream_stage("quality") == "language"
+    assert upstream_stage("repetition") == "quality"
+    assert upstream_stage("exact_dedup") == "repetition"
+    assert upstream_stage("sentence_dedup") == "exact_dedup"
+    assert upstream_stage("stats") == "sentence_dedup"
+
+
+def test_upstream_stage_rejects_unknown_stage() -> None:
+    """An unknown stage name raises KeyError."""
+    import pytest
+
+    from slm4ie.data.curate.stages import upstream_stage
+
+    with pytest.raises(KeyError):
+        upstream_stage("not_a_stage")

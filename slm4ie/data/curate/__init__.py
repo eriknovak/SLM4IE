@@ -31,6 +31,7 @@ from slm4ie.data.curate.stages import (
     config_slice_keys,
     final_corpus_dir,
     stats_dir,
+    upstream_stage,
 )
 from slm4ie.data.curate.sentinel import (
     Sentinel,
@@ -50,6 +51,7 @@ __all__ = [
     "config_slice_keys",
     "final_corpus_dir",
     "stats_dir",
+    "upstream_stage",
 ]
 
 __all__ += [
