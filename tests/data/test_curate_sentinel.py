@@ -1,12 +1,8 @@
 """Tests for the per-stage sentinel I/O + config-hash module."""
 
-import json
 from pathlib import Path
 
-import pytest
-
 from slm4ie.data.curate.sentinel import (
-    Sentinel,
     cascade_invalidate,
     config_hash,
     read_sentinel,
@@ -35,7 +31,7 @@ def test_config_hash_ignores_key_order() -> None:
     assert config_hash(a) == config_hash(b)
 
 
-def test_config_hash_includes_extra_payload(tmp_path: Path) -> None:
+def test_config_hash_includes_extra_payload() -> None:
     """Optional extra payload (e.g. stopword file contents) affects the hash."""
     a = config_hash({"min_doc_words": 50})
     b = config_hash({"min_doc_words": 50}, extra=b"different bytes")
