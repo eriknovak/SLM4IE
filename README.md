@@ -260,7 +260,7 @@ Output goes to `<raw-dir>/eval/superglue_sl/<variant>/<task>/<split>.jsonl.gz` (
 
 #### Curation (datatrove)
 
-`curate.py` produces the **final pretraining corpus** in a single invocation: language verification, cross-dataset deduplication, and corpus statistics, all fused into one [datatrove](https://github.com/huggingface/datatrove) pipeline. Inputs and outputs are read from `configs/data/curate.yaml` (`input_dir`, `output_dir`) — `input_dir` is the folder of `<key>.jsonl.gz` datatrove shards from the previous stage and `output_dir` is where the deduplicated training corpus and statistics are written. The dataset key list is still pulled from `configs/data/extract.yaml`.
+`curate.py` produces the **final pretraining corpus** as a sequence of six independent, sentinel-skippable stages built on [datatrove](https://github.com/huggingface/datatrove): language filtering, Gopher within-document quality and repetition heuristics, cross-corpus exact and sentence deduplication, and corpus statistics. Each stage writes a durable on-disk artifact and a `.complete` sentinel under `output_dir`; on rerun, a stage whose config slice hash is unchanged is skipped, and editing one section of `configs/data/curate.yaml` cascade-invalidates that stage plus every downstream stage. `input_dir` is the folder of `<key>/<NNNNN>.jsonl.gz` datatrove shards from `to_datatrove.py`; `output_dir` is the curate-owned tree. The dataset key list still comes from `configs/data/extract.yaml`.
 
 ##### Install the extra
 
@@ -276,109 +276,89 @@ The `curate` extra pulls in `datatrove`, `lingua-language-detector`, `spacy` (Sl
 uv run python scripts/data/curate.py --all
 ```
 
-This runs the full pipeline end-to-end on every dataset declared in `configs/data/extract.yaml`. The output is the `output_dir` from `configs/data/curate.yaml` and nothing else — every intermediate artifact lives in a `tempfile.TemporaryDirectory` that is removed at the end of the run.
+This iterates all six stages in order, skipping any whose sentinel hash matches the current config. The final corpus lands at `<output_dir>/04_2_dedup/<dataset>/<rank>.jsonl.gz`; statistics at `<output_dir>/05_statistics/`.
 
-##### How the pipeline runs (6 datatrove executors)
+##### Six user-facing stages
 
-`build_curate_executors()` chains six `LocalPipelineExecutor`s with `depends=`. Calling `.run()` on the last executor walks the chain backwards and runs the rest in order. Find stages can't be merged with the rest because they consume all signatures from disk in a single pass; the corpus-stats stage stays single-process because `CorpusStats` keeps global counters on its instance.
+Each stage reads its predecessor's output and writes a numbered folder. The two dedup sub-stages are independent: `04_1_dedup` cleans whole-document duplicates across the corpus; `04_2_dedup` runs sentence-level dedup over that result.
 
-```text
-TMP = tempfile.TemporaryDirectory()      (or <output_dir>/_dedup/ with --debug)
+| CLI name | Folder | Operates on | What it does |
+|---|---|---|---|
+| `language` | `01_language/` | per-doc | lingua-py language detection (tag or filter) |
+| `quality` | `02_quality/` | per-doc | Gopher within-document quality heuristics (length, word lengths, symbol/bullet/ellipsis ratios, stopword floor) |
+| `repetition` | `03_repetition/` | per-doc | Gopher within-document repetition heuristics (duplicate paragraphs/lines, top-n-gram saturation, dup-n-gram fractions) |
+| `exact_dedup` | `04_1_dedup/` | corpus-wide | whole-document exact dedup (xxhash64 of `doc.text`) |
+| `sentence_dedup` | `04_2_dedup/` | corpus-wide | N-sentence sliding-window dedup (final corpus) |
+| `stats` | `05_statistics/` | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process) |
 
-executor 1   (per-shard, parallel via --workers)
-    JsonlReader(<input_dir>)
-        → LinguaLanguageFilter            # tag metadata.language + score
-        → JsonlWriter(TMP/lang_tagged)    # tagged shards for executor 3
-        → ExactDedupSignature             # writes hashes to TMP/exact_sigs
+Each stage's sentinel hash covers its own top-level `curate.yaml` section. The `quality` and `stats` hashes additionally fold in the contents of the stopword file, and every stage's hash folds in the sorted list of dataset keys this run will process — so editing `stopwords_sl.txt`, switching between `--all` and a positional subset, or adding a dataset to `extract.yaml` all correctly trigger rebuilds.
 
-executor 2   (single worker — find stage)
-    ExactFindDedups
-        reads  TMP/exact_sigs
-        writes TMP/exact_dups
-
-executor 3   (per-shard, parallel via --workers)
-    JsonlReader(TMP/lang_tagged)
-        → ExactDedupFilter                # drops whole-doc duplicates
-        → JsonlWriter(TMP/after_exact)    # filtered shards for executor 5
-        → SentenceDedupSignature          # writes 3-sent hashes to TMP/sent_sigs
-
-executor 4   (single worker — find stage)
-    SentenceFindDedups
-        reads  TMP/sent_sigs
-        writes TMP/sent_dups
-
-executor 5   (per-shard, parallel via --workers)
-    JsonlReader(TMP/after_exact)
-        → SentenceDedupFilter             # drops duplicate sentence spans
-        → JsonlWriter(<output_dir>)       # the training corpus
-
-executor 6   (single worker — global stats)
-    JsonlReader(<output_dir>)
-        → CorpusStats                     # accumulates global counters
-                                          # writes <output_dir>/statistics/
-```
-
-Both signature steps use `Languages.slovenian`, so datatrove dispatches to its bundled Slovenian `SpaCyTokenizer` for word and sentence boundaries. Running them with the English default would corrupt the dedup signature.
+Internally each dedup stage chains three datatrove executors via `depends=`: signature → find (single-worker reducer over signatures) → filter + write. The sig/find scratch lives at `<output_dir>/_dedup_state/` and is purged when the stage's sentinel lands. The stats stage is single-process because `CorpusStats` keeps global counters on its instance. The sentence-dedup blocks use `Languages.slovenian` so datatrove dispatches its bundled Slovenian `SpaCyTokenizer` for sentence boundaries.
 
 ##### Output layout
 
 ```text
 <input_dir>/                                upstream input (unchanged)
-└── <key>.jsonl.gz
+└── <key>/<NNNNN>.jsonl.gz
 
 <output_dir>/                               curate.py owns this entire tree
-├── <key>.jsonl.gz                          ← deduplicated training corpus
-├── statistics/
+├── 01_language/
+│   ├── <key>/<rank>.jsonl.gz               ← post-language-filter shards
+│   └── .complete                           sentinel: stage hash + counts
+├── 02_quality/
+│   ├── <key>/<rank>.jsonl.gz
+│   └── .complete
+├── 03_repetition/
+│   ├── <key>/<rank>.jsonl.gz
+│   └── .complete
+├── 04_1_dedup/
+│   ├── <key>/<rank>.jsonl.gz               ← post-exact-dedup shards
+│   └── .complete
+├── 04_2_dedup/
+│   ├── <key>/<rank>.jsonl.gz               ← final pretraining corpus
+│   └── .complete
+├── 05_statistics/
 │   ├── aggregate.json                      corpus-wide totals + tables
-│   └── per_dataset/<key>.json              per-dataset doc/word breakdowns
-└── _dedup/                                 only with --debug
-    ├── lang_tagged/<key>.jsonl.gz          (executor 1 output)
-    ├── after_exact/<key>.jsonl.gz          (executor 3 output)
-    ├── exact_sigs/, exact_dups/            (datatrove dedup state)
-    ├── sent_sigs/, sent_dups/              (datatrove dedup state)
-    ├── exact_dropped/<key>.jsonl.gz        (whole-doc duplicates dropped)
-    └── sentence_dropped/<key>.jsonl.gz     (docs dropped post sentence-dedup)
+│   ├── per_dataset/<key>.json              per-dataset doc/word breakdowns
+│   └── .complete
+├── _dedup_state/                           sig/find scratch (auto-purged
+│                                           when each dedup sentinel lands)
+└── _logs/<stage>/                          datatrove per-executor logs
 ```
 
 ##### Useful invocations
 
 ```bash
-# Single dataset (still all three concerns; dedup operates within that
-# one shard only — for cross-dataset dedup, use --all).
-uv run python scripts/data/curate.py kzb
+# Run all six stages, skipping any whose config slice hash is unchanged.
+uv run python scripts/data/curate.py --all
 
-# Re-run only the stats stage against the existing curated corpus —
-# useful after editing top_k / keyword_top_k in configs/data/curate.yaml.
-uv run python scripts/data/curate.py --all --stage stats
+# Run only one stage. If its hash diverges from the recorded sentinel,
+# downstream sentinels are dropped so the next --all picks them up.
+uv run python scripts/data/curate.py --all --stage quality
 
-# Skip the (slow) classla-lemmatized TF-IDF keyword pass.
-uv run python scripts/data/curate.py --all --no-keywords
+# Force-rebuild a stage and every downstream stage. Removes their data
+# folders AND sentinels; --force without --stage clears <output_dir>.
+uv run python scripts/data/curate.py --all --force --stage quality
 
-# Debug: keep dedup state and dropped-duplicate JSONL shards under
-# <output_dir>/_dedup/ for inspection. Or --debug-dir <path> to put
-# them somewhere else.
-uv run python scripts/data/curate.py --all --debug
+# Single dataset, or a subset. The dataset key list folds into every
+# stage's hash, so a subset rerun will not silently reuse a previous
+# full-corpus output. (Switching between subsets / --all triggers rebuilds.)
+uv run python scripts/data/curate.py kzb solar
 
-# Parallelism: per-shard executors (1, 3, 5) run with this many workers.
-# Find stages and the final stats stage stay single-worker by design.
-# Pass --workers 0 to use every available core. --tasks is a back-compat alias.
-uv run python scripts/data/curate.py --all --workers 4
+# Parallelism. Default is 1 (serial). 0 = cpu_count // 2. --tasks is an alias.
+uv run python scripts/data/curate.py --all --max-workers 8
+uv run python scripts/data/curate.py --all --max-workers 0
 
-# Rebuild from scratch (the existing <output_dir> is preserved by default).
-uv run python scripts/data/curate.py --all --force
-
-# Override curate.yaml paths from the CLI (e.g. for ad-hoc runs).
+# Override curate.yaml paths from the CLI.
 uv run python scripts/data/curate.py --all \
     --input-dir /tmp/in --output-dir /tmp/out
 ```
 
-`--stage lang` and `--stage dedup` exist for debugging only — their outputs live in the auto-cleaned tempdir, so they vanish when the script exits. Combine with `--debug` to make those intermediates inspectable. `--stage stats` is the only single-stage mode that produces a real persistent artifact (it re-reads `<output_dir>` and refreshes `<output_dir>/statistics/`).
-
 ##### Configuration
 
-`configs/data/curate.yaml` controls the input/output folders, language candidate set, dedup thresholds, n-gram orders, and stopword path. `input_dir` and `output_dir` are required; both can be overridden per run via `--input-dir` / `--output-dir`. The default `<output_dir>/statistics/aggregate.json` includes top-5000 word / bigram / trigram tables and top-200 TF-IDF keywords per (domain, dataset) bucket — adjust those numbers in the config rather than via CLI flags.
+`configs/data/curate.yaml` has one top-level section per stage (`language:`, `quality:`, `repetition:`, `exact_dedup:`, `sentence_dedup:`, `stats:`) plus shared `input_dir`, `output_dir`, and a `stopwords:` path used by both `quality` and `stats`. Each section is the **exclusive input** to that stage's sentinel hash slice, so edits propagate as far downstream as needed and no further. Defaults match the Gopher paper for the heuristic filters, 64-bit xxhash for exact dedup, 3-sentence windows for sentence dedup, and top-5000 word / bigram / trigram + top-200 TF-IDF keyword tables for stats. To skip the (slow) classla-lemmatized keyword pass, set `stats.compute_keywords: false` in the YAML — there is no longer a `--no-keywords` CLI flag.
 
-The first run of the keyword stage downloads the Slovenian classla model (~200 MB) under `~/.classla_resources/`. Pass `--no-keywords` to skip it — the rest of the stats are populated from datatrove's bundled spaCy tokenizer and don't need any model download.
+The first run of the keyword stage downloads the Slovenian classla model (~200 MB) under `~/.classla_resources/`.
 
 #### Synthetic data
 
