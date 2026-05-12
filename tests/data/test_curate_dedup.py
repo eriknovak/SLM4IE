@@ -30,14 +30,13 @@ class TestExactDedupHelpers:
         cfg = default_exact_config()
         assert cfg.content_getter is doc_text
 
-    def test_make_exact_config_defaults_match_default_helper(self) -> None:
-        """make_exact_config with no args returns the same shape as default_exact_config."""
+    def test_make_exact_config_defaults_are_pinned(self) -> None:
+        """Defaults are 64-bit xxhash, only_dedup_in_index=True, doc_text getter."""
         cfg = make_exact_config()
-        default = default_exact_config()
         assert cfg.content_getter is doc_text
-        assert cfg.hash_config.precision == default.hash_config.precision
-        assert cfg.hash_config.hash_fc == default.hash_config.hash_fc
-        assert cfg.only_dedup_in_index == default.only_dedup_in_index
+        assert cfg.hash_config.precision == 64
+        assert cfg.hash_config.hash_fc == "xxhash"
+        assert cfg.only_dedup_in_index is True
 
     def test_make_exact_config_overrides_precision(self) -> None:
         """make_exact_config threads the precision arg into HashConfig."""

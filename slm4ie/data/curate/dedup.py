@@ -1,9 +1,10 @@
 """Helpers for the datatrove dedup blocks used by the curation pipeline.
 
 The actual block instantiation lives in `pipeline.py`. This module
-exposes the small bits the pipeline builder needs: the
-`ExactDedupConfig` factory and an `ExactDedupConfig.content_getter`
-implementation that hashes `doc.text`.
+exposes `doc_text` (the content getter for whole-document exact dedup)
+and two `ExactDedupConfig` factories: `make_exact_config` for the
+parameterized form driven by `curate.yaml::exact_dedup`, and
+`default_exact_config` as a zero-arg alias kept for back-compat.
 """
 
 from typing import Literal
@@ -26,17 +27,6 @@ def doc_text(doc: Document) -> str:
         of their metadata.
     """
     return doc.text
-
-
-def default_exact_config() -> ExactDedupConfig:
-    """Build the default `ExactDedupConfig` used by the curation pipeline.
-
-    Returns:
-        An `ExactDedupConfig` whose `content_getter` is `doc_text` and
-        whose `hash_config` and `document_priority` keep the upstream
-        datatrove defaults.
-    """
-    return ExactDedupConfig(content_getter=doc_text)
 
 
 def make_exact_config(
@@ -71,3 +61,19 @@ def make_exact_config(
         hash_config=HashConfig(precision=precision, hash_fc=hash_fc),
         only_dedup_in_index=only_dedup_in_index,
     )
+
+
+def default_exact_config() -> ExactDedupConfig:
+    """Build the default `ExactDedupConfig` used by the curation pipeline.
+
+    Thin alias for `make_exact_config()` — kept for back-compat with
+    test fixtures and the existing pipeline call sites. New code should
+    call `make_exact_config(...)` directly so any non-default knob is
+    explicit at the call site.
+
+    Returns:
+        An `ExactDedupConfig` whose `content_getter` is `doc_text` and
+        whose hashing knobs match `make_exact_config`'s defaults (64-bit
+        xxhash, `only_dedup_in_index=True`).
+    """
+    return make_exact_config()
