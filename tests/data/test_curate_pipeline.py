@@ -32,7 +32,6 @@ from slm4ie.data.curate.language import LinguaLanguageFilter  # noqa: E402
 from slm4ie.data.curate.pipeline import (  # noqa: E402
     CuratePaths,
     QualityConfig,
-    build_curate_executors,
     build_exact_dedup_executors,
     build_language_executors,
     build_quality_executors,

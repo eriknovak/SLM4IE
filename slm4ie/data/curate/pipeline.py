@@ -433,34 +433,6 @@ def build_sentence_dedup_executors(
     return [sig, find, filt]
 
 
-def build_curate_executors(*args: object, **kwargs: object) -> List[LocalPipelineExecutor]:
-    """Removed: replaced by per-stage builder functions.
-
-    This name is kept only so that the old `scripts/data/curate.py` can
-    be imported during test collection without a hard `ImportError`. Any
-    call will raise `NotImplementedError` immediately; the CLI is
-    rewritten in Task 6.
-
-    Args:
-        *args: Ignored.
-        **kwargs: Ignored.
-
-    Returns:
-        Never returns — always raises.
-
-    Raises:
-        NotImplementedError: Always. Use the per-stage builders instead.
-    """
-    # TODO(task-6): remove this shim once scripts/data/curate.py no longer
-    # imports build_curate_executors. Kept only so test collection succeeds
-    # while the CLI is being rewritten.
-    raise NotImplementedError(
-        "build_curate_executors has been replaced by per-stage builders "
-        "(build_language_executors, build_quality_executors, etc.). "
-        "The CLI is rewritten in Task 6."
-    )
-
-
 def build_stats_executors(
     paths: CuratePaths,
     *,
