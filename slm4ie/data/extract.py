@@ -10,6 +10,8 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from slm4ie.data.parallel import workers_quiet
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +48,7 @@ def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
             unit="B",
             unit_scale=True,
             desc=archive_path.name,
+            disable=workers_quiet(),
         ) as wrapped_in:
             with gzip.GzipFile(fileobj=wrapped_in, mode="rb") as f_in:  # type: ignore[arg-type]
                 with open(output_path, "wb") as f_out:
@@ -87,6 +90,7 @@ def _extract_xz(archive_path: Path, output_dir: Path) -> Path:
             unit="B",
             unit_scale=True,
             desc=archive_path.name,
+            disable=workers_quiet(),
         ) as wrapped_in:
             with lzma.open(wrapped_in, "rb") as f_in:  # type: ignore[arg-type]
                 with open(output_path, "wb") as f_out:
@@ -114,6 +118,7 @@ def _extract_zip(archive_path: Path, output_dir: Path) -> Path:
             members,
             desc=archive_path.name,
             unit="file",
+            disable=workers_quiet(),
         ):
             zf.extract(member, output_dir)
     return output_dir
@@ -140,6 +145,7 @@ def _extract_tar(archive_path: Path, output_dir: Path) -> Path:
             members,
             desc=archive_path.name,
             unit="file",
+            disable=workers_quiet(),
         ):
             tf.extract(member, output_dir, filter="data")
     return output_dir

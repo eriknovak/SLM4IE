@@ -4,23 +4,21 @@ Provides a small dispatcher that runs a worker function over a list of
 dataset keys with a bounded process or thread pool. Per-key exceptions
 are isolated so a single failure does not abort the whole run.
 
-Also provides per-task file logging and a periodic console summary
-when running in parallel mode, so that worker output does not interleave
-on the console.
+Also provides per-task file logging and a single self-updating tqdm
+bar in parallel mode, so that worker output does not interleave on the
+console.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import sys
 import threading
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
     as_completed,
 )
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -92,37 +90,74 @@ def workers_quiet() -> bool:
     return os.environ.get(_PARALLEL_ENV_VAR) == "1"
 
 
-def configure_script_logging(parallel: bool) -> None:
+#: Third-party loggers whose INFO output is pure chatter for our scripts.
+#: Bumped to WARNING so neither the console nor the per-dataset log files
+#: are flooded by shard progress, "Generating split…" lines, retry warnings,
+#: etc. Per-dataset detail we care about comes from `slm4ie.*` loggers.
+_NOISY_THIRD_PARTY_LOGGERS = (
+    "datasets",
+    "huggingface_hub",
+    "urllib3",
+    "filelock",
+    "fsspec",
+)
+
+
+def configure_script_logging(
+    parallel: bool,
+    console_level: Optional[int] = None,
+) -> None:
     """Configure root logging for a data script.
 
-    Always installs the project's standard console format at INFO level.
+    Always installs the project's standard console format at INFO level,
+    quiets noisy third-party loggers (`datasets`, `huggingface_hub`,
+    `urllib3`, `filelock`, `fsspec`) to WARNING, and disables HuggingFace
+    progress bars so they do not interleave with our own output.
+
     When ``parallel`` is True, the console handler is bumped to WARNING
     so routine worker output does not spam stderr (per-dataset INFO/DEBUG
     still reaches the per-key log files set up by `run_parallel`).
 
+    When ``console_level`` is given, the console handler's level is set
+    to that value after the parallel adjustment, so callers can force a
+    quiet console even in serial mode while letting INFO records reach
+    the per-dataset log files.
+
     Args:
-        parallel: True when ``--max-workers`` will be greater than 1.
+        parallel: True when `--max-workers` will be greater than 1.
+        console_level: Optional explicit level for the console
+            StreamHandler. When None, defaults to WARNING in parallel
+            mode and INFO in serial mode.
     """
     logging.basicConfig(
         level=logging.INFO,
         format=_FILE_LOG_FORMAT,
     )
-    if parallel:
+    for name in _NOISY_THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    try:
+        from datasets.utils.logging import disable_progress_bar
+
+        disable_progress_bar()
+    except ImportError:
+        pass
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+
+        disable_progress_bars()
+    except ImportError:
+        pass
+
+    if parallel or console_level is not None:
+        effective_level = (
+            console_level if console_level is not None else logging.WARNING
+        )
         for handler in logging.getLogger().handlers:
             if isinstance(handler, logging.StreamHandler) and not isinstance(
                 handler, logging.FileHandler
             ):
-                handler.setLevel(logging.WARNING)
-
-
-@dataclass
-class _Counts:
-    """Mutable counters shared between main thread and summary thread."""
-
-    total: int
-    done: int = 0
-    skipped: int = 0
-    failed: int = 0
+                handler.setLevel(effective_level)
 
 
 class _ThreadFilter(logging.Filter):
@@ -193,37 +228,6 @@ def _worker_with_log(
             handler.close()
 
 
-def _summary_loop(
-    desc: str,
-    counts: _Counts,
-    max_workers: int,
-    interval: float,
-    lock: threading.Lock,
-    stop: threading.Event,
-) -> None:
-    """Print a periodic summary line until ``stop`` is set.
-
-    Args:
-        desc: Short label used in the log line.
-        counts: Shared counters updated by the main thread.
-        max_workers: Pool size; bounds the reported "running" value.
-        interval: Seconds between summary lines.
-        lock: Guards reads of ``counts``.
-        stop: Event the main thread sets when the run is finishing.
-    """
-    while not stop.wait(interval):
-        with lock:
-            completed = counts.done + counts.skipped + counts.failed
-            running = max(0, min(max_workers, counts.total - completed))
-            waiting = max(0, counts.total - completed - running)
-            line = (
-                f"{desc}: running={running} done={counts.done} "
-                f"skipped={counts.skipped} failed={counts.failed} "
-                f"waiting={waiting} ({completed}/{counts.total})"
-            )
-        print(line, file=sys.stderr, flush=True)
-
-
 def run_parallel(
     func: Callable[..., Any],
     keys: Iterable[str],
@@ -233,7 +237,6 @@ def run_parallel(
     pool: str = "process",
     kwargs_for: Callable[[str], Dict[str, Any]] = lambda _k: {},
     log_dir: Optional[Path] = None,
-    summary_interval: float = 30.0,
 ) -> Tuple[Dict[str, Any], List[Tuple[str, BaseException]]]:
     """Run ``func(key, **kwargs_for(key))`` over ``keys`` with bounded concurrency.
 
@@ -241,14 +244,16 @@ def run_parallel(
     without an executor so tracebacks stay unwrapped for debugging. When
     parallel, sets ``SLM4IE_DATA_PARALLEL=1`` for the duration of the
     pool so workers can call `workers_quiet()` to suppress their own
-    progress bars, and emits a periodic plain-text summary line to
-    stderr in place of an outer tqdm bar.
+    progress bars, and drives a single self-updating tqdm bar on stderr
+    with a postfix showing running/done/skipped/failed/waiting counts.
+    The start timestamp is logged once before the bar opens; elapsed
+    time is shown inside the bar itself.
 
     Args:
         func: Worker callable. Must be picklable when ``pool="process"``.
         keys: Dataset keys (or any string identifiers) to process.
         max_workers: Effective worker count (use ``resolve_workers``).
-        desc: Short label used in the summary line / outer tqdm bar.
+        desc: Short label used as the tqdm bar description.
         pool: Either ``"process"`` (CPU-bound) or ``"thread"`` (I/O-bound).
         kwargs_for: Builds per-key keyword args. Resolve config / paths
             here in the parent so workers stay pickle-clean and config
@@ -256,8 +261,6 @@ def run_parallel(
         log_dir: When set, every task's `logger` output is captured into
             ``log_dir / f"{key}.log"`` for the duration of the call.
             Applies to both serial and parallel paths.
-        summary_interval: Seconds between periodic console summary lines
-            in parallel mode. Ignored when serial.
 
     Returns:
         ``(results_by_key, failures)``. ``results_by_key`` maps each key
@@ -304,20 +307,22 @@ def run_parallel(
     else:
         raise ValueError(f"Unknown pool kind: {pool!r}")
 
-    counts = _Counts(total=len(keys_list))
-    lock = threading.Lock()
-    stop = threading.Event()
-    summary_thread = threading.Thread(
-        target=_summary_loop,
-        args=(desc, counts, max_workers, summary_interval, lock, stop),
-        daemon=True,
-    )
+    total = len(keys_list)
+    done = 0
+    skipped = 0
+    failed = 0
 
     prev_env = os.environ.get(_PARALLEL_ENV_VAR)
     os.environ[_PARALLEL_ENV_VAR] = "1"
-    summary_thread.start()
+    ticker_stop = threading.Event()
+    ticker_thread: Optional[threading.Thread] = None
     try:
-        with executor_cls(max_workers=max_workers) as executor:
+        with executor_cls(max_workers=max_workers) as executor, tqdm(
+            total=total,
+            desc=desc,
+            unit="task",
+            dynamic_ncols=True,
+        ) as bar:
             future_to_key = {
                 executor.submit(
                     _worker_with_log,
@@ -329,6 +334,28 @@ def run_parallel(
                 ): key
                 for key in keys_list
             }
+
+            def _refresh_postfix() -> None:
+                completed = done + skipped + failed
+                running = max(0, min(max_workers, total - completed))
+                waiting = max(0, total - completed - running)
+                bar.set_postfix(
+                    running=running,
+                    done=done,
+                    skipped=skipped,
+                    failed=failed,
+                    waiting=waiting,
+                    refresh=False,
+                )
+
+            def _tick() -> None:
+                while not ticker_stop.wait(1.0):
+                    bar.refresh()
+
+            _refresh_postfix()
+            bar.refresh()
+            ticker_thread = threading.Thread(target=_tick, daemon=True)
+            ticker_thread.start()
             for future in as_completed(future_to_key):
                 key = future_to_key[future]
                 try:
@@ -336,32 +363,33 @@ def run_parallel(
                 except Exception as exc:
                     logger.exception("Failed processing '%s'", key)
                     failures.append((key, exc))
-                    with lock:
-                        counts.failed += 1
+                    failed += 1
                 else:
                     results[key] = value
-                    with lock:
-                        if value is None:
-                            counts.skipped += 1
-                        else:
-                            counts.done += 1
+                    if value is None:
+                        skipped += 1
+                    else:
+                        done += 1
+                _refresh_postfix()
+                bar.update(1)
     finally:
-        stop.set()
-        summary_thread.join(timeout=summary_interval + 1.0)
+        ticker_stop.set()
+        if ticker_thread is not None:
+            ticker_thread.join(timeout=2.0)
         if prev_env is None:
             os.environ.pop(_PARALLEL_ENV_VAR, None)
         else:
             os.environ[_PARALLEL_ENV_VAR] = prev_env
 
-    completed = counts.done + counts.skipped + counts.failed
+    completed = done + skipped + failed
     logger.info(
         "%s: finished %d/%d (done=%d skipped=%d failed=%d)",
         desc,
         completed,
-        counts.total,
-        counts.done,
-        counts.skipped,
-        counts.failed,
+        total,
+        done,
+        skipped,
+        failed,
     )
 
     return results, failures
