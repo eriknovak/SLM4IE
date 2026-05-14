@@ -72,10 +72,10 @@ from slm4ie.data.curate.dedup import make_exact_config
 from slm4ie.data.curate.pipeline import (
     CuratePaths,
     QualityConfig,
-    build_exact_dedup_executors,
     build_language_executors,
     build_quality_executors,
     build_repetition_executors,
+    build_exact_dedup_executors,
     build_sentence_dedup_executors,
     build_stats_executors,
 )
@@ -284,26 +284,54 @@ def _count_records(folder: Path) -> int:
     return total
 
 
-def _count_extracted_records(input_dir: Path, keys: List[str]) -> int:
-    """Sum line counts across `<input_dir>/<key>.jsonl` files.
+def _human_bytes(num: int) -> str:
+    """Render a byte count as a human-readable string.
+
+    Args:
+        num: A non-negative byte count.
+
+    Returns:
+        The count scaled to the largest binary unit below 1024, with
+        one decimal place for KiB and above (e.g. 1536 -> `"1.5 KiB"`)
+        and no decimal for plain bytes (e.g. 512 -> `"512 B"`).
+    """
+    size = float(num)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+        if size < 1024.0:
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} EiB"
+
+
+def _extracted_input_summary(input_dir: Path, keys: List[str]) -> Tuple[int, int]:
+    """Summarize the convert stage's input without reading record contents.
+
+    The convert stage performs a 1:1 format conversion, so its input
+    record count is redundant with the output shard count taken after
+    the run. Counting input lines would mean reading every `<key>.jsonl`
+    in full; instead this reports the dataset count and the summed
+    on-disk size via `stat` only.
 
     Args:
         input_dir: Directory holding extraction output JSONLs.
-        keys: Dataset keys to include in the count.
+        keys: Dataset keys to include.
 
     Returns:
-        Total line count across all `<key>.jsonl` files; 0 for keys
-        whose file is missing (they will be reported as skipped by the
-        convert stage).
+        Tuple `(num_datasets_present, total_bytes)`: the count of keys
+        whose `<key>.jsonl` exists under *input_dir* and the summed
+        on-disk size of those files. Keys with no `<key>.jsonl` are
+        excluded from both figures (the convert stage reports them as
+        skipped).
     """
-    total = 0
+    present = 0
+    total_bytes = 0
     for key in keys:
         path = input_dir / f"{key}.jsonl"
         if not path.exists():
             continue
-        with path.open(encoding="utf-8") as fh:
-            total += sum(1 for _ in fh)
-    return total
+        present += 1
+        total_bytes += path.stat().st_size
+    return present, total_bytes
 
 
 def _stage_input_dir(
@@ -694,15 +722,29 @@ def main() -> None:
                     )
                 cascaded = True
 
-            if last_records_out is not None:
-                records_in_before = last_records_out
-            elif stage == "convert":
-                records_in_before = _count_extracted_records(paths.input_folder, dataset_keys)
-            else:
-                records_in_before = _count_records(
-                    _stage_input_dir(paths, stage, convert_view=subset_holder)
+            if stage == "convert":
+                # Convert is a 1:1 format conversion: counting input
+                # records would mean reading every <key>.jsonl in full,
+                # only to reproduce the output shard count taken after
+                # the run. Report dataset count + on-disk input size for
+                # the "starting" line; records_in is backfilled from
+                # records_out once the stage finishes.
+                n_datasets, input_bytes = _extracted_input_summary(
+                    paths.input_folder, dataset_keys
                 )
-            logger.info("[%s] starting (input records ~%d)", stage, records_in_before)
+                logger.info(
+                    "[convert] starting (%d dataset(s), %s)",
+                    n_datasets, _human_bytes(input_bytes),
+                )
+                records_in_before = 0
+            else:
+                if last_records_out is not None:
+                    records_in_before = last_records_out
+                else:
+                    records_in_before = _count_records(
+                        _stage_input_dir(paths, stage, convert_view=subset_holder)
+                    )
+                logger.info("[%s] starting (input records ~%d)", stage, records_in_before)
             runner = _stage_runner(
                 stage,
                 paths,
@@ -722,6 +764,9 @@ def main() -> None:
                 subset_holder = _filter_convert_subset(stage_folder, dataset_keys)
             records_out = 0 if stage == "stats" else _count_records(stage_folder)
             last_records_out = records_out
+            if stage == "convert":
+                # 1:1 conversion — the counted output is also the input count.
+                records_in_before = records_out
             write_sentinel(
                 stage_folder,
                 config_slice=slice_,
