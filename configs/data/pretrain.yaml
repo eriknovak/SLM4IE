@@ -21,9 +21,19 @@ convert:
 
 # 01_language: lingua-py language detection. In `mode: filter`, only
 # docs whose detected top-1 language is in `targets` survive.
+# `candidates` is every European language lingua supports (36 living
+# European languages plus Turkish), so detection disambiguates `sl`
+# against its real neighbours instead of the full 75-language model.
+# Codes are ISO 639-1; order is irrelevant (targets are appended if
+# missing).
 language:
   targets: [sl]
-  candidates: [sl, hr, sr, bs, mk, en, de, it, hu]
+  candidates:
+    [
+      be, bg, bs, ca, cs, cy, da, de, el, en, es, et, eu, fi, fr, ga,
+      hr, hu, is, it, lt, lv, mk, nb, nl, nn, pl, pt, ro, ru, sk, sl,
+      sq, sr, sv, tr, uk,
+    ]
   minimum_relative_distance: 0.1
   mode: filter
   low_accuracy: true
