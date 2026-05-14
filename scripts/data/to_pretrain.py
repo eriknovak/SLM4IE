@@ -39,6 +39,7 @@ Examples:
 import argparse
 import gzip
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -79,7 +80,6 @@ from slm4ie.data.curate.pipeline import (
     build_stats_executors,
 )
 from slm4ie.data.io_utils import DEFAULT_MAX_SHARD_BYTES, find_project_root as _find_project_root
-from slm4ie.data.parallel import cpu_default, resolve_workers
 
 logger = logging.getLogger(__name__)
 
@@ -601,7 +601,6 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = parse_args()
-    workers = resolve_workers(args.workers, len(STAGE_NAMES), cpu_default(len(STAGE_NAMES)))
 
     project_root = _find_project_root()
     pretrain_path = args.pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
@@ -612,9 +611,17 @@ def main() -> None:
 
     if args.all:
         dataset_keys = _list_datasets(extract_path)
-        logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
     else:
         dataset_keys = list(args.datasets)
+    # `workers` is a CPU budget, not an item count. The convert stage caps
+    # it at the dataset count itself (run_convert_stage); the datatrove
+    # stages use it as their `tasks` rank count, where shards -- far more
+    # numerous than datasets -- are the unit of work. So an explicit
+    # --max-workers is honored as-is; auto (0) resolves to cpu_count // 2.
+    workers = args.workers if args.workers > 0 else max(1, (os.cpu_count() or 2) // 2)
+    if args.all:
+        logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
+    else:
         logger.info(
             "Running on %d dataset(s): %s (workers=%d)",
             len(dataset_keys), ", ".join(dataset_keys), workers,
