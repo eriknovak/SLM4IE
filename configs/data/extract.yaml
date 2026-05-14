@@ -1,3 +1,35 @@
+# extract.yaml — Sources to normalize into the canonical `extracted/` tier.
+#
+# Consumed by: scripts/data/extract.py. The dataset key list here is also
+#   the key list to_pretrain.py iterates when building the pretrain corpus.
+# Reads:  <input_dir>/<key>/ — raw downloads from download.py.
+# Writes: <output_dir>/<key>.jsonl (+ <key>.annotations.jsonl.gz when the
+#   extractor emits annotations).
+#
+# Top-level keys:
+#   input_dir    Root of raw downloads (download.py's output_dir).
+#   output_dir   Root for the extracted/ tier.
+#   datasets     Map of <dataset key> -> extraction spec.
+#
+# Extraction spec fields:
+#   extractor    Registered reader to use. One of:
+#                  jsonl       — line-delimited JSON
+#                  json        — single JSON document/array
+#                  text        — plain text
+#                  conllu      — CoNLL-U annotated columns
+#                  tei         — TEI XML (parliamentary/academic corpora)
+#                  macocu      — MaCoCu monolingual XML
+#                  coleslaw    — COLESLAW legal-text format
+#                  huggingface — a locally cached HuggingFace dataset
+#                The registry lives in slm4ie/data/extractors/.
+#   domain       Free-text provenance tag (web, wiki, parliamentary,
+#                academic, legal, medical, scientific, forum, blog, news,
+#                student, mixed). Flows into Document.metadata and drives
+#                source-weighted sampling downstream.
+#
+# Selection: pass dataset keys positionally, or --all for every entry.
+#   --force re-extracts existing outputs; --max-workers sets parallelism.
+
 input_dir: /vault/data/SLM4IE/raw
 output_dir: /vault/data/SLM4IE/extracted
 
@@ -5,69 +37,91 @@ datasets:
   classla_web_sl:
     extractor: jsonl
     domain: web
+
   classlawiki_sl:
     extractor: conllu
     domain: wiki
+
   macocu_sl:
     extractor: macocu
     domain: web
+
   parlamint_si:
     extractor: tei
     domain: parliamentary
+
   kas:
     extractor: tei
     domain: academic
+
   coleslaw:
     extractor: coleslaw
     domain: legal
+
   povejmo_vemo_med:
     extractor: json
     domain: medical
+
   oss:
     extractor: conllu
     domain: scientific
+
   siparl:
     extractor: tei
     domain: parliamentary
+
   janes_forum:
     extractor: tei
     domain: forum
+
   janes_blog:
     extractor: tei
     domain: blog
+
   janes_news:
     extractor: tei
     domain: news
+
   kzb:
     extractor: conllu
     domain: scientific
+
   solar:
     extractor: conllu
     domain: student
+
   finepdf:
     extractor: huggingface
     domain: web
+
   fineweb2:
     extractor: huggingface
     domain: web
+
   culturax:
     extractor: huggingface
     domain: web
+
   legal_mc4:
     extractor: jsonl
     domain: legal
+
   c4:
     extractor: huggingface
     domain: web
+
   hplt:
     extractor: huggingface
     domain: web
+
   cc100:
     extractor: text
     domain: web
+
   suk:
     extractor: conllu
     domain: mixed
+
   ssj500k:
     extractor: conllu
     domain: mixed

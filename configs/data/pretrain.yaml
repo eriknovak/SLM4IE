@@ -1,3 +1,24 @@
+# pretrain.yaml — Seven-stage pretraining-corpus build (datatrove-backed).
+#
+# Consumed by: scripts/data/to_pretrain.py. The dataset key list comes
+#   from configs/data/extract.yaml.
+# Reads:  <input_dir>/<key>.jsonl — the extracted/ tier.
+# Writes: <output_dir>/00_convert/ … 05_statistics/ — one subtree per stage.
+#
+# Top-level keys:
+#   input_dir    Root of the extracted/ tier.
+#   output_dir   Root of the pretrain-owned stage tree.
+#   stopwords    Stopword file used by the `quality` and `stats` stages.
+#   <stage>      One section per stage (convert, language, quality,
+#                repetition, exact_dedup, sentence_dedup, stats); each is
+#                documented inline below and is the exclusive input to
+#                that stage's sentinel hash.
+#
+# Behavior: each stage writes a durable artifact + a `.complete` sentinel;
+#   on rerun a stage is skipped when its config-slice hash is unchanged.
+#   Editing one section cascade-invalidates that stage and every
+#   downstream stage. Pass dataset keys positionally, or --all.
+
 input_dir: /vault/data/SLM4IE/extracted
 output_dir: /vault/data/SLM4IE/pretrain
 
@@ -5,13 +26,25 @@ output_dir: /vault/data/SLM4IE/pretrain
 # and the stats stage (word/n-gram/keyword filtering).
 stopwords: configs/data/stopwords_sl.txt
 
-# 00_convert: extract -> datatrove `Document`-shaped shards. Reads
-# <input_dir>/<key>.jsonl, writes <output_dir>/00_convert/<key>/*.jsonl.gz.
-# Provenance fields listed under `metadata_fields` survive verbatim and
-# end up under `Document.metadata` once datatrove's JsonlReader picks
-# the shards up. The extraction `source` field is always renamed to
-# `dataset` (every stage writer routes shards by `${dataset}`); do not
-# list it here.
+# 00_convert — Stage 0: lift extracted <key>.jsonl into datatrove
+#   `Document`-shaped shards (text / id / metadata).
+#   Consumed by: slm4ie/data/curate/convert.py
+#   Reads:  <input_dir>/<key>.jsonl (+ optional .annotations.jsonl.gz)
+#   Writes: <output_dir>/00_convert/<key>/*.jsonl.gz
+#   Keys:
+#     text_field           Source-record field copied into `text`.
+#     id_field             Source-record field kept verbatim as the
+#                          document id; always kept even if absent from
+#                          metadata_fields.
+#     metadata_fields      Source fields kept verbatim under
+#                          Document.metadata. The extraction `source`
+#                          field is auto-renamed to `dataset` (downstream
+#                          writers route by `${dataset}`); never list it.
+#     include_annotations  Join the .annotations sidecar as a nested
+#                          `annotations` field. Off by default —
+#                          annotations desync once a later stage rewrites
+#                          the text.
+#     max_shard_bytes      Compressed-byte ceiling per output shard.
 convert:
   text_field: text
   id_field: doc_id
@@ -19,13 +52,28 @@ convert:
   include_annotations: false
   max_shard_bytes: 200000000  # ~200 MB compressed per shard
 
-# 01_language: lingua-py language detection. In `mode: filter`, only
-# docs whose detected top-1 language is in `targets` survive.
-# `candidates` is every European language lingua supports (36 living
-# European languages plus Turkish), so detection disambiguates `sl`
-# against its real neighbours instead of the full 75-language model.
-# Codes are ISO 639-1; order is irrelevant (targets are appended if
-# missing).
+# 01_language — Stage 1: lingua-py language detection.
+#   Consumed by: slm4ie/data/curate/language.py (LinguaLanguageFilter),
+#                wired by pipeline.build_language_executors.
+#   Reads:  <output_dir>/00_convert/   Writes: <output_dir>/01_language/
+#   Keys:
+#     targets                     ISO 639-1 codes treated as in-language.
+#     candidates                  ISO 639-1 candidate set lingua chooses
+#                                 among — every European language lingua
+#                                 supports (36 living European languages
+#                                 plus Turkish), so `sl` is disambiguated
+#                                 against its real neighbours rather than
+#                                 the full 75-language model. Order is
+#                                 irrelevant; targets are appended if
+#                                 missing.
+#     minimum_relative_distance   Required confidence gap before lingua
+#                                 commits to a label. 0.0 disables.
+#     mode                        `filter` drops out-of-target docs;
+#                                 `tag` keeps every doc and only writes
+#                                 metadata.language.
+#     low_accuracy                Use lingua's lighter trigram-only model.
+#     max_chars                   Truncate doc text to this many chars
+#                                 before detection. null disables.
 language:
   targets: [sl]
   candidates:
@@ -39,9 +87,28 @@ language:
   low_accuracy: true
   max_chars: 2048
 
-# 02_quality: Gopher WITHIN-DOCUMENT quality heuristics. Drops docs
-# based on length, word-length, symbol/bullet/ellipsis ratios,
-# alphabetic content, and stopword floor. Never compares across docs.
+# 02_quality — Stage 2: Gopher WITHIN-DOCUMENT quality heuristics.
+#   Drops docs on their own text alone; never compares across docs.
+#   Consumed by: datatrove GopherQualityFilter, wired by
+#                pipeline.build_quality_executors (QualityConfig). Also
+#                reads the shared `stopwords` file above.
+#   Reads:  <output_dir>/01_language/  Writes: <output_dir>/02_quality/
+#   Keys:
+#     min_doc_words               Drop docs shorter than this.
+#     max_doc_words               Drop docs longer than this.
+#     min_avg_word_length         Drop docs below this mean word length.
+#     max_avg_word_length         Drop docs above this mean word length.
+#     max_symbol_word_ratio       Max fraction of word-like tokens that
+#                                 are pure symbols.
+#     max_bullet_lines_ratio      Max fraction of lines starting with a
+#                                 bullet glyph.
+#     max_ellipsis_lines_ratio    Max fraction of lines ending in an
+#                                 ellipsis.
+#     max_non_alpha_words_ratio   MINIMUM fraction of words that must
+#                                 contain an alphabetic character
+#                                 (datatrove keeps the legacy name).
+#     min_stop_words              Minimum stopword tokens a doc must
+#                                 contain (uses the `stopwords` file).
 quality:
   min_doc_words: 50
   max_doc_words: 100000
@@ -53,31 +120,73 @@ quality:
   max_non_alpha_words_ratio: 0.8
   min_stop_words: 2
 
-# 03_repetition: Gopher WITHIN-DOCUMENT repetition heuristics. Drops
-# docs whose own text repeats too much internally (duplicate
-# paragraphs/lines, top-n-gram saturation, dup-n-gram fractions).
-# datatrove's defaults from the Gopher paper are used.
+# 03_repetition — Stage 3: Gopher WITHIN-DOCUMENT repetition heuristics.
+#   Drops docs whose own text repeats too much internally (duplicate
+#   paragraphs/lines, top-n-gram saturation, dup-n-gram fractions).
+#   Consumed by: datatrove GopherRepetitionFilter, wired by
+#                pipeline.build_repetition_executors.
+#   Reads:  <output_dir>/02_quality/  Writes: <output_dir>/03_repetition/
+#   Keys: none — the empty mapping `{}` keeps datatrove's Gopher-paper
+#         defaults. The section must still exist (it drives this stage's
+#         sentinel hash slice).
 repetition: {}
 
-# 04_1_dedup: whole-document exact dedup ACROSS THE CORPUS. Two docs
-# with byte-identical text collapse to one. `precision` and `hash_fc`
-# rarely change — 64-bit xxhash is collision-safe up to ~10B docs.
+# 04_1_dedup — Stage 4: whole-document exact dedup ACROSS THE CORPUS.
+#   Two docs with byte-identical text collapse to one (runs as a
+#   signature -> find -> filter executor chain).
+#   Consumed by: slm4ie/data/curate/dedup.py (make_exact_config), wired
+#                by pipeline.build_exact_dedup_executors.
+#   Reads:  <output_dir>/03_repetition/  Writes: <output_dir>/04_1_dedup/
+#   Keys:
+#     precision             Hash width in bits (32 | 64). 64 is the
+#                           collision-safe default up to ~10B docs; 32
+#                           only for very small corpora.
+#     hash_fc               Hash function (xxhash | sha1). xxhash is
+#                           faster; sha1 is strong but unnecessary here.
+#     only_dedup_in_index   True dedups only within this run's index
+#                           (datatrove default); False extends an
+#                           existing dedup index across runs.
 exact_dedup:
   precision: 64
   hash_fc: xxhash
   only_dedup_in_index: true
 
-# 04_2_dedup: N-sentence sliding-window dedup ACROSS THE CORPUS.
-# Removes windows that recur across docs; drops docs whose surviving
-# text falls below the floors.
+# 04_2_dedup — Stage 5: N-sentence sliding-window dedup ACROSS THE
+#   CORPUS. Removes sentence windows that recur across docs, then drops
+#   docs whose surviving text falls below the floors. Its output folder
+#   is the final pretraining corpus.
+#   Consumed by: datatrove SentDedupConfig / SentenceDedup* blocks,
+#                wired by pipeline.build_sentence_dedup_executors.
+#   Reads:  <output_dir>/04_1_dedup/  Writes: <output_dir>/04_2_dedup/
+#   Keys:
+#     n_sentences         Sentences per sliding window compared across
+#                         docs.
+#     min_doc_words       Drop a doc whose surviving text (after
+#                         duplicate windows are cut) has fewer words.
+#     min_num_sentences   Drop a doc with fewer surviving sentences.
+#     split_sentences     Split text into sentences (vs. lines) before
+#                         building windows.
 sentence_dedup:
   n_sentences: 3
   min_doc_words: 50
   min_num_sentences: 2
   split_sentences: true
 
-# 05_statistics: word/n-gram tables and (optional) classla TF-IDF
-# keywords. Single-process by design.
+# 05_statistics — Stage 6: corpus word/n-gram tables and (optional)
+#   classla TF-IDF keywords. Single-process by design (CorpusStats keeps
+#   every counter on the instance). Does not filter — read-only pass.
+#   Consumed by: slm4ie/data/curate/stats.py (CorpusStats), wired by
+#                pipeline.build_stats_executors. Also reads the shared
+#                `stopwords` file above.
+#   Reads:  <output_dir>/04_2_dedup/
+#   Writes: <output_dir>/05_statistics/ (aggregate.json + per_dataset/)
+#   Keys:
+#     top_k_words       Size of the word-frequency table.
+#     top_k_ngrams      Size of the per-order n-gram table.
+#     keyword_top_k     TF-IDF keywords kept per bucket.
+#     ngram_orders      N-gram orders to compute (e.g. [2, 3]).
+#     compute_keywords  Set false to skip the slow classla-lemmatized
+#                       TF-IDF keyword pass.
 stats:
   top_k_words: 5000
   top_k_ngrams: 5000

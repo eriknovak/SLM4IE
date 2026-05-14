@@ -1,10 +1,31 @@
-# Task registry for SLM4IE downstream evaluation and fine-tuning.
+# tasks.yaml — Registry of <task>/<dataset> targets for downstream
+# evaluation and fine-tuning.
 #
-# This file drives the three task converters (to_spans, to_sentiment,
-# to_superglue). Each entry under `entries:` declares a single
-# <task>/<dataset> target under tasks/. The converter for each task
-# family defaults from the `converters:` map and may be overridden per
-# entry with a `converter:` field.
+# Consumed by: scripts/data/to_spans.py, to_sentiment.py, to_superglue.py.
+#   The converter per entry defaults from the `converters:` map and may be
+#   overridden with a per-entry `converter:` field.
+# Reads:  roots.extracted/<key>.jsonl (source.kind: extracted) or
+#         roots.raw/<key>/ (source.kind: raw — task-native bundles).
+# Writes: roots.tasks/<task>/<dataset>/<split>.jsonl.gz, using the
+#         task-family schemas in slm4ie/data/schema.py.
+#
+# Top-level keys:
+#   roots        extracted / raw / tasks — path roots for I/O.
+#   converters   Default converter script per task family.
+#   entries      Map of <task>/<dataset> -> entry spec. The key IS the
+#                output directory under roots.tasks.
+#
+# Entry spec fields:
+#   role         finetune_and_eval | held_out — enforces train/test
+#                isolation regardless of directory placement.
+#   source       kind (extracted | raw) + keys (source dataset keys).
+#   splits       Split name -> output filename.
+#   labels       Label set for the task.
+#   suite        Parent benchmark suite, or null.
+#   language     ISO language code.
+#   license      Dataset license identifier.
+#
+# Selection: pass <task>/<dataset> entry keys positionally, or --all.
 
 # Roots for resolving source paths and writing output.
 roots:

@@ -1,2 +1,9 @@
-# Synthetic data generation settings
-# LLM API parameters, prompt templates, generation config
+# synthetic.yaml — Synthetic data generation settings (NOT YET IMPLEMENTED).
+#
+# Consumed by: scripts/data/generate_synthetic.py — currently a stub that
+#   raises NotImplementedError; slm4ie/data/synthetic.py is likewise empty.
+#
+# This file is reserved for the synthetic-data route. The schema is not
+# final and is intentionally left blank. It is expected to hold LLM API /
+# model parameters, prompt templates, and generation/output config once
+# the generator is implemented.

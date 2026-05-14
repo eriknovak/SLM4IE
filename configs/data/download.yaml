@@ -1,3 +1,29 @@
+# download.yaml — Raw corpus & benchmark download catalog.
+#
+# Consumed by: scripts/data/download.py (also read by to_tokenization.py
+#   to resolve per-dataset raw subdirectories).
+# Writes:      <output_dir>/<dataset.output_dir>/ — raw, untouched files.
+#
+# Top-level keys:
+#   output_dir   Root for all raw downloads.
+#   datasets     Map of <dataset key> -> dataset spec.
+#
+# Dataset spec fields:
+#   enabled      If false, --all skips it (still fetchable by key).
+#   source       http | huggingface — selects the download backend.
+#   name         Human-readable title.
+#   output_dir   Subdirectory under the top-level output_dir.
+#   provider     Origin, e.g. clarin.si. Informational.
+#   urls         [http] Files to fetch.
+#   repo_id      [huggingface] Hub repo id.
+#   configs      [huggingface] Subset/config names to pull.
+#   manual       If true, needs a manual download step (see note).
+#   note         Free-text caveats, stats, licensing.
+#   benchmark    If true, an eval dataset, not pretraining corpus.
+#   tasks        [benchmark] Downstream tasks supported.
+#
+# Selection: pass dataset keys positionally, or --all for enabled entries.
+
 output_dir: /vault/data/SLM4IE/raw
 
 datasets:
