@@ -1,4 +1,4 @@
-"""Tests for slm4ie/data/sloleks.py and scripts/data/to_tokenizer_eval.py."""
+"""Tests for slm4ie/data/sloleks.py and scripts/data/to_tokenization.py."""
 
 import gzip
 import json
@@ -15,7 +15,7 @@ sys.path.insert(
     0,
     str(Path(__file__).resolve().parents[2] / "scripts" / "data"),
 )
-import to_tokenizer_eval  # noqa: E402
+import to_tokenization as to_tokenizer_eval  # noqa: E402
 
 
 SAMPLE_TEI = dedent(
@@ -186,7 +186,7 @@ class TestIterSloleksDir:
 
 
 class TestToTokenizerEvalConverter:
-    """Integration tests for scripts/data/to_tokenizer_eval.py."""
+    """Integration tests for scripts/data/to_tokenization.py."""
 
     def test_convert_sloleks_writes_tagged_records(self, tmp_path: Path):
         """The converter produces JSONL with dataset/task tags."""
@@ -248,34 +248,24 @@ class TestToTokenizerEvalConverter:
             list(to_tokenizer_eval._read_sloleks(empty_dir))
 
 
-class TestListTokenizerDatasets:
-    """Tests for the config-driven dataset selection helper."""
+class TestLoadTokenizationConfig:
+    """Tests for the tokenization config loader."""
 
-    def test_filters_by_benchmark_and_task(self, tmp_path: Path):
-        """Only entries with benchmark: true AND TOKENIZER in tasks match."""
-        config = tmp_path / "download.yaml"
+    def test_parses_minimum_required_fields(self, tmp_path: Path):
+        """A well-formed tokenization config parses into the expected dict."""
+        config = tmp_path / "tokenization.yaml"
         config.write_text(
             dedent(
                 """\
-                output_dir: /tmp/raw
+                input_dir: /tmp/raw
+                output_dir: /tmp/out
                 datasets:
-                  sloleks:
-                    enabled: true
-                    benchmark: true
-                    name: "Sloleks"
-                    tasks: [TOKENIZER]
-                  some_corpus:
-                    enabled: true
-                    benchmark: false
-                    name: "Some Corpus"
-                  sentinews:
-                    enabled: true
-                    benchmark: true
-                    name: "SentiNews"
-                    tasks: [SA]
+                  - sloleks
                 """
             ),
             encoding="utf-8",
         )
-        keys = to_tokenizer_eval.list_tokenizer_datasets_from_config(config)
-        assert keys == ["sloleks"]
+        cfg = to_tokenizer_eval.load_tokenization_config(config)
+        assert cfg["input_dir"] == Path("/tmp/raw")
+        assert cfg["output_dir"] == Path("/tmp/out")
+        assert cfg["datasets"] == ["sloleks"]

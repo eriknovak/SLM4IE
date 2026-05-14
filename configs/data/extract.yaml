@@ -1,5 +1,5 @@
 input_dir: /vault/data/SLM4IE/raw
-output_dir: /vault/data/SLM4IE/processed
+output_dir: /vault/data/SLM4IE/extracted
 
 datasets:
   classla_web_sl:

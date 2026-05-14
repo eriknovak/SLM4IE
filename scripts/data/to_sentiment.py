@@ -1,75 +1,61 @@
-"""Convert raw SA benchmark downloads into evaluation-ready JSONL.
+"""Convert SA datasets into task-shaped per-split JSONL.
 
-Reads sentiment-analysis benchmark datasets directly from their raw
-download directories (i.e. it bypasses the unified `<key>.jsonl`
-extraction layer used by to_datatrove.py and to_spans.py) and emits
-per-dataset JSONL files whose shape is suitable for downstream
-classification training and SloBENCH-style evaluation.
+Driven by ``configs/data/tasks.yaml``. Processes every entry whose
+resolved converter is ``to_sentiment`` and emits one gzipped JSONL
+per declared split under
+``<roots.tasks>/<task>/<dataset>/<split>.jsonl.gz``.
 
-Each output line has this shape:
+Each output line is a ``SentimentExample``:
 
-    {
-        "id":       "sentinews:doc-00042",
-        "text":     "<text content>",
-        "label":    "negative",
-        "label_id": 0,
-        "dataset":  "sentinews",
-        "task":     "SA",
-        "level":    "document",
-        "metadata": {...}
-    }
+    {"id": "<source>:<doc_id>", "text": "<...>", "label": "negative"}
 
-A sibling `label_map.json` is written next to the output file so the
-`label_id` integer encoding is traceable.
+Two source kinds are supported:
 
-Examples:
-    Convert the SentiNews document-level split:
-
-        uv run python scripts/data/to_sentiment.py sentinews
-
-    Convert every SA benchmark dataset declared in download.yaml:
-
-        uv run python scripts/data/to_sentiment.py --all
+* ``kind: extracted`` -- reads from ``<roots.extracted>/<key>.jsonl``
+  (used by the SentiNews entry). Splits are derived from a
+  deterministic 80/10/10 hash bucket over each record's ``uid`` /
+  ``doc_id``.
+* ``kind: raw`` -- reads SentiNews-format text files directly from
+  ``<roots.raw>/<key>/`` (used by the held-out Twitter dataset).
+  Every record lands in the single declared split (typically ``test``).
 """
 
 import argparse
 import csv
-import json
 import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import (
-    IO,
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-)
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from tqdm import tqdm
-
-from slm4ie.data.download import DatasetConfig, load_config
-from slm4ie.data.io_utils import find_project_root, open_output
+from slm4ie.data.io_utils import find_project_root, iter_joined_records
 from slm4ie.data.parallel import (
     configure_script_logging,
     cpu_default,
     resolve_workers,
     run_parallel,
-    workers_quiet,
+)
+from slm4ie.data.schema import SentimentExample
+from slm4ie.data.tasks import (
+    TaskEntry,
+    TasksRoots,
+    filter_for_converter,
+    load_tasks,
+    resolve_output_dir,
+)
+from slm4ie.data.task_writer import (
+    all_outputs_exist,
+    hash_split,
+    outputs_for_splits,
+    write_jsonl_splits,
 )
 
 logger = logging.getLogger(__name__)
 
-#: Canonical 3-class label vocabulary for sentiment analysis. Order
-#: defines the integer encoding used in the `label_id` field.
-CANONICAL_LABELS: Tuple[str, ...] = ("negative", "neutral", "positive")
+#: Converter module name, used to filter `tasks.yaml`.
+CONVERTER_NAME: str = "to_sentiment"
 
-#: Map common SentiNews label spellings to canonical labels.
+#: Map common label spellings to canonical 3-class labels.
 _LABEL_NORMALIZATION: Dict[str, str] = {
     "negative": "negative",
     "neutral": "neutral",
@@ -79,516 +65,435 @@ _LABEL_NORMALIZATION: Dict[str, str] = {
     "neu": "neutral",
 }
 
-#: Levels supported by SentiNews-style corpora.
-SENTINEWS_LEVELS: Tuple[str, ...] = ("document", "paragraph", "sentence")
 
-
-def _normalize_label(raw_label: str) -> str:
-    """Map a raw label string to one of CANONICAL_LABELS.
+def _normalize_label(raw_label: Optional[Any], allow: Optional[set]) -> Optional[str]:
+    """Map a raw label string to the canonical form, if allowed.
 
     Args:
-        raw_label (str): Label as it appears in the source file.
+        raw_label: Label as it appears in the source. May be `None`.
+        allow: Optional allow-list of canonical label names.
 
     Returns:
-        str: Canonical lowercase label.
-
-    Raises:
-        ValueError: If the label is not recognized.
+        The canonical label, or `None` when the value is empty, not
+        recognized, or filtered out by *allow*.
     """
-    cleaned = raw_label.strip().lower()
-    if cleaned not in _LABEL_NORMALIZATION:
-        raise ValueError(f"Unrecognized SA label: {raw_label!r}")
-    return _LABEL_NORMALIZATION[cleaned]
+    if raw_label is None:
+        return None
+    cleaned = str(raw_label).strip().lower()
+    if not cleaned:
+        return None
+    canonical = _LABEL_NORMALIZATION.get(cleaned)
+    if canonical is None:
+        return None
+    if allow is not None and canonical not in allow:
+        return None
+    return canonical
 
 
-def _label_id(label: str) -> int:
-    """Return the integer encoding for *label*.
+def _iter_extracted(
+    entry: TaskEntry,
+    roots: TasksRoots,
+    allow: Optional[set],
+) -> Iterator[Tuple[str, SentimentExample, str]]:
+    """Yield ``(split_key, example, label)`` tuples from extracted sources.
+
+    The ``split_key`` is a stable string used by `hash_split` to assign
+    the record to one of the entry's declared splits.
 
     Args:
-        label (str): Canonical label.
-
-    Returns:
-        int: Index into CANONICAL_LABELS.
-    """
-    return CANONICAL_LABELS.index(label)
-
-
-def _sentinews_files(raw_dir: Path) -> Dict[str, Path]:
-    """Discover SentiNews files keyed by annotation level.
-
-    Args:
-        raw_dir (Path): Directory containing the SentiNews downloads.
-
-    Returns:
-        Dict[str, Path]: Mapping from level name (one of
-            SENTINEWS_LEVELS) to the matching file path. Only levels
-            actually present on disk are included.
-    """
-    available: Dict[str, Path] = {}
-    for level in SENTINEWS_LEVELS:
-        for candidate in raw_dir.glob(f"SentiNews_{level}-level.*"):
-            if candidate.is_file():
-                available[level] = candidate
-                break
-    return available
-
-
-def _open_tsv(path: Path) -> IO[str]:
-    """Open a SentiNews tab-separated text file.
-
-    Args:
-        path (Path): Path to the SentiNews file.
-
-    Returns:
-        IO[str]: A readable text stream. Caller is responsible for
-            closing it.
-    """
-    return path.open(encoding="utf-8", newline="")
-
-
-def _read_sentinews_level(
-    path: Path,
-    level: str,
-) -> Iterator[Dict[str, Any]]:
-    """Yield normalized records from a single SentiNews file.
-
-    Args:
-        path (Path): Path to one of the SentiNews_*-level.txt files.
-        level (str): Annotation level (document / paragraph / sentence).
+        entry: Sentiment task entry with ``source.kind == 'extracted'``.
+        roots: Filesystem roots.
+        allow: Optional allow-list of canonical labels.
 
     Yields:
-        Dict[str, Any]: Normalized record with id, text, label,
-            label_id, dataset, task, level, and metadata fields.
+        ``(split_key, SentimentExample, label)`` triples. The ``label``
+        is repeated for the caller's convenience but is identical to
+        ``example["label"]``.
+
+    Raises:
+        FileNotFoundError: If a source JSONL is missing.
     """
-    with _open_tsv(path) as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        text_keys = ("content", "text", "sentence", "paragraph")
-        for index, row in enumerate(reader):
-            text = next(
-                (row[k] for k in text_keys if k in row and row[k]),
-                None,
+    index = 0
+    for key in entry.source.keys:
+        text_path = roots.extracted / f"{key}.jsonl"
+        ann_path = roots.extracted / f"{key}.annotations.jsonl.gz"
+        if not text_path.exists():
+            raise FileNotFoundError(
+                f"Source for {entry.task}/{entry.dataset}: "
+                f"{text_path} does not exist."
             )
-            raw_label = row.get("sentiment") or row.get("label")
-            if text is None or raw_label is None:
-                logger.warning(
-                    "Skipping malformed %s row %d in %s",
-                    level, index, path.name,
-                )
+        ann_arg: Optional[Path] = ann_path if ann_path.exists() else None
+        for record in iter_joined_records(text_path, ann_arg):
+            raw_label = (
+                record.get("label")
+                or record.get("sentiment")
+                or (record.get("metadata") or {}).get("sentiment")
+                or (record.get("metadata") or {}).get("label")
+            )
+            label = _normalize_label(raw_label, allow)
+            if label is None:
                 continue
-
-            try:
-                label = _normalize_label(raw_label)
-            except ValueError as exc:
-                logger.warning(
-                    "Skipping row %d (%s): %s",
-                    index, path.name, exc,
-                )
-                continue
-
-            nid = row.get("nid") or row.get("doc_id") or f"idx-{index:08d}"
-            id_parts = [str(nid)]
-            if level in ("paragraph", "sentence"):
-                pid = row.get("pid")
-                if pid is not None:
-                    id_parts.append(f"p{pid}")
-            if level == "sentence":
-                sid = row.get("sid")
-                if sid is not None:
-                    id_parts.append(f"s{sid}")
-
-            metadata = {
-                k: v
-                for k, v in row.items()
-                if k
-                not in {
-                    "content",
-                    "text",
-                    "sentence",
-                    "paragraph",
-                    "sentiment",
-                    "label",
-                }
-                and v not in (None, "")
-            }
-
-            yield {
-                "id": f"sentinews:{'-'.join(id_parts)}",
-                "text": text,
-                "label": label,
-                "label_id": _label_id(label),
-                "dataset": "sentinews",
-                "task": "SA",
-                "level": level,
-                "metadata": metadata,
-            }
+            source = record.get("source", entry.dataset)
+            uid = record.get("uid")
+            doc_id = record.get("doc_id")
+            if uid:
+                example_id = str(uid)
+                split_key = str(uid)
+            elif doc_id is not None:
+                example_id = f"{source}:{doc_id}"
+                split_key = example_id
+            else:
+                example_id = f"{source}:idx-{index:014d}"
+                split_key = example_id
+            example: SentimentExample = SentimentExample(
+                id=example_id,
+                text=record.get("text", ""),
+                label=label,
+            )
+            index += 1
+            yield split_key, example, label
 
 
-def _read_sentinews(
-    raw_dir: Path,
-    levels: Optional[List[str]] = None,
-) -> Iterator[Dict[str, Any]]:
-    """Yield normalized records from a SentiNews download.
+def _iter_raw_sentinews_format(
+    source_dir: Path,
+    dataset: str,
+    allow: Optional[set],
+) -> Iterator[Tuple[str, SentimentExample, str]]:
+    """Yield records from SentiNews-format TSV files inside *source_dir*.
+
+    The held-out Twitter sentiment dataset ships in the same
+    ``SentiNews_<level>-level.txt`` layout, so a single TSV reader
+    covers both. The caller decides how to assign splits.
 
     Args:
-        raw_dir (Path): Directory containing the SentiNews files.
-        levels (Optional[List[str]]): Annotation levels to emit. When
-            None, emits whichever levels are present in *raw_dir*.
+        source_dir: Directory containing ``SentiNews_*-level.*`` files.
+        dataset: Dataset name used to synthesize record ids.
+        allow: Optional allow-list of canonical labels.
 
     Yields:
-        Dict[str, Any]: Normalized records (one per item per level).
+        ``(split_key, SentimentExample, label)`` triples.
 
     Raises:
-        FileNotFoundError: If no SentiNews_*-level.txt files are found.
+        FileNotFoundError: If no SentiNews-format files are present.
     """
-    available = _sentinews_files(raw_dir)
-    if not available:
+    candidates: List[Path] = []
+    for pattern in ("SentiNews_*-level.*", "*.tsv", "*.txt"):
+        candidates.extend(sorted(source_dir.glob(pattern)))
+    seen: set = set()
+    files: List[Path] = []
+    for path in candidates:
+        if path.is_file() and path not in seen:
+            files.append(path)
+            seen.add(path)
+    if not files:
         raise FileNotFoundError(
-            f"No SentiNews_*-level.txt files found in {raw_dir}. "
-            "Run scripts/data/download.py --datasets sentinews first."
+            f"No sentiment input files found in {source_dir}."
         )
 
-    selected_levels = levels or list(available.keys())
-    for level in selected_levels:
-        if level not in available:
-            logger.warning(
-                "SentiNews level %r not found in %s; skipping.",
-                level, raw_dir,
-            )
-            continue
-        yield from _read_sentinews_level(available[level], level)
+    text_keys = ("content", "text", "sentence", "paragraph", "tweet")
+    index = 0
+    for path in files:
+        with path.open(encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh, delimiter="\t")
+            for row in reader:
+                text = next(
+                    (row[k] for k in text_keys if row.get(k)),
+                    None,
+                )
+                raw_label = (
+                    row.get("sentiment")
+                    or row.get("label")
+                    or row.get("polarity")
+                )
+                if text is None:
+                    continue
+                label = _normalize_label(raw_label, allow)
+                if label is None:
+                    continue
+                nid = (
+                    row.get("nid")
+                    or row.get("doc_id")
+                    or row.get("id")
+                    or f"idx-{index:08d}"
+                )
+                example_id = f"{dataset}:{nid}"
+                example: SentimentExample = SentimentExample(
+                    id=example_id,
+                    text=text,
+                    label=label,
+                )
+                index += 1
+                yield example_id, example, label
 
 
-#: Registry mapping dataset key to a reader callable.
-_READERS: Dict[
-    str,
-    Callable[..., Iterator[Dict[str, Any]]],
-] = {
-    "sentinews": _read_sentinews,
-}
-
-
-def list_sa_datasets_from_config(
-    config_path: Path,
-) -> List[str]:
-    """Return SA-tagged benchmark dataset keys from a download config.
+def _iter_raw(
+    entry: TaskEntry,
+    roots: TasksRoots,
+    allow: Optional[set],
+) -> Iterator[Tuple[str, SentimentExample, str]]:
+    """Yield records from raw sentiment sources.
 
     Args:
-        config_path (Path): Path to the download YAML config.
+        entry: Sentiment task entry with ``source.kind == 'raw'``.
+        roots: Filesystem roots.
+        allow: Optional allow-list of canonical labels.
 
-    Returns:
-        List[str]: Dataset keys whose `benchmark` field is true and
-            whose `tasks` list contains `"SA"`.
+    Yields:
+        ``(split_key, SentimentExample, label)`` triples.
 
     Raises:
-        FileNotFoundError: If the config file does not exist.
+        FileNotFoundError: If a source directory is missing.
     """
-    _, datasets = load_config(config_path)
-    return [
-        key
-        for key, cfg in datasets.items()
-        if cfg.benchmark and "SA" in cfg.tasks
-    ]
+    for key in entry.source.keys:
+        source_dir = roots.raw / key
+        if not source_dir.is_dir():
+            raise FileNotFoundError(
+                f"Raw source for {entry.task}/{entry.dataset}: "
+                f"{source_dir} is not a directory."
+            )
+        yield from _iter_raw_sentinews_format(
+            source_dir, entry.dataset, allow,
+        )
 
 
-def write_records(
-    records: Iterable[Dict[str, Any]],
-    out_stream: IO[str],
-) -> int:
-    """Write *records* as JSONL lines and return the count.
+def _iter_examples_for_entry(
+    entry: TaskEntry,
+    roots: TasksRoots,
+) -> Iterator[Tuple[str, SentimentExample]]:
+    """Yield ``(split, example)`` pairs ready to write.
 
     Args:
-        records (Iterable[Dict[str, Any]]): Records to serialize.
-        out_stream (IO[str]): Writable text stream.
+        entry: Sentiment task entry.
+        roots: Filesystem roots.
 
-    Returns:
-        int: Number of records written.
+    Yields:
+        ``(split_name, SentimentExample)`` pairs.
+
+    Raises:
+        ValueError: If the entry source kind is unknown.
     """
-    count = 0
-    for record in records:
-        out_stream.write(json.dumps(record, ensure_ascii=False))
-        out_stream.write("\n")
-        count += 1
-    return count
-
-
-def write_label_map(output_dir: Path) -> Path:
-    """Persist the label_id encoding next to the output file.
-
-    Args:
-        output_dir (Path): Directory the JSONL output is being written
-            to. The label map lands at `<output_dir>/label_map.json`.
-
-    Returns:
-        Path: Path to the written label map.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / "label_map.json"
-    payload = {label: idx for idx, label in enumerate(CANONICAL_LABELS)}
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    allow: Optional[set] = (
+        set(str(lbl) for lbl in entry.labels)
+        if entry.labels is not None
+        else None
     )
-    return path
+    splits_keys = list(entry.splits.keys())
+    only_split: Optional[str] = (
+        splits_keys[0] if len(splits_keys) == 1 else None
+    )
+
+    if entry.source.kind == "extracted":
+        record_iter = _iter_extracted(entry, roots, allow)
+    elif entry.source.kind == "raw":
+        record_iter = _iter_raw(entry, roots, allow)
+    else:
+        raise ValueError(
+            f"Unknown source kind {entry.source.kind!r} for "
+            f"{entry.task}/{entry.dataset}."
+        )
+
+    for split_key, example, _label in record_iter:
+        split = (
+            only_split
+            if only_split is not None
+            else hash_split(split_key, splits_keys)
+        )
+        yield split, example
 
 
-def convert_dataset(
+def convert_entry(
     key: str,
-    raw_dir: Path,
-    output_dir: Path,
-    levels: Optional[List[str]] = None,
+    entry: TaskEntry,
+    roots: TasksRoots,
     force: bool = False,
-) -> Optional[int]:
-    """Convert one SA dataset to `<output_dir>/<key>.jsonl.gz`.
+) -> Optional[Dict[str, int]]:
+    """Convert one sentiment entry, writing one file per declared split.
 
     Args:
-        key (str): Dataset key (must be registered in _READERS).
-        raw_dir (Path): Directory holding the raw download for *key*.
-        output_dir (Path): Directory to write the JSONL output into.
-            Created if missing.
-        levels (Optional[List[str]]): Annotation levels to emit (only
-            relevant for multi-level corpora like SentiNews).
-        force (bool): When True, overwrite an existing output file.
+        key: Entry key ``"<task>/<dataset>"`` (used for logging).
+        entry: Parsed task entry.
+        roots: Filesystem roots.
+        force: When True, re-derive even if every split already
+            exists.
 
     Returns:
-        Optional[int]: Number of records written, or None when no
-            reader is registered for *key*. Returns 0 when the output
-            already exists and *force* is False.
+        Mapping ``{split: written_count}``, or ``None`` when the
+        outputs already existed and ``force`` is False.
     """
-    reader = _READERS.get(key)
-    if reader is None:
-        logger.warning(
-            "No SA reader registered for dataset %r; skipping.", key,
-        )
-        return None
+    output_dir = resolve_output_dir(entry, roots)
+    outputs = outputs_for_splits(output_dir, entry.splits)
 
-    if not raw_dir.exists():
-        logger.warning(
-            "Raw dir for %r does not exist: %s", key, raw_dir,
-        )
-        return None
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"{key}.jsonl.gz"
-
-    if out_path.exists() and not force:
+    if not force and all_outputs_exist(outputs):
         logger.info(
-            "Skipping %r, output already exists: %s "
-            "(use --force to overwrite)",
-            key, out_path,
+            "Skipping %s: every split already exists at %s "
+            "(use --force to overwrite).",
+            key, output_dir,
         )
-        return 0
+        return None
 
-    logger.info("Converting %s → %s", raw_dir, out_path)
-    records = reader(raw_dir, levels=levels) if key == "sentinews" else reader(raw_dir)
-    progress = tqdm(records, desc=key, unit="rec", disable=workers_quiet())
-    with open_output(out_path) as out_stream:
-        try:
-            count = write_records(progress, out_stream)
-        finally:
-            progress.close()
+    logger.info("Converting %s -> %s", key, output_dir)
+    counts = write_jsonl_splits(
+        _iter_examples_for_entry(entry, roots),
+        outputs,
+    )
+    total = sum(counts.values())
+    logger.info(
+        "Wrote %d records across splits %s for %s",
+        total, counts, key,
+    )
+    return counts
 
-    write_label_map(output_dir)
-    logger.info("Wrote %d records to %s", count, out_path)
-    return count
+
+def _resolve_keys(
+    entries: List[TaskEntry],
+    requested: List[str],
+    use_all: bool,
+) -> List[str]:
+    """Resolve which entry keys to process from CLI selection.
+
+    Args:
+        entries: Entries already filtered to this converter.
+        requested: Positional ``<task>/<dataset>`` keys from the CLI.
+        use_all: Whether ``--all`` was passed.
+
+    Returns:
+        List of entry keys, preserving registry order.
+
+    Raises:
+        SystemExit: If a requested key is unknown to this converter.
+    """
+    known = {f"{e.task}/{e.dataset}": e for e in entries}
+    if use_all:
+        return list(known.keys())
+    unknown = [k for k in requested if k not in known]
+    if unknown:
+        logger.error(
+            "Unknown entries for converter %s: %s. Known: %s",
+            CONVERTER_NAME, unknown, sorted(known.keys()),
+        )
+        sys.exit(1)
+    return list(requested)
 
 
-def parse_args(argv=None) -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
-        argv: Optional argument list (defaults to `sys.argv`).
+        argv: Optional argument list (defaults to ``sys.argv``).
 
     Returns:
-        argparse.Namespace: Parsed arguments.
+        Parsed namespace.
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Convert SA benchmark downloads into evaluation-ready "
-            "<output_dir>/<key>.jsonl.gz files."
+            "Convert SA datasets into per-split task JSONL under "
+            "<roots.tasks>/<task>/<dataset>/<split>.jsonl.gz."
         )
     )
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument(
-        "dataset",
-        nargs="?",
+        "entries",
+        nargs="*",
+        default=[],
         help=(
-            "Dataset key (e.g. 'sentinews'). Mutually exclusive "
-            "with --all."
+            "Entry keys to process, e.g. 'sentiment/sentinews'. "
+            "Mutually exclusive with --all."
         ),
     )
     target.add_argument(
         "--all",
         action="store_true",
-        help=(
-            "Convert every SA-tagged benchmark dataset declared in "
-            "the download config."
-        ),
+        help="Process every sentiment entry declared in tasks.yaml.",
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=None,
-        help=(
-            "Path to download.yaml (default: "
-            "configs/data/download.yaml)."
-        ),
-    )
-    parser.add_argument(
-        "--raw-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Directory containing the raw downloads. Defaults to the "
-            "output_dir from the download config."
-        ),
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Directory to write <key>.jsonl.gz into. Defaults to "
-            "<raw-dir>/eval/sentiment."
-        ),
-    )
-    parser.add_argument(
-        "--levels",
-        nargs="+",
-        choices=SENTINEWS_LEVELS,
-        default=None,
-        help=(
-            "SentiNews annotation levels to emit (default: all "
-            "levels present in the raw download)."
-        ),
+        help="Path to tasks.yaml (default: configs/data/tasks.yaml).",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing <key>.jsonl.gz outputs.",
+        help="Re-derive outputs even when every split already exists.",
     )
     parser.add_argument(
         "--max-workers",
         type=int,
         default=0,
         help=(
-            "Process datasets in parallel. 0=auto (cpu_count // 2), "
-            "1=serial, N=N workers. Capped at the number of datasets."
+            "Process entries in parallel. 0=auto (cpu_count // 2), "
+            "1=serial, N=N workers. Capped at the number of entries."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.all and args.entries:
+        parser.error("argument --all: not allowed with positional entries")
+    if not args.all and not args.entries:
+        parser.error("one of the arguments entries --all is required")
+    return args
 
 
-def _resolve_raw_dir(
-    config_path: Path,
-    override: Optional[Path],
-) -> Path:
-    """Return the base raw-downloads directory.
-
-    Args:
-        config_path (Path): Path to download.yaml.
-        override (Optional[Path]): Explicit `--raw-dir` value.
-
-    Returns:
-        Path: Directory containing per-dataset subdirectories.
-
-    Raises:
-        FileNotFoundError: If *override* is None and *config_path*
-            does not exist.
-    """
-    if override is not None:
-        return override
-    base, _ = load_config(config_path)
-    return Path(base)
-
-
-def _resolve_dataset_dir(
-    base_raw_dir: Path,
-    config_path: Path,
-    key: str,
-) -> Path:
-    """Return the raw-input directory for a specific dataset.
-
-    Args:
-        base_raw_dir (Path): Base raw downloads directory.
-        config_path (Path): Path to download.yaml.
-        key (str): Dataset key.
-
-    Returns:
-        Path: Per-dataset raw directory (`<base>/<output_dir>`).
-    """
-    _, datasets = load_config(config_path)
-    cfg: Optional[DatasetConfig] = datasets.get(key)
-    subdir = cfg.output_dir if cfg and cfg.output_dir else key
-    return base_raw_dir / subdir
-
-
-def main():
-    """Run the SA conversion from CLI arguments."""
+def main() -> None:
+    """Run the sentiment conversion from CLI arguments."""
     args = parse_args()
     project_root = find_project_root()
     config_path = (
         args.config
-        if args.config
-        else project_root / "configs" / "data" / "download.yaml"
+        if args.config is not None
+        else project_root / "configs" / "data" / "tasks.yaml"
     )
 
-    base_raw_dir = _resolve_raw_dir(config_path, args.raw_dir)
-    output_dir = (
-        args.output_dir
-        if args.output_dir is not None
-        else base_raw_dir / "eval" / "sentiment"
+    tasks_config = load_tasks(config_path)
+    entries = filter_for_converter(tasks_config, CONVERTER_NAME)
+    by_key = {f"{e.task}/{e.dataset}": e for e in entries}
+
+    keys = _resolve_keys(entries, args.entries, args.all)
+    if not keys:
+        logger.warning(
+            "No entries to process for converter %s.", CONVERTER_NAME,
+        )
+        return
+
+    workers = resolve_workers(
+        args.max_workers, len(keys), cpu_default(len(keys)),
     )
-
-    if args.all:
-        keys = list_sa_datasets_from_config(config_path)
-    else:
-        keys = [args.dataset]
-
-    # Resolve per-dataset raw dirs in the parent (avoids re-parsing
-    # download.yaml inside every worker).
-    dataset_dirs: Dict[str, Path] = {
-        key: _resolve_dataset_dir(base_raw_dir, config_path, key)
-        for key in keys
-    }
-
-    workers = resolve_workers(args.max_workers, len(keys), cpu_default(len(keys)))
     configure_script_logging(parallel=workers > 1)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
 
+    roots = tasks_config.roots
+
     def kwargs_for(key: str) -> Dict[str, Any]:
         return {
-            "raw_dir": dataset_dirs[key],
-            "output_dir": output_dir,
-            "levels": args.levels,
+            "entry": by_key[key],
+            "roots": roots,
             "force": args.force,
         }
 
     results, failures = run_parallel(
-        convert_dataset,
+        convert_entry,
         keys,
         max_workers=workers,
-        desc="sentiment",
+        desc=CONVERTER_NAME,
         pool="process",
         kwargs_for=kwargs_for,
         log_dir=log_dir,
     )
 
-    skipped: List[str] = [k for k, v in results.items() if v is None]
-    total = sum(v for v in results.values() if v is not None)
-
+    skipped = [k for k, v in results.items() if v is None]
+    total = sum(
+        sum(v.values()) for v in results.values() if v is not None
+    )
     logger.info(
-        "Done. Converted %d dataset(s), %d records total. "
-        "Skipped: %s. Failed: %s",
+        "Done. Processed %d entr(ies); %d skipped; %d records written. "
+        "Failed: %s",
         len(results) - len(skipped),
+        len(skipped),
         total,
-        skipped or "none",
         [k for k, _ in failures] or "none",
     )
     if failures:
         sys.exit(2)
-    if not args.all and skipped:
-        sys.exit(1)
 
 
 if __name__ == "__main__":

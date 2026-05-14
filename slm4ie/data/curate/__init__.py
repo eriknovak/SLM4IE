@@ -1,15 +1,16 @@
 """Curation pipeline that produces the final SLM4IE pretraining corpus.
 
-Reads `<output_dir>/datatrove/<key>.jsonl.gz` and writes one consolidated
-output: `<output_dir>/final/` containing the deduplicated training shards
-and a `statistics/` subfolder. Three concerns are wired into a single
-five-executor datatrove pipeline:
+Reads `<input_dir>/<key>.jsonl` extraction outputs and writes durable,
+sentinel-tracked artifacts under `<output_dir>/`:
 
+* `convert` (stage 0): per-dataset folders of datatrove `Document`-shaped
+  gzipped JSONL shards. Wires the extraction step into the curate
+  pipeline without going through a separate `to_datatrove` script.
 * `language`: every document is tagged with a lingua-py language label
   and a target-language confidence score.
-* `dedup`: cross-dataset whole-document and 3-sentence exact dedup
-  (datatrove's six-block ladder, fused with the surrounding lang and
-  stats steps so only five executors are spawned).
+* `quality`, `repetition`: per-document Gopher heuristics.
+* `exact_dedup`, `sentence_dedup`: corpus-wide whole-document and
+  N-sentence dedup (datatrove's six-block ladder).
 * `stats`: corpus-wide totals plus per-domain and per-dataset
   breakdowns, top-K word and n-gram tables, and classla-lemmatized
   TF-IDF keywords.

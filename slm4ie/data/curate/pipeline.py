@@ -51,10 +51,10 @@ class CuratePaths:
     """Filesystem locations for one curation run.
 
     Attributes:
-        input_folder: Upstream `<key>/<part>.jsonl.gz` shards
-            (typically the output of `to_datatrove.py`).
+        input_folder: Folder of `<key>.jsonl` extraction outputs that
+            the `convert` stage (stage 0) reads from.
         output_dir: Curation output root. Stage folders
-            (`01_language/`, `02_quality/`, ...) live directly under
+            (`00_convert/`, `01_language/`, ...) live directly under
             this path, alongside `_dedup_state/` and `_logs/`.
     """
 
@@ -173,8 +173,9 @@ def build_language_executors(
     lang_minimum_relative_distance: float = 0.0,
     lang_low_accuracy: bool = False,
     lang_max_chars: Optional[int] = None,
+    input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
-    """Build the language stage: read input → lingua filter → write 01_language/.
+    """Build the language stage: read 00_convert/ → lingua filter → write 01_language/.
 
     Args:
         paths: Resolved input/output locations.
@@ -188,14 +189,20 @@ def build_language_executors(
         lang_low_accuracy: Use lingua's trigram-only model.
         lang_max_chars: Truncate doc text to this many chars before
             detection. `None` disables truncation.
+        input_override: Optional folder to read from instead of the
+            convert stage's output folder. Used by the CLI runner to
+            restrict the language stage to a symlinked subset of
+            `<output_dir>/00_convert/` when the user requests a subset
+            of dataset keys.
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
     out = paths.stage_dir("language")
+    in_ = input_override if input_override is not None else paths.stage_dir("convert")
     executor = LocalPipelineExecutor(
         pipeline=[
-            _reader(paths.input_folder),
+            _reader(in_),
             LinguaLanguageFilter(
                 targets=list(target_languages),
                 candidates=candidate_languages,

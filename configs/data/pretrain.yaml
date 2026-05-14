@@ -1,9 +1,23 @@
-input_dir: /vault/data/SLM4IE/processed/datatrove
-output_dir: /vault/data/SLM4IE/final
+input_dir: /vault/data/SLM4IE/extracted
+output_dir: /vault/data/SLM4IE/pretrain
 
 # Stopword file used by both the quality stage (Gopher's min_stop_words)
 # and the stats stage (word/n-gram/keyword filtering).
 stopwords: configs/data/stopwords_sl.txt
+
+# 00_convert: extract -> datatrove `Document`-shaped shards. Reads
+# <input_dir>/<key>.jsonl, writes <output_dir>/00_convert/<key>/*.jsonl.gz.
+# Provenance fields listed under `metadata_fields` survive verbatim and
+# end up under `Document.metadata` once datatrove's JsonlReader picks
+# the shards up. The extraction `source` field is always renamed to
+# `dataset` (every stage writer routes shards by `${dataset}`); do not
+# list it here.
+convert:
+  text_field: text
+  id_field: doc_id
+  metadata_fields: [domain, doc_id]
+  include_annotations: false
+  max_shard_bytes: 200000000  # ~200 MB compressed per shard
 
 # 01_language: lingua-py language detection. In `mode: filter`, only
 # docs whose detected top-1 language is in `targets` survive.

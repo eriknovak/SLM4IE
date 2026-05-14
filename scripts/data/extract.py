@@ -5,55 +5,74 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List, Optional
 
+from slm4ie.data.io_utils import find_project_root
 from slm4ie.data.parallel import configure_script_logging
 from slm4ie.data.processing import extract_datasets
 
 
-def _find_project_root() -> Path:
-    """Find the project root by locating pyproject.toml.
-
-    Returns:
-        Path: The project root directory.
-
-    Raises:
-        FileNotFoundError: If pyproject.toml cannot be found.
-    """
-    current = Path(__file__).resolve().parent
-    for parent in [current, *current.parents]:
-        if (parent / "pyproject.toml").exists():
-            return parent
-    raise FileNotFoundError("Could not find project root (no pyproject.toml)")
-
-
-def parse_args(argv=None) -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
+    Selection is explicit: either pass one or more positional dataset
+    keys, or pass `--all`. Exactly one of the two must be provided.
+
     Args:
-        argv: Argument list (defaults to sys.argv).
+        argv: Optional argument list (defaults to `sys.argv`).
 
     Returns:
-        argparse.Namespace: Parsed arguments.
+        Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description=("Extract raw datasets to unified JSONL format.")
+        description="Extract raw datasets to unified JSONL format.",
     )
-    parser.add_argument(
-        "--datasets",
-        nargs="+",
-        default=None,
-        help=("Dataset keys to extract (default: all configured)."),
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument(
+        "datasets",
+        nargs="*",
+        default=[],
+        help="Dataset keys to extract (e.g. 'kzb gigafida').",
+    )
+    target.add_argument(
+        "--all",
+        action="store_true",
+        help="Extract every dataset declared in the config.",
     )
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help=("Path to extraction YAML config (default: configs/data/extract.yaml)."),
+        help=(
+            "Path to YAML config file. Overrides --config-name "
+            "if both are set."
+        ),
+    )
+    parser.add_argument(
+        "--config-name",
+        type=str,
+        default="extract",
+        help=(
+            "Name of the config in configs/data/ to use, "
+            "without extension (default: 'extract')."
+        ),
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=str,
+        default=None,
+        help="Override the configured input directory.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override the configured output directory.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help=("Re-extract datasets even if their output already exists."),
+        help="Re-extract datasets even if their output already exists.",
     )
     parser.add_argument(
         "--max-workers",
@@ -64,31 +83,48 @@ def parse_args(argv=None) -> argparse.Namespace:
             "1=serial, N=N workers. Capped at the number of datasets."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # argparse's `required=True` on a mutex group accepts a positional
+    # with `nargs="*"`, but treats an empty positional as "provided" —
+    # so bare invocation can slip through. Validate the xor by hand.
+    if args.all and args.datasets:
+        parser.error("argument --all: not allowed with positional datasets")
+    if not args.all and not args.datasets:
+        parser.error("one of the arguments datasets --all is required")
+    return args
 
 
-def main():
+def main() -> None:
     """Run dataset extraction pipeline."""
     args = parse_args()
-    project_root = _find_project_root()
+    project_root = find_project_root()
 
     config_path = (
         Path(args.config)
         if args.config
-        else project_root / "configs" / "data" / "extract.yaml"
+        else project_root
+        / "configs"
+        / "data"
+        / f"{args.config_name}.yaml"
     )
 
-    configure_script_logging(parallel=args.max_workers > 1)
+    configure_script_logging(
+        parallel=args.max_workers > 1,
+        console_level=logging.WARNING,
+    )
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
+    print(f"Logs: {log_dir}", file=sys.stderr)
 
     try:
         extract_datasets(
             config_path=config_path,
-            dataset_keys=args.datasets,
+            dataset_keys=args.datasets if not args.all else None,
             force=args.force,
             max_workers=args.max_workers,
             log_dir=log_dir,
+            input_dir_override=args.input_dir,
+            output_dir_override=args.output_dir,
         )
     except ValueError as e:
         logging.getLogger(__name__).error(str(e))

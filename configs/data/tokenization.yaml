@@ -1,0 +1,21 @@
+# Tokenizer-evaluation corpus configuration.
+#
+# Produces per-dataset <key>.jsonl.gz files used to measure tokenizer
+# quality (compression ratio, fertility, OOV rate, morphological
+# coverage). Inputs are raw downloads from scripts/data/download.py;
+# outputs land in `output_dir/<key>.jsonl.gz`.
+#
+# The current pipeline ships a single TOKENIZER-tagged dataset
+# (Sloleks 3.1), used as a morphological lexicon. New tokenizer-eval
+# corpora are added by registering a reader in
+# scripts/data/to_tokenization.py and listing the dataset key below.
+
+input_dir: /vault/data/SLM4IE/raw
+output_dir: /vault/data/SLM4IE/tokenization
+
+# Dataset keys to convert. Each must:
+#   1. be declared in configs/data/download.yaml (so the raw download
+#      directory can be located via its `output_dir`), and
+#   2. have a reader registered in scripts/data/to_tokenization.py.
+datasets:
+  - sloleks

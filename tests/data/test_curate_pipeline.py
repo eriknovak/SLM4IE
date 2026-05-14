@@ -297,9 +297,13 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     and asserts dedup invariants on the `04_2_dedup/` output plus the
     statistics bundle.
     """
-    input_folder = tmp_path / "datatrove"
+    output_dir = tmp_path / "curated"
+    # Drop synthetic shards directly into the convert stage's output
+    # folder; the language stage reads from `<output_dir>/00_convert/`,
+    # so the in-tree convert step is effectively pre-populated here.
+    convert_folder = output_dir / "00_convert"
     _write_shard(
-        input_folder / "alpha" / "00000.jsonl.gz",
+        convert_folder / "alpha" / "00000.jsonl.gz",
         dataset="alpha",
         domain="scientific",
         docs=[
@@ -309,7 +313,7 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
         ],
     )
     _write_shard(
-        input_folder / "beta" / "00000.jsonl.gz",
+        convert_folder / "beta" / "00000.jsonl.gz",
         dataset="beta",
         domain="legal",
         docs=[
@@ -319,8 +323,7 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
         ],
     )
 
-    output_dir = tmp_path / "curated"
-    paths = CuratePaths(input_folder=input_folder, output_dir=output_dir)
+    paths = CuratePaths(input_folder=tmp_path / "extracted", output_dir=output_dir)
 
     loose_quality = QualityConfig(
         min_doc_words=5,
@@ -381,12 +384,12 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
 
 
 # --- CLI: multi-key dataset selection ----------------------------------------
-# `scripts/data/curate.py` accepts either one or more positional dataset keys,
-# or `--all`. The CLI lives outside `slm4ie/` but is importable as
-# `scripts.data.curate` because both `scripts/` and `scripts/data/` ship empty
-# `__init__.py` files.
+# `scripts/data/to_pretrain.py` accepts either one or more positional dataset
+# keys, or `--all`. The CLI lives outside `slm4ie/` but is importable as
+# `scripts.data.to_pretrain` because both `scripts/` and `scripts/data/` ship
+# empty `__init__.py` files.
 
-from scripts.data import curate as curate_cli  # noqa: E402
+from scripts.data import to_pretrain as curate_cli  # noqa: E402
 
 
 class TestCurateCLISelection:
@@ -423,7 +426,7 @@ class TestCurateCLISelection:
     def test_parse_args_accepts_each_stage_name(self) -> None:
         """Every documented `--stage` value parses."""
         for name in (
-            "language", "quality", "repetition",
+            "convert", "language", "quality", "repetition",
             "exact_dedup", "sentence_dedup", "stats", "all",
         ):
             args = curate_cli.parse_args(["--all", "--stage", name])
@@ -449,30 +452,33 @@ class TestCurateCLISelection:
         args = curate_cli.parse_args(["--all", "--tasks", "4"])
         assert args.workers == 4
 
-    def test_filter_input_keys_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
-        """`_filter_input_keys` builds symlinks for every requested key."""
-        input_dir = tmp_path / "datatrove"
+    def test_filter_convert_subset_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
+        """`_filter_convert_subset` builds symlinks for every requested key."""
+        convert_dir = tmp_path / "00_convert"
         for key in ("kzb", "solar"):
-            shard_dir = input_dir / key
+            shard_dir = convert_dir / key
             shard_dir.mkdir(parents=True)
-            (shard_dir / "00000.jsonl.gz").write_bytes(b"")
+            (shard_dir / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
-        holder = curate_cli._filter_input_keys(input_dir, ["kzb", "solar"])
+        holder = curate_cli._filter_convert_subset(convert_dir, ["kzb", "solar"])
         try:
             assert (holder / "kzb" / "00000.jsonl.gz").is_symlink()
             assert (holder / "solar" / "00000.jsonl.gz").is_symlink()
         finally:
             import shutil
+
             shutil.rmtree(holder, ignore_errors=True)
 
-    def test_filter_input_keys_lists_all_missing_keys(self, tmp_path: Path) -> None:
+    def test_filter_convert_subset_lists_all_missing_keys(self, tmp_path: Path) -> None:
         """Missing shard folders are reported together in one error."""
-        input_dir = tmp_path / "datatrove"
-        (input_dir / "kzb").mkdir(parents=True)
-        (input_dir / "kzb" / "00000.jsonl.gz").write_bytes(b"")
+        convert_dir = tmp_path / "00_convert"
+        (convert_dir / "kzb").mkdir(parents=True)
+        (convert_dir / "kzb" / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
         with pytest.raises(FileNotFoundError) as excinfo:
-            curate_cli._filter_input_keys(input_dir, ["kzb", "missing1", "missing2"])
+            curate_cli._filter_convert_subset(
+                convert_dir, ["kzb", "missing1", "missing2"]
+            )
         msg = str(excinfo.value)
         assert "missing1" in msg
         assert "missing2" in msg

@@ -1,9 +1,10 @@
-"""Tests for scripts/data/to_sentiment.py."""
+"""Tests for scripts/data/to_sentiment.py (tasks.yaml-driven SA converter)."""
 
 import gzip
 import json
 import sys
 from pathlib import Path
+from typing import Any, Dict, List
 
 import pytest
 import yaml
@@ -14,13 +15,53 @@ sys.path.insert(
 )
 import to_sentiment  # noqa: E402
 
+from slm4ie.data.tasks import load_tasks  # noqa: E402
 
-def _write_sentinews_file(
+
+def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
+    """Write *records* as JSONL to *path*.
+
+    Args:
+        path: Destination path. Parents are created if missing.
+        records: Records to serialize.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r, ensure_ascii=False))
+            fh.write("\n")
+
+
+def _read_jsonl_gz(path: Path) -> List[Dict[str, Any]]:
+    """Read a gzipped JSONL file into a list.
+
+    Args:
+        path: Gzipped JSONL path.
+
+    Returns:
+        Decoded records.
+    """
+    out: List[Dict[str, Any]] = []
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+    return out
+
+
+def _write_sentinews_tsv(
     path: Path,
-    rows,
-    columns,
+    rows: List[Dict[str, str]],
+    columns: List[str],
 ) -> None:
-    """Write a tab-separated SentiNews-style file at *path*."""
+    """Write a tab-separated SentiNews-style file at *path*.
+
+    Args:
+        path: Output TSV path. Parents are created if missing.
+        rows: Row dicts; missing columns become empty strings.
+        columns: Column header order.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(columns) + "\n")
@@ -28,228 +69,269 @@ def _write_sentinews_file(
             fh.write("\t".join(row.get(c, "") for c in columns) + "\n")
 
 
-def _read_jsonl_gz(path: Path):
-    """Yield JSON-decoded records from a gzipped JSONL file."""
-    with gzip.open(path, "rt", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
+def _make_extracted_layout(
+    tmp_path: Path,
+    dataset_key: str,
+    records: List[Dict[str, Any]],
+) -> Path:
+    """Build a tasks.yaml + matching `extracted/<key>.jsonl` source tree.
+
+    Args:
+        tmp_path: pytest tmp_path root.
+        dataset_key: Source key written under ``extracted/<key>.jsonl``.
+        records: Joined extraction records, each carrying a `label` /
+            `sentiment` field that the converter normalizes.
+
+    Returns:
+        Path to the written tasks.yaml.
+    """
+    extracted = tmp_path / "extracted"
+    raw = tmp_path / "raw"
+    tasks_root = tmp_path / "tasks"
+    raw.mkdir(parents=True, exist_ok=True)
+    tasks_root.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(extracted / f"{dataset_key}.jsonl", records)
+
+    tasks_yaml = {
+        "roots": {
+            "extracted": str(extracted),
+            "raw": str(raw),
+            "tasks": str(tasks_root),
+        },
+        "converters": {"sentiment": "to_sentiment"},
+        "entries": {
+            f"sentiment/{dataset_key}": {
+                "role": "finetune_and_eval",
+                "source": {"kind": "extracted", "keys": [dataset_key]},
+                "splits": {
+                    "train": "train.jsonl.gz",
+                    "val": "val.jsonl.gz",
+                    "test": "test.jsonl.gz",
+                },
+                "labels": ["negative", "neutral", "positive"],
+                "suite": None,
+                "language": "sl",
+                "license": "cc-by-sa-4.0",
+            },
+        },
+    }
+    config_path = tmp_path / "tasks.yaml"
+    config_path.write_text(yaml.safe_dump(tasks_yaml))
+    return config_path
+
+
+def _make_raw_layout(
+    tmp_path: Path,
+    dataset_key: str,
+    rows: List[Dict[str, str]],
+    columns: List[str],
+) -> Path:
+    """Build a tasks.yaml that points at a SentiNews-style raw TSV.
+
+    Args:
+        tmp_path: pytest tmp_path root.
+        dataset_key: Subdirectory name under ``raw/<key>/``.
+        rows: TSV rows.
+        columns: TSV column order.
+
+    Returns:
+        Path to the written tasks.yaml.
+    """
+    extracted = tmp_path / "extracted"
+    raw = tmp_path / "raw"
+    tasks_root = tmp_path / "tasks"
+    extracted.mkdir(parents=True, exist_ok=True)
+    tasks_root.mkdir(parents=True, exist_ok=True)
+    _write_sentinews_tsv(
+        raw / dataset_key / "SentiNews_document-level.txt",
+        rows,
+        columns,
+    )
+
+    tasks_yaml = {
+        "roots": {
+            "extracted": str(extracted),
+            "raw": str(raw),
+            "tasks": str(tasks_root),
+        },
+        "converters": {"sentiment": "to_sentiment"},
+        "entries": {
+            f"sentiment/{dataset_key}": {
+                "role": "held_out",
+                "source": {"kind": "raw", "keys": [dataset_key]},
+                "splits": {"test": "test.jsonl.gz"},
+                "labels": ["negative", "neutral", "positive"],
+                "suite": None,
+                "language": "sl",
+                "license": "cc-by-4.0",
+            },
+        },
+    }
+    config_path = tmp_path / "tasks.yaml"
+    config_path.write_text(yaml.safe_dump(tasks_yaml))
+    return config_path
 
 
 class TestNormalizeLabel:
-    """Unit tests for to_sentiment._normalize_label."""
+    """Unit tests for `to_sentiment._normalize_label`."""
 
-    def test_canonical_passes_through(self):
+    def test_canonical_passes_through(self) -> None:
         """Canonical labels are returned unchanged."""
         for label in ("negative", "neutral", "positive"):
-            assert to_sentiment._normalize_label(label) == label
+            assert to_sentiment._normalize_label(label, None) == label
 
-    def test_uppercase_normalized(self):
-        """Mixed-case labels are lowercased."""
-        assert to_sentiment._normalize_label("Positive") == "positive"
+    def test_mixed_case_normalized(self) -> None:
+        """Mixed-case labels lowercase to canonical labels."""
+        assert to_sentiment._normalize_label("Positive", None) == "positive"
 
-    def test_short_form_normalized(self):
-        """`neg` and `pos` short forms expand to canonical labels."""
-        assert to_sentiment._normalize_label("neg") == "negative"
-        assert to_sentiment._normalize_label("pos") == "positive"
+    def test_short_form_normalized(self) -> None:
+        """`neg` / `pos` / `neu` expand to canonical labels."""
+        assert to_sentiment._normalize_label("neg", None) == "negative"
+        assert to_sentiment._normalize_label("pos", None) == "positive"
+        assert to_sentiment._normalize_label("neu", None) == "neutral"
 
-    def test_unknown_raises(self):
-        """An unrecognized label raises ValueError."""
-        with pytest.raises(ValueError, match="Unrecognized SA label"):
-            to_sentiment._normalize_label("very-positive")
+    def test_unknown_returns_none(self) -> None:
+        """Unknown labels become None instead of raising."""
+        assert to_sentiment._normalize_label("very-positive", None) is None
 
-
-class TestLabelId:
-    """Unit tests for to_sentiment._label_id."""
-
-    def test_encoding_is_stable(self):
-        """Label-to-id encoding is fixed at negative=0, neutral=1, positive=2."""
-        assert to_sentiment._label_id("negative") == 0
-        assert to_sentiment._label_id("neutral") == 1
-        assert to_sentiment._label_id("positive") == 2
-
-
-class TestReadSentinews:
-    """Tests for the SentiNews reader."""
-
-    def test_document_level(self, tmp_path: Path):
-        """Document-level rows are emitted with a `level=document` field."""
-        raw_dir = tmp_path / "sentinews"
-        _write_sentinews_file(
-            raw_dir / "SentiNews_document-level.txt",
-            [
-                {"nid": "1", "content": "Lepa novica.", "sentiment": "positive"},
-                {"nid": "2", "content": "Slaba novica.", "sentiment": "negative"},
-            ],
-            columns=["nid", "content", "sentiment"],
+    def test_allow_list_filters(self) -> None:
+        """A canonical label not in the allow-list returns None."""
+        assert (
+            to_sentiment._normalize_label("neutral", {"negative", "positive"})
+            is None
         )
-        records = list(to_sentiment._read_sentinews(raw_dir))
-        assert len(records) == 2
-        first = records[0]
-        assert first["id"] == "sentinews:1"
-        assert first["text"] == "Lepa novica."
-        assert first["label"] == "positive"
-        assert first["label_id"] == 2
-        assert first["dataset"] == "sentinews"
-        assert first["task"] == "SA"
-        assert first["level"] == "document"
 
-    def test_paragraph_level_id_includes_pid(self, tmp_path: Path):
-        """Paragraph-level ids encode the paragraph index as `<nid>-p<pid>`."""
-        raw_dir = tmp_path / "sentinews"
-        _write_sentinews_file(
-            raw_dir / "SentiNews_paragraph-level.txt",
-            [
-                {"nid": "1", "pid": "0", "content": "Prvi odstavek.", "sentiment": "neutral"},
-            ],
-            columns=["nid", "pid", "content", "sentiment"],
+
+class TestConvertEntryExtracted:
+    """Tests for the `extracted` source path."""
+
+    def test_writes_split_files(self, tmp_path: Path) -> None:
+        """Records are bucketed across train/val/test and written gzipped."""
+        records = [
+            {
+                "text": f"text {i}",
+                "source": "sentinews",
+                "doc_id": f"d{i}",
+                "uid": f"sentinews:d{i}",
+                "label": ["negative", "neutral", "positive"][i % 3],
+            }
+            for i in range(30)
+        ]
+        config_path = _make_extracted_layout(tmp_path, "sentinews", records)
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries
+            if f"{e.task}/{e.dataset}" == "sentiment/sentinews"
         )
-        records = list(to_sentiment._read_sentinews(raw_dir))
-        assert records[0]["id"] == "sentinews:1-p0"
-        assert records[0]["level"] == "paragraph"
 
-    def test_levels_filter(self, tmp_path: Path):
-        """`levels=[...]` selects only the requested annotation granularities."""
-        raw_dir = tmp_path / "sentinews"
-        _write_sentinews_file(
-            raw_dir / "SentiNews_document-level.txt",
-            [{"nid": "1", "content": "doc", "sentiment": "neutral"}],
-            columns=["nid", "content", "sentiment"],
+        counts = to_sentiment.convert_entry(
+            "sentiment/sentinews", entry, cfg.roots
         )
-        _write_sentinews_file(
-            raw_dir / "SentiNews_sentence-level.txt",
-            [{"nid": "1", "pid": "0", "sid": "0", "content": "sent",
-              "sentiment": "neutral"}],
-            columns=["nid", "pid", "sid", "content", "sentiment"],
+        assert counts is not None
+        assert sum(counts.values()) == 30
+
+        # Every declared split file must exist.
+        out_dir = tmp_path / "tasks" / "sentiment" / "sentinews"
+        for split_filename in entry.splits.values():
+            assert (out_dir / split_filename).exists()
+
+        # Spot-check the schema of one row matches SentimentExample.
+        records_train = _read_jsonl_gz(out_dir / "train.jsonl.gz")
+        sample = records_train[0]
+        assert set(sample.keys()) == {"id", "text", "label"}
+        assert sample["label"] in {"negative", "neutral", "positive"}
+
+    def test_skips_when_outputs_exist(self, tmp_path: Path) -> None:
+        """Existing outputs short-circuit the converter."""
+        records = [
+            {
+                "text": "x",
+                "source": "sentinews",
+                "doc_id": "d1",
+                "uid": "sentinews:d1",
+                "label": "neutral",
+            }
+        ]
+        config_path = _make_extracted_layout(tmp_path, "sentinews", records)
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries
+            if f"{e.task}/{e.dataset}" == "sentiment/sentinews"
         )
-        records = list(
-            to_sentiment._read_sentinews(raw_dir, levels=["document"])
-        )
-        assert len(records) == 1
-        assert records[0]["level"] == "document"
 
-    def test_unknown_label_skipped(self, tmp_path: Path):
-        """Rows with non-canonical labels are dropped silently."""
-        raw_dir = tmp_path / "sentinews"
-        _write_sentinews_file(
-            raw_dir / "SentiNews_document-level.txt",
-            [
-                {"nid": "1", "content": "ok", "sentiment": "neutral"},
-                {"nid": "2", "content": "bad", "sentiment": "ambivalent"},
-            ],
-            columns=["nid", "content", "sentiment"],
-        )
-        records = list(to_sentiment._read_sentinews(raw_dir))
-        assert len(records) == 1
-        assert records[0]["id"] == "sentinews:1"
+        out_dir = tmp_path / "tasks" / "sentiment" / "sentinews"
+        out_dir.mkdir(parents=True)
+        for split_filename in entry.splits.values():
+            (out_dir / split_filename).write_bytes(b"\x1f\x8b")
 
-    def test_missing_files_raise(self, tmp_path: Path):
-        """An empty SentiNews directory raises FileNotFoundError."""
-        raw_dir = tmp_path / "sentinews"
-        raw_dir.mkdir()
-        with pytest.raises(FileNotFoundError, match="No SentiNews"):
-            list(to_sentiment._read_sentinews(raw_dir))
-
-
-class TestConvertDataset:
-    """End-to-end conversion via convert_dataset."""
-
-    def test_writes_jsonl_gz_and_label_map(self, tmp_path: Path):
-        """`convert_dataset` writes the gzipped JSONL and the label_map.json."""
-        raw_dir = tmp_path / "sentinews"
-        _write_sentinews_file(
-            raw_dir / "SentiNews_document-level.txt",
-            [
-                {"nid": "1", "content": "A", "sentiment": "negative"},
-                {"nid": "2", "content": "B", "sentiment": "neutral"},
-                {"nid": "3", "content": "C", "sentiment": "positive"},
-            ],
-            columns=["nid", "content", "sentiment"],
-        )
-        out_dir = tmp_path / "out"
-        count = to_sentiment.convert_dataset(
-            "sentinews", raw_dir, out_dir,
-        )
-        assert count == 3
-
-        out_path = out_dir / "sentinews.jsonl.gz"
-        records = list(_read_jsonl_gz(out_path))
-        assert {r["label"] for r in records} == {
-            "negative", "neutral", "positive"
-        }
-
-        label_map = json.loads(
-            (out_dir / "label_map.json").read_text(encoding="utf-8")
-        )
-        assert label_map == {"negative": 0, "neutral": 1, "positive": 2}
-
-    def test_unknown_dataset_returns_none(self, tmp_path: Path):
-        """Unknown dataset keys return None instead of raising."""
-        result = to_sentiment.convert_dataset(
-            "nonexistent", tmp_path, tmp_path / "out",
+        result = to_sentiment.convert_entry(
+            "sentiment/sentinews", entry, cfg.roots
         )
         assert result is None
 
-    def test_existing_output_skipped_without_force(
-        self, tmp_path: Path,
-    ):
-        """An existing output file is preserved when `force=False`."""
-        raw_dir = tmp_path / "sentinews"
-        _write_sentinews_file(
-            raw_dir / "SentiNews_document-level.txt",
-            [{"nid": "1", "content": "A", "sentiment": "negative"}],
+
+class TestConvertEntryRaw:
+    """Tests for the `raw` source path (SentiNews-style TSV)."""
+
+    def test_raw_records_go_to_single_split(self, tmp_path: Path) -> None:
+        """When only one split is declared, every record lands there."""
+        rows = [
+            {"nid": "1", "content": "Lepo.", "sentiment": "positive"},
+            {"nid": "2", "content": "Slabo.", "sentiment": "negative"},
+            {"nid": "3", "content": "OK.", "sentiment": "neutral"},
+        ]
+        config_path = _make_raw_layout(
+            tmp_path,
+            "twitter_sentiment_15eu",
+            rows,
             columns=["nid", "content", "sentiment"],
         )
-        out_dir = tmp_path / "out"
-        out_dir.mkdir()
-        out_path = out_dir / "sentinews.jsonl.gz"
-        with gzip.open(out_path, "wt", encoding="utf-8") as fh:
-            fh.write("placeholder\n")
-
-        result = to_sentiment.convert_dataset(
-            "sentinews", raw_dir, out_dir,
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries
+            if f"{e.task}/{e.dataset}" == "sentiment/twitter_sentiment_15eu"
         )
-        assert result == 0
-        assert out_path.read_bytes()[:2] == b"\x1f\x8b"  # still gzip
 
+        counts = to_sentiment.convert_entry(
+            "sentiment/twitter_sentiment_15eu", entry, cfg.roots
+        )
+        assert counts is not None
+        assert counts == {"test": 3}
 
-class TestListSaDatasetsFromConfig:
-    """Tests for filtering SA-tagged benchmark datasets."""
-
-    def test_returns_only_sa_benchmarks(self, tmp_path: Path):
-        """Only benchmark datasets tagged with the SA task are returned."""
-        config = {
-            "output_dir": str(tmp_path / "raw"),
-            "datasets": {
-                "pretrain_ds": {
-                    "enabled": True,
-                    "source": "clarin",
-                    "name": "Pretrain",
-                    "urls": ["https://example.com/p.gz"],
-                    "output_dir": "pretrain_ds",
-                },
-                "sentinews": {
-                    "enabled": True,
-                    "benchmark": True,
-                    "source": "clarin",
-                    "name": "SentiNews",
-                    "urls": ["https://example.com/s.txt"],
-                    "output_dir": "sentinews",
-                    "tasks": ["SA"],
-                },
-                "ssj500k": {
-                    "enabled": True,
-                    "benchmark": True,
-                    "source": "clarin",
-                    "name": "ssj500k",
-                    "urls": ["https://example.com/sj.zip"],
-                    "output_dir": "ssj500k",
-                    "tasks": ["POS", "NER"],
-                },
-            },
+        out_dir = (
+            tmp_path / "tasks" / "sentiment" / "twitter_sentiment_15eu"
+        )
+        records = _read_jsonl_gz(out_dir / "test.jsonl.gz")
+        assert len(records) == 3
+        assert {r["label"] for r in records} == {
+            "negative", "neutral", "positive"
         }
-        config_file = tmp_path / "download.yaml"
-        config_file.write_text(yaml.dump(config))
-        keys = to_sentiment.list_sa_datasets_from_config(config_file)
-        assert keys == ["sentinews"]
+        for record in records:
+            # Schema parity with SentimentExample.
+            assert set(record.keys()) == {"id", "text", "label"}
+
+
+class TestParseArgs:
+    """Tests for `to_sentiment.parse_args`."""
+
+    def test_accepts_entry_keys(self) -> None:
+        """Positional entries are gathered into `args.entries`."""
+        args = to_sentiment.parse_args(["sentiment/sentinews"])
+        assert args.entries == ["sentiment/sentinews"]
+        assert args.all is False
+
+    def test_all_flag(self) -> None:
+        """`--all` parses without positional entries."""
+        args = to_sentiment.parse_args(["--all"])
+        assert args.all is True
+        assert args.entries == []
+
+    def test_force_flag_sets_true(self) -> None:
+        """Passing `--force` flips the flag."""
+        args = to_sentiment.parse_args(["--all", "--force"])
+        assert args.force is True
+
+    def test_bare_invocation_errors(self) -> None:
+        """A bare invocation requires entries or `--all`."""
+        with pytest.raises(SystemExit):
+            to_sentiment.parse_args([])

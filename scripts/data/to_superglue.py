@@ -1,88 +1,107 @@
-"""Convert raw SuperGLUE-SL downloads into per-task evaluation JSONL.
+"""Convert SuperGLUE-SL subtasks into task-shaped per-split JSONL.
 
-The Slovene SuperGLUE distribution ships as a zip containing 8 task
-subdirectories (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC), each
-with its own `train.jsonl` / `val.jsonl` / `test.jsonl` files
-following the original SuperGLUE schemas. This script reads those raw
-JSONL files and emits gzipped copies under
-`<output_dir>/superglue_sl/<task>/<split>.jsonl.gz` so they are easy
-to consume from training pipelines while remaining structurally
-faithful to the SloBENCH submission format.
+Driven by ``configs/data/tasks.yaml``. Processes every entry whose
+resolved converter is ``to_superglue`` (the NLI / QA / coref / WSD /
+COPA families) and emits one gzipped JSONL per declared split under
+``<roots.tasks>/<task>/<dataset>/<split>.jsonl.gz``.
 
-Records are passed through largely unchanged. MultiRC, which has
-deeply nested questions/answers, is flattened to one row per answer
-(`--flatten` style is the default for MultiRC; pass
-`--no-flatten-multirc` to disable).
+Each output line follows the appropriate ``TypedDict`` from
+``slm4ie.data.schema``:
 
-Examples:
-    Convert every available task and split from the HumanT variant:
+* ``nli/cb`` / ``nli/rte``  -> ``NliExample``
+* ``qa/boolq``              -> ``QaBooleanExample``
+* ``qa/multirc``            -> ``QaBooleanExample`` (one row per
+  passage/question/answer triple)
+* ``coref/wsc``             -> ``CorefExample``
+* ``wsd/wic``               -> ``WsdExample``
+* ``commonsense/copa``      -> ``CommonsenseCopaExample``
 
-        uv run python scripts/data/to_superglue.py --variant humant
-
-    Convert only CB and RTE:
-
-        uv run python scripts/data/to_superglue.py --tasks CB RTE
+Source files are the per-subtask ``train.jsonl`` / ``val.jsonl`` /
+``test.jsonl`` shipped inside the SuperGLUE-SL distribution. The
+distribution is expected to be already extracted under
+``<roots.raw>/superglue_sl/`` (e.g. ``SuperGLUE-HumanT/<Task>/``);
+the ``--variant`` flag controls which translated variant is read.
 """
 
 import argparse
-import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import (
-    IO,
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+
+from slm4ie.data.io_utils import find_project_root
+from slm4ie.data.parallel import (
+    configure_script_logging,
+    cpu_default,
+    resolve_workers,
+    run_parallel,
 )
-
-from tqdm import tqdm
-
-from slm4ie.data.download import DatasetConfig, load_config
-from slm4ie.data.io_utils import find_project_root, open_output
+from slm4ie.data.schema import (
+    CommonsenseCopaExample,
+    CorefExample,
+    NliExample,
+    QaBooleanExample,
+    WsdExample,
+)
+from slm4ie.data.tasks import (
+    TaskEntry,
+    TasksRoots,
+    filter_for_converter,
+    load_tasks,
+    resolve_output_dir,
+)
+from slm4ie.data.task_writer import (
+    all_outputs_exist,
+    find_first_existing,
+    iter_jsonl,
+    outputs_for_splits,
+    write_jsonl_splits,
+)
 
 logger = logging.getLogger(__name__)
 
-#: The eight SuperGLUE subtasks, in the canonical order.
-SUPERGLUE_TASKS: Tuple[str, ...] = (
-    "BoolQ",
-    "CB",
-    "COPA",
-    "MultiRC",
-    "ReCoRD",
-    "RTE",
-    "WiC",
-    "WSC",
-)
+#: Converter module name, used to filter `tasks.yaml`.
+CONVERTER_NAME: str = "to_superglue"
 
-#: Splits to look for inside each task subdirectory. Test splits often
-#: lack labels but are still emitted so the user can run inference.
-SUPERGLUE_SPLITS: Tuple[str, ...] = ("train", "val", "test")
+#: Map each ``<task>/<dataset>`` to its SuperGLUE subtask directory.
+SUBTASK_DIRS: Dict[str, str] = {
+    "nli/cb": "CB",
+    "nli/rte": "RTE",
+    "qa/boolq": "BoolQ",
+    "qa/multirc": "MultiRC",
+    "coref/wsc": "WSC",
+    "wsd/wic": "WiC",
+    "commonsense/copa": "COPA",
+}
 
-#: Variant suffixes used in the published distribution.
+#: Variant subdirectory candidates for each ``--variant`` value.
 VARIANT_DIRS: Dict[str, Tuple[str, ...]] = {
     "humant": ("SuperGLUE-HumanT", "HumanT"),
     "googlemt": ("SuperGLUE-GoogleMT", "GoogleMT"),
 }
 
+#: Source filenames to try (per split) inside each subtask directory.
+_SPLIT_FILENAMES: Dict[str, Tuple[str, ...]] = {
+    "train": ("train.jsonl", "train.json"),
+    "val": ("val.jsonl", "val.json"),
+    "test": ("test.jsonl", "test.json"),
+}
+
 
 def _find_variant_root(raw_dir: Path, variant: str) -> Path:
-    """Return the directory holding task subdirectories for *variant*.
+    """Return the directory holding subtask subdirectories.
 
     Args:
-        raw_dir (Path): The dataset raw-download directory.
-        variant (str): One of `humant` / `googlemt`.
+        raw_dir: Root of the SuperGLUE-SL raw bundle
+            (``<roots.raw>/superglue_sl``).
+        variant: One of ``humant`` / ``googlemt``.
 
     Returns:
-        Path: The variant root directory containing per-task subdirs.
+        Directory that contains per-subtask folders.
 
     Raises:
-        FileNotFoundError: If no matching variant directory is found.
+        FileNotFoundError: If no candidate matches on disk.
     """
     candidates = VARIANT_DIRS.get(variant, ())
     for name in candidates:
@@ -92,418 +111,631 @@ def _find_variant_root(raw_dir: Path, variant: str) -> Path:
     if (raw_dir / "BoolQ").is_dir():
         return raw_dir
     raise FileNotFoundError(
-        f"Could not find a SuperGLUE {variant!r} variant directory in "
-        f"{raw_dir}. Tried: {candidates}. Did you extract the zip?"
+        f"Could not find SuperGLUE {variant!r} variant directory in "
+        f"{raw_dir}. Tried: {candidates}."
     )
 
 
-def _find_task_dir(variant_root: Path, task: str) -> Optional[Path]:
-    """Return the task subdirectory matching *task*, case-insensitively.
+def _find_subtask_dir(variant_root: Path, subtask: str) -> Optional[Path]:
+    """Return the subtask subdirectory matching *subtask* case-insensitively.
 
     Args:
-        variant_root (Path): Variant root directory.
-        task (str): Canonical task name (e.g. `BoolQ`).
+        variant_root: Variant root.
+        subtask: Canonical subtask name (e.g. ``BoolQ``).
 
     Returns:
-        Optional[Path]: The task subdirectory, or None when not found.
+        The matching directory, or ``None`` when absent.
     """
+    if not variant_root.is_dir():
+        return None
     for child in variant_root.iterdir():
-        if child.is_dir() and child.name.lower() == task.lower():
+        if child.is_dir() and child.name.lower() == subtask.lower():
             return child
     return None
 
 
-def _find_split_file(task_dir: Path, split: str) -> Optional[Path]:
-    """Locate the JSONL file for *split* inside *task_dir*.
+def _source_path_for_split(
+    subtask_dir: Path,
+    split: str,
+) -> Optional[Path]:
+    """Return the source JSONL path for *split* inside *subtask_dir*.
 
     Args:
-        task_dir (Path): Task subdirectory.
-        split (str): One of `train`/`val`/`test`.
+        subtask_dir: Per-subtask directory.
+        split: Output split name (``train`` / ``val`` / ``test``).
 
     Returns:
-        Optional[Path]: Path to the source JSONL file, or None when
-            the split is not present.
+        First existing candidate path, or ``None`` when absent.
     """
-    for ext in (".jsonl", ".json"):
-        path = task_dir / f"{split}{ext}"
-        if path.exists():
-            return path
+    names = _SPLIT_FILENAMES.get(split, ())
+    return find_first_existing([subtask_dir / name for name in names])
+
+
+def _coerce_bool(value: Any) -> Optional[bool]:
+    """Coerce common boolean spellings to ``bool``.
+
+    Args:
+        value: A value pulled from a record.
+
+    Returns:
+        ``True``/``False`` for recognized inputs, ``None`` otherwise.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(int(value))
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "t"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "f"}:
+            return False
     return None
 
 
-def _read_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
-    """Yield JSON objects from a JSONL file.
+def _stable_id(record: Dict[str, Any], dataset: str, index: int) -> str:
+    """Synthesize a stable id for a SuperGLUE record.
 
     Args:
-        path (Path): Path to the JSONL file.
+        record: Source record.
+        dataset: ``entry.dataset`` (used as prefix when ``idx`` is
+            available without one).
+        index: Zero-based record position; used as fallback.
 
-    Yields:
-        Dict[str, Any]: Parsed records.
+    Returns:
+        A string id that is unique within the originating split.
     """
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            yield json.loads(line)
+    raw = record.get("id") or record.get("idx")
+    if isinstance(raw, (str, int)):
+        text = str(raw)
+        if ":" in text:
+            return text
+        return f"{dataset}:{text}"
+    if isinstance(raw, dict):
+        parts = [str(v) for v in raw.values() if v is not None]
+        if parts:
+            return f"{dataset}:{'-'.join(parts)}"
+    return f"{dataset}:idx-{index:08d}"
 
 
-def _passthrough(
-    records: Iterable[Dict[str, Any]],
-) -> Iterator[Dict[str, Any]]:
-    """Yield records unchanged.
+def _convert_nli(
+    record: Dict[str, Any],
+    dataset: str,
+    index: int,
+    allow: Optional[set],
+) -> Optional[Tuple[Optional[str], NliExample]]:
+    """Convert one CB/RTE record to ``(split_hint, NliExample)``.
 
     Args:
-        records (Iterable[Dict[str, Any]]): Source records.
+        record: Source record.
+        dataset: Entry dataset name.
+        index: Zero-based record position.
+        allow: Optional label allow-list.
 
-    Yields:
-        Dict[str, Any]: The same records.
+    Returns:
+        ``(None, example)`` because NLI records are kept in the split
+        they came from. Returns ``None`` when required fields are
+        missing.
     """
-    yield from records
+    premise = record.get("premise")
+    hypothesis = record.get("hypothesis")
+    label = record.get("label")
+    if premise is None or hypothesis is None:
+        return None
+    label_str = str(label) if label is not None else ""
+    if allow is not None and label_str and label_str not in allow:
+        return None
+    example = NliExample(
+        id=_stable_id(record, dataset, index),
+        premise=str(premise),
+        hypothesis=str(hypothesis),
+        label=label_str,
+    )
+    return None, example
 
 
-def _flatten_multirc(
-    records: Iterable[Dict[str, Any]],
-) -> Iterator[Dict[str, Any]]:
-    """Flatten MultiRC records to one row per answer candidate.
-
-    The native MultiRC schema nests questions and answers inside each
-    passage. This helper emits one record per `(passage, question,
-    answer)` triple, which is more convenient for classification.
+def _convert_boolq(
+    record: Dict[str, Any],
+    dataset: str,
+    index: int,
+    allow: Optional[set],
+) -> Optional[Tuple[Optional[str], QaBooleanExample]]:
+    """Convert one BoolQ record to ``QaBooleanExample``.
 
     Args:
-        records (Iterable[Dict[str, Any]]): Native MultiRC records
-            with the nested `passage.questions[].answers[]` shape.
+        record: Source record.
+        dataset: Entry dataset name.
+        index: Zero-based record position.
+        allow: Unused (boolean labels are not filtered).
+
+    Returns:
+        ``(None, example)``, or ``None`` when required fields are
+        missing.
+    """
+    del allow
+    passage = record.get("passage") or record.get("paragraph")
+    question = record.get("question")
+    if passage is None or question is None:
+        return None
+    label = _coerce_bool(record.get("label"))
+    if label is None:
+        label = False
+    example = QaBooleanExample(
+        id=_stable_id(record, dataset, index),
+        passage=str(passage),
+        question=str(question),
+        label=label,
+    )
+    return None, example
+
+
+def _convert_wsc(
+    record: Dict[str, Any],
+    dataset: str,
+    index: int,
+    allow: Optional[set],
+) -> Optional[Tuple[Optional[str], CorefExample]]:
+    """Convert one WSC record to ``CorefExample``.
+
+    Args:
+        record: Source record with ``target`` span1/span2 fields.
+        dataset: Entry dataset name.
+        index: Zero-based record position.
+        allow: Unused.
+
+    Returns:
+        ``(None, example)``, or ``None`` when required fields are
+        missing.
+    """
+    del allow
+    text = record.get("text")
+    target = record.get("target") or {}
+    span1_text = target.get("span1_text") or record.get("span1_text")
+    span2_text = target.get("span2_text") or record.get("span2_text")
+    span1_index = target.get("span1_index", record.get("span1_index"))
+    span2_index = target.get("span2_index", record.get("span2_index"))
+    if text is None or span1_text is None or span2_text is None:
+        return None
+
+    span1: Dict[str, Any] = {"text": str(span1_text)}
+    span2: Dict[str, Any] = {"text": str(span2_text)}
+    if span1_index is not None:
+        span1["start"] = int(span1_index)
+        span1["end"] = int(span1_index) + len(str(span1_text).split())
+    if span2_index is not None:
+        span2["start"] = int(span2_index)
+        span2["end"] = int(span2_index) + len(str(span2_text).split())
+
+    label = _coerce_bool(record.get("label"))
+    if label is None:
+        label = False
+    example = CorefExample(
+        id=_stable_id(record, dataset, index),
+        text=str(text),
+        span1=span1,
+        span2=span2,
+        label=label,
+    )
+    return None, example
+
+
+def _convert_wic(
+    record: Dict[str, Any],
+    dataset: str,
+    index: int,
+    allow: Optional[set],
+) -> Optional[Tuple[Optional[str], WsdExample]]:
+    """Convert one WiC record to ``WsdExample``.
+
+    Args:
+        record: Source record.
+        dataset: Entry dataset name.
+        index: Zero-based record position.
+        allow: Unused.
+
+    Returns:
+        ``(None, example)``, or ``None`` when required fields are
+        missing.
+    """
+    del allow
+    sentence1 = record.get("sentence1")
+    sentence2 = record.get("sentence2")
+    word = record.get("word")
+    if sentence1 is None or sentence2 is None or word is None:
+        return None
+    label = _coerce_bool(record.get("label"))
+    if label is None:
+        label = False
+    example = WsdExample(
+        id=_stable_id(record, dataset, index),
+        sentence1=str(sentence1),
+        sentence2=str(sentence2),
+        word=str(word),
+        label=label,
+    )
+    return None, example
+
+
+def _convert_copa(
+    record: Dict[str, Any],
+    dataset: str,
+    index: int,
+    allow: Optional[set],
+) -> Optional[Tuple[Optional[str], CommonsenseCopaExample]]:
+    """Convert one COPA record to ``CommonsenseCopaExample``.
+
+    Args:
+        record: Source record.
+        dataset: Entry dataset name.
+        index: Zero-based record position.
+        allow: Unused (the registry's COPA labels are ``[0, 1]``).
+
+    Returns:
+        ``(None, example)``, or ``None`` when required fields are
+        missing.
+    """
+    del allow
+    premise = record.get("premise")
+    choice1 = record.get("choice1")
+    choice2 = record.get("choice2")
+    question = record.get("question", "cause")
+    if premise is None or choice1 is None or choice2 is None:
+        return None
+    raw_label = record.get("label")
+    try:
+        label_int = int(raw_label) if raw_label is not None else 0
+    except (TypeError, ValueError):
+        label_int = 0
+    example = CommonsenseCopaExample(
+        id=_stable_id(record, dataset, index),
+        premise=str(premise),
+        choice1=str(choice1),
+        choice2=str(choice2),
+        question=str(question),
+        label=label_int,
+    )
+    return None, example
+
+
+def _iter_multirc(
+    record: Dict[str, Any],
+    dataset: str,
+    base_index: int,
+) -> Iterator[QaBooleanExample]:
+    """Flatten one MultiRC passage into per-answer ``QaBooleanExample`` rows.
+
+    Args:
+        record: Native MultiRC record with nested
+            ``passage.questions[].answers[]`` structure.
+        dataset: Entry dataset name.
+        base_index: Index of the parent record, used to synthesize
+            stable ids when explicit ``idx`` fields are absent.
 
     Yields:
-        Dict[str, Any]: Flat records with keys `idx`, `paragraph`,
-            `question`, `answer`, and `label` (when available).
+        One ``QaBooleanExample`` per ``(passage, question, answer)``
+        triple.
     """
-    for record in records:
-        passage = record.get("passage") or {}
-        paragraph_text = passage.get("text", "")
-        passage_idx = record.get("idx")
-        for question in passage.get("questions", []) or []:
-            q_text = question.get("question", "")
-            q_idx = question.get("idx")
-            for answer in question.get("answers", []) or []:
-                yield {
-                    "idx": {
-                        "passage": passage_idx,
-                        "question": q_idx,
-                        "answer": answer.get("idx"),
-                    },
-                    "paragraph": paragraph_text,
-                    "question": q_text,
-                    "answer": answer.get("text", ""),
-                    "label": answer.get("label"),
-                }
+    passage = record.get("passage") or {}
+    paragraph_text = passage.get("text", "")
+    passage_idx = record.get("idx", base_index)
+    for question in passage.get("questions") or []:
+        q_text = question.get("question", "")
+        q_idx = question.get("idx")
+        for answer in question.get("answers") or []:
+            ans_idx = answer.get("idx")
+            parts = [str(passage_idx)]
+            if q_idx is not None:
+                parts.append(f"q{q_idx}")
+            if ans_idx is not None:
+                parts.append(f"a{ans_idx}")
+            example_id = f"{dataset}:{'-'.join(parts)}"
+            label = _coerce_bool(answer.get("label"))
+            if label is None:
+                label = False
+            combined_question = f"{q_text}\n{answer.get('text', '')}".strip()
+            yield QaBooleanExample(
+                id=example_id,
+                passage=str(paragraph_text),
+                question=combined_question,
+                label=label,
+            )
 
 
-#: Per-task transform registry. Each callable converts an iterable of
-#: source records into the iterable to write to disk.
-_TASK_TRANSFORMS: Dict[
+#: Per-task-family converter callable. Returns ``(split_override,
+#: example)`` -- when ``split_override`` is ``None``, the example
+#: stays in its source split.
+_RECORD_CONVERTERS: Dict[
     str,
     Callable[
-        [Iterable[Dict[str, Any]]],
-        Iterator[Dict[str, Any]],
+        [Dict[str, Any], str, int, Optional[set]],
+        Optional[Tuple[Optional[str], Any]],
     ],
 ] = {
-    "BoolQ": _passthrough,
-    "CB": _passthrough,
-    "COPA": _passthrough,
-    "MultiRC": _flatten_multirc,
-    "ReCoRD": _passthrough,
-    "RTE": _passthrough,
-    "WiC": _passthrough,
-    "WSC": _passthrough,
+    "nli/cb": _convert_nli,
+    "nli/rte": _convert_nli,
+    "qa/boolq": _convert_boolq,
+    "coref/wsc": _convert_wsc,
+    "wsd/wic": _convert_wic,
+    "commonsense/copa": _convert_copa,
 }
 
 
-def write_records(
-    records: Iterable[Dict[str, Any]],
-    out_stream: IO[str],
-) -> int:
-    """Write *records* as JSONL lines and return the count.
-
-    Args:
-        records (Iterable[Dict[str, Any]]): Records to serialize.
-        out_stream (IO[str]): Writable text stream.
-
-    Returns:
-        int: Number of records written.
-    """
-    count = 0
-    for record in records:
-        out_stream.write(json.dumps(record, ensure_ascii=False))
-        out_stream.write("\n")
-        count += 1
-    return count
-
-
-def convert_split(
-    src_path: Path,
-    out_path: Path,
-    task: str,
-    flatten_multirc: bool = True,
-    force: bool = False,
-) -> Optional[int]:
-    """Convert one (task, split) pair to `<out_path>`.
-
-    Args:
-        src_path (Path): Source JSONL path.
-        out_path (Path): Target `.jsonl.gz` path. Parent directories
-            are created if missing.
-        task (str): Canonical task name (used for transform dispatch).
-        flatten_multirc (bool): When True, apply the MultiRC flattener
-            even though the registry has it as the default.
-        force (bool): When True, overwrite an existing output file.
-
-    Returns:
-        Optional[int]: Number of records written, or 0 when the output
-            already exists and *force* is False.
-    """
-    if out_path.exists() and not force:
-        logger.info(
-            "Skipping %s, output already exists: %s "
-            "(use --force to overwrite)",
-            task, out_path,
-        )
-        return 0
-
-    transform = _TASK_TRANSFORMS[task]
-    if task == "MultiRC" and not flatten_multirc:
-        transform = _passthrough
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Converting %s → %s", src_path, out_path)
-    records = transform(_read_jsonl(src_path))
-    progress = tqdm(records, desc=f"{task}/{src_path.stem}", unit="rec")
-    with open_output(out_path) as out_stream:
-        try:
-            count = write_records(progress, out_stream)
-        finally:
-            progress.close()
-    logger.info("Wrote %d records to %s", count, out_path)
-    return count
-
-
-def convert_dataset(
-    raw_dir: Path,
-    output_dir: Path,
+def _iter_examples_for_entry(
+    entry: TaskEntry,
+    roots: TasksRoots,
     variant: str,
-    tasks: Optional[List[str]] = None,
-    splits: Optional[List[str]] = None,
-    flatten_multirc: bool = True,
-    force: bool = False,
-) -> Dict[Tuple[str, str], int]:
-    """Convert SuperGLUE-SL into per-task per-split JSONL files.
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Yield ``(split, example)`` pairs for one SuperGLUE entry.
 
     Args:
-        raw_dir (Path): Directory containing the extracted SuperGLUE
-            distribution (must contain a `SuperGLUE-{HumanT,GoogleMT}`
-            subdirectory).
-        output_dir (Path): Base directory for outputs. Each (task,
-            split) lands at `<output_dir>/<task>/<split>.jsonl.gz`.
-        variant (str): One of `humant` / `googlemt`.
-        tasks (Optional[List[str]]): Subset of tasks to process
-            (default: all eight).
-        splits (Optional[List[str]]): Subset of splits to process
-            (default: `train`/`val`/`test`).
-        flatten_multirc (bool): Whether to flatten MultiRC.
-        force (bool): When True, overwrite existing outputs.
+        entry: Task entry assigned to ``to_superglue``.
+        roots: Filesystem roots.
+        variant: SuperGLUE-SL variant (``humant`` / ``googlemt``).
 
-    Returns:
-        Dict[Tuple[str, str], int]: Map from (task, split) to record
-            count for splits that were successfully written.
+    Yields:
+        ``(split_name, example_dict)`` pairs.
+
+    Raises:
+        FileNotFoundError: If the SuperGLUE-SL bundle is missing.
+        ValueError: If the entry has no registered subtask mapping.
     """
-    variant_root = _find_variant_root(raw_dir, variant)
-    selected_tasks = list(tasks) if tasks else list(SUPERGLUE_TASKS)
-    selected_splits = list(splits) if splits else list(SUPERGLUE_SPLITS)
+    key = f"{entry.task}/{entry.dataset}"
+    subtask = SUBTASK_DIRS.get(key)
+    if subtask is None:
+        raise ValueError(
+            f"No SuperGLUE subtask mapping registered for {key!r}."
+        )
 
-    written: Dict[Tuple[str, str], int] = {}
-    for task in selected_tasks:
-        task_dir = _find_task_dir(variant_root, task)
-        if task_dir is None:
+    if entry.source.kind != "raw":
+        raise ValueError(
+            f"to_superglue only supports source.kind='raw'; got "
+            f"{entry.source.kind!r} for {key}."
+        )
+
+    bundle_dirs = [roots.raw / src_key for src_key in entry.source.keys]
+    bundle = bundle_dirs[0]
+    variant_root = _find_variant_root(bundle, variant)
+    subtask_dir = _find_subtask_dir(variant_root, subtask)
+    if subtask_dir is None:
+        raise FileNotFoundError(
+            f"Subtask directory {subtask!r} not found under "
+            f"{variant_root}."
+        )
+
+    allow: Optional[set] = (
+        set(str(lbl) for lbl in entry.labels)
+        if entry.labels is not None
+        else None
+    )
+
+    is_multirc = key == "qa/multirc"
+    converter = _RECORD_CONVERTERS.get(key) if not is_multirc else None
+
+    for split in entry.splits:
+        src_path = _source_path_for_split(subtask_dir, split)
+        if src_path is None:
             logger.warning(
-                "Task %r not found under %s; skipping.",
-                task, variant_root,
+                "No source file for split %r of %s in %s; skipping split.",
+                split, key, subtask_dir,
             )
             continue
-
-        for split in selected_splits:
-            src = _find_split_file(task_dir, split)
-            if src is None:
-                logger.info(
-                    "No %s split for task %r; skipping.",
-                    split, task,
-                )
+        for index, record in enumerate(iter_jsonl(src_path)):
+            if is_multirc:
+                for example in _iter_multirc(record, entry.dataset, index):
+                    yield split, dict(example)
                 continue
-            out = output_dir / task / f"{split}.jsonl.gz"
-            count = convert_split(
-                src, out, task,
-                flatten_multirc=flatten_multirc,
-                force=force,
-            )
-            if count is not None:
-                written[(task, split)] = count
-    return written
+            assert converter is not None
+            converted = converter(record, entry.dataset, index, allow)
+            if converted is None:
+                continue
+            split_override, example = converted
+            yield split_override or split, dict(example)
 
 
-def parse_args(argv=None) -> argparse.Namespace:
+def convert_entry(
+    key: str,
+    entry: TaskEntry,
+    roots: TasksRoots,
+    variant: str,
+    force: bool = False,
+) -> Optional[Dict[str, int]]:
+    """Convert one SuperGLUE entry, writing one file per declared split.
+
+    Args:
+        key: Entry key ``"<task>/<dataset>"`` (used for logging).
+        entry: Parsed task entry.
+        roots: Filesystem roots.
+        variant: SuperGLUE-SL variant (``humant`` / ``googlemt``).
+        force: When True, re-derive even if every split already
+            exists.
+
+    Returns:
+        Mapping ``{split: written_count}``, or ``None`` when the
+        outputs already existed and ``force`` is False.
+    """
+    output_dir = resolve_output_dir(entry, roots)
+    outputs = outputs_for_splits(output_dir, entry.splits)
+
+    if not force and all_outputs_exist(outputs):
+        logger.info(
+            "Skipping %s: every split already exists at %s "
+            "(use --force to overwrite).",
+            key, output_dir,
+        )
+        return None
+
+    logger.info("Converting %s -> %s", key, output_dir)
+    counts = write_jsonl_splits(
+        _iter_examples_for_entry(entry, roots, variant),
+        outputs,
+    )
+    total = sum(counts.values())
+    logger.info(
+        "Wrote %d records across splits %s for %s",
+        total, counts, key,
+    )
+    return counts
+
+
+def _resolve_keys(
+    entries: List[TaskEntry],
+    requested: List[str],
+    use_all: bool,
+) -> List[str]:
+    """Resolve which entry keys to process from CLI selection.
+
+    Args:
+        entries: Entries already filtered to this converter.
+        requested: Positional ``<task>/<dataset>`` keys from the CLI.
+        use_all: Whether ``--all`` was passed.
+
+    Returns:
+        List of entry keys, preserving registry order.
+
+    Raises:
+        SystemExit: If a requested key is unknown to this converter.
+    """
+    known = {f"{e.task}/{e.dataset}": e for e in entries}
+    if use_all:
+        return list(known.keys())
+    unknown = [k for k in requested if k not in known]
+    if unknown:
+        logger.error(
+            "Unknown entries for converter %s: %s. Known: %s",
+            CONVERTER_NAME, unknown, sorted(known.keys()),
+        )
+        sys.exit(1)
+    return list(requested)
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
-        argv: Optional argument list (defaults to `sys.argv`).
+        argv: Optional argument list (defaults to ``sys.argv``).
 
     Returns:
-        argparse.Namespace: Parsed arguments.
+        Parsed namespace.
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Convert raw SuperGLUE-SL downloads into per-task "
-            "evaluation JSONL under "
-            "<output_dir>/<task>/<split>.jsonl.gz."
+            "Convert SuperGLUE-SL subtasks into per-split task JSONL "
+            "under <roots.tasks>/<task>/<dataset>/<split>.jsonl.gz."
         )
+    )
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument(
+        "entries",
+        nargs="*",
+        default=[],
+        help=(
+            "Entry keys to process, e.g. 'nli/cb qa/boolq'. "
+            "Mutually exclusive with --all."
+        ),
+    )
+    target.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every SuperGLUE entry declared in tasks.yaml.",
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=None,
-        help=(
-            "Path to download.yaml (default: "
-            "configs/data/download.yaml). Used to locate the raw "
-            "download directory when --raw-dir is not given."
-        ),
-    )
-    parser.add_argument(
-        "--dataset",
-        default="superglue_sl",
-        help=(
-            "Dataset key in download.yaml (default: 'superglue_sl')."
-        ),
-    )
-    parser.add_argument(
-        "--raw-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Directory holding the extracted SuperGLUE-SL "
-            "distribution. Defaults to <download output_dir>/<dataset>."
-        ),
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Base directory for converted output. Defaults to "
-            "<raw-dir>/eval/superglue_sl/<variant>."
-        ),
+        help="Path to tasks.yaml (default: configs/data/tasks.yaml).",
     )
     parser.add_argument(
         "--variant",
         choices=tuple(VARIANT_DIRS.keys()),
         default="humant",
-        help="SuperGLUE-SL variant to use (default: humant).",
-    )
-    parser.add_argument(
-        "--tasks",
-        nargs="+",
-        choices=SUPERGLUE_TASKS,
-        default=None,
-        help="Subset of tasks to materialize (default: all 8).",
-    )
-    parser.add_argument(
-        "--splits",
-        nargs="+",
-        choices=SUPERGLUE_SPLITS,
-        default=None,
-        help="Subset of splits to materialize (default: all).",
-    )
-    parser.add_argument(
-        "--no-flatten-multirc",
-        action="store_true",
-        help=(
-            "Keep MultiRC records in their native nested shape "
-            "instead of flattening to one row per answer."
-        ),
+        help="SuperGLUE-SL variant to read (default: humant).",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing per-split output files.",
+        help="Re-derive outputs even when every split already exists.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=0,
+        help=(
+            "Process entries in parallel. 0=auto (cpu_count // 2), "
+            "1=serial, N=N workers. Capped at the number of entries."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.all and args.entries:
+        parser.error("argument --all: not allowed with positional entries")
+    if not args.all and not args.entries:
+        parser.error("one of the arguments entries --all is required")
+    return args
 
 
-def _resolve_raw_dir(
-    config_path: Path,
-    override: Optional[Path],
-    dataset_key: str,
-) -> Path:
-    """Return the raw input directory for the SuperGLUE-SL dataset.
-
-    Args:
-        config_path (Path): Path to download.yaml.
-        override (Optional[Path]): Explicit `--raw-dir` value.
-        dataset_key (str): Dataset key in the download config.
-
-    Returns:
-        Path: Directory expected to hold the extracted SuperGLUE
-            distribution.
-    """
-    if override is not None:
-        return override
-    base, datasets = load_config(config_path)
-    cfg: Optional[DatasetConfig] = datasets.get(dataset_key)
-    subdir = cfg.output_dir if cfg and cfg.output_dir else dataset_key
-    return Path(base) / subdir
-
-
-def main():
+def main() -> None:
     """Run the SuperGLUE conversion from CLI arguments."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
     args = parse_args()
     project_root = find_project_root()
     config_path = (
         args.config
-        if args.config
-        else project_root / "configs" / "data" / "download.yaml"
+        if args.config is not None
+        else project_root / "configs" / "data" / "tasks.yaml"
     )
 
-    raw_dir = _resolve_raw_dir(config_path, args.raw_dir, args.dataset)
-    output_dir = (
-        args.output_dir
-        if args.output_dir is not None
-        else raw_dir / "eval" / "superglue_sl" / args.variant
-    )
+    tasks_config = load_tasks(config_path)
+    entries = filter_for_converter(tasks_config, CONVERTER_NAME)
+    by_key = {f"{e.task}/{e.dataset}": e for e in entries}
 
-    written = convert_dataset(
-        raw_dir,
-        output_dir,
-        variant=args.variant,
-        tasks=args.tasks,
-        splits=args.splits,
-        flatten_multirc=not args.no_flatten_multirc,
-        force=args.force,
-    )
-
-    if not written:
-        logger.error(
-            "No splits were written. Check --raw-dir and --variant."
+    keys = _resolve_keys(entries, args.entries, args.all)
+    if not keys:
+        logger.warning(
+            "No entries to process for converter %s.", CONVERTER_NAME,
         )
-        sys.exit(1)
+        return
 
-    total = sum(written.values())
-    logger.info(
-        "Done. Wrote %d records across %d (task, split) pairs.",
-        total, len(written),
+    workers = resolve_workers(
+        args.max_workers, len(keys), cpu_default(len(keys)),
     )
+    configure_script_logging(parallel=workers > 1)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_dir = project_root / "logs" / Path(__file__).stem / stamp
+
+    roots = tasks_config.roots
+
+    def kwargs_for(key: str) -> Dict[str, Any]:
+        return {
+            "entry": by_key[key],
+            "roots": roots,
+            "variant": args.variant,
+            "force": args.force,
+        }
+
+    results, failures = run_parallel(
+        convert_entry,
+        keys,
+        max_workers=workers,
+        desc=CONVERTER_NAME,
+        pool="process",
+        kwargs_for=kwargs_for,
+        log_dir=log_dir,
+    )
+
+    skipped = [k for k, v in results.items() if v is None]
+    total = sum(
+        sum(v.values()) for v in results.values() if v is not None
+    )
+    logger.info(
+        "Done. Processed %d entr(ies); %d skipped; %d records written. "
+        "Failed: %s",
+        len(results) - len(skipped),
+        len(skipped),
+        total,
+        [k for k, _ in failures] or "none",
+    )
+    if failures:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

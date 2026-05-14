@@ -1,323 +1,194 @@
-"""Dataset fetchers for HuggingFace Hub, Clarin.si, and other sources."""
+"""Dataset download orchestration and per-source dispatch."""
 
-import abc
 import logging
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import requests
-import yaml
-from datasets import load_dataset
-from tqdm import tqdm
-
+from slm4ie.data.catalog import ConfigError, DatasetConfig, load_config
 from slm4ie.data.parallel import io_default, resolve_workers, run_parallel
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class DatasetConfig:
-    """Configuration for a single dataset.
+class DownloaderResult:
+    """Outcome of a per-source download call.
 
     Attributes:
-        key: Config key identifier (e.g., 'classla_web_sl').
-        name: Human-readable dataset name.
-        enabled: Whether to include in default download.
-        source: Source type ('clarin' or 'huggingface').
-        urls: Download URLs (CLARIN datasets).
-        output_dir: Subdirectory name under base output dir.
-        manual: Whether this requires manual download.
-        repo_id: HuggingFace repository ID.
-        configs: HuggingFace dataset config names.
-        note: Informational note.
-        benchmark: True for evaluation benchmark datasets, False for
-            pretraining corpora. Used by downstream scripts to filter
-            which datasets to materialize.
-        tasks: Supported NLP tasks (e.g., POS, NER, SA, NLI). Empty
-            list for pretraining corpora.
+        completed: Sub-unit identifiers that finished successfully.
+        failed: Sub-unit identifiers paired with the exception that
+            ended their attempt.
     """
 
-    key: str
-    name: str
-    enabled: bool = True
-    source: str = ""
-    urls: List[str] = field(default_factory=list)
-    output_dir: str = ""
-    manual: bool = False
-    repo_id: Optional[str] = None
-    configs: Optional[List[str]] = None
-    note: Optional[str] = None
-    benchmark: bool = False
-    tasks: List[str] = field(default_factory=list)
+    completed: List[str] = field(default_factory=list)
+    failed: List[Tuple[str, BaseException]] = field(default_factory=list)
 
-    @classmethod
-    def from_dict(cls, key: str, data: Dict) -> "DatasetConfig":
-        """Create a DatasetConfig from a config dictionary.
+
+class DatasetDownloadError(Exception):
+    """Raised when one or more sub-units of a dataset failed.
+
+    Attributes:
+        dataset_key: The dataset's registry key.
+        failed: Sub-unit identifier paired with the failure exception.
+        n_completed: Number of sub-units that succeeded.
+        n_total: Total number of sub-units attempted.
+    """
+
+    def __init__(
+        self,
+        dataset_key: str,
+        failed: List[Tuple[str, BaseException]],
+        n_completed: int,
+        n_total: int,
+    ):
+        """Build a per-dataset aggregate failure error.
 
         Args:
-            key: The dataset key identifier.
-            data: Dictionary of config values.
-
-        Returns:
-            DatasetConfig: Populated config instance.
+            dataset_key: The dataset's registry key.
+            failed: Sub-unit identifier paired with the exception.
+            n_completed: Number of sub-units that succeeded.
+            n_total: Total number of sub-units attempted.
         """
-        return cls(
-            key=key,
-            name=data.get("name", key),
-            enabled=data.get("enabled", True),
-            source=data.get("source", ""),
-            urls=data.get("urls", []),
-            output_dir=data.get("output_dir", ""),
-            manual=data.get("manual", False),
-            repo_id=data.get("repo_id"),
-            configs=data.get("configs"),
-            note=data.get("note"),
-            benchmark=data.get("benchmark", False),
-            tasks=data.get("tasks", []),
+        self.dataset_key = dataset_key
+        self.failed = list(failed)
+        self.n_completed = n_completed
+        self.n_total = n_total
+        unit_summary = ", ".join(
+            f"{unit}: {exc.__class__.__name__}: {str(exc).splitlines()[0]}"
+            for unit, exc in self.failed
+        )
+        super().__init__(
+            f"{dataset_key}: {len(self.failed)}/{n_total} sub-units failed"
+            f" ({unit_summary})"
         )
 
 
-def load_config(
-    config_path: Path,
-) -> Tuple[str, Dict[str, DatasetConfig]]:
-    """Load dataset download configuration from YAML file.
+def _augment_with_note(
+    exc: BaseException, note: Optional[str]
+) -> BaseException:
+    """Return an exception whose message embeds the dataset note.
 
     Args:
-        config_path: Path to the YAML config file.
+        exc: Original exception raised by the source downloader.
+        note: Optional informational note from the dataset config.
 
     Returns:
-        Tuple of (output_dir, dict of dataset key to DatasetConfig).
+        BaseException: The original exception when `note` is empty,
+            otherwise a `RuntimeError` whose message wraps the original
+            class name, message, and the note.
+    """
+    if not note:
+        return exc
+    return RuntimeError(
+        f"{exc.__class__.__name__}: {exc} — {note.strip()}"
+    )
+
+
+# Source modules are imported AFTER DownloaderResult / _augment_with_note
+# are defined so they can import them from this module without triggering
+# a circular import.
+from slm4ie.data.sources import http as http_source  # noqa: E402
+from slm4ie.data.sources import huggingface as hf_source  # noqa: E402
+
+
+def _http_download(
+    config: DatasetConfig, output_path: Path, force: bool
+) -> DownloaderResult:
+    """Dispatch to the http source downloader via module attribute lookup."""
+    return http_source.download(config, output_path, force)
+
+
+def _hf_download(
+    config: DatasetConfig, output_path: Path, force: bool
+) -> DownloaderResult:
+    """Dispatch to the huggingface source downloader via module attribute lookup."""
+    return hf_source.download(config, output_path, force)
+
+
+_SOURCES: Dict[str, Callable[[DatasetConfig, Path, bool], DownloaderResult]] = {
+    "http": _http_download,
+    "huggingface": _hf_download,
+}
+
+#: Frozen set of known source names. Used for fail-fast validation
+#: without depending on the patchable dispatch-time wrappers.
+_SOURCE_NAMES = frozenset(_SOURCES.keys())
+
+__all__ = [
+    "ConfigError",
+    "DatasetConfig",
+    "DatasetDownloadError",
+    "DownloaderResult",
+    "download_datasets",
+    "load_config",
+]
+
+
+def _note_suffix(note: Optional[str]) -> str:
+    """Render a dataset note as a human-readable trailing suffix.
+
+    Args:
+        note: Optional informational note from the dataset config.
+
+    Returns:
+        str: An empty string when `note` is falsy, otherwise the note
+        prefixed with ` — ` for inline embedding in error messages.
+    """
+    if not note:
+        return ""
+    return f" — {note.strip()}"
+
+
+def _validate_selection(
+    selected: Dict[str, DatasetConfig],
+    base_output_dir: str,
+    explicit: bool,
+) -> None:
+    """Raise ConfigError if any selected dataset cannot be processed.
+
+    Always raises on unknown source. Additionally, when `explicit` is
+    True, escalates `enabled: false` and missing-manual datasets into
+    errors (so a user who explicitly named a key gets a hard failure
+    instead of a silent skip).
+
+    Args:
+        selected: Datasets chosen for this run.
+        base_output_dir: Base directory where dataset subdirs live.
+        explicit: True when the user passed `dataset_keys` rather than
+            relying on the enabled-by-default selection.
 
     Raises:
-        FileNotFoundError: If config file does not exist.
+        ConfigError: When one or more selected datasets violate the
+            preconditions above. All problems are aggregated into one
+            error so the user sees them in a single round.
     """
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_path) as f:
-        raw = yaml.safe_load(f)
-
-    output_dir = raw.get("output_dir", "data/raw")
-    datasets: Dict[str, DatasetConfig] = {}
-
-    for key, data in raw.get("datasets", {}).items():
-        datasets[key] = DatasetConfig.from_dict(key, data)
-
-    return output_dir, datasets
-
-
-class BaseDownloader(abc.ABC):
-    """Abstract base class for dataset downloaders."""
-
-    @abc.abstractmethod
-    def download(self, config: DatasetConfig, output_dir: Path) -> Path:
-        """Download dataset files to output directory.
-
-        Args:
-            config: Dataset configuration.
-            output_dir: Directory to save downloaded files.
-
-        Returns:
-            Path: The output directory.
-        """
-
-
-class HttpDownloader(BaseDownloader):
-    """Downloads dataset files over plain HTTP(S).
-
-    Supports streaming downloads with progress bars, resume via
-    HTTP Range headers, and retry with exponential backoff.
-    Used for CLARIN.SI and any other direct-URL source.
-    """
-
-    MAX_RETRIES = 3
-    CHUNK_SIZE = 8192
-
-    def download(self, config: DatasetConfig, output_dir: Path) -> Path:
-        """Download all URLs for a dataset.
-
-        Args:
-            config: Dataset configuration with urls list.
-            output_dir: Directory to save files.
-
-        Returns:
-            Path: The output directory.
-        """
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        for url in config.urls:
-            filename = self._extract_filename(url)
-            dest = output_dir / filename
-            part = output_dir / f"{filename}.part"
-            self._download_file(url, dest, part)
-
-        return output_dir
-
-    def _extract_filename(self, url: str) -> str:
-        """Extract filename from a URL, stripping query params.
-
-        Args:
-            url: The download URL.
-
-        Returns:
-            str: The filename portion of the URL path.
-        """
-        parsed = urlparse(url)
-        return Path(parsed.path).name
-
-    def _download_file(self, url: str, dest: Path, part: Path) -> None:
-        """Download a single file with resume and retry support.
-
-        Args:
-            url: URL to download from.
-            dest: Final destination path.
-            part: Temporary .part file path.
-        """
-        if dest.exists():
-            logger.info("File exists, skipping: %s", dest.name)
-            return
-
-        for attempt in range(1, self.MAX_RETRIES + 1):
-            try:
-                self._stream_download(url, dest, part)
-                return
-            except requests.RequestException as e:
-                if attempt == self.MAX_RETRIES:
-                    logger.error(
-                        "Failed to download %s after %d " "attempts: %s",
-                        dest.name,
-                        self.MAX_RETRIES,
-                        e,
-                    )
-                    raise
-                wait = 2 ** (attempt - 1)
-                logger.warning(
-                    "Download attempt %d/%d failed for " "%s, retrying in %ds: %s",
-                    attempt,
-                    self.MAX_RETRIES,
-                    dest.name,
-                    wait,
-                    e,
-                )
-                time.sleep(wait)
-
-    def _stream_download(self, url: str, dest: Path, part: Path) -> None:
-        """Stream download with optional resume.
-
-        Args:
-            url: URL to download from.
-            dest: Final destination path.
-            part: Temporary .part file path.
-        """
-        headers = {}
-        initial_size = 0
-        mode = "wb"
-
-        if part.exists():
-            initial_size = part.stat().st_size
-            headers["Range"] = f"bytes={initial_size}-"
-            mode = "ab"
-            logger.info(
-                "Resuming download of %s from %d bytes",
-                dest.name,
-                initial_size,
+    problems: List[str] = []
+    for key, config in selected.items():
+        if explicit and not config.enabled:
+            problems.append(
+                f"{key}: explicitly selected but disabled in config"
+                + _note_suffix(config.note)
+            )
+            continue
+        if config.source not in _SOURCE_NAMES:
+            problems.append(
+                f"{key}: unknown source '{config.source}'"
+                + _note_suffix(config.note)
+            )
+            continue
+        if (
+            explicit
+            and config.manual
+            and not _dir_has_files(Path(base_output_dir) / config.output_dir)
+        ):
+            problems.append(
+                f"{key}: explicitly selected but requires manual download"
+                + _note_suffix(config.note)
             )
 
-        with requests.get(url, stream=True, headers=headers, timeout=30) as resp:
-            resp.raise_for_status()
-
-            if initial_size > 0 and resp.status_code != 206:
-                initial_size = 0
-                mode = "wb"
-                logger.info(
-                    "Server does not support resume, " "restarting download of %s",
-                    dest.name,
-                )
-
-            total = resp.headers.get("content-length")
-            total_size = int(total) + initial_size if total else None
-
-            with (
-                open(part, mode) as f,
-                tqdm(
-                    total=total_size,
-                    initial=initial_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=dest.name,
-                ) as pbar,
-            ):
-                for chunk in resp.iter_content(chunk_size=self.CHUNK_SIZE):
-                    f.write(chunk)
-                    pbar.update(len(chunk))
-
-        part.rename(dest)
-        logger.info("Downloaded: %s", dest.name)
-
-
-class HuggingFaceDownloader(BaseDownloader):
-    """Downloads datasets from Hugging Face Hub.
-
-    Uses the datasets library to download and save in Arrow
-    format. For gated datasets, the library reads HF_TOKEN
-    from the environment.
-    """
-
-    def download(self, config: DatasetConfig, output_dir: Path) -> Path:
-        """Download HuggingFace dataset configs to output dir.
-
-        Each config (language code) is saved as a subdirectory
-        in Arrow format via save_to_disk(). If download fails
-        (e.g., gated dataset without token), logs a warning
-        and skips that config.
-
-        Args:
-            config: Dataset config with repo_id and configs.
-            output_dir: Directory to save dataset(s).
-
-        Returns:
-            Path: The output directory.
-        """
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        configs = config.configs or []
-        for cfg_name in configs:
-            save_path = output_dir / cfg_name
-            if save_path.exists():
-                logger.info(
-                    "Config '%s' already exists, skipping",
-                    cfg_name,
-                )
-                continue
-
-            logger.info(
-                "Downloading %s config '%s' from HuggingFace",
-                config.name,
-                cfg_name,
-            )
-            try:
-                ds = load_dataset(config.repo_id, cfg_name)
-                ds.save_to_disk(str(save_path))
-                logger.info(
-                    "Saved %s/%s to %s",
-                    config.repo_id,
-                    cfg_name,
-                    save_path,
-                )
-            except Exception as e:
-                note = config.note or ""
-                logger.warning(
-                    "Failed to download %s config '%s'" ": %s. %s",
-                    config.name,
-                    cfg_name,
-                    e,
-                    note,
-                )
-
-        return output_dir
+    if problems:
+        raise ConfigError(problems)
 
 
 def _download_one(
@@ -332,7 +203,7 @@ def _download_one(
         key: Dataset key (used for log messages).
         config: Per-dataset configuration loaded from the YAML.
         base_output_dir: Base directory under which the dataset's
-            ``output_dir`` subdirectory will live.
+            `output_dir` subdirectory will live.
         force: Re-download even if the destination already has files.
 
     Returns:
@@ -340,11 +211,6 @@ def _download_one(
             None for skipped/disabled/manual datasets.
     """
     output_path = Path(base_output_dir) / config.output_dir
-
-    if not config.enabled:
-        note = config.note or "No details available."
-        logger.warning("Dataset '%s' is disabled: %s", key, note)
-        return None
 
     if config.manual:
         if _dir_has_files(output_path):
@@ -358,12 +224,6 @@ def _download_one(
             )
         return None
 
-    if not force and _dir_has_files(output_path):
-        logger.info(
-            "Dataset '%s' already exists at %s, skipping", key, output_path,
-        )
-        return None
-
     logger.info(
         "Downloading '%s' (%s) from %s",
         config.name,
@@ -371,15 +231,14 @@ def _download_one(
         config.source,
     )
 
-    if config.source in ("clarin", "http"):
-        HttpDownloader().download(config, output_path)
-    elif config.source == "huggingface":
-        HuggingFaceDownloader().download(config, output_path)
-    else:
-        logger.error(
-            "Unknown source '%s' for dataset '%s'", config.source, key,
+    result = _SOURCES[config.source](config, output_path, force)
+    if result.failed:
+        raise DatasetDownloadError(
+            key,
+            result.failed,
+            n_completed=len(result.completed),
+            n_total=len(result.completed) + len(result.failed),
         )
-        return None
 
     return str(output_path)
 
@@ -409,16 +268,19 @@ def download_datasets(
             default selection. Ignored when `dataset_keys` is
             provided. Mutually exclusive with `only_benchmarks`.
         max_workers: Number of datasets to download in parallel.
-            ``0`` (default) picks ``min(4, n_datasets)`` to stay polite
-            to remote servers; ``1`` runs serially; ``N > 1`` uses that
+            `0` (default) picks `min(4, n_datasets)` to stay polite
+            to remote servers; `1` runs serially; `N > 1` uses that
             many threads (capped at the number of selected datasets).
         log_dir: When set, per-dataset logs are written to
-            ``<log_dir>/<key>.log``. The directory is created if it
+            `<log_dir>/<key>.log`. The directory is created if it
             does not exist.
 
     Raises:
         ValueError: If any requested dataset key is unknown, or if
             both `only_benchmarks` and `exclude_benchmarks` are set.
+        ConfigError: When the selected datasets fail pre-flight
+            validation (unknown source, or — when explicitly selected
+            — disabled or missing-manual entries).
         RuntimeError: If one or more downloads failed.
     """
     if only_benchmarks and exclude_benchmarks:
@@ -433,7 +295,7 @@ def download_datasets(
     if dataset_keys:
         unknown = set(dataset_keys) - set(datasets.keys())
         if unknown:
-            raise ValueError(f"Unknown dataset keys: " f"{', '.join(unknown)}")
+            raise ValueError(f"Unknown dataset keys: {', '.join(unknown)}")
         selected = {k: v for k, v in datasets.items() if k in dataset_keys}
     else:
         selected = {k: v for k, v in datasets.items() if v.enabled}
@@ -441,6 +303,10 @@ def download_datasets(
             selected = {k: v for k, v in selected.items() if v.benchmark}
         elif exclude_benchmarks:
             selected = {k: v for k, v in selected.items() if not v.benchmark}
+
+    _validate_selection(
+        selected, base_output_dir, explicit=bool(dataset_keys)
+    )
 
     keys = list(selected.keys())
     workers = resolve_workers(max_workers, len(keys), io_default(len(keys)))
@@ -463,10 +329,17 @@ def download_datasets(
     )
 
     if failures:
-        failed_keys = ", ".join(k for k, _ in failures)
-        raise RuntimeError(
-            f"Download failed for {len(failures)} dataset(s): {failed_keys}"
-        )
+        lines = [f"Download failed for {len(failures)} dataset(s):"]
+        for key, exc in failures:
+            if isinstance(exc, DatasetDownloadError):
+                lines.append(f"  - {exc}")
+            else:
+                lines.append(
+                    f"  - {key}: {exc.__class__.__name__}: {exc}"
+                )
+        if log_dir is not None:
+            lines.append(f"See {log_dir} for per-dataset logs.")
+        raise RuntimeError("\n".join(lines))
 
 
 def _dir_has_files(path: Path) -> bool:

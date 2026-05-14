@@ -10,6 +10,7 @@ import yaml
 from slm4ie.data.extractors import register_extractor, BaseExtractor
 from slm4ie.data.schema import Annotations, Document, Token
 from slm4ie.data.processing import (
+    _extract_one,
     extract_datasets,
     load_extraction_config,
 )
@@ -217,6 +218,41 @@ class _MixedStubExtractor(BaseExtractor):
 
 
 register_extractor("mixed_stub", _MixedStubExtractor)
+
+
+class _RaisingMidStreamExtractor(BaseExtractor):
+    """Yields two documents then raises a RuntimeError."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+    ) -> Iterator[Document]:
+        """Yield two documents, then raise to simulate mid-stream failure.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+
+        Yields:
+            Document: Two documents before the explosion.
+
+        Raises:
+            RuntimeError: Always, after yielding two documents.
+        """
+        for n in range(2):
+            yield Document(
+                text=f"doc {n}",
+                source=source,
+                domain=domain,
+                doc_id=f"doc-{n}",
+            )
+        raise RuntimeError("boom")
+
+
+register_extractor("raising_mid_stream", _RaisingMidStreamExtractor)
 
 
 def _write_config(tmp_path: Path, datasets: dict) -> Path:
@@ -559,3 +595,156 @@ class TestExtractDatasets:
         new = output_file.read_text().strip().splitlines()
         assert len(new) == 1
         assert json.loads(new[0])["text"] == "stub text"
+
+
+class TestAtomicWrites:
+    """Tests for atomic-write behaviour of `_extract_one`."""
+
+    def test_no_partial_files_after_success(self, tmp_path: Path):
+        """Happy path leaves only final outputs on disk."""
+        input_base = tmp_path / "raw"
+        output_base = tmp_path / "processed"
+        (input_base / "ds1").mkdir(parents=True)
+        output_base.mkdir(parents=True)
+
+        _extract_one(
+            key="ds1",
+            ds_cfg={"extractor": "annotated_stub", "domain": "web"},
+            input_base=input_base,
+            output_base=output_base,
+            force=False,
+        )
+
+        assert (output_base / "ds1.jsonl").exists()
+        assert (output_base / "ds1.annotations.jsonl.gz").exists()
+        assert not (output_base / "ds1.jsonl.partial").exists()
+        assert not (
+            output_base / "ds1.annotations.jsonl.gz.partial"
+        ).exists()
+
+    def test_recovers_from_orphan_partials(self, tmp_path: Path):
+        """Pre-existing `.partial` files are removed before extraction."""
+        input_base = tmp_path / "raw"
+        output_base = tmp_path / "processed"
+        (input_base / "ds1").mkdir(parents=True)
+        output_base.mkdir(parents=True)
+
+        text_partial = output_base / "ds1.jsonl.partial"
+        ann_partial = output_base / "ds1.annotations.jsonl.gz.partial"
+        text_partial.write_text("garbage\n")
+        ann_partial.write_bytes(b"garbage")
+
+        _extract_one(
+            key="ds1",
+            ds_cfg={"extractor": "annotated_stub", "domain": "web"},
+            input_base=input_base,
+            output_base=output_base,
+            force=False,
+        )
+
+        text_file = output_base / "ds1.jsonl"
+        ann_file = output_base / "ds1.annotations.jsonl.gz"
+        assert text_file.exists()
+        assert ann_file.exists()
+        assert not text_partial.exists()
+        assert not ann_partial.exists()
+
+        # Output matches a fresh run (single annotated doc).
+        records = [
+            json.loads(ln)
+            for ln in text_file.read_text().splitlines()
+        ]
+        assert len(records) == 1
+        assert records[0]["doc_id"] == "ann-1"
+
+    def test_mid_run_failure_leaves_partial(self, tmp_path: Path):
+        """A mid-stream raise leaves `.partial` and no final text file."""
+        input_base = tmp_path / "raw"
+        output_base = tmp_path / "processed"
+        (input_base / "ds1").mkdir(parents=True)
+        output_base.mkdir(parents=True)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            _extract_one(
+                key="ds1",
+                ds_cfg={
+                    "extractor": "raising_mid_stream",
+                    "domain": "web",
+                },
+                input_base=input_base,
+                output_base=output_base,
+                force=False,
+            )
+
+        text_file = output_base / "ds1.jsonl"
+        text_partial = output_base / "ds1.jsonl.partial"
+        assert not text_file.exists()
+        assert text_partial.exists()
+
+
+class TestPathOverrides:
+    """Tests for `input_dir_override` and `output_dir_override`."""
+
+    def test_overrides_redirect_io(self, tmp_path: Path):
+        """Overrides win over `input_dir` / `output_dir` from the YAML."""
+        bogus_in = tmp_path / "bogus_in"
+        bogus_out = tmp_path / "bogus_out"
+        bogus_in.mkdir()
+        bogus_out.mkdir()
+
+        # Config points at bogus paths; overrides must win.
+        config_data = {
+            "input_dir": str(bogus_in),
+            "output_dir": str(bogus_out),
+            "datasets": {
+                "ds1": {"extractor": "stub", "domain": "web"},
+            },
+        }
+        config_file = tmp_path / "extract.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        real_in = tmp_path / "real_in"
+        real_out = tmp_path / "real_out"
+        (real_in / "ds1").mkdir(parents=True)
+
+        extract_datasets(
+            config_file,
+            input_dir_override=str(real_in),
+            output_dir_override=str(real_out),
+        )
+
+        assert (real_out / "ds1.jsonl").exists()
+        assert not (bogus_out / "ds1.jsonl").exists()
+
+
+class TestFailuresArtifact:
+    """Tests for the `failures.txt` artifact written to `log_dir`."""
+
+    def test_failures_txt_written_on_failure(self, tmp_path: Path):
+        """One failing dataset produces a sorted `failures.txt`."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds_good": {"extractor": "stub", "domain": "web"},
+                "ds_bad": {
+                    "extractor": "raising_mid_stream",
+                    "domain": "web",
+                },
+            },
+        )
+        (tmp_path / "raw" / "ds_good").mkdir(parents=True)
+        (tmp_path / "raw" / "ds_bad").mkdir(parents=True)
+
+        log_dir = tmp_path / "logs"
+
+        with pytest.raises(RuntimeError, match="ds_bad"):
+            extract_datasets(
+                config_file,
+                log_dir=log_dir,
+                max_workers=1,
+            )
+
+        failures_file = log_dir / "failures.txt"
+        assert failures_file.exists()
+        lines = failures_file.read_text().strip().splitlines()
+        assert lines == ["ds_bad"]

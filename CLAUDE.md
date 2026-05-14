@@ -9,9 +9,10 @@ repository.
 Small language models for zero-shot information extraction across European
 languages, with emphasis on Slovenian. Three workstreams live here:
 
-- Pretraining-corpus preparation (download, extract, datatrove conversion).
+- Pretraining-corpus preparation (download, extract, curate via `to_pretrain.py`).
 - Tokenizer + model training (SLURM-friendly, MLflow-tracked).
-- Evaluation on Slovenian benchmarks (NER, SA, SuperGLUE, etc.).
+- Evaluation on Slovenian benchmarks (NER, SA, SuperGLUE, etc.) driven by
+  the `tasks.yaml` registry.
 
 See `README.md` for the dataset catalog and end-to-end commands.
 
@@ -42,36 +43,75 @@ adding a small wrapper in `scripts/` that loads a YAML from `configs/`.
 
 ## Data layout
 
-- Datasets live **outside the repo** at `/vault/data/SLM4IE/`. Never commit
-  data files; respect the `.gitignore`.
-- `scripts/data/extract.py` produces, per dataset, two artifacts that are
-  joined on the fly downstream — never materialize a merged file:
+Datasets live **outside the repo** at `/vault/data/SLM4IE/`. Never commit
+data files; respect the `.gitignore`. The tree has five tiers:
+
+```text
+raw/<key>/...                                  # download.py
+extracted/                                     # extract.py — canonical L2
+  <key>.jsonl
+  <key>.annotations.jsonl.gz
+pretrain/                                      # to_pretrain.py
+  00_convert/<key>/*.jsonl.gz                    # datatrove `Document` shape
+  01_language/ … 04_2_dedup/                     # filter/dedup stages
+  05_statistics/
+tasks/<task>/<dataset>/{train,val,test}.jsonl.gz  # to_spans / to_sentiment / to_superglue
+tokenization/<dataset>.jsonl.gz                # to_tokenization.py
+```
+
+- `scripts/data/extract.py` produces, per dataset, two artifacts under
+  `extracted/` that are joined on the fly downstream — never materialize a
+  merged file:
   - `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `metadata`.
   - `<key>.annotations.jsonl.gz` — gzipped per-document annotations
     (parallel arrays: `forms`, `lemmas`, `upos`, `feats`, `sentences`,
     plus `spans` when present).
 - Use `slm4ie.data.io_utils.iter_joined_records` to consume both together.
+- Old tier names (`processed/`, `final/`, `benchmarks/`) are gone. Don't
+  reintroduce them.
 
-## Two conversion routes — keep them separate
+## Conversion routes — keep them separate
 
-Downstream consumers fork after extraction:
+Downstream consumers fork after extraction. There are three routes, and
+they own disjoint output trees:
 
-1. **Pretraining (datatrove):** `scripts/data/to_datatrove.py` →
-   `<output>/datatrove/<key>.jsonl.gz` in datatrove's `Document` shape
-   (`text` / `id` / `metadata`). Carries `dataset` and `domain` at the top
-   level for source-weighted sampling.
-2. **IE / evaluation (spans + task-specific):**
-   - `scripts/data/to_spans.py --schema {gliner|conll|generic}` →
-     `<output>/spans/<schema>/<key>.jsonl.gz`. Requires a `spans` field in
-     the annotations payload.
-   - `scripts/data/to_sentiment.py` → `<raw>/eval/sentiment/<key>.jsonl.gz`
-     with normalized `{negative, neutral, positive}` labels and a
-     `label_map.json`.
-   - `scripts/data/to_superglue.py` →
-     `<raw>/eval/superglue_sl/<variant>/<task>/<split>.jsonl.gz`.
+1. **Pretraining (`to_pretrain.py`):** runs seven sentinel-skippable stages
+   on top of [datatrove](https://github.com/huggingface/datatrove). Stage 0
+   (`convert`) lifts `extracted/<key>.jsonl` into the `Document` shape
+   (`text` / `id` / `metadata`, with `dataset` and `domain` for
+   source-weighted sampling); stages 1–6 do language filtering, Gopher
+   quality + repetition heuristics, exact + sentence dedup, and corpus
+   stats. Output: `pretrain/00_convert/ … pretrain/05_statistics/`.
+   Driven by `configs/data/pretrain.yaml`. The annotations sidecar is
+   **not** read here — it would desync after any datatrove step that
+   rewrites the text.
+
+2. **Tasks (`to_spans`, `to_sentiment`, `to_superglue`):** all three read
+   `configs/data/tasks.yaml`, a flat registry keyed `<task>/<dataset>`.
+   They write `tasks/<task>/<dataset>/<split>.jsonl.gz` using task-family
+   schemas defined as TypedDicts in `slm4ie/data/schema.py`.
+   - `to_spans.py` handles every `ner/*` entry and emits GLiNER-style
+     output. (The old `--schema {gliner|conll|generic}` flag is gone; only
+     the GLiNER schema remains.) Requires a `spans` field in the
+     annotations payload.
+   - `to_sentiment.py` handles `sentiment/*` entries with normalized
+     `{negative, neutral, positive}` labels.
+   - `to_superglue.py` handles every SuperGLUE-SL subtask, dissolved into
+     `nli/`, `qa/`, `coref/`, `wsd/`, `commonsense/`. The `--variant`
+     flag picks `humant` (default) or `googlemt`.
+
+   Train/test isolation is enforced by each entry's `role` field
+   (`finetune_and_eval` vs `held_out`), **not** by directory placement.
+   Document-shaped sources use `source.kind: extracted`; task-native
+   bundles (SuperGLUE-SL) bypass `extracted/` via `source.kind: raw`.
+
+3. **Tokenizer quality (`to_tokenization.py`):** reads
+   `configs/data/tokenization.yaml`, writes `tokenization/<dataset>.jsonl.gz`.
+   Lexicon-derived (Sloleks, etc.); never enters the pretraining corpus.
 
 All converters skip existing outputs unless `--force` is passed and accept
-either a single dataset key or `--all`.
+either a single dataset key (or `<task>/<dataset>` entry key for the task
+converters) or `--all`.
 
 ## Documentation style — Google-style docstrings (REQUIRED)
 
@@ -144,5 +184,7 @@ checks structure but not semantic agreement with the code.
 - Using `pip install` instead of `uv add` / `uv sync`.
 - Bumping `line-length` above 120 to fit a long line — refactor instead.
 - Cross-importing between `scripts/` modules; share via `slm4ie/`.
-- Adding a third conversion route alongside datatrove/spans without
-  discussing it first — the split is intentional.
+- Adding a fourth conversion route alongside `to_pretrain` / task
+  converters / `to_tokenization` without discussing it first — the split is
+  intentional. New task families belong as new entries in `tasks.yaml`,
+  not as new scripts.

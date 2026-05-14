@@ -1,85 +1,89 @@
-"""Convert SLM4IE processed JSONL into span-level IE training files.
+"""Convert extracted SLM4IE NER datasets into GLiNER-style task JSONL.
 
-Reads <key>.jsonl and the optional <key>.annotations.jsonl.gz sidecar
-from the extraction output directory and emits a per-dataset JSONL
-whose shape matches the requested span IE schema.
+Driven by ``configs/data/tasks.yaml``. Processes every entry whose
+resolved converter is ``to_spans`` (i.e. NER task family) and emits
+one gzipped JSONL per declared split under
+``<roots.tasks>/<task>/<dataset>/<split>.jsonl.gz``.
 
-The converter expects each record's annotations payload to carry a
-spans field that is a list of either [start, end, label] triples or
-{start, end, label} dicts, with token-level indices that are
-end-exclusive (Python slice convention). Records without a spans
-field are skipped with a warning -- they typically come from corpora
-that have UD-only annotations and no entity layer.
+Each output line is a ``NerExample``:
 
-Three output schemas are supported. The gliner schema produces
-GLiNER-style training examples and converts token indices to GLiNER's
-end-inclusive convention; output keys are id, tokenized_text, and ner
-(a list of [start, end_inclusive, label] triples). The conll schema
-produces CoNLL-style IOB2 token tags; output keys are id, tokens, and
-ner_tags. The generic schema is a lossless dump preserving text,
-tokens, spans, and provenance; output keys are id, text, tokens,
-spans (as {start, end, label} dicts), dataset, and domain.
+    {
+        "id": "<source>:<doc_id>",
+        "text": "<document text>",
+        "spans": [{"start": <char_start>, "end": <char_end>, "label": "<TAG>"}]
+    }
+
+Sources are read from the extraction tree
+(``<roots.extracted>/<key>.jsonl`` + the optional annotations
+sidecar). Annotation spans whose label is not in the entry's
+``labels:`` allow-list are dropped (one warning per dataset). Splits
+are derived from a deterministic hash of each document's ``uid`` /
+``doc_id`` (80/10/10 buckets), redirected to the splits declared by
+the entry.
 
 Examples:
-    Convert a single dataset to GLiNER format:
+    Convert every NER entry declared in tasks.yaml:
 
-        uv run python scripts/data/to_spans.py kzb --schema gliner
+        uv run python scripts/data/to_spans.py --all
 
-    Convert every dataset declared in extract.yaml to the generic
-    schema:
+    Convert just one entry:
 
-        uv run python scripts/data/to_spans.py --all --schema generic
+        uv run python scripts/data/to_spans.py ner/ssj500k
 """
 
 import argparse
-import json
 import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-import yaml
-from tqdm import tqdm
-
-from slm4ie.data.io_utils import (
-    find_dataset_files as _find_dataset_files,
-    find_project_root as _find_project_root,
-    iter_joined_records as _iter_joined_records,
-    open_output as _open_output,
-    resolve_processed_dir as _resolve_processed_dir,
-)
+from slm4ie.data.io_utils import find_project_root, iter_joined_records
 from slm4ie.data.parallel import (
     configure_script_logging,
     cpu_default,
     resolve_workers,
     run_parallel,
-    workers_quiet,
+)
+from slm4ie.data.schema import NerExample
+from slm4ie.data.tasks import (
+    TaskEntry,
+    TasksRoots,
+    filter_for_converter,
+    load_tasks,
+    resolve_output_dir,
+)
+from slm4ie.data.task_writer import (
+    all_outputs_exist,
+    hash_split,
+    outputs_for_splits,
+    write_jsonl_splits,
 )
 
 logger = logging.getLogger(__name__)
 
-SCHEMAS: Tuple[str, ...] = ("gliner", "conll", "generic")
+#: Converter module name, used to filter `tasks.yaml`.
+CONVERTER_NAME: str = "to_spans"
 
 
 def _normalize_spans(
-    raw_spans: Iterable[Any],
+    raw_spans: Any,
 ) -> List[Tuple[int, int, str]]:
     """Normalize spans from list-of-lists or list-of-dicts to tuples.
 
     Args:
-        raw_spans (Iterable[Any]): Spans as either `[s, e, label]`
-            triples or `{"start": s, "end": e, "label": label}`
-            dicts.
+        raw_spans: Spans as either ``[s, e, label]`` triples or
+            ``{"start": s, "end": e, "label": label}`` dicts.
 
     Returns:
-        List[Tuple[int, int, str]]: Normalized `(start, end, label)`
-            tuples with end-exclusive token indices.
+        Normalized ``(start, end, label)`` tuples.
 
     Raises:
         ValueError: If a span entry is malformed.
     """
     normalized: List[Tuple[int, int, str]] = []
+    if not raw_spans:
+        return normalized
     for span in raw_spans:
         if isinstance(span, dict):
             normalized.append((
@@ -96,445 +100,337 @@ def _normalize_spans(
 
 
 def _record_id(record: Dict[str, Any], index: int) -> str:
-    """Returns a stable id for *record* with a deterministic fallback.
+    """Return a stable id for *record* with a deterministic fallback.
 
     Args:
-        record (Dict[str, Any]): Joined record.
-        index (int): Zero-based record position used to synthesize a
-            fallback id when `uid` is missing.
+        record: Joined record.
+        index: Zero-based record position, used to synthesize a
+            fallback id when ``uid`` and ``doc_id`` are both missing.
 
     Returns:
-        str: `uid` from the record, or
-            `"<source>:idx-<14-digit-index>"` when absent.
+        ``uid``, or ``"<source>:<doc_id>"``, or
+        ``"<source>:idx-<14-digit-index>"``.
     """
     source = record.get("source", "unknown")
-    return record.get("uid") or f"{source}:idx-{index:014d}"
+    uid = record.get("uid")
+    if uid:
+        return str(uid)
+    doc_id = record.get("doc_id")
+    if doc_id is not None:
+        return f"{source}:{doc_id}"
+    return f"{source}:idx-{index:014d}"
 
 
-def _extract_spans_or_none(
+def _record_to_example(
     record: Dict[str, Any],
-) -> Optional[List[Tuple[int, int, str]]]:
-    """Returns normalized spans from a record, or None if absent.
+    index: int,
+    label_allow: Optional[set],
+    dropped_labels: set,
+) -> Optional[NerExample]:
+    """Convert one joined record to a ``NerExample``, or ``None``.
 
     Args:
-        record (Dict[str, Any]): Joined record.
+        record: Joined record (text + annotations).
+        index: Zero-based record position.
+        label_allow: Optional set of accepted labels. When provided,
+            spans whose label is not in the set are dropped (and the
+            label is added to *dropped_labels* for a one-shot warning
+            later).
+        dropped_labels: Mutable accumulator collecting the names of
+            labels filtered out of this dataset.
 
     Returns:
-        Optional[List[Tuple[int, int, str]]]: Normalized spans, or
-            None when the record carries no `spans` field.
+        A ``NerExample`` when the record carries a ``spans`` field,
+        otherwise ``None``.
     """
     annotations = record.get("annotations") or {}
-    raw = annotations.get("spans")
-    if raw is None:
+    raw_spans = annotations.get("spans")
+    if raw_spans is None:
         return None
-    return _normalize_spans(raw)
 
+    spans = _normalize_spans(raw_spans)
+    if label_allow is not None:
+        filtered: List[Tuple[int, int, str]] = []
+        for start, end, label in spans:
+            if label in label_allow:
+                filtered.append((start, end, label))
+            else:
+                dropped_labels.add(label)
+        spans = filtered
 
-def _tokens_for(record: Dict[str, Any]) -> List[str]:
-    """Returns the token list for *record* (the `forms` array).
-
-    Args:
-        record (Dict[str, Any]): Joined record.
-
-    Returns:
-        List[str]: Token surface forms.
-
-    Raises:
-        ValueError: If the record has spans but no `forms` array.
-    """
-    annotations = record.get("annotations") or {}
-    forms = annotations.get("forms")
-    if forms is None:
-        raise ValueError(
-            "Record has spans but no token forms; cannot emit "
-            "token-level output."
-        )
-    return list(forms)
-
-
-def to_gliner(
-    record: Dict[str, Any],
-    index: int,
-) -> Optional[Dict[str, Any]]:
-    """Converts a record to a GLiNER training example.
-
-    Args:
-        record (Dict[str, Any]): Joined record (text + annotations).
-        index (int): Zero-based record position.
-
-    Returns:
-        Optional[Dict[str, Any]]: Dict with `id`, `tokenized_text`,
-            `ner` (with end-inclusive indices), or None when the
-            record has no spans.
-    """
-    spans = _extract_spans_or_none(record)
-    if spans is None:
-        return None
-    tokens = _tokens_for(record)
-    ner = [[s, e - 1, label] for s, e, label in spans]
-    return {
-        "id": _record_id(record, index),
-        "tokenized_text": tokens,
-        "ner": ner,
-    }
-
-
-def to_conll(
-    record: Dict[str, Any],
-    index: int,
-) -> Optional[Dict[str, Any]]:
-    """Converts a record to a CoNLL-style IOB2-tagged example.
-
-    Args:
-        record (Dict[str, Any]): Joined record (text + annotations).
-        index (int): Zero-based record position.
-
-    Returns:
-        Optional[Dict[str, Any]]: Dict with `id`, `tokens`, and
-            `ner_tags` (IOB2-tagged), or None when the record has
-            no spans.
-    """
-    spans = _extract_spans_or_none(record)
-    if spans is None:
-        return None
-    tokens = _tokens_for(record)
-    tags = ["O"] * len(tokens)
-    for start, end, label in sorted(spans, key=lambda s: (s[0], -s[1])):
-        if not (0 <= start < end <= len(tokens)):
-            logger.warning(
-                "Span (%d, %d, %r) out of bounds for %d tokens; skipping.",
-                start, end, label, len(tokens),
-            )
-            continue
-        tags[start] = f"B-{label}"
-        for i in range(start + 1, end):
-            tags[i] = f"I-{label}"
-    return {
-        "id": _record_id(record, index),
-        "tokens": tokens,
-        "ner_tags": tags,
-    }
-
-
-def to_generic(
-    record: Dict[str, Any],
-    index: int,
-) -> Optional[Dict[str, Any]]:
-    """Converts a record to the lossless generic span shape.
-
-    Args:
-        record (Dict[str, Any]): Joined record (text + annotations).
-        index (int): Zero-based record position.
-
-    Returns:
-        Optional[Dict[str, Any]]: Dict with `id`, `text`,
-            `tokens`, `spans` (as dicts), `dataset`, `domain`,
-            or None when the record has no spans.
-    """
-    spans = _extract_spans_or_none(record)
-    if spans is None:
-        return None
-    tokens = _tokens_for(record)
-    return {
-        "id": _record_id(record, index),
-        "text": record["text"],
-        "tokens": tokens,
-        "spans": [
-            {"start": s, "end": e, "label": label}
-            for s, e, label in spans
+    return NerExample(
+        id=_record_id(record, index),
+        text=record.get("text", ""),
+        spans=[
+            {"start": start, "end": end, "label": label}
+            for start, end, label in spans
         ],
-        "dataset": record.get("source", "unknown"),
-        "domain": record.get("domain", "unknown"),
-    }
+    )
 
 
-_CONVERTERS: Dict[
-    str, Callable[[Dict[str, Any], int], Optional[Dict[str, Any]]]
-] = {
-    "gliner": to_gliner,
-    "conll": to_conll,
-    "generic": to_generic,
-}
-
-
-def convert_record(
-    record: Dict[str, Any],
-    index: int,
-    schema: str,
-) -> Optional[Dict[str, Any]]:
-    """Dispatches to the appropriate per-schema converter.
+def _iter_examples_for_entry(
+    entry: TaskEntry,
+    roots: TasksRoots,
+) -> Iterator[Tuple[str, NerExample]]:
+    """Yield ``(split, NerExample)`` pairs for every joined input record.
 
     Args:
-        record (Dict[str, Any]): Joined record (text + annotations).
-        index (int): Zero-based record position.
-        schema (str): One of `gliner`, `conll`, `generic`.
+        entry: NER task entry from the registry.
+        roots: Filesystem roots.
 
-    Returns:
-        Optional[Dict[str, Any]]: Converted record, or None when the
-            input lacks span annotations and should be skipped.
+    Yields:
+        ``(split_name, example)`` pairs ready for
+        `write_jsonl_splits`.
 
     Raises:
-        ValueError: If *schema* is not a known schema name.
+        FileNotFoundError: If a source ``<key>.jsonl`` is missing.
     """
-    try:
-        converter = _CONVERTERS[schema]
-    except KeyError as exc:
+    if entry.source.kind != "extracted":
         raise ValueError(
-            f"Unknown schema {schema!r}. Choose from {SCHEMAS}."
-        ) from exc
-    return converter(record, index)
+            f"to_spans only supports source.kind='extracted'; got "
+            f"{entry.source.kind!r} for {entry.task}/{entry.dataset}."
+        )
 
+    label_allow: Optional[set] = (
+        set(str(lbl) for lbl in entry.labels)
+        if entry.labels is not None
+        else None
+    )
+    dropped_labels: set = set()
+    splits_keys = list(entry.splits.keys())
+    index = 0
 
-def convert_stream(
-    records: Iterable[Dict[str, Any]],
-    out_stream: IO[str],
-    schema: str,
-) -> Tuple[int, int]:
-    """Converts each input record and writes it as a JSONL line.
+    for key in entry.source.keys:
+        text_path = roots.extracted / f"{key}.jsonl"
+        ann_path = roots.extracted / f"{key}.annotations.jsonl.gz"
+        if not text_path.exists():
+            raise FileNotFoundError(
+                f"Source for {entry.task}/{entry.dataset}: "
+                f"{text_path} does not exist."
+            )
+        ann_arg: Optional[Path] = ann_path if ann_path.exists() else None
+        for record in iter_joined_records(text_path, ann_arg):
+            example = _record_to_example(
+                record, index, label_allow, dropped_labels
+            )
+            index += 1
+            if example is None:
+                continue
+            split_key = (
+                str(record.get("uid"))
+                or str(record.get("doc_id"))
+                or str(index)
+            )
+            split = hash_split(split_key, splits_keys)
+            yield split, example
 
-    Args:
-        records (Iterable[Dict[str, Any]]): Iterable of joined records.
-        out_stream (IO[str]): Writable text stream for converted JSONL.
-        schema (str): One of `gliner`, `conll`, `generic`.
-
-    Returns:
-        Tuple[int, int]: `(written, skipped)` counts.
-    """
-    written = 0
-    skipped = 0
-    for index, record in enumerate(records):
-        converted = convert_record(record, index, schema)
-        if converted is None:
-            skipped += 1
-            continue
-        out_stream.write(json.dumps(converted, ensure_ascii=False))
-        out_stream.write("\n")
-        written += 1
-    return written, skipped
-
-
-def list_datasets_from_config(config_path: Path) -> List[str]:
-    """Returns the dataset keys declared in `extract.yaml`.
-
-    Args:
-        config_path (Path): Path to the extraction YAML config.
-
-    Returns:
-        List[str]: Dataset keys in declaration order.
-
-    Raises:
-        FileNotFoundError: If the config file does not exist.
-    """
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    with config_path.open() as fh:
-        cfg = yaml.safe_load(fh) or {}
-    return list((cfg.get("datasets") or {}).keys())
-
-
-def convert_dataset(
-    key: str,
-    processed_dir: Path,
-    output_dir: Path,
-    schema: str,
-    force: bool = False,
-) -> Optional[Tuple[int, int]]:
-    """Converts a single dataset, writing `<output_dir>/<key>.jsonl.gz`.
-
-    Args:
-        key (str): Dataset key.
-        processed_dir (Path): Directory containing processed input
-            files.
-        output_dir (Path): Directory to write span-shaped output into.
-            Created if it does not exist.
-        schema (str): One of `gliner`, `conll`, `generic`.
-        force (bool): When True, overwrite an existing output file.
-            Defaults to False (skip and return `(0, 0)`).
-
-    Returns:
-        Optional[Tuple[int, int]]: `(written, skipped)` counts, or
-            None when no input file exists for *key*. Returns
-            `(0, 0)` when the output already exists and *force* is
-            False.
-    """
-    pair = _find_dataset_files(processed_dir, key)
-    if pair is None:
+    if dropped_labels:
         logger.warning(
-            "No processed input found for dataset %r in %s",
-            key, processed_dir,
+            "Entry %s/%s dropped spans with %d label(s) outside "
+            "allow-list (%s): %s",
+            entry.task,
+            entry.dataset,
+            len(dropped_labels),
+            sorted(label_allow) if label_allow else "<empty>",
+            sorted(dropped_labels),
+        )
+
+
+def convert_entry(
+    key: str,
+    entry: TaskEntry,
+    roots: TasksRoots,
+    force: bool = False,
+) -> Optional[Dict[str, int]]:
+    """Convert one NER entry, writing one file per declared split.
+
+    Args:
+        key: Entry key ``"<task>/<dataset>"`` (used for logging).
+        entry: Parsed task entry.
+        roots: Filesystem roots.
+        force: When True, re-derive even if every split already
+            exists.
+
+    Returns:
+        Mapping ``{split: written_count}``, or ``None`` when the
+        outputs already existed and ``force`` is False.
+    """
+    output_dir = resolve_output_dir(entry, roots)
+    outputs = outputs_for_splits(output_dir, entry.splits)
+
+    if not force and all_outputs_exist(outputs):
+        logger.info(
+            "Skipping %s: every split already exists at %s "
+            "(use --force to overwrite).",
+            key, output_dir,
         )
         return None
-    text_path, ann_path = pair
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"{key}.jsonl.gz"
-
-    if out_path.exists() and not force:
-        logger.info(
-            "Skipping %r, output already exists: %s "
-            "(use --force to overwrite)",
-            key, out_path,
-        )
-        return (0, 0)
-
-    logger.info(
-        "Converting %s%s → %s [schema=%s]",
-        text_path,
-        f" + {ann_path}" if ann_path else "",
-        out_path,
-        schema,
+    logger.info("Converting %s -> %s", key, output_dir)
+    counts = write_jsonl_splits(
+        _iter_examples_for_entry(entry, roots),
+        outputs,
     )
-    records = _iter_joined_records(text_path, ann_path)
-    progress = tqdm(records, desc=key, unit="doc", disable=workers_quiet())
-    with _open_output(out_path) as out_stream:
-        try:
-            written, skipped = convert_stream(progress, out_stream, schema)
-        finally:
-            progress.close()
+    total = sum(counts.values())
     logger.info(
-        "Wrote %d records (skipped %d without spans) to %s",
-        written, skipped, out_path,
+        "Wrote %d records across splits %s for %s",
+        total, counts, key,
     )
-    return written, skipped
+    return counts
 
 
-def parse_args(argv=None) -> argparse.Namespace:
-    """Parses command-line arguments.
+def _resolve_keys(
+    entries: List[TaskEntry],
+    requested: List[str],
+    use_all: bool,
+) -> List[str]:
+    """Resolve which entry keys to process from CLI selection.
 
     Args:
-        argv: Optional argument list (defaults to `sys.argv`).
+        entries: Entries already filtered to this converter.
+        requested: Positional ``<task>/<dataset>`` keys from the CLI.
+        use_all: Whether ``--all`` was passed.
 
     Returns:
-        argparse.Namespace: Parsed arguments.
+        List of entry keys, preserving registry order.
+
+    Raises:
+        SystemExit: If a requested key is unknown to this converter.
+    """
+    known = {f"{e.task}/{e.dataset}": e for e in entries}
+    if use_all:
+        return list(known.keys())
+    unknown = [k for k in requested if k not in known]
+    if unknown:
+        logger.error(
+            "Unknown entries for converter %s: %s. Known: %s",
+            CONVERTER_NAME, unknown, sorted(known.keys()),
+        )
+        sys.exit(1)
+    return list(requested)
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Args:
+        argv: Optional argument list (defaults to ``sys.argv``).
+
+    Returns:
+        Parsed namespace.
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Convert SLM4IE processed JSONL into span IE training "
-            "files (gliner / conll / generic)."
+            "Convert extracted NER datasets into GLiNER-style task "
+            "JSONL under <roots.tasks>/<task>/<dataset>/<split>.jsonl.gz."
         )
     )
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument(
-        "dataset",
-        nargs="?",
-        help="Dataset key (e.g. 'kzb'). Mutually exclusive with --all.",
+        "entries",
+        nargs="*",
+        default=[],
+        help=(
+            "Entry keys to process, e.g. 'ner/ssj500k ner/suk'. "
+            "Mutually exclusive with --all."
+        ),
     )
     target.add_argument(
         "--all",
         action="store_true",
-        help="Convert every dataset declared in extract.yaml.",
-    )
-    parser.add_argument(
-        "--schema",
-        choices=SCHEMAS,
-        default="generic",
-        help="Output schema. Defaults to 'generic'.",
-    )
-    parser.add_argument(
-        "--processed-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Directory containing the processed <key>.jsonl files. "
-            "Defaults to output_dir from configs/data/extract.yaml."
-        ),
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Directory to write <key>.jsonl.gz into. Defaults to "
-            "<processed-dir>/spans/<schema>."
-        ),
+        help="Process every NER entry declared in tasks.yaml.",
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=None,
         help=(
-            "Path to extract.yaml (default: configs/data/extract.yaml)."
+            "Path to tasks.yaml (default: configs/data/tasks.yaml)."
         ),
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing <key>.jsonl.gz outputs.",
+        help="Re-derive outputs even when every split already exists.",
     )
     parser.add_argument(
         "--max-workers",
         type=int,
         default=0,
         help=(
-            "Process datasets in parallel. 0=auto (cpu_count // 2), "
-            "1=serial, N=N workers. Capped at the number of datasets."
+            "Process entries in parallel. 0=auto (cpu_count // 2), "
+            "1=serial, N=N workers. Capped at the number of entries."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.all and args.entries:
+        parser.error("argument --all: not allowed with positional entries")
+    if not args.all and not args.entries:
+        parser.error("one of the arguments entries --all is required")
+    return args
 
 
-def main():
-    """Runs the conversion from CLI arguments."""
+def main() -> None:
+    """Run the NER conversion from CLI arguments."""
     args = parse_args()
-    project_root = _find_project_root()
-
+    project_root = find_project_root()
     config_path = (
         args.config
-        if args.config
-        else project_root / "configs" / "data" / "extract.yaml"
-    )
-    processed_dir = _resolve_processed_dir(config_path, args.processed_dir)
-    output_dir = (
-        args.output_dir
-        if args.output_dir is not None
-        else processed_dir / "spans" / args.schema
+        if args.config is not None
+        else project_root / "configs" / "data" / "tasks.yaml"
     )
 
-    if args.all:
-        keys = list_datasets_from_config(config_path)
-    else:
-        keys = [args.dataset]
+    tasks_config = load_tasks(config_path)
+    entries = filter_for_converter(tasks_config, CONVERTER_NAME)
+    by_key = {f"{e.task}/{e.dataset}": e for e in entries}
 
-    workers = resolve_workers(args.max_workers, len(keys), cpu_default(len(keys)))
+    keys = _resolve_keys(entries, args.entries, args.all)
+    if not keys:
+        logger.warning(
+            "No entries to process for converter %s.", CONVERTER_NAME,
+        )
+        return
+
+    workers = resolve_workers(
+        args.max_workers, len(keys), cpu_default(len(keys)),
+    )
     configure_script_logging(parallel=workers > 1)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
 
-    def kwargs_for(_key: str) -> dict:
+    roots = tasks_config.roots
+
+    def kwargs_for(key: str) -> Dict[str, Any]:
         return {
-            "processed_dir": processed_dir,
-            "output_dir": output_dir,
-            "schema": args.schema,
+            "entry": by_key[key],
+            "roots": roots,
             "force": args.force,
         }
 
     results, failures = run_parallel(
-        convert_dataset,
+        convert_entry,
         keys,
         max_workers=workers,
-        desc="spans",
+        desc=CONVERTER_NAME,
         pool="process",
         kwargs_for=kwargs_for,
         log_dir=log_dir,
     )
 
-    missing: List[str] = [k for k, v in results.items() if v is None]
-    total_written = sum(v[0] for v in results.values() if v is not None)
-    total_skipped = sum(v[1] for v in results.values() if v is not None)
-
+    skipped = [k for k, v in results.items() if v is None]
+    total = sum(
+        sum(v.values()) for v in results.values() if v is not None
+    )
     logger.info(
-        "Done. Converted %d dataset(s), %d records written, "
-        "%d skipped (no spans). Missing inputs: %s. Failed: %s",
-        len(results) - len(missing),
-        total_written,
-        total_skipped,
-        missing or "none",
+        "Done. Processed %d entr(ies); %d skipped; %d records written. "
+        "Failed: %s",
+        len(results) - len(skipped),
+        len(skipped),
+        total,
         [k for k, _ in failures] or "none",
     )
     if failures:
         sys.exit(2)
-    if not args.all and missing:
-        sys.exit(1)
 
 
 if __name__ == "__main__":

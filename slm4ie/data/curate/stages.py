@@ -1,10 +1,10 @@
 """Stage names, folder mapping, and config-slice helpers for the curate pipeline.
 
-The curation pipeline runs six sequential stages, each producing a
+The curation pipeline runs seven sequential stages, each producing a
 durable on-disk artifact under `<output_dir>/<folder>/`. This module is
 the single source of truth that ties together the user-facing CLI name
 of each stage (`--stage <name>`), the folder it writes to, and the
-top-level `curate.yaml` key(s) whose contents determine its sentinel
+top-level `pretrain.yaml` key(s) whose contents determine its sentinel
 hash. Consumers should import from here rather than hard-coding stage
 names or folder paths.
 """
@@ -12,8 +12,11 @@ names or folder paths.
 from typing import Dict, Optional, Tuple
 
 
-#: Stage names in pipeline execution order.
+#: Stage names in pipeline execution order. `convert` is stage 0: it
+#: turns extracted `<key>.jsonl` files into datatrove-shaped shards that
+#: the remaining six stages consume.
 STAGE_NAMES: Tuple[str, ...] = (
+    "convert",
     "language",
     "quality",
     "repetition",
@@ -30,6 +33,7 @@ ALL_STAGE_NAMES: Tuple[str, ...] = STAGE_NAMES + ("all",)
 
 #: Mapping from stage name to the folder under `<output_dir>/` it writes.
 STAGE_DIRS: Dict[str, str] = {
+    "convert": "00_convert",
     "language": "01_language",
     "quality": "02_quality",
     "repetition": "03_repetition",
@@ -41,6 +45,7 @@ STAGE_DIRS: Dict[str, str] = {
 
 #: Per-stage top-level YAML keys that go into the sentinel config hash.
 _CONFIG_SLICE_KEYS: Dict[str, Tuple[str, ...]] = {
+    "convert": ("convert",),
     "language": ("language",),
     "quality": ("quality",),
     "repetition": ("repetition",),

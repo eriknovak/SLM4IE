@@ -1,0 +1,124 @@
+# Task registry for SLM4IE downstream evaluation and fine-tuning.
+#
+# This file drives the three task converters (to_spans, to_sentiment,
+# to_superglue). Each entry under `entries:` declares a single
+# <task>/<dataset> target under tasks/. The converter for each task
+# family defaults from the `converters:` map and may be overridden per
+# entry with a `converter:` field.
+
+# Roots for resolving source paths and writing output.
+roots:
+  extracted: /vault/data/SLM4IE/extracted
+  raw:       /vault/data/SLM4IE/raw
+  tasks:     /vault/data/SLM4IE/tasks
+
+# Default converter per task family. Override per entry with `converter:`.
+converters:
+  ner: to_spans
+  sentiment: to_sentiment
+  nli: to_superglue
+  qa: to_superglue
+  coref: to_superglue
+  wsd: to_superglue
+  commonsense: to_superglue
+
+# Per <task>/<dataset> entries. The key IS the directory under tasks/.
+entries:
+  ner/ssj500k:
+    role: finetune_and_eval
+    source: {kind: extracted, keys: [ssj500k]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [PER, LOC, ORG, MISC]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  ner/suk:
+    role: held_out
+    source: {kind: extracted, keys: [suk]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [PER, LOC, ORG, MISC, DERIV-PER]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  sentiment/sentinews:
+    role: finetune_and_eval
+    source: {kind: extracted, keys: [sentinews]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [negative, neutral, positive]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  sentiment/twitter_15eu_sl:
+    role: held_out
+    source: {kind: raw, keys: [twitter_sentiment_15eu]}
+    splits: {test: test.jsonl.gz}
+    labels: [negative, neutral, positive]
+    suite: null
+    language: sl
+    license: cc-by-4.0
+
+  nli/cb:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [entailment, neutral, contradiction]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0
+
+  nli/rte:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [entailment, not_entailment]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0
+
+  qa/boolq:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [true, false]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0
+
+  qa/multirc:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [true, false]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0
+
+  coref/wsc:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [true, false]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0
+
+  wsd/wic:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [true, false]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0
+
+  commonsense/copa:
+    role: held_out
+    source: {kind: raw, keys: [superglue_sl]}
+    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    labels: [0, 1]
+    suite: superglue_sl
+    language: sl
+    license: cc-by-4.0

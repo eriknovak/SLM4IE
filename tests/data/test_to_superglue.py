@@ -1,11 +1,13 @@
-"""Tests for scripts/data/to_superglue.py."""
+"""Tests for scripts/data/to_superglue.py (tasks.yaml-driven converter)."""
 
 import gzip
 import json
 import sys
 from pathlib import Path
+from typing import Any, Dict, List
 
 import pytest
+import yaml
 
 sys.path.insert(
     0,
@@ -13,9 +15,16 @@ sys.path.insert(
 )
 import to_superglue  # noqa: E402
 
+from slm4ie.data.tasks import load_tasks  # noqa: E402
 
-def _write_jsonl(path: Path, records) -> None:
-    """Write *records* as JSONL to *path*."""
+
+def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
+    """Write *records* as JSONL to *path*.
+
+    Args:
+        path: Destination path. Parents are created if missing.
+        records: Records to serialize.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         for r in records:
@@ -23,251 +32,359 @@ def _write_jsonl(path: Path, records) -> None:
             fh.write("\n")
 
 
-def _read_jsonl_gz(path: Path):
-    """Yield JSON-decoded records from a gzipped JSONL file."""
+def _read_jsonl_gz(path: Path) -> List[Dict[str, Any]]:
+    """Read a gzipped JSONL file into a list.
+
+    Args:
+        path: Gzipped JSONL path.
+
+    Returns:
+        Decoded records.
+    """
+    out: List[Dict[str, Any]] = []
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line:
-                yield json.loads(line)
+                out.append(json.loads(line))
+    return out
 
 
-def _make_layout(
-    raw_dir: Path,
-    variant_subdir: str,
-    tasks: dict,
+def _write_tasks_yaml(
+    tmp_path: Path,
+    bundle_key: str,
+    task: str,
+    dataset: str,
+    labels: List[Any],
 ) -> Path:
-    """Build a fake SuperGLUE-SL extraction tree.
+    """Build a single-entry tasks.yaml pointing at a raw SuperGLUE bundle.
 
     Args:
-        raw_dir: Top-level raw download directory.
-        variant_subdir: Variant root name (e.g. `SuperGLUE-HumanT`).
-        tasks: Mapping from task name to `{split: [records]}`.
+        tmp_path: pytest tmp_path root.
+        bundle_key: Subdirectory name under ``raw/<bundle_key>/``
+            holding the SuperGLUE distribution.
+        task: Task family (e.g. ``nli``).
+        dataset: Dataset name (e.g. ``cb``).
+        labels: Label allow-list declared on the entry.
 
     Returns:
-        Path: The variant root that was created.
+        Path to the written tasks.yaml.
     """
-    variant_root = raw_dir / variant_subdir
-    for task_name, splits in tasks.items():
-        for split, records in splits.items():
-            _write_jsonl(
-                variant_root / task_name / f"{split}.jsonl",
-                records,
-            )
-    return variant_root
+    extracted = tmp_path / "extracted"
+    raw = tmp_path / "raw"
+    tasks_root = tmp_path / "tasks"
+    extracted.mkdir(parents=True, exist_ok=True)
+    (raw / bundle_key).mkdir(parents=True, exist_ok=True)
+    tasks_root.mkdir(parents=True, exist_ok=True)
+
+    tasks_yaml = {
+        "roots": {
+            "extracted": str(extracted),
+            "raw": str(raw),
+            "tasks": str(tasks_root),
+        },
+        "converters": {
+            "nli": "to_superglue",
+            "qa": "to_superglue",
+            "coref": "to_superglue",
+            "wsd": "to_superglue",
+            "commonsense": "to_superglue",
+        },
+        "entries": {
+            f"{task}/{dataset}": {
+                "role": "held_out",
+                "source": {"kind": "raw", "keys": [bundle_key]},
+                "splits": {
+                    "train": "train.jsonl.gz",
+                    "val": "val.jsonl.gz",
+                    "test": "test.jsonl.gz",
+                },
+                "labels": labels,
+                "suite": "superglue_sl",
+                "language": "sl",
+                "license": "cc-by-4.0",
+            },
+        },
+    }
+    config_path = tmp_path / "tasks.yaml"
+    config_path.write_text(yaml.safe_dump(tasks_yaml))
+    return config_path
+
+
+def _make_subtask_layout(
+    raw_dir: Path,
+    bundle_key: str,
+    subtask_dir: str,
+    splits: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    """Build a fake SuperGLUE-SL subtask tree.
+
+    Args:
+        raw_dir: Root of the raw bundle directory.
+        bundle_key: Subdirectory under ``raw/`` holding the bundle.
+        subtask_dir: Canonical SuperGLUE subtask name (e.g. ``CB``).
+        splits: Mapping ``{split: [records]}``. Each split is written
+            as ``<bundle>/SuperGLUE-HumanT/<Subtask>/<split>.jsonl``.
+    """
+    variant_root = raw_dir / bundle_key / "SuperGLUE-HumanT"
+    for split, records in splits.items():
+        _write_jsonl(
+            variant_root / subtask_dir / f"{split}.jsonl",
+            records,
+        )
 
 
 class TestVariantDiscovery:
     """Tests for the variant-root discovery helper."""
 
-    def test_finds_humant(self, tmp_path: Path):
+    def test_finds_humant(self, tmp_path: Path) -> None:
         """The HumanT variant root is located by directory name."""
-        _make_layout(
-            tmp_path,
-            "SuperGLUE-HumanT",
-            {"BoolQ": {"train": [{"idx": 0, "label": True}]}},
+        bundle = tmp_path / "bundle"
+        _make_subtask_layout(
+            bundle.parent,
+            bundle.name,
+            "BoolQ",
+            {"train": [{"idx": 0, "label": True}]},
         )
-        root = to_superglue._find_variant_root(tmp_path, "humant")
+        root = to_superglue._find_variant_root(bundle, "humant")
         assert root.name == "SuperGLUE-HumanT"
 
-    def test_finds_googlemt(self, tmp_path: Path):
-        """The GoogleMT variant root is located by directory name."""
-        _make_layout(
-            tmp_path,
-            "SuperGLUE-GoogleMT",
-            {"BoolQ": {"train": [{"idx": 0, "label": True}]}},
-        )
-        root = to_superglue._find_variant_root(tmp_path, "googlemt")
-        assert root.name == "SuperGLUE-GoogleMT"
-
-    def test_falls_back_to_raw_dir_when_flat(self, tmp_path: Path):
-        """A flat layout without a variant subdir uses the raw directory."""
-        _write_jsonl(
-            tmp_path / "BoolQ" / "train.jsonl",
-            [{"idx": 0, "label": True}],
-        )
-        root = to_superglue._find_variant_root(tmp_path, "humant")
-        assert root == tmp_path
-
-    def test_missing_raises(self, tmp_path: Path):
+    def test_missing_raises(self, tmp_path: Path) -> None:
         """A missing variant root raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError, match="SuperGLUE"):
             to_superglue._find_variant_root(tmp_path, "humant")
 
 
-class TestPassthrough:
-    """Pass-through tasks should preserve native shape verbatim."""
+class TestConvertEntryNli:
+    """End-to-end tests for the NLI (CB / RTE) task family."""
 
-    def test_cb_passthrough(self, tmp_path: Path):
-        """CB records keep their native premise/hypothesis/label fields."""
-        _make_layout(
-            tmp_path,
-            "SuperGLUE-HumanT",
+    def test_cb_records_match_nli_schema(self, tmp_path: Path) -> None:
+        """Converted CB records satisfy NliExample (`id/premise/hypothesis/label`)."""
+        _make_subtask_layout(
+            tmp_path / "raw",
+            "superglue_sl",
+            "CB",
             {
-                "CB": {
-                    "train": [
-                        {
-                            "idx": 0,
-                            "premise": "Misli, da je doma.",
-                            "hypothesis": "Je doma.",
-                            "label": "entailment",
-                        },
-                    ],
-                },
-            },
-        )
-        out_dir = tmp_path / "out"
-        written = to_superglue.convert_dataset(
-            tmp_path, out_dir, variant="humant",
-            tasks=["CB"], splits=["train"],
-        )
-        assert written == {("CB", "train"): 1}
-        records = list(_read_jsonl_gz(out_dir / "CB" / "train.jsonl.gz"))
-        assert records[0]["premise"] == "Misli, da je doma."
-        assert records[0]["hypothesis"] == "Je doma."
-        assert records[0]["label"] == "entailment"
-
-
-class TestMultircFlatten:
-    """MultiRC should flatten one row per answer by default."""
-
-    def test_default_flattens(self, tmp_path: Path):
-        """MultiRC nested passages are flattened to one row per answer."""
-        _make_layout(
-            tmp_path,
-            "SuperGLUE-HumanT",
-            {
-                "MultiRC": {
-                    "val": [
-                        {
-                            "idx": 0,
-                            "passage": {
-                                "text": "Janez gre v trgovino.",
-                                "questions": [
-                                    {
-                                        "idx": 0,
-                                        "question": "Kam gre Janez?",
-                                        "answers": [
-                                            {"idx": 0, "text": "v trgovino", "label": 1},
-                                            {"idx": 1, "text": "domov", "label": 0},
-                                        ],
-                                    },
-                                ],
-                            },
-                        },
-                    ],
-                },
-            },
-        )
-        out_dir = tmp_path / "out"
-        written = to_superglue.convert_dataset(
-            tmp_path, out_dir, variant="humant",
-            tasks=["MultiRC"], splits=["val"],
-        )
-        assert written == {("MultiRC", "val"): 2}
-        records = list(_read_jsonl_gz(out_dir / "MultiRC" / "val.jsonl.gz"))
-        assert {r["answer"] for r in records} == {"v trgovino", "domov"}
-        assert {r["label"] for r in records} == {0, 1}
-        for r in records:
-            assert r["paragraph"] == "Janez gre v trgovino."
-            assert r["question"] == "Kam gre Janez?"
-
-    def test_no_flatten_passes_through(self, tmp_path: Path):
-        """`flatten_multirc=False` keeps the original nested structure."""
-        nested = {
-            "idx": 0,
-            "passage": {
-                "text": "X.",
-                "questions": [
+                "train": [
                     {
                         "idx": 0,
-                        "question": "Q",
-                        "answers": [{"idx": 0, "text": "A", "label": 1}],
+                        "premise": "Misli, da je doma.",
+                        "hypothesis": "Je doma.",
+                        "label": "entailment",
+                    },
+                    {
+                        "idx": 1,
+                        "premise": "Pravi, da bo prišel.",
+                        "hypothesis": "Ne bo prišel.",
+                        "label": "contradiction",
                     },
                 ],
             },
-        }
-        _make_layout(
-            tmp_path,
-            "SuperGLUE-HumanT",
-            {"MultiRC": {"val": [nested]}},
         )
-        out_dir = tmp_path / "out"
-        to_superglue.convert_dataset(
-            tmp_path, out_dir, variant="humant",
-            tasks=["MultiRC"], splits=["val"],
-            flatten_multirc=False,
-        )
-        records = list(_read_jsonl_gz(out_dir / "MultiRC" / "val.jsonl.gz"))
-        assert records[0] == nested
-
-
-class TestSplitFiltering:
-    """--tasks and --splits should restrict what gets emitted."""
-
-    def test_only_selected_splits_written(self, tmp_path: Path):
-        """`splits=[...]` writes only the requested split files."""
-        _make_layout(
+        config_path = _write_tasks_yaml(
             tmp_path,
-            "SuperGLUE-HumanT",
+            "superglue_sl",
+            "nli",
+            "cb",
+            ["entailment", "neutral", "contradiction"],
+        )
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "nli/cb"
+        )
+
+        counts = to_superglue.convert_entry(
+            "nli/cb", entry, cfg.roots, variant="humant"
+        )
+        assert counts is not None
+        assert counts["train"] == 2
+
+        out_dir = tmp_path / "tasks" / "nli" / "cb"
+        rows = _read_jsonl_gz(out_dir / "train.jsonl.gz")
+        assert len(rows) == 2
+        assert set(rows[0].keys()) == {"id", "premise", "hypothesis", "label"}
+        assert rows[0]["label"] in {"entailment", "contradiction"}
+
+
+class TestConvertEntryBoolq:
+    """End-to-end test for the BoolQ converter."""
+
+    def test_boolq_records_match_schema(self, tmp_path: Path) -> None:
+        """Converted BoolQ records satisfy QaBooleanExample."""
+        _make_subtask_layout(
+            tmp_path / "raw",
+            "superglue_sl",
+            "BoolQ",
             {
-                "RTE": {
-                    "train": [{"idx": 0, "premise": "p", "hypothesis": "h", "label": 0}],
-                    "val": [{"idx": 1, "premise": "p", "hypothesis": "h", "label": 1}],
-                    "test": [{"idx": 2, "premise": "p", "hypothesis": "h"}],
-                },
+                "val": [
+                    {
+                        "idx": 5,
+                        "passage": "Janez gre v trgovino vsak teden.",
+                        "question": "Ali gre Janez v trgovino?",
+                        "label": True,
+                    },
+                ],
             },
         )
-        out_dir = tmp_path / "out"
-        written = to_superglue.convert_dataset(
-            tmp_path, out_dir, variant="humant",
-            tasks=["RTE"], splits=["val"],
-        )
-        assert written == {("RTE", "val"): 1}
-        assert (out_dir / "RTE" / "val.jsonl.gz").exists()
-        assert not (out_dir / "RTE" / "train.jsonl.gz").exists()
-        assert not (out_dir / "RTE" / "test.jsonl.gz").exists()
-
-
-class TestForceOverwrite:
-    """Existing outputs are skipped unless --force is passed."""
-
-    def test_skip_existing(self, tmp_path: Path):
-        """An existing output file is left untouched without `force`."""
-        _make_layout(
+        config_path = _write_tasks_yaml(
             tmp_path,
-            "SuperGLUE-HumanT",
-            {"CB": {"train": [{"idx": 0, "premise": "a", "hypothesis": "b", "label": 0}]}},
+            "superglue_sl",
+            "qa",
+            "boolq",
+            [True, False],
         )
-        out_dir = tmp_path / "out"
-        out_path = out_dir / "CB" / "train.jsonl.gz"
-        out_path.parent.mkdir(parents=True)
-        with gzip.open(out_path, "wt", encoding="utf-8") as fh:
-            fh.write("placeholder\n")
-
-        written = to_superglue.convert_dataset(
-            tmp_path, out_dir, variant="humant",
-            tasks=["CB"], splits=["train"],
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "qa/boolq"
         )
-        assert written == {("CB", "train"): 0}
 
-    def test_force_overwrites(self, tmp_path: Path):
-        """`force=True` replaces an existing output with freshly converted data."""
-        _make_layout(
+        counts = to_superglue.convert_entry(
+            "qa/boolq", entry, cfg.roots, variant="humant"
+        )
+        assert counts is not None
+        assert counts["val"] == 1
+
+        out_dir = tmp_path / "tasks" / "qa" / "boolq"
+        rows = _read_jsonl_gz(out_dir / "val.jsonl.gz")
+        assert set(rows[0].keys()) == {"id", "passage", "question", "label"}
+        assert isinstance(rows[0]["label"], bool)
+
+
+class TestConvertEntryMultirc:
+    """MultiRC flattens nested answers into one row per (passage, q, a)."""
+
+    def test_multirc_flatten(self, tmp_path: Path) -> None:
+        """Each answer becomes its own QaBooleanExample row."""
+        _make_subtask_layout(
+            tmp_path / "raw",
+            "superglue_sl",
+            "MultiRC",
+            {
+                "val": [
+                    {
+                        "idx": 0,
+                        "passage": {
+                            "text": "Janez gre v trgovino.",
+                            "questions": [
+                                {
+                                    "idx": 0,
+                                    "question": "Kam gre Janez?",
+                                    "answers": [
+                                        {"idx": 0, "text": "v trgovino", "label": 1},
+                                        {"idx": 1, "text": "domov", "label": 0},
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+        )
+        config_path = _write_tasks_yaml(
             tmp_path,
-            "SuperGLUE-HumanT",
-            {"CB": {"train": [{"idx": 0, "premise": "a", "hypothesis": "b", "label": 0}]}},
+            "superglue_sl",
+            "qa",
+            "multirc",
+            [True, False],
         )
-        out_dir = tmp_path / "out"
-        out_path = out_dir / "CB" / "train.jsonl.gz"
-        out_path.parent.mkdir(parents=True)
-        with gzip.open(out_path, "wt", encoding="utf-8") as fh:
-            fh.write("placeholder\n")
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "qa/multirc"
+        )
 
-        written = to_superglue.convert_dataset(
-            tmp_path, out_dir, variant="humant",
-            tasks=["CB"], splits=["train"], force=True,
+        counts = to_superglue.convert_entry(
+            "qa/multirc", entry, cfg.roots, variant="humant"
         )
-        assert written == {("CB", "train"): 1}
-        records = list(_read_jsonl_gz(out_path))
-        assert records[0]["premise"] == "a"
+        assert counts is not None
+        assert counts["val"] == 2
+
+        out_dir = tmp_path / "tasks" / "qa" / "multirc"
+        rows = _read_jsonl_gz(out_dir / "val.jsonl.gz")
+        assert {r["label"] for r in rows} == {True, False}
+        for record in rows:
+            assert set(record.keys()) == {"id", "passage", "question", "label"}
+            assert record["passage"] == "Janez gre v trgovino."
+
+
+class TestSkipExistingOutputs:
+    """`convert_entry` short-circuits when every split file exists."""
+
+    def test_skip_returns_none(self, tmp_path: Path) -> None:
+        """Pre-existing outputs cause convert_entry to skip and return None."""
+        _make_subtask_layout(
+            tmp_path / "raw",
+            "superglue_sl",
+            "CB",
+            {
+                "train": [
+                    {
+                        "idx": 0,
+                        "premise": "a",
+                        "hypothesis": "b",
+                        "label": "entailment",
+                    }
+                ],
+            },
+        )
+        config_path = _write_tasks_yaml(
+            tmp_path,
+            "superglue_sl",
+            "nli",
+            "cb",
+            ["entailment", "neutral", "contradiction"],
+        )
+        cfg = load_tasks(config_path)
+        entry = next(
+            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "nli/cb"
+        )
+
+        out_dir = tmp_path / "tasks" / "nli" / "cb"
+        out_dir.mkdir(parents=True)
+        for split_filename in entry.splits.values():
+            (out_dir / split_filename).write_bytes(b"\x1f\x8b")
+
+        result = to_superglue.convert_entry(
+            "nli/cb", entry, cfg.roots, variant="humant"
+        )
+        assert result is None
+
+
+class TestParseArgs:
+    """Tests for `to_superglue.parse_args`."""
+
+    def test_accepts_entry_keys(self) -> None:
+        """Positional entries are gathered into `args.entries`."""
+        args = to_superglue.parse_args(["nli/cb", "qa/boolq"])
+        assert args.entries == ["nli/cb", "qa/boolq"]
+        assert args.all is False
+
+    def test_all_flag(self) -> None:
+        """`--all` parses without positional entries."""
+        args = to_superglue.parse_args(["--all"])
+        assert args.all is True
+        assert args.entries == []
+
+    def test_variant_default_humant(self) -> None:
+        """The default variant is humant."""
+        args = to_superglue.parse_args(["--all"])
+        assert args.variant == "humant"
+
+    def test_variant_googlemt(self) -> None:
+        """`--variant googlemt` is accepted."""
+        args = to_superglue.parse_args(["--all", "--variant", "googlemt"])
+        assert args.variant == "googlemt"
+
+    def test_invalid_variant_rejected(self) -> None:
+        """Unknown variants are rejected by argparse."""
+        with pytest.raises(SystemExit):
+            to_superglue.parse_args(["--all", "--variant", "bogus"])
+
+    def test_force_flag_sets_true(self) -> None:
+        """Passing `--force` flips the flag."""
+        args = to_superglue.parse_args(["--all", "--force"])
+        assert args.force is True
+
+    def test_bare_invocation_errors(self) -> None:
+        """A bare invocation requires entries or `--all`."""
+        with pytest.raises(SystemExit):
+            to_superglue.parse_args([])

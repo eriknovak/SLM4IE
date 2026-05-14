@@ -3,6 +3,7 @@
 import gzip
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -136,6 +137,22 @@ def _extract_one(
         )
         return 0
 
+    # Recovery on entry: discard partial files left by a prior
+    # crashed run. The final outputs are written atomically below
+    # via os.replace, so any `.partial` files imply incomplete work.
+    text_partial = output_base / f"{key}.jsonl.partial"
+    ann_partial = output_base / f"{key}.annotations.jsonl.gz.partial"
+    if text_partial.exists():
+        logger.info(
+            "Removing orphan partial text file for '%s'", key,
+        )
+        text_partial.unlink()
+    if ann_partial.exists():
+        logger.info(
+            "Removing orphan partial annotations file for '%s'", key,
+        )
+        ann_partial.unlink()
+
     # Decompress any archives before extraction
     for archive in sorted(input_dir.iterdir()):
         if archive.name.endswith(
@@ -155,7 +172,7 @@ def _extract_one(
     # backfilled as stub lines so the two streams stay in lockstep.
     pending_stubs: List[Tuple[Optional[str], Optional[str]]] = []
 
-    with open(text_file, "w", encoding="utf-8") as tf:
+    with open(text_partial, "w", encoding="utf-8") as tf:
         ann_fh = None
         try:
             for index, doc in enumerate(tqdm(
@@ -173,7 +190,7 @@ def _extract_one(
                 ann_line = doc.to_annotation_line()
                 if ann_line is not None:
                     if ann_fh is None:
-                        ann_fh = gzip.open(ann_file, "wt", encoding="utf-8")
+                        ann_fh = gzip.open(ann_partial, "wt", encoding="utf-8")
                         has_annotations = True
                         for stub_doc_id, stub_uid in pending_stubs:
                             ann_fh.write(_stub_line(stub_doc_id, stub_uid))
@@ -192,6 +209,14 @@ def _extract_one(
             if ann_fh is not None:
                 ann_fh.close()
 
+    # Promote partials atomically; single-file os.replace is atomic
+    # on POSIX. If the function raised mid-stream above, control
+    # never reaches here and the orphan recovery on the next run
+    # cleans up the `.partial` files.
+    os.replace(text_partial, text_file)
+    if has_annotations:
+        os.replace(ann_partial, ann_file)
+
     logger.info(
         "Extracted %d documents from '%s' -> %s%s",
         count,
@@ -208,6 +233,8 @@ def extract_datasets(
     force: bool = False,
     max_workers: int = 0,
     log_dir: Optional[Path] = None,
+    input_dir_override: Optional[str] = None,
+    output_dir_override: Optional[str] = None,
 ) -> None:
     """Extract and convert datasets to unified JSONL.
 
@@ -217,12 +244,20 @@ def extract_datasets(
         force: When True, re-extract datasets whose output already
             exists. Defaults to False (skip already-extracted datasets).
         max_workers: Number of datasets to extract in parallel.
-            ``0`` (default) picks ``min(cpu_count // 2, n_datasets)``;
-            ``1`` runs serially with unwrapped tracebacks; ``N > 1``
+            `0` (default) picks `min(cpu_count // 2, n_datasets)`;
+            `1` runs serially with unwrapped tracebacks; `N > 1`
             spins up that many worker processes.
         log_dir: When set, per-dataset logs are written to
-            ``<log_dir>/<key>.log``. The directory is created if it
-            does not exist.
+            `<log_dir>/<key>.log`. The directory is created if it
+            does not exist. When extractions fail, the failed dataset
+            keys are also written to `<log_dir>/failures.txt`, one per
+            line, sorted alphabetically.
+        input_dir_override: Override the `input_dir` from the YAML
+            config. When truthy, this path is used as the base
+            directory under which `<key>/` lives.
+        output_dir_override: Override the `output_dir` from the YAML
+            config. When truthy, processed outputs are written here
+            instead of the configured location.
 
     Raises:
         ValueError: If any requested key is unknown.
@@ -238,8 +273,8 @@ def extract_datasets(
     else:
         selected = cfg.datasets
 
-    input_base = Path(cfg.input_dir)
-    output_base = Path(cfg.output_dir)
+    input_base = Path(input_dir_override) if input_dir_override else Path(cfg.input_dir)
+    output_base = Path(output_dir_override) if output_dir_override else Path(cfg.output_dir)
     output_base.mkdir(parents=True, exist_ok=True)
 
     keys = list(selected.keys())
@@ -264,6 +299,13 @@ def extract_datasets(
     )
 
     if failures:
+        if log_dir is not None:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            failed_sorted = sorted(k for k, _ in failures)
+            (log_dir / "failures.txt").write_text(
+                "\n".join(failed_sorted) + "\n",
+                encoding="utf-8",
+            )
         failed_keys = ", ".join(k for k, _ in failures)
         raise RuntimeError(
             f"Extraction failed for {len(failures)} dataset(s): {failed_keys}"

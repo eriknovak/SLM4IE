@@ -1,4 +1,4 @@
-"""Integration tests for the stage runner in scripts/data/curate.py.
+"""Integration tests for the stage runner in scripts/data/to_pretrain.py.
 
 Asserts the sentinel-skip + cascade-invalidate contract by stubbing
 out the actual executor builds. The real builders are tested in
@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Set
 
 import pytest
 
-import scripts.data.curate as curate_cli
+import scripts.data.to_pretrain as curate_cli
 from slm4ie.data.curate import (
     STAGE_DIRS,
     STAGE_NAMES,
@@ -19,7 +19,14 @@ from slm4ie.data.curate import (
 
 
 def _setup_output(tmp_path: Path) -> Path:
-    """Build a minimal <output_dir>/ for a test run."""
+    """Build a minimal <output_dir>/ for a test run.
+
+    Args:
+        tmp_path: pytest's tmp_path fixture.
+
+    Returns:
+        Path to the freshly created output directory.
+    """
     output_dir = tmp_path / "out"
     output_dir.mkdir()
     return output_dir
@@ -42,6 +49,9 @@ def _stub_runner(
         cfg: Dict[str, Any],
         workers: int,
         stopwords: Set[str],
+        dataset_keys: List[str],
+        convert_view: Any = None,
+        log_dir: Any = None,
     ):
         def run() -> None:
             ran.append(stage)
@@ -54,10 +64,19 @@ def _stub_runner(
 
 
 def _common_cfg(input_dir: Path, output_dir: Path) -> Dict[str, Any]:
-    """Return a minimal `curate.yaml`-equivalent dict for stub-driven tests."""
+    """Return a minimal `pretrain.yaml`-equivalent dict for stub-driven tests.
+
+    Args:
+        input_dir: Extraction input directory.
+        output_dir: Curation output directory.
+
+    Returns:
+        Mapping with every top-level key the runner reads.
+    """
     return {
         "input_dir": str(input_dir),
         "output_dir": str(output_dir),
+        "convert": {"text_field": "text"},
         "language": {"targets": ["sl"]},
         "quality": {"min_doc_words": 50},
         "repetition": {},
@@ -73,14 +92,21 @@ def _run_cli(
     args: List[str],
     project_root: Path,
 ) -> None:
-    """Drive `curate_cli.main()` with a stubbed YAML loader and key list."""
+    """Drive `curate_cli.main()` with a stubbed YAML loader and key list.
+
+    Args:
+        monkeypatch: pytest's monkeypatch fixture.
+        cfg: pretrain.yaml-equivalent dict.
+        args: CLI argv tail (excluding the script name).
+        project_root: Project root used for stopword resolution.
+    """
     monkeypatch.setattr(curate_cli, "_load_yaml", lambda _p: cfg)
     monkeypatch.setattr(
         curate_cli, "_load_stopwords", lambda _root, _cfg: (set(), b"")
     )
     monkeypatch.setattr(curate_cli, "_find_project_root", lambda: project_root)
     monkeypatch.setattr(curate_cli, "_list_datasets", lambda _p: [])
-    monkeypatch.setattr(curate_cli.sys, "argv", ["curate.py", *args])
+    monkeypatch.setattr(curate_cli.sys, "argv", ["to_pretrain.py", *args])
     curate_cli.main()
 
 
@@ -117,7 +143,7 @@ def test_unchanged_rerun_skips_every_stage(
 def test_quality_config_change_cascades(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Editing quality config invalidates quality + downstream, not language."""
+    """Editing quality config invalidates quality + downstream, not upstream stages."""
     input_dir = tmp_path / "in"
     input_dir.mkdir()
     output_dir = _setup_output(tmp_path)

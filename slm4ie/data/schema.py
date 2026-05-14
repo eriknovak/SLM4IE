@@ -2,7 +2,7 @@
 
 import dataclasses
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 
 @dataclasses.dataclass
@@ -142,3 +142,141 @@ class Document:
         data["feats"] = [t.feats for t in tokens]
         data["sentences"] = self.annotations.sentences
         return json.dumps(data, ensure_ascii=False)
+
+
+class NerExample(TypedDict):
+    """A single NER example in GLiNER-compatible shape.
+
+    Attributes:
+        id: Document identifier.
+        text: Raw text.
+        spans: List of entity spans; each is
+            ``{"start": int, "end": int, "label": str}``.
+    """
+
+    id: str
+    text: str
+    spans: List[Dict[str, Any]]
+
+
+class SentimentExample(TypedDict):
+    """A single sentiment-classification example.
+
+    Attributes:
+        id: Document identifier.
+        text: Raw text.
+        label: One of the dataset's declared `labels`.
+    """
+
+    id: str
+    text: str
+    label: str
+
+
+class NliExample(TypedDict):
+    """A single natural-language-inference example.
+
+    Attributes:
+        id: Example identifier.
+        premise: Premise text.
+        hypothesis: Hypothesis text.
+        label: Entailment label (e.g. ``"entailment"``,
+            ``"neutral"``, ``"contradiction"``, or
+            ``"not_entailment"`` depending on the task).
+    """
+
+    id: str
+    premise: str
+    hypothesis: str
+    label: str
+
+
+class QaExtractiveExample(TypedDict):
+    """A single extractive question-answering example.
+
+    Attributes:
+        id: Example identifier.
+        context: Passage text.
+        question: Question text.
+        answers: List of answer dicts of the form
+            ``{"text": str, "start": int}``.
+    """
+
+    id: str
+    context: str
+    question: str
+    answers: List[Dict[str, Any]]
+
+
+class QaBooleanExample(TypedDict):
+    """A single boolean QA example (e.g. BoolQ, MultiRC).
+
+    Attributes:
+        id: Example identifier.
+        passage: Passage text.
+        question: Question text.
+        label: Boolean answer.
+    """
+
+    id: str
+    passage: str
+    question: str
+    label: bool
+
+
+class CorefExample(TypedDict):
+    """A single coreference / span-pair example (e.g. WSC).
+
+    Attributes:
+        id: Example identifier.
+        text: Raw text containing both spans.
+        span1: Span dict of the form
+            ``{"start": int, "end": int, "text": str}``.
+        span2: Second span dict with the same shape as ``span1``.
+        label: True if the two spans corefer.
+    """
+
+    id: str
+    text: str
+    span1: Dict[str, Any]
+    span2: Dict[str, Any]
+    label: bool
+
+
+class WsdExample(TypedDict):
+    """A single word-sense disambiguation example (e.g. WiC).
+
+    Attributes:
+        id: Example identifier.
+        sentence1: First sentence containing the target word.
+        sentence2: Second sentence containing the target word.
+        word: Target word whose sense is being compared.
+        label: True if the word has the same sense in both
+            sentences.
+    """
+
+    id: str
+    sentence1: str
+    sentence2: str
+    word: str
+    label: bool
+
+
+class CommonsenseCopaExample(TypedDict):
+    """A single COPA-style commonsense reasoning example.
+
+    Attributes:
+        id: Example identifier.
+        premise: Premise text.
+        choice1: First candidate continuation.
+        choice2: Second candidate continuation.
+        question: Either ``"cause"`` or ``"effect"``.
+        label: Index of the correct choice (``0`` or ``1``).
+    """
+
+    id: str
+    premise: str
+    choice1: str
+    choice2: str
+    question: str
+    label: int

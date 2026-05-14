@@ -1,13 +1,18 @@
 """Build the final SLM4IE pretraining corpus stage-by-stage.
 
-`scripts/data/curate.py` runs the six-stage curation pipeline:
+`scripts/data/to_pretrain.py` runs the seven-stage curation pipeline:
 
+    0. convert        -> <output_dir>/00_convert/
     1. language       -> <output_dir>/01_language/
     2. quality        -> <output_dir>/02_quality/
     3. repetition     -> <output_dir>/03_repetition/
     4. exact_dedup    -> <output_dir>/04_1_dedup/
     5. sentence_dedup -> <output_dir>/04_2_dedup/   (final corpus)
     6. stats          -> <output_dir>/05_statistics/
+
+Stage 0 turns the extraction-output `<key>.jsonl` files into
+datatrove-shaped `<key>/<NNNNN>.jsonl.gz` shards (formerly the job of
+the standalone `to_datatrove.py` script).
 
 Each stage writes a `.complete` sentinel into its output folder. On
 rerun, a stage's sentinel is compared against a fresh hash of its
@@ -16,19 +21,19 @@ invalidated and re-executed.
 
 Examples:
     # Run all stages, skipping any whose config slice hash is unchanged.
-    uv run python scripts/data/curate.py --all
+    uv run python scripts/data/to_pretrain.py --all
 
     # Run only the quality stage. Re-run downstream stats etc. on next --all.
-    uv run python scripts/data/curate.py --all --stage quality
+    uv run python scripts/data/to_pretrain.py --all --stage quality
 
     # Force-rebuild quality + downstream (drops their sentinels).
-    uv run python scripts/data/curate.py --all --force --stage quality
+    uv run python scripts/data/to_pretrain.py --all --force --stage quality
 
     # Subset of datasets — dedup operates within the given subset only.
-    uv run python scripts/data/curate.py kzb solar
+    uv run python scripts/data/to_pretrain.py kzb solar
 
     # Use cpu_count // 2 workers (default is serial: 1 worker).
-    uv run python scripts/data/curate.py --all --max-workers 0
+    uv run python scripts/data/to_pretrain.py --all --max-workers 0
 """
 
 import argparse
@@ -37,6 +42,7 @@ import logging
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, cast
 
@@ -55,6 +61,12 @@ from slm4ie.data.curate import (
     upstream_stage,
     write_sentinel,
 )
+from slm4ie.data.curate.convert import (
+    DEFAULT_ID_FIELD,
+    DEFAULT_METADATA_FIELDS,
+    DEFAULT_TEXT_FIELD,
+    run_convert_stage,
+)
 from slm4ie.data.curate.dedup import make_exact_config
 from slm4ie.data.curate.pipeline import (
     CuratePaths,
@@ -66,7 +78,7 @@ from slm4ie.data.curate.pipeline import (
     build_sentence_dedup_executors,
     build_stats_executors,
 )
-from slm4ie.data.io_utils import find_project_root as _find_project_root
+from slm4ie.data.io_utils import DEFAULT_MAX_SHARD_BYTES, find_project_root as _find_project_root
 from slm4ie.data.parallel import cpu_default, resolve_workers
 
 logger = logging.getLogger(__name__)
@@ -99,15 +111,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--input-dir", type=Path, default=None,
-        help="Override curate.yaml::input_dir.",
+        help="Override pretrain.yaml::input_dir.",
     )
     parser.add_argument(
         "--output-dir", type=Path, default=None,
-        help="Override curate.yaml::output_dir.",
+        help="Override pretrain.yaml::output_dir.",
     )
     parser.add_argument(
-        "--curate-config", type=Path, default=None,
-        help="Path to curate.yaml (default: configs/data/curate.yaml).",
+        "--pretrain-config", type=Path, default=None,
+        help="Path to pretrain.yaml (default: configs/data/pretrain.yaml).",
     )
     parser.add_argument(
         "--extract-config", type=Path, default=None,
@@ -165,11 +177,11 @@ def _list_datasets(extract_config: Path) -> List[str]:
 def _resolve_dirs(
     args: argparse.Namespace, cfg: Dict[str, Any]
 ) -> Tuple[Path, Path]:
-    """Resolve input/output dirs from CLI flags or curate.yaml.
+    """Resolve input/output dirs from CLI flags or pretrain.yaml.
 
     Args:
         args: Parsed CLI namespace.
-        cfg: Parsed curate.yaml.
+        cfg: Parsed pretrain.yaml.
 
     Returns:
         Tuple `(input_dir, output_dir)`.
@@ -183,7 +195,7 @@ def _resolve_dirs(
     if raw_input is None or raw_output is None:
         raise FileNotFoundError(
             "Curation paths not set. Provide --input-dir/--output-dir or set "
-            "curate.yaml::input_dir / output_dir."
+            "pretrain.yaml::input_dir / output_dir."
         )
     return Path(raw_input), Path(raw_output)
 
@@ -193,7 +205,7 @@ def _load_stopwords(project_root: Path, cfg: Dict[str, Any]) -> Tuple[Set[str], 
 
     Args:
         project_root: Project root for resolving relative stopword paths.
-        cfg: Parsed curate.yaml.
+        cfg: Parsed pretrain.yaml.
 
     Returns:
         Tuple of `(stopword set, raw file bytes)`. When `stopwords:` is
@@ -216,32 +228,36 @@ def _load_stopwords(project_root: Path, cfg: Dict[str, Any]) -> Tuple[Set[str], 
     return out, raw
 
 
-def _filter_input_keys(input_dir: Path, keys: List[str]) -> Path:
-    """Materialize a tempdir of symlinks restricted to *keys*.
+def _filter_convert_subset(convert_dir: Path, keys: List[str]) -> Path:
+    """Materialize a tempdir of symlinks restricted to *keys* under `00_convert/`.
 
     Args:
-        input_dir: Folder of `<key>/<NNNNN>.jsonl.gz` shards.
-        keys: Dataset keys to keep.
+        convert_dir: The convert stage's output folder (typically
+            `<output_dir>/00_convert/`).
+        keys: Dataset keys to expose.
 
     Returns:
         Path to a tempdir mirroring the requested keys via symlinks.
+        Downstream stages can be pointed at this folder so their
+        readers walk only the subset's shards.
 
     Raises:
-        FileNotFoundError: If any requested shard folder is missing or empty.
+        FileNotFoundError: If any requested shard folder is missing or
+            empty under *convert_dir*.
     """
     missing: List[str] = []
     for key in keys:
-        src = input_dir / key
+        src = convert_dir / key
         if not src.is_dir() or not any(src.glob("*.jsonl.gz")):
             missing.append(key)
     if missing:
         raise FileNotFoundError(
-            f"No datatrove shard folder(s) under {input_dir} for dataset(s): "
+            f"No converted shard folder(s) under {convert_dir} for dataset(s): "
             + ", ".join(repr(k) for k in missing)
         )
-    holder = Path(tempfile.mkdtemp(prefix="slm4ie-curate-subset-"))
+    holder = Path(tempfile.mkdtemp(prefix="slm4ie-pretrain-subset-"))
     for key in keys:
-        src = input_dir / key
+        src = convert_dir / key
         holder_key = holder / key
         holder_key.mkdir()
         for shard in src.glob("*.jsonl.gz"):
@@ -268,19 +284,53 @@ def _count_records(folder: Path) -> int:
     return total
 
 
-def _stage_input_dir(paths: CuratePaths, stage: str) -> Path:
+def _count_extracted_records(input_dir: Path, keys: List[str]) -> int:
+    """Sum line counts across `<input_dir>/<key>.jsonl` files.
+
+    Args:
+        input_dir: Directory holding extraction output JSONLs.
+        keys: Dataset keys to include in the count.
+
+    Returns:
+        Total line count across all `<key>.jsonl` files; 0 for keys
+        whose file is missing (they will be reported as skipped by the
+        convert stage).
+    """
+    total = 0
+    for key in keys:
+        path = input_dir / f"{key}.jsonl"
+        if not path.exists():
+            continue
+        with path.open(encoding="utf-8") as fh:
+            total += sum(1 for _ in fh)
+    return total
+
+
+def _stage_input_dir(
+    paths: CuratePaths,
+    stage: str,
+    convert_view: Optional[Path] = None,
+) -> Path:
     """Return the folder a stage reads from.
 
     Args:
         paths: Resolved curation paths.
         stage: Stage name.
+        convert_view: Optional symlink view of `00_convert/` used in
+            subset mode. When set, the language stage (and any other
+            stage whose upstream is `convert`) reads through it.
 
     Returns:
-        The previous stage's output folder, or `paths.input_folder`
-        when *stage* is the first stage in the pipeline.
+        The previous stage's output folder, the convert subset view
+        when applicable, or `paths.input_folder` when *stage* is the
+        first stage in the pipeline.
     """
     prev = upstream_stage(stage)
-    return paths.input_folder if prev is None else paths.stage_dir(prev)
+    if prev is None:
+        return paths.input_folder
+    if prev == "convert" and convert_view is not None:
+        return convert_view
+    return paths.stage_dir(prev)
 
 
 def _purge_dedup_state(paths: CuratePaths, which: str) -> None:
@@ -302,15 +352,24 @@ def _stage_runner(
     cfg: Dict[str, Any],
     workers: int,
     stopwords: Set[str],
+    dataset_keys: List[str],
+    convert_view: Optional[Path] = None,
+    log_dir: Optional[Path] = None,
 ) -> Callable[[], None]:
     """Return a zero-arg callable that runs *stage*'s executor chain.
 
     Args:
         stage: Stage name.
         paths: Resolved curation paths.
-        cfg: Parsed curate.yaml.
+        cfg: Parsed pretrain.yaml.
         workers: Resolved worker count.
         stopwords: Loaded stopword set (used by quality and stats).
+        dataset_keys: Dataset keys to process; consumed by the convert
+            stage to know which `<key>.jsonl` files to read.
+        convert_view: Optional symlink view of `00_convert/` for subset
+            runs (used by the language stage).
+        log_dir: Optional directory for per-task log files (currently
+            only consumed by the convert stage).
 
     Returns:
         A callable that runs the stage when invoked.
@@ -318,8 +377,42 @@ def _stage_runner(
     Raises:
         ValueError: If *stage* is not a known stage name.
     """
+    if stage == "convert":
+        ccfg = cfg.get("convert") or {}
+        text_field = str(ccfg.get("text_field", DEFAULT_TEXT_FIELD))
+        id_field = str(ccfg.get("id_field", DEFAULT_ID_FIELD))
+        metadata_fields_raw = ccfg.get("metadata_fields")
+        metadata_fields = (
+            [str(f) for f in metadata_fields_raw]
+            if metadata_fields_raw is not None
+            else list(DEFAULT_METADATA_FIELDS)
+        )
+        include_annotations = bool(ccfg.get("include_annotations", False))
+        max_shard_bytes = int(ccfg.get("max_shard_bytes", DEFAULT_MAX_SHARD_BYTES))
+        out = paths.stage_dir("convert")
+
+        def run() -> None:
+            run_convert_stage(
+                input_dir=paths.input_folder,
+                output_dir=out,
+                dataset_keys=dataset_keys,
+                text_field=text_field,
+                id_field=id_field,
+                metadata_fields=metadata_fields,
+                include_annotations=include_annotations,
+                max_shard_bytes=max_shard_bytes,
+                workers=workers,
+                log_dir=log_dir,
+            )
+
+        return run
+
     if stage == "language":
         lang_cfg = cfg.get("language") or {}
+        # Read from the convert subset view when running on a dataset
+        # subset, so downstream readers don't pick up shards from
+        # previously-converted but currently-excluded keys.
+        override = convert_view
 
         def run() -> None:
             execs = build_language_executors(
@@ -333,6 +426,7 @@ def _stage_runner(
                 ),
                 lang_low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
                 lang_max_chars=lang_cfg.get("max_chars"),
+                input_override=override,
             )
             execs[-1].run()
 
@@ -375,12 +469,12 @@ def _stage_runner(
         raw_precision = int(edcfg.get("precision", 64))
         if raw_precision not in (32, 64):
             raise ValueError(
-                f"curate.yaml::exact_dedup.precision must be 32 or 64, got {raw_precision}"
+                f"pretrain.yaml::exact_dedup.precision must be 32 or 64, got {raw_precision}"
             )
         raw_hash_fc = str(edcfg.get("hash_fc", "xxhash"))
         if raw_hash_fc not in ("sha1", "xxhash"):
             raise ValueError(
-                f"curate.yaml::exact_dedup.hash_fc must be 'sha1' or 'xxhash', got {raw_hash_fc!r}"
+                f"pretrain.yaml::exact_dedup.hash_fc must be 'sha1' or 'xxhash', got {raw_hash_fc!r}"
             )
         # Both values are now narrowed by the runtime checks above; cast to
         # keep static type-checkers happy without losing the Literal contract.
@@ -452,7 +546,7 @@ def _stage_slice(stage: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         stage: Stage name.
-        cfg: Parsed curate.yaml.
+        cfg: Parsed pretrain.yaml.
 
     Returns:
         The mapping under the stage's top-level YAML key, or `{}` if
@@ -501,7 +595,7 @@ def _stage_extra(stage: str, stopwords_bytes: bytes, dataset_keys_bytes: bytes) 
 
 
 def main() -> None:
-    """Entry point for the curate CLI."""
+    """Entry point for the to_pretrain CLI."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -510,28 +604,24 @@ def main() -> None:
     workers = resolve_workers(args.workers, len(STAGE_NAMES), cpu_default(len(STAGE_NAMES)))
 
     project_root = _find_project_root()
-    curate_path = args.curate_config or (project_root / "configs" / "data" / "curate.yaml")
+    pretrain_path = args.pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
     extract_path = args.extract_config or (project_root / "configs" / "data" / "extract.yaml")
-    cfg = _load_yaml(curate_path)
+    cfg = _load_yaml(pretrain_path)
     input_dir, output_dir = _resolve_dirs(args, cfg)
     stopwords, stopwords_raw = _load_stopwords(project_root, cfg)
 
-    subset_holder: Optional[Path] = None
     if args.all:
         dataset_keys = _list_datasets(extract_path)
         logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
-        input_folder = input_dir
     else:
         dataset_keys = list(args.datasets)
         logger.info(
             "Running on %d dataset(s): %s (workers=%d)",
             len(dataset_keys), ", ".join(dataset_keys), workers,
         )
-        subset_holder = _filter_input_keys(input_dir, dataset_keys)
-        input_folder = subset_holder
     dataset_keys_bytes = _dataset_keys_payload(dataset_keys)
 
-    paths = CuratePaths(input_folder=input_folder, output_dir=output_dir)
+    paths = CuratePaths(input_folder=input_dir, output_dir=output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.force and args.stage == "all":
@@ -560,6 +650,10 @@ def main() -> None:
 
     requested_stages = STAGE_NAMES if args.stage == "all" else (args.stage,)
 
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    convert_log_dir = project_root / "logs" / Path(__file__).stem / stamp / "convert"
+
+    subset_holder: Optional[Path] = None
     try:
         cascaded = False
         last_records_out: Optional[int] = None
@@ -574,6 +668,11 @@ def main() -> None:
                 # Skipped — next running stage must re-derive its input count
                 # from disk since we did not just produce this stage's output.
                 last_records_out = None
+                # The convert stage is unique: when skipped under a subset
+                # run we still need a symlink view of its on-disk output so
+                # downstream readers don't see other keys.
+                if stage == "convert" and not args.all and subset_holder is None:
+                    subset_holder = _filter_convert_subset(stage_folder, dataset_keys)
                 continue
 
             if not cascaded:
@@ -590,11 +689,30 @@ def main() -> None:
 
             if last_records_out is not None:
                 records_in_before = last_records_out
+            elif stage == "convert":
+                records_in_before = _count_extracted_records(paths.input_folder, dataset_keys)
             else:
-                records_in_before = _count_records(_stage_input_dir(paths, stage))
+                records_in_before = _count_records(
+                    _stage_input_dir(paths, stage, convert_view=subset_holder)
+                )
             logger.info("[%s] starting (input records ~%d)", stage, records_in_before)
-            runner = _stage_runner(stage, paths, cfg, workers, stopwords)
+            runner = _stage_runner(
+                stage,
+                paths,
+                cfg,
+                workers,
+                stopwords,
+                dataset_keys=dataset_keys,
+                convert_view=subset_holder,
+                log_dir=convert_log_dir if stage == "convert" else None,
+            )
             runner()
+            # After the convert stage runs in subset mode, materialize a
+            # symlink view restricted to the requested keys; downstream
+            # stages will then read through it rather than seeing every
+            # dataset previously written under 00_convert/.
+            if stage == "convert" and not args.all and subset_holder is None:
+                subset_holder = _filter_convert_subset(stage_folder, dataset_keys)
             records_out = 0 if stage == "stats" else _count_records(stage_folder)
             last_records_out = records_out
             write_sentinel(

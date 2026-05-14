@@ -5,46 +5,39 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List, Optional
 
 from slm4ie.data.download import download_datasets
+from slm4ie.data.io_utils import find_project_root
 from slm4ie.data.parallel import configure_script_logging
 
 
-def _find_project_root() -> Path:
-    """Find the project root by locating pyproject.toml.
-
-    Returns:
-        Path: The project root directory.
-
-    Raises:
-        FileNotFoundError: If pyproject.toml cannot be found.
-    """
-    current = Path(__file__).resolve().parent
-    for parent in [current, *current.parents]:
-        if (parent / "pyproject.toml").exists():
-            return parent
-    raise FileNotFoundError(
-        "Could not find project root (no pyproject.toml)"
-    )
-
-
-def parse_args(argv=None) -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
+    Selection is explicit: either pass one or more positional dataset
+    keys, or pass `--all`. Exactly one of the two must be provided.
+
     Args:
-        argv: Argument list (defaults to sys.argv).
+        argv: Argument list (defaults to `sys.argv`).
 
     Returns:
-        argparse.Namespace: Parsed arguments.
+        Parsed namespace.
     """
     parser = argparse.ArgumentParser(
         description="Download datasets for SLM4IE project."
     )
-    parser.add_argument(
-        "--datasets",
-        nargs="+",
-        default=None,
-        help="Dataset keys to download (default: all enabled).",
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument(
+        "datasets",
+        nargs="*",
+        default=[],
+        help="Dataset keys to download. Use --all for the full catalog.",
+    )
+    target.add_argument(
+        "--all",
+        action="store_true",
+        help="Download every dataset declared in the config.",
     )
     parser.add_argument(
         "--config",
@@ -103,13 +96,21 @@ def parse_args(argv=None) -> argparse.Namespace:
             "1=serial, N=N threads. Capped at the number of datasets."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # argparse's `required=True` on a mutex group accepts a positional
+    # with `nargs="*"`, but treats an empty positional as "provided" —
+    # so bare invocation can slip through. Validate the xor by hand.
+    if args.all and args.datasets:
+        parser.error("argument --all: not allowed with positional datasets")
+    if not args.all and not args.datasets:
+        parser.error("one of the arguments datasets --all is required")
+    return args
 
 
 def main():
     """Run dataset download pipeline."""
     args = parse_args()
-    project_root = _find_project_root()
+    project_root = find_project_root()
 
     config_path = (
         Path(args.config)
@@ -120,14 +121,18 @@ def main():
         / f"{args.config_name}.yaml"
     )
 
-    configure_script_logging(parallel=args.max_workers > 1)
+    configure_script_logging(
+        parallel=args.max_workers > 1,
+        console_level=logging.WARNING,
+    )
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
+    print(f"Logs: {log_dir}", file=sys.stderr)
 
     try:
         download_datasets(
             config_path=config_path,
-            dataset_keys=args.datasets,
+            dataset_keys=args.datasets if not args.all else None,
             force=args.force,
             output_dir_override=args.output_dir,
             only_benchmarks=args.only_benchmarks,

@@ -12,8 +12,9 @@ from slm4ie.data.curate.stages import (
 
 
 def test_stage_names_are_in_pipeline_order() -> None:
-    """STAGE_NAMES lists the six stages in execution order."""
+    """STAGE_NAMES lists the seven stages in execution order."""
     assert STAGE_NAMES == (
+        "convert",
         "language",
         "quality",
         "repetition",
@@ -31,6 +32,7 @@ def test_all_stage_names_includes_sentinel() -> None:
 def test_stage_dirs_use_numeric_prefix() -> None:
     """Each stage maps to its numbered folder name."""
     assert STAGE_DIRS == {
+        "convert": "00_convert",
         "language": "01_language",
         "quality": "02_quality",
         "repetition": "03_repetition",
@@ -52,6 +54,7 @@ def test_stats_dir_matches_mapping() -> None:
 
 def test_config_slice_keys_per_stage() -> None:
     """Each stage advertises the top-level YAML key(s) that govern it."""
+    assert config_slice_keys("convert") == ("convert",)
     assert config_slice_keys("language") == ("language",)
     assert config_slice_keys("quality") == ("quality",)
     assert config_slice_keys("repetition") == ("repetition",)
@@ -62,9 +65,10 @@ def test_config_slice_keys_per_stage() -> None:
 
 def test_cascade_from_returns_stage_and_successors() -> None:
     """cascade_from yields the stage and every downstream stage in order."""
-    assert cascade_from("language") == STAGE_NAMES
-    assert cascade_from("quality") == STAGE_NAMES[1:]
-    assert cascade_from("exact_dedup") == STAGE_NAMES[3:]
+    assert cascade_from("convert") == STAGE_NAMES
+    assert cascade_from("language") == STAGE_NAMES[1:]
+    assert cascade_from("quality") == STAGE_NAMES[2:]
+    assert cascade_from("exact_dedup") == STAGE_NAMES[4:]
     assert cascade_from("stats") == ("stats",)
 
 
@@ -94,16 +98,17 @@ def test_config_slice_keys_rejects_unknown_stage() -> None:
 
 
 def test_upstream_stage_for_first_stage_is_none() -> None:
-    """The first stage has no upstream stage."""
+    """The first stage (convert) has no upstream stage."""
     from slm4ie.data.curate.stages import upstream_stage
 
-    assert upstream_stage("language") is None
+    assert upstream_stage("convert") is None
 
 
 def test_upstream_stage_returns_predecessor() -> None:
     """upstream_stage returns the preceding stage in execution order."""
     from slm4ie.data.curate.stages import upstream_stage
 
+    assert upstream_stage("language") == "convert"
     assert upstream_stage("quality") == "language"
     assert upstream_stage("repetition") == "quality"
     assert upstream_stage("exact_dedup") == "repetition"

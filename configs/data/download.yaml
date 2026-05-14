@@ -3,7 +3,8 @@ output_dir: /vault/data/SLM4IE/raw
 datasets:
   classla_web_sl:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "CLASSLA-web.sl 2.0 (annotated)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2079/CLASSLA-web.sl.2.0.anno.jsonl.gz?sequence=19&isAllowed=y"
@@ -11,7 +12,8 @@ datasets:
 
   classlawiki_sl:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "CLASSLAWiki-sl"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1427/classlawiki-sl.conllu.gz?sequence=6&isAllowed=y"
@@ -19,7 +21,8 @@ datasets:
 
   macocu_sl:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "MaCoCu-sl 2.0"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-sl-2.0.xml.zip?sequence=1&isAllowed=y"
@@ -28,7 +31,8 @@ datasets:
 
   parlamint_si:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "ParlaMint-SI 5.0"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2004/ParlaMint-SI.tgz?sequence=27&isAllowed=y"
@@ -36,7 +40,8 @@ datasets:
 
   kas:
     enabled: false
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "KAS 2.0 (Academic Writing Corpus)"
     manual: true
     urls:
@@ -48,7 +53,8 @@ datasets:
 
   coleslaw:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "COLESLAW 1.0 (Slovenian Legal Texts)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2095/COLESLAW.zip?sequence=3&isAllowed=y"
@@ -56,7 +62,8 @@ datasets:
 
   povejmo_vemo_med:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "PoVeJMo-VeMo-Med 1.0 (Slovenian Medical Texts)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1983/PoVeJMo-VeMo-Med_1.0.zip?sequence=1&isAllowed=y"
@@ -64,7 +71,8 @@ datasets:
 
   oss:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "OSS 1.0 (Corpus of Scientific Texts)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.1.zip?sequence=1&isAllowed=y"
@@ -77,7 +85,8 @@ datasets:
 
   siparl:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "siParl 4.0 (Slovenian Parliamentary Corpus)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1936/siParl.4.0.TEI.ana.zip?sequence=8&isAllowed=y"
@@ -88,7 +97,8 @@ datasets:
 
   janes_forum:
     enabled: false
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "Janes-Forum 1.0 (Slovenian Forum Posts)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1139/Janes-Forum.TEI.zip?sequence=1&isAllowed=y"
@@ -99,7 +109,8 @@ datasets:
 
   janes_blog:
     enabled: false
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "Janes-Blog 1.0 (Slovenian Blog Posts)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1138/Janes-Blog.TEI.zip?sequence=1&isAllowed=y"
@@ -110,7 +121,8 @@ datasets:
 
   janes_news:
     enabled: false
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "Janes-News 1.0 (Slovenian News Comments)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1140/Janes-News.TEI.zip?sequence=1&isAllowed=y"
@@ -121,7 +133,8 @@ datasets:
 
   kzb:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "KZB 1.0 (Scientific Texts of Contemporary Slovenian)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1872/KZB.conll.zip?sequence=1&isAllowed=y"
@@ -132,7 +145,8 @@ datasets:
 
   solar:
     enabled: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "Solar 3.0 (Student Essays)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1589/Solar.CoNLL-U.zip?sequence=5&isAllowed=y"
@@ -252,7 +266,8 @@ datasets:
   suk:
     enabled: true
     benchmark: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "SUK 1.1 (Slovene Training Corpus)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.TEI.zip?sequence=1&isAllowed=y"
@@ -276,7 +291,8 @@ datasets:
   ssj500k:
     enabled: true
     benchmark: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "ssj500k 2.3 (Slovene Training Corpus)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1434/ssj500k.conllu.zip?sequence=10&isAllowed=y"
@@ -297,7 +313,8 @@ datasets:
   superglue_sl:
     enabled: true
     benchmark: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "Slovene SuperGLUE"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1380/SuperGLUE-HumanT.zip?sequence=1&isAllowed=y"
@@ -319,7 +336,8 @@ datasets:
   sentinews:
     enabled: true
     benchmark: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "SentiNews 1.0 (Slovene News Sentiment)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1110/SentiNews_sentence-level.txt?sequence=2&isAllowed=y"
@@ -338,7 +356,8 @@ datasets:
   sloleks:
     enabled: true
     benchmark: true
-    source: clarin
+    source: http
+    provider: clarin.si
     name: "Sloleks 3.1 (Slovenian Inflectional Lexicon)"
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2080/Sloleks.3.1.zip?sequence=1&isAllowed=y"

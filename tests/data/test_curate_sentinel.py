@@ -89,13 +89,15 @@ def test_cascade_invalidate_removes_sentinels(tmp_path: Path) -> None:
         folder = tmp_path / name
         folder.mkdir()
         (folder / ".complete").write_text("{}")
-    (tmp_path / "01_language").mkdir()
-    (tmp_path / "01_language" / ".complete").write_text("{}")
+    for name in ("00_convert", "01_language"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / ".complete").write_text("{}")
 
     removed = cascade_invalidate(tmp_path, "quality")
     assert "quality" in removed
     assert "stats" in removed
-    # language was before quality — must NOT be invalidated.
+    # convert and language were before quality — must NOT be invalidated.
+    assert (tmp_path / "00_convert" / ".complete").exists()
     assert (tmp_path / "01_language" / ".complete").exists()
     # quality + downstream sentinels gone.
     for name in ("02_quality", "03_repetition", "04_1_dedup", "04_2_dedup", "05_statistics"):
@@ -109,7 +111,7 @@ def test_cascade_invalidate_handles_missing_sentinels_silently(tmp_path: Path) -
 
 
 def test_sentinel_filename_is_complete(tmp_path: Path) -> None:
-    """The sentinel file is named .complete, matching to_datatrove.py convention."""
+    """The sentinel file is named .complete, matching the curate stage convention."""
     folder = tmp_path / "02_quality"
     folder.mkdir()
     write_sentinel(
