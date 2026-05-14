@@ -37,7 +37,6 @@ Examples:
 """
 
 import argparse
-import gzip
 import logging
 import os
 import shutil
@@ -58,6 +57,7 @@ from slm4ie.data.curate import (
     cascade_from,
     cascade_invalidate,
     config_hash,
+    read_sentinel,
     sentinel_is_current,
     upstream_stage,
     write_sentinel,
@@ -78,6 +78,7 @@ from slm4ie.data.curate.pipeline import (
     build_exact_dedup_executors,
     build_sentence_dedup_executors,
     build_stats_executors,
+    pipeline_io_counts,
 )
 from slm4ie.data.io_utils import DEFAULT_MAX_SHARD_BYTES, find_project_root as _find_project_root
 
@@ -265,23 +266,29 @@ def _filter_convert_subset(convert_dir: Path, keys: List[str]) -> Path:
     return holder
 
 
-def _count_records(folder: Path) -> int:
-    """Sum decompressed JSONL line counts across every shard under *folder*.
+def _starting_input_hint(paths: CuratePaths, stage: str) -> str:
+    """Return an ` (input records ~N)` suffix for a stage's start log line.
+
+    The approximate input size is read from the upstream stage's
+    sentinel `records_out` field — already on disk from that stage's
+    own run, so no shard scan is needed.
 
     Args:
-        folder: A stage output folder containing `<dataset>/<rank>.jsonl.gz`.
+        paths: Resolved curation paths.
+        stage: Stage about to run.
 
     Returns:
-        Total record count across all shards. Returns 0 when the folder
-        does not exist.
+        An ` (input records ~N)` suffix when the upstream stage's
+        sentinel is present, or an empty string otherwise (the first
+        stage, or an upstream stage that has not completed).
     """
-    if not folder.is_dir():
-        return 0
-    total = 0
-    for shard in folder.glob("**/*.jsonl.gz"):
-        with gzip.open(shard, "rt", encoding="utf-8") as fh:
-            total += sum(1 for _ in fh)
-    return total
+    upstream = upstream_stage(stage)
+    if upstream is None:
+        return ""
+    sentinel = read_sentinel(paths.stage_dir(upstream))
+    if sentinel is None:
+        return ""
+    return f" (input records ~{sentinel.records_out})"
 
 
 def _human_bytes(num: int) -> str:
@@ -334,33 +341,6 @@ def _extracted_input_summary(input_dir: Path, keys: List[str]) -> Tuple[int, int
     return present, total_bytes
 
 
-def _stage_input_dir(
-    paths: CuratePaths,
-    stage: str,
-    convert_view: Optional[Path] = None,
-) -> Path:
-    """Return the folder a stage reads from.
-
-    Args:
-        paths: Resolved curation paths.
-        stage: Stage name.
-        convert_view: Optional symlink view of `00_convert/` used in
-            subset mode. When set, the language stage (and any other
-            stage whose upstream is `convert`) reads through it.
-
-    Returns:
-        The previous stage's output folder, the convert subset view
-        when applicable, or `paths.input_folder` when *stage* is the
-        first stage in the pipeline.
-    """
-    prev = upstream_stage(stage)
-    if prev is None:
-        return paths.input_folder
-    if prev == "convert" and convert_view is not None:
-        return convert_view
-    return paths.stage_dir(prev)
-
-
 def _purge_dedup_state(paths: CuratePaths, which: str) -> None:
     """Purge the dedup scratch for *which* stage.
 
@@ -383,7 +363,7 @@ def _stage_runner(
     dataset_keys: List[str],
     convert_view: Optional[Path] = None,
     log_dir: Optional[Path] = None,
-) -> Callable[[], None]:
+) -> Callable[[], Tuple[int, int]]:
     """Return a zero-arg callable that runs *stage*'s executor chain.
 
     Args:
@@ -400,7 +380,12 @@ def _stage_runner(
             only consumed by the convert stage).
 
     Returns:
-        A callable that runs the stage when invoked.
+        A callable that runs the stage when invoked and returns its
+        `(records_in, records_out)` document counts. The convert stage
+        sums the per-dataset counts `run_convert_stage` returns; the
+        datatrove stages read theirs from the run's `PipelineStats`
+        via `pipeline_io_counts`. The stats stage reports
+        `(records_in, 0)` since it emits a JSON bundle, not shards.
 
     Raises:
         ValueError: If *stage* is not a known stage name.
@@ -419,8 +404,8 @@ def _stage_runner(
         max_shard_bytes = int(ccfg.get("max_shard_bytes", DEFAULT_MAX_SHARD_BYTES))
         out = paths.stage_dir("convert")
 
-        def run() -> None:
-            run_convert_stage(
+        def run() -> Tuple[int, int]:
+            results = run_convert_stage(
                 input_dir=paths.input_folder,
                 output_dir=out,
                 dataset_keys=dataset_keys,
@@ -432,6 +417,11 @@ def _stage_runner(
                 workers=workers,
                 log_dir=log_dir,
             )
+            # Convert is a 1:1 format conversion; the count it writes
+            # out is also the count it read in. Datasets with no input
+            # map to None (skipped) and contribute nothing.
+            total = sum(n for n in results.values() if n is not None)
+            return total, total
 
         return run
 
@@ -442,7 +432,7 @@ def _stage_runner(
         # previously-converted but currently-excluded keys.
         override = convert_view
 
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             execs = build_language_executors(
                 paths,
                 tasks=workers,
@@ -456,7 +446,7 @@ def _stage_runner(
                 lang_max_chars=lang_cfg.get("max_chars"),
                 input_override=override,
             )
-            execs[-1].run()
+            return pipeline_io_counts(execs[-1].run())
 
         return run
 
@@ -474,21 +464,21 @@ def _stage_runner(
             min_stop_words=int(qcfg.get("min_stop_words", 2)),
         )
 
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             execs = build_quality_executors(
                 paths,
                 tasks=workers,
                 quality_config=quality_config,
                 stopwords=stopwords,
             )
-            execs[-1].run()
+            return pipeline_io_counts(execs[-1].run())
 
         return run
 
     if stage == "repetition":
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             execs = build_repetition_executors(paths, tasks=workers)
-            execs[-1].run()
+            return pipeline_io_counts(execs[-1].run())
 
         return run
 
@@ -514,14 +504,14 @@ def _stage_runner(
             only_dedup_in_index=bool(edcfg.get("only_dedup_in_index", True)),
         )
 
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             try:
                 execs = build_exact_dedup_executors(
                     paths,
                     tasks=workers,
                     exact_config=exact_cfg,
                 )
-                execs[-1].run()
+                return pipeline_io_counts(execs[-1].run())
             finally:
                 _purge_dedup_state(paths, "exact_dedup")
 
@@ -536,14 +526,14 @@ def _stage_runner(
             split_sentences=bool(scfg.get("split_sentences", True)),
         )
 
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             try:
                 execs = build_sentence_dedup_executors(
                     paths,
                     tasks=workers,
                     sentence_config=sent_cfg,
                 )
-                execs[-1].run()
+                return pipeline_io_counts(execs[-1].run())
             finally:
                 _purge_dedup_state(paths, "sentence_dedup")
 
@@ -552,7 +542,7 @@ def _stage_runner(
     if stage == "stats":
         stcfg = cfg.get("stats") or {}
 
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             execs = build_stats_executors(
                 paths,
                 stopwords=stopwords,
@@ -562,7 +552,10 @@ def _stage_runner(
                 compute_keywords=bool(stcfg.get("compute_keywords", True)),
                 ngram_orders=stcfg.get("ngram_orders") or (2, 3),
             )
-            execs[-1].run()
+            # The stats stage emits a JSON bundle, not shards: report the
+            # documents it consumed and a zero output count.
+            records_in, _ = pipeline_io_counts(execs[-1].run())
+            return records_in, 0
 
         return run
 
@@ -691,7 +684,6 @@ def main() -> None:
     subset_holder: Optional[Path] = None
     try:
         cascaded = False
-        last_records_out: Optional[int] = None
         for stage in requested_stages:
             slice_ = _stage_slice(stage, cfg)
             extra = _stage_extra(stage, stopwords_raw, dataset_keys_bytes)
@@ -700,9 +692,6 @@ def main() -> None:
 
             if not cascaded and sentinel_is_current(stage_folder, current_hash):
                 logger.info("[%s] sentinel current; skipping.", stage)
-                # Skipped — next running stage must re-derive its input count
-                # from disk since we did not just produce this stage's output.
-                last_records_out = None
                 # The convert stage is unique: when skipped under a subset
                 # run we still need a symlink view of its on-disk output so
                 # downstream readers don't see other keys.
@@ -723,12 +712,6 @@ def main() -> None:
                 cascaded = True
 
             if stage == "convert":
-                # Convert is a 1:1 format conversion: counting input
-                # records would mean reading every <key>.jsonl in full,
-                # only to reproduce the output shard count taken after
-                # the run. Report dataset count + on-disk input size for
-                # the "starting" line; records_in is backfilled from
-                # records_out once the stage finishes.
                 n_datasets, input_bytes = _extracted_input_summary(
                     paths.input_folder, dataset_keys
                 )
@@ -736,15 +719,8 @@ def main() -> None:
                     "[convert] starting (%d dataset(s), %s)",
                     n_datasets, _human_bytes(input_bytes),
                 )
-                records_in_before = 0
             else:
-                if last_records_out is not None:
-                    records_in_before = last_records_out
-                else:
-                    records_in_before = _count_records(
-                        _stage_input_dir(paths, stage, convert_view=subset_holder)
-                    )
-                logger.info("[%s] starting (input records ~%d)", stage, records_in_before)
+                logger.info("[%s] starting%s", stage, _starting_input_hint(paths, stage))
             runner = _stage_runner(
                 stage,
                 paths,
@@ -755,28 +731,23 @@ def main() -> None:
                 convert_view=subset_holder,
                 log_dir=convert_log_dir if stage == "convert" else None,
             )
-            runner()
+            records_in, records_out = runner()
             # After the convert stage runs in subset mode, materialize a
             # symlink view restricted to the requested keys; downstream
             # stages will then read through it rather than seeing every
             # dataset previously written under 00_convert/.
             if stage == "convert" and not args.all and subset_holder is None:
                 subset_holder = _filter_convert_subset(stage_folder, dataset_keys)
-            records_out = 0 if stage == "stats" else _count_records(stage_folder)
-            last_records_out = records_out
-            if stage == "convert":
-                # 1:1 conversion — the counted output is also the input count.
-                records_in_before = records_out
             write_sentinel(
                 stage_folder,
                 config_slice=slice_,
                 config_hash_value=current_hash,
-                records_in=records_in_before,
+                records_in=records_in,
                 records_out=records_out,
             )
             logger.info(
                 "[%s] done (records_in=%d, records_out=%d)",
-                stage, records_in_before, records_out,
+                stage, records_in, records_out,
             )
     finally:
         if subset_holder is not None:

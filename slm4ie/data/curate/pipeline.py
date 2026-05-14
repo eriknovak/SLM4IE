@@ -20,7 +20,7 @@ factories — they do not check, write, or honor sentinels.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Set
+from typing import List, Optional, Sequence, Set, Tuple
 
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.dedup import (
@@ -36,6 +36,7 @@ from datatrove.pipeline.dedup import (
 from datatrove.pipeline.filters import GopherQualityFilter, GopherRepetitionFilter
 from datatrove.pipeline.readers import JsonlReader
 from datatrove.pipeline.writers import JsonlWriter
+from datatrove.utils.stats import PipelineStats
 from datatrove.utils.typeshelper import Languages
 
 from slm4ie.data.curate.dedup import default_exact_config
@@ -161,6 +162,35 @@ def _reader(folder: Path) -> JsonlReader:
         shuffle_files=False,
         recursive=True,
     )
+
+
+def pipeline_io_counts(stats: PipelineStats) -> Tuple[int, int]:
+    """Extract input/output document counts from a datatrove run's stats.
+
+    `LocalPipelineExecutor.run()` returns a `PipelineStats` whose
+    `stats` list holds one stats block per pipeline step, in order. For
+    the `[reader, ..., writer]` pipelines built in this module the
+    reader records every document it yields under the `documents`
+    metric and the writer records every document it persists under
+    `total`. This reads those two figures so callers can report stage
+    throughput without re-scanning the on-disk shards.
+
+    Args:
+        stats: Merged stats returned by a `LocalPipelineExecutor.run()`
+            call (the executor also writes them to `stats.json`).
+
+    Returns:
+        Tuple `(records_in, records_out)`: documents read by the first
+        pipeline step and documents written by the last. Both are `0`
+        when *stats* carries no per-step blocks. `records_out` is `0`
+        for pipelines whose final step is not a writer (it records no
+        `total` metric); such callers must supply their own value.
+    """
+    if not stats.stats:
+        return 0, 0
+    records_in = int(stats.stats[0]["documents"].total)
+    records_out = int(stats.stats[-1]["total"].total)
+    return records_in, records_out
 
 
 def build_language_executors(

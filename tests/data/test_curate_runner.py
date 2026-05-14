@@ -6,7 +6,7 @@ test_curate_pipeline.py.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
@@ -32,6 +32,10 @@ def _setup_output(tmp_path: Path) -> Path:
     return output_dir
 
 
+#: Fixed (records_in, records_out) the stub runner reports for every stage.
+_STUB_COUNTS: Tuple[int, int] = (100, 50)
+
+
 def _stub_runner(
     monkeypatch: pytest.MonkeyPatch, ran: List[str]
 ) -> None:
@@ -53,10 +57,9 @@ def _stub_runner(
         convert_view: Any = None,
         log_dir: Any = None,
     ):
-        def run() -> None:
+        def run() -> Tuple[int, int]:
             ran.append(stage)
-            # Materialize the stage folder so `_count_records` finds it.
-            paths.stage_dir(stage).mkdir(parents=True, exist_ok=True)
+            return _STUB_COUNTS
 
         return run
 
@@ -234,3 +237,21 @@ def test_sentinel_records_config_slice(
     # config_hash(slice_) alone. Just assert the hash was recorded and is a
     # sha256 hex prefixed string.
     assert sentinel.config_hash.startswith("sha256:")
+
+
+def test_sentinel_records_counts_from_runner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The sentinel stores the record counts the stage runner returned."""
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    output_dir = _setup_output(tmp_path)
+    cfg = _common_cfg(input_dir, output_dir)
+    ran: List[str] = []
+    _stub_runner(monkeypatch, ran)
+    _run_cli(monkeypatch, cfg, ["--all", "--stage", "quality"], tmp_path)
+    sentinel = read_sentinel(output_dir / STAGE_DIRS["quality"])
+    assert sentinel is not None
+    records_in, records_out = _STUB_COUNTS
+    assert sentinel.records_in == records_in
+    assert sentinel.records_out == records_out

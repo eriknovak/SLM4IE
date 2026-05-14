@@ -383,6 +383,42 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     assert (per_dataset_dir / "beta.json").exists()
 
 
+@pytest.mark.slow
+def test_pipeline_io_counts_reports_reader_and_writer_totals(tmp_path: Path) -> None:
+    """`pipeline_io_counts` reads records_in from the reader, records_out from the writer.
+
+    Runs the quality stage over three docs — two long enough to clear
+    `min_doc_words` and one too short — so the reader sees 3 documents
+    and the writer sees 2, and asserts the helper reports `(3, 2)`.
+    """
+    from slm4ie.data.curate.pipeline import pipeline_io_counts
+
+    paths = CuratePaths(
+        input_folder=tmp_path / "extracted", output_dir=tmp_path / "curated"
+    )
+    _write_shard(
+        paths.stage_dir("language") / "alpha" / "00000.jsonl.gz",
+        dataset="alpha",
+        domain="scientific",
+        docs=[
+            {"id": "alpha:1", "text": "beseda " * 40},
+            {"id": "alpha:2", "text": "beseda " * 40},
+            {"id": "alpha:3", "text": "beseda " * 3},
+        ],
+    )
+    quality = QualityConfig(
+        min_doc_words=20,
+        min_stop_words=0,
+        max_non_alpha_words_ratio=0.6,
+        max_avg_word_length=15,
+    )
+    stats = build_quality_executors(
+        paths, tasks=1, quality_config=quality, stopwords=set()
+    )[-1].run()
+
+    assert pipeline_io_counts(stats) == (3, 2)
+
+
 # --- CLI: multi-key dataset selection ----------------------------------------
 # `scripts/data/to_pretrain.py` accepts either one or more positional dataset
 # keys, or `--all`. The CLI lives outside `slm4ie/` but is importable as
