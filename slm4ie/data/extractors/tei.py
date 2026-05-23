@@ -60,7 +60,7 @@ Example:
         metadata:    `who` / `ana` from the `<u>` element (utterance
                      path) layered on top of any per-file fields
                      from a `metadata:` config block (see
-                     `MetadataLookup`); empty when neither applies.
+                     `MetadataSidecar`); empty when neither applies.
         annotations:
             tokens:    flat concatenation across every contained `<s>`.
             sentences: one inclusive `[start, end]` per sentence,
@@ -77,7 +77,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from xml.etree import ElementTree
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
-from slm4ie.data.metadata_lookup import MetadataLookup
+from slm4ie.data.metadata_sidecar import MetadataSidecar
 from slm4ie.data.schema import Annotations, Document, Token
 
 _TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -291,7 +291,7 @@ def _build_document(
         domain (str): Domain label.
         metadata (Optional[Dict[str, Any]]): Optional metadata to
             attach to the Document. For utterance-level docs this
-            typically merges per-file `MetadataLookup` fields with
+            typically merges per-file `MetadataSidecar` fields with
             the utterance's `who` / `ana` attributes.
 
     Returns:
@@ -366,7 +366,7 @@ def _parse_annotated_with_utterances(
         source (str): Dataset key.
         domain (str): Domain label.
         extra_metadata (Optional[Dict[str, Any]]): Per-file fields
-            from `MetadataLookup`. Utterance attributes (`who`,
+            from `MetadataSidecar`. Utterance attributes (`who`,
             `ana`) take precedence on key collision since they are
             more specific.
 
@@ -408,7 +408,7 @@ def _parse_annotated_per_file(
         domain (str): Domain label.
         doc_id (str): Identifier for the single produced Document.
         extra_metadata (Optional[Dict[str, Any]]): Per-file fields
-            from `MetadataLookup`, copied onto the produced Document.
+            from `MetadataSidecar`, copied onto the produced Document.
 
     Yields:
         Document: One document per file, or nothing if the file had
@@ -496,14 +496,14 @@ class TeiExtractor(BaseExtractor):
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
                 When given, every Document is enriched with the row
-                matched on the source filename. See `MetadataLookup`
+                matched on the source filename. See `MetadataSidecar`
                 for the expected schema.
 
         Yields:
             Document: Extracted documents in unified schema format.
         """
-        lookup: Optional[MetadataLookup] = (
-            MetadataLookup.from_config(input_dir, metadata)
+        sidecar: Optional[MetadataSidecar] = (
+            MetadataSidecar.from_config(input_dir, metadata)
             if metadata
             else None
         )
@@ -517,7 +517,7 @@ class TeiExtractor(BaseExtractor):
                 )
                 continue
 
-            extra = lookup.get_for_path(filepath) if lookup else {}
+            extra = sidecar.get_for_path(filepath) if sidecar else {}
             root = tree.getroot()
             is_annotated = next(root.iter(_W_TAG), None) is not None
 

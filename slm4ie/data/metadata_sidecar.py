@@ -25,8 +25,8 @@ Example:
     Lookup:
 
         cfg = ds_cfg["metadata"]
-        lookup = MetadataLookup.from_config(input_dir, cfg)
-        row = lookup.get_for_path(Path("oss-10000.conllu"))
+        sidecar = MetadataSidecar.from_config(input_dir, cfg)
+        row = sidecar.get_for_path(Path("oss-10000.conllu"))
         # row == {"cerif": ["P000", "T270"], "udc": "502(043)", "doctype": "Diplomsko delo"}
 """
 
@@ -49,7 +49,7 @@ _NA_VALUES = frozenset({"", "-"})
 _KEY_FROM_VALID = frozenset({"filename_stem"})
 
 
-class MetadataLookup:
+class MetadataSidecar:
     """Per-document metadata loaded from an external TSV, indexed by key.
 
     The class name is intentionally distinct from ``Document.metadata``
@@ -133,8 +133,8 @@ class MetadataLookup:
         cls,
         input_dir: Path,
         cfg: Dict[str, Any],
-    ) -> "MetadataLookup":
-        """Build a lookup from a YAML ``metadata:`` block.
+    ) -> "MetadataSidecar":
+        """Build a sidecar from a YAML ``metadata:`` block.
 
         Args:
             input_dir: Per-dataset input directory (the TSV ``path``
@@ -144,7 +144,7 @@ class MetadataLookup:
                 ``key_pattern``.
 
         Returns:
-            MetadataLookup: A loaded, ready-to-query instance.
+            MetadataSidecar: A loaded, ready-to-query instance.
 
         Raises:
             KeyError: If required keys are missing from ``cfg``.

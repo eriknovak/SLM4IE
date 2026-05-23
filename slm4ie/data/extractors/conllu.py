@@ -54,7 +54,7 @@ Example:
                      when hierarchical; otherwise the file's stem.
         metadata:    empty by default; populated per-file when the
                      `metadata:` config block is supplied (see
-                     `MetadataLookup`).
+                     `MetadataSidecar`).
         annotations:
             tokens:    flat concatenation of every sentence's tokens.
             sentences: one inclusive `[start, end]` index pair per
@@ -65,7 +65,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
-from slm4ie.data.metadata_lookup import MetadataLookup
+from slm4ie.data.metadata_sidecar import MetadataSidecar
 from slm4ie.data.schema import Annotations, Document, Token
 
 
@@ -231,7 +231,7 @@ def _build_document(
         domain (str): Domain label.
         extra_metadata (Optional[Dict[str, Any]]): Per-document
             fields copied verbatim into `Document.metadata` (e.g.
-            from `MetadataLookup`). Empty when no sidecar TSV is
+            from `MetadataSidecar`). Empty when no sidecar TSV is
             configured.
 
     Returns:
@@ -289,7 +289,7 @@ class ConlluExtractor(BaseExtractor):
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
                 When given, every Document is enriched with the row
-                matched on the source filename. See `MetadataLookup`
+                matched on the source filename. See `MetadataSidecar`
                 for the expected schema.
 
         Yields:
@@ -297,8 +297,8 @@ class ConlluExtractor(BaseExtractor):
                 markers are present; otherwise one per leading
                 `# sent_id` prefix; otherwise one per file.
         """
-        lookup: Optional[MetadataLookup] = (
-            MetadataLookup.from_config(input_dir, metadata)
+        sidecar: Optional[MetadataSidecar] = (
+            MetadataSidecar.from_config(input_dir, metadata)
             if metadata
             else None
         )
@@ -310,7 +310,7 @@ class ConlluExtractor(BaseExtractor):
         files.sort()
 
         for filepath in files:
-            extra = lookup.get_for_path(filepath) if lookup else {}
+            extra = sidecar.get_for_path(filepath) if sidecar else {}
             yield from self._parse_file(filepath, source, domain, extra)
 
     def _parse_file(
