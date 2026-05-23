@@ -12,8 +12,7 @@ sentinel-tracked artifacts under `<output_dir>/`:
 * `exact_dedup`, `sentence_dedup`: corpus-wide whole-document and
   N-sentence dedup (datatrove's six-block ladder).
 * `stats`: corpus-wide totals plus per-domain and per-dataset
-  breakdowns, top-K word and n-gram tables, and classla-lemmatized
-  TF-IDF keywords.
+  breakdowns and a global top-K word-frequency table.
 
 The package eagerly imports `importlib.metadata` and `importlib.util`
 at module load so that `datatrove`'s lazy dependency probing

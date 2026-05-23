@@ -178,24 +178,18 @@ sentence_dedup:
   min_num_sentences: 2
   split_sentences: true
 
-# 05_statistics — Stage 6: corpus word/n-gram tables and (optional)
-#   classla TF-IDF keywords. Single-process by design (CorpusStats keeps
-#   every counter on the instance). Does not filter — read-only pass.
+# 05_statistics — Stage 6: corpus totals, per-domain / per-dataset
+#   distributions, and a global top-K word-frequency table.
+#   Map-reduce: each map worker accumulates counters and writes a
+#   partial pickle, then a single reduce worker sums partials and
+#   emits `aggregate.json` + per-dataset breakdowns. Does not filter
+#   — read-only pass.
 #   Consumed by: slm4ie/data/curate/stats.py (CorpusStats), wired by
 #                pipeline.build_stats_executors. Also reads the shared
-#                `stopwords` file above.
+#                `stopwords` configuration above.
 #   Reads:  <output_dir>/04_2_dedup/
 #   Writes: <output_dir>/05_statistics/ (aggregate.json + per_dataset/)
 #   Keys:
-#     top_k_words       Size of the word-frequency table.
-#     top_k_ngrams      Size of the per-order n-gram table.
-#     keyword_top_k     TF-IDF keywords kept per bucket.
-#     ngram_orders      N-gram orders to compute (e.g. [2, 3]).
-#     compute_keywords  Set false to skip the slow classla-lemmatized
-#                       TF-IDF keyword pass.
+#     top_k_words   Size of the word-frequency table.
 stats:
   top_k_words: 5000
-  top_k_ngrams: 5000
-  keyword_top_k: 200
-  ngram_orders: [2, 3]
-  compute_keywords: true

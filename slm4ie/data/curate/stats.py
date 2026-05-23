@@ -4,25 +4,35 @@ datatrove's bundled stats blocks (`DocStats` / `WordStats` /
 `SentenceStats`) are scoped to fixed groupings — `summary`,
 `histogram`, `fqdn`, `suffix` — that are useful for web crawls
 but cannot be coerced to bucket by `domain` or `dataset`. We
-therefore implement a single `CorpusStats` `PipelineStep` that
-maintains every counter we care about in memory, runs through the full
-deduplicated stream once, and emits a JSON bundle.
+therefore implement a `CorpusStats` `PipelineStep` that maintains
+the corpus counters in memory, plus a `CorpusStatsReduce` step that
+merges per-rank partials into a single JSON bundle.
 
-The block uses datatrove's bundled Slovenian `SpaCyTokenizer` (via
-`load_word_tokenizer(Languages.slovenian)`) for word and sentence
-boundaries — same tokenizer that `SentenceDedupSignature` saw, so
-counts stay consistent. Keyword/TF-IDF lemmatization additionally
-uses `classla` (Slovenian-specific stanza fork) which is loaded
-lazily on first call and cached on the instance.
+The map step (`CorpusStats`) runs sharded across N workers; each
+rank writes a partial pickle to `partials_dir`. The reduce step
+(`CorpusStatsReduce`) runs single-process, sums all counters, and
+derives the top-K word-frequency table on the merged totals. For
+single-process use (e.g. direct unit tests) `CorpusStats` also
+accepts an `output_path` and writes the aggregate JSON itself when
+`partials_dir` is not given.
+
+The bundle reports corpus totals, per-domain and per-dataset
+distributions, and a global top-K word-frequency table. Words are
+tokenized with datatrove's bundled Slovenian `SpaCyTokenizer` (via
+`load_word_tokenizer(Languages.slovenian)`) — the same tokenizer
+that `SentenceDedupSignature` saw, so counts stay consistent. The
+only sizeable counter is `word_freq`; it is word-scale (bounded by
+the corpus vocabulary), so a rank's memory stays modest regardless
+of corpus size.
 """
 
 import json
 import logging
-import math
+import pickle
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from datatrove.data import DocumentsPipeline
 from datatrove.pipeline.base import PipelineStep
@@ -31,8 +41,8 @@ from datatrove.utils.word_tokenizers import load_word_tokenizer
 
 logger = logging.getLogger(__name__)
 
-#: Words shorter than this are dropped from word-frequency, n-gram, and
-#: keyword tables. Keeps tables free of single-letter punctuation noise.
+#: Words shorter than this are dropped from the word-frequency table.
+#: Keeps the table free of single-letter punctuation noise.
 _MIN_WORD_LEN = 2
 
 #: Pattern that identifies "real" word tokens (letters / digits, must
@@ -42,7 +52,7 @@ _WORD_RE = re.compile(r"^(?=.*[^\W\d_])[\w'’-]+$", flags=re.UNICODE)
 
 
 def _is_word(token: str) -> bool:
-    """Return True if *token* should count toward word/n-gram stats.
+    """Return True if *token* should count toward word-frequency stats.
 
     Args:
         token: A token produced by datatrove's word tokenizer.
@@ -54,29 +64,126 @@ def _is_word(token: str) -> bool:
     return len(token) >= _MIN_WORD_LEN and bool(_WORD_RE.match(token))
 
 
-class CorpusStats(PipelineStep):
-    """Single-pass corpus statistics aggregator.
+def _build_bundle(
+    *,
+    top_k_words: int,
+    total_docs: int,
+    total_words: int,
+    per_domain_docs: Counter,
+    per_domain_words: Counter,
+    per_dataset_docs: Counter,
+    per_dataset_words: Counter,
+    word_freq: Counter,
+) -> Dict[str, Any]:
+    """Assemble the final stats dict in the canonical aggregate.json shape.
 
-    Maintains every counter on the instance, then serializes them to a
-    single JSON file when the input stream is exhausted. Per-shard
-    aggregation is not needed at our corpus size; if the pipeline is
-    sharded across workers, each rank produces its own JSON file and
-    the runner merges them.
+    Args:
+        top_k_words: Word-frequency table size.
+        total_docs: Total documents seen.
+        total_words: Total words seen.
+        per_domain_docs: Document counter keyed by domain.
+        per_domain_words: Word counter keyed by domain.
+        per_dataset_docs: Document counter keyed by dataset.
+        per_dataset_words: Word counter keyed by dataset.
+        word_freq: Global word-frequency counter.
+
+    Returns:
+        Dict matching the on-disk `aggregate.json` schema.
+    """
+    def _distribution(docs: Counter, words: Counter) -> Dict[str, Dict[str, float]]:
+        out: Dict[str, Dict[str, float]] = {}
+        for key in sorted(docs):
+            d = docs[key]
+            w = words[key]
+            out[key] = {
+                "doc_count": int(d),
+                "word_count": int(w),
+                "avg_doc_words": (w / d) if d else 0.0,
+                "share_of_total_words": (w / total_words) if total_words else 0.0,
+            }
+        return out
+
+    return {
+        "total_docs": total_docs,
+        "total_words": total_words,
+        "by_domain": _distribution(per_domain_docs, per_domain_words),
+        "by_dataset": _distribution(per_dataset_docs, per_dataset_words),
+        f"word_freq_top_{top_k_words}": [
+            [tok, int(count)] for tok, count in word_freq.most_common(top_k_words)
+        ],
+    }
+
+
+def _write_bundle(
+    bundle: Dict[str, Any],
+    *,
+    output_path: Path,
+    per_dataset_dir: Optional[Path],
+    dataset_to_domain: Dict[str, str],
+    rank: int = 0,
+    world_size: int = 1,
+) -> None:
+    """Write the JSON bundle to disk.
+
+    Args:
+        bundle: The aggregate stats dict produced by `_build_bundle`.
+        output_path: Destination JSON file. Parent directories are created.
+        per_dataset_dir: Optional folder for per-dataset JSON breakdowns.
+        dataset_to_domain: Mapping from dataset key to domain label.
+        rank: Worker rank; appended to filename when `world_size > 1`.
+        world_size: Total number of workers.
+    """
+    path = output_path
+    if world_size > 1:
+        path = path.with_name(f"{path.stem}.{rank:05d}{path.suffix}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        json.dump(bundle, fh, ensure_ascii=False, indent=2)
+    logger.info("Wrote aggregate stats bundle to %s", path)
+
+    if per_dataset_dir is None or world_size > 1:
+        return
+    per_dataset_dir.mkdir(parents=True, exist_ok=True)
+    by_dataset = bundle.get("by_dataset", {})
+    for dataset_key, dataset_stats in by_dataset.items():
+        slim = {
+            "dataset": dataset_key,
+            "domain": dataset_to_domain.get(dataset_key),
+            "doc_count": dataset_stats["doc_count"],
+            "word_count": dataset_stats["word_count"],
+            "avg_doc_words": dataset_stats["avg_doc_words"],
+            "share_of_total_words": dataset_stats["share_of_total_words"],
+        }
+        with (per_dataset_dir / f"{dataset_key}.json").open("w", encoding="utf-8") as fh:
+            json.dump(slim, fh, ensure_ascii=False, indent=2)
+    logger.info(
+        "Wrote %d per-dataset stats files under %s",
+        len(by_dataset), per_dataset_dir,
+    )
+
+
+class CorpusStats(PipelineStep):
+    """Per-shard corpus statistics accumulator.
+
+    Maintains the corpus counters on the instance, then either:
+
+    - dumps a per-rank pickle of raw counters to `partials_dir` (when
+      set), so a downstream `CorpusStatsReduce` can merge across
+      workers; or
+    - computes the final top-K aggregate and writes it to
+      `output_path` directly (when `partials_dir` is `None`, used for
+      single-process direct invocation, e.g. unit tests).
 
     Attributes:
-        output_path: Destination JSON file. Parent directories are
-            created on `run`.
-        language: ISO-3 code for the word/sentence tokenizer.
-        stopwords: Tokens excluded from word-frequency, n-gram, and
-            keyword tables.
+        partials_dir: When set, run() writes
+            `partials_dir/partial.<rank>.pkl` instead of an aggregate.
+        output_path: Destination JSON file when running standalone.
+        per_dataset_dir: Optional folder for per-dataset breakdowns
+            (standalone mode only).
+        language: ISO-3 code for the word tokenizer.
+        stopwords: Tokens excluded from the word-frequency table.
         top_k_words: Number of entries kept in the word-frequency
             table.
-        top_k_ngrams: Number of entries kept in each of the bigram /
-            trigram tables.
-        keyword_top_k: Number of TF-IDF keywords kept per bucket.
-        compute_keywords: When False, skip the (slow) classla
-            lemmatization stage entirely.
-        ngram_orders: Which n-gram orders to compute (e.g. `[2, 3]`).
     """
 
     type = "📊 - STATS"
@@ -84,86 +191,43 @@ class CorpusStats(PipelineStep):
 
     def __init__(
         self,
-        output_path: Path,
+        output_path: Optional[Path] = None,
         per_dataset_dir: Optional[Path] = None,
         language: str = Languages.slovenian,
         stopwords: Optional[Set[str]] = None,
         top_k_words: int = 5_000,
-        top_k_ngrams: int = 5_000,
-        keyword_top_k: int = 200,
-        compute_keywords: bool = True,
-        ngram_orders: Iterable[int] = (2, 3),
+        partials_dir: Optional[Path] = None,
     ) -> None:
-        """Initialize the aggregator with output settings.
+        """Initialize the aggregator.
 
         Args:
-            output_path: Where to write the corpus-wide aggregate JSON
-                (typically `final/statistics/aggregate.json`).
-            per_dataset_dir: Optional folder for per-dataset breakdowns.
-                When given, one `<dataset>.json` is written under it
-                with the same shape as the aggregate but scoped to
-                docs whose `metadata.dataset` matches that key.
+            output_path: Aggregate JSON destination for standalone use.
+                Ignored when `partials_dir` is given.
+            per_dataset_dir: Optional per-dataset breakdown folder
+                (standalone use only).
             language: ISO-3 code for the tokenizer
                 (`Languages.slovenian` by default).
             stopwords: Optional stopword set; tokens in this set are
-                excluded from word-frequency, n-gram, and keyword
-                tables.
+                excluded from the word-frequency table.
             top_k_words: Word-frequency table size.
-            top_k_ngrams: Per-order n-gram table size.
-            keyword_top_k: TF-IDF keywords kept per bucket.
-            compute_keywords: When False, the classla lemmatization
-                pass is skipped — useful for fast smoke tests.
-            ngram_orders: N-gram orders to compute. Order 1 is always
-                produced as the word-frequency table; pass
-                `(2, 3)` for the standard bigram + trigram bundle.
+            partials_dir: When set, write a per-rank pickle of raw
+                counters here and skip aggregate-bundle computation.
+                A downstream `CorpusStatsReduce` then merges them.
         """
         super().__init__()
-        self.output_path = Path(output_path)
+        self.output_path = Path(output_path) if output_path is not None else None
         self.per_dataset_dir = Path(per_dataset_dir) if per_dataset_dir is not None else None
         self.language = language
         self.stopwords = set(stopwords) if stopwords is not None else set()
         self.top_k_words = top_k_words
-        self.top_k_ngrams = top_k_ngrams
-        self.keyword_top_k = keyword_top_k
-        self.compute_keywords = compute_keywords
-        self.ngram_orders = tuple(ngram_orders)
+        self.partials_dir = Path(partials_dir) if partials_dir is not None else None
         self._tokenizer = None
-        self._classla = None
 
     def _ensure_tokenizer(self):
         """Build the datatrove tokenizer on first use."""
         if self._tokenizer is None:
             self._tokenizer = load_word_tokenizer(self.language)
         return self._tokenizer
-
-    def _ensure_classla(self):
-        """Build a classla pipeline (tokenize+pos+lemma) on first use.
-
-        Returns:
-            A ready-to-call `classla.Pipeline` for Slovenian, or
-            `None` if classla is not available (in which case the
-            keyword stage logs a warning and is skipped).
-        """
-        if self._classla is not None:
-            return self._classla
-        try:
-            import classla
-        except ImportError:
-            logger.warning("classla not installed; skipping lemmatized keyword stats.")
-            self.compute_keywords = False
-            return None
-        try:
-            self._classla = classla.Pipeline(
-                lang="sl",
-                processors="tokenize,pos,lemma",
-                use_gpu=False,
-                logging_level="WARN",
-            )
-        except Exception as exc:  # noqa: BLE001 — classla raises a variety of types
-            logger.warning("classla model load failed (%s); skipping keyword stats.", exc)
-            self.compute_keywords = False
-            return None
-        return self._classla
 
     def _tokenize_words(self, text: str) -> List[str]:
         """Tokenize and filter to lowercase content words.
@@ -187,18 +251,16 @@ class CorpusStats(PipelineStep):
         return out
 
     def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
-        """Walk the document stream and emit a JSON stats bundle.
+        """Walk the document stream and emit a partial pickle or JSON bundle.
 
         Args:
             data: Input document stream (post-dedup).
-            rank: Worker rank; included in the output filename when
-                `world_size > 1`.
+            rank: Worker rank.
             world_size: Number of parallel workers.
 
         Yields:
             Documents are passed through unchanged so further pipeline
-            steps can reuse the stream. The block has no effect on
-            document content.
+            steps can reuse the stream.
         """
         total_docs = 0
         total_words = 0
@@ -207,14 +269,10 @@ class CorpusStats(PipelineStep):
         per_dataset_docs: Counter[str] = Counter()
         per_dataset_words: Counter[str] = Counter()
         word_freq: Counter[str] = Counter()
-        ngram_freqs: Dict[int, Counter[Tuple[str, ...]]] = {n: Counter() for n in self.ngram_orders}
         # Captures the (dataset → domain) edge that aggregate counters
         # lose. Used to label per-dataset bundles. Datasets that mix
         # multiple domains in a single shard collapse to "_mixed".
         dataset_to_domain: Dict[str, str] = {}
-
-        # TF-IDF accumulators: term -> bucket -> count, plus per-bucket totals.
-        keyword_buckets: Dict[Tuple[str, str], Counter[str]] = defaultdict(Counter)
 
         for doc in data:
             with self.track_time():
@@ -237,23 +295,27 @@ class CorpusStats(PipelineStep):
                 per_dataset_words[dataset] += n
                 word_freq.update(words)
 
-                for order, counter in ngram_freqs.items():
-                    if n >= order:
-                        counter.update(tuple(words[i : i + order]) for i in range(n - order + 1))
-
-                if self.compute_keywords:
-                    pipeline = self._ensure_classla()
-                    if pipeline is not None:
-                        try:
-                            lemmas = self._lemmatize(pipeline, doc.text)
-                        except Exception as exc:  # noqa: BLE001 — classla is opaque here
-                            logger.debug("classla failed on doc %s: %s", doc.id, exc)
-                        else:
-                            keyword_buckets[(domain, dataset)].update(lemmas)
-
             yield doc
 
-        bundle = self._build_bundle(
+        if self.partials_dir is not None:
+            self._write_partial(
+                rank=rank,
+                total_docs=total_docs,
+                total_words=total_words,
+                per_domain_docs=per_domain_docs,
+                per_domain_words=per_domain_words,
+                per_dataset_docs=per_dataset_docs,
+                per_dataset_words=per_dataset_words,
+                word_freq=word_freq,
+                dataset_to_domain=dataset_to_domain,
+            )
+            return
+
+        if self.output_path is None:
+            raise ValueError("CorpusStats requires either partials_dir or output_path.")
+
+        bundle = _build_bundle(
+            top_k_words=self.top_k_words,
             total_docs=total_docs,
             total_words=total_words,
             per_domain_docs=per_domain_docs,
@@ -261,47 +323,20 @@ class CorpusStats(PipelineStep):
             per_dataset_docs=per_dataset_docs,
             per_dataset_words=per_dataset_words,
             word_freq=word_freq,
-            ngram_freqs=ngram_freqs,
-            keyword_buckets=keyword_buckets,
         )
-        self._write_bundle(
+        _write_bundle(
             bundle,
+            output_path=self.output_path,
+            per_dataset_dir=self.per_dataset_dir,
+            dataset_to_domain=dataset_to_domain,
             rank=rank,
             world_size=world_size,
-            dataset_to_domain=dataset_to_domain,
         )
 
-    def _lemmatize(self, pipeline, text: str) -> List[str]:
-        """Run *text* through classla and return content-word lemmas.
-
-        Args:
-            pipeline: A `classla.Pipeline` instance.
-            text: Document text.
-
-        Returns:
-            Lowercased lemmas with stopwords and punctuation removed.
-            Closed-class POS tags (PUNCT, SYM, NUM, X) are dropped so
-            TF-IDF focuses on content words.
-        """
-        skip_upos = {"PUNCT", "SYM", "NUM", "X", "PART", "DET", "ADP", "CCONJ", "SCONJ", "PRON", "AUX"}
-        out: List[str] = []
-        doc = pipeline(text)
-        for sentence in doc.sentences:
-            for word in sentence.words:
-                upos = getattr(word, "upos", None)
-                if upos in skip_upos:
-                    continue
-                lemma = (word.lemma or word.text or "").lower().strip()
-                if len(lemma) < _MIN_WORD_LEN:
-                    continue
-                if lemma in self.stopwords:
-                    continue
-                out.append(lemma)
-        return out
-
-    def _build_bundle(
+    def _write_partial(
         self,
         *,
+        rank: int,
         total_docs: int,
         total_words: int,
         per_domain_docs: Counter,
@@ -309,151 +344,187 @@ class CorpusStats(PipelineStep):
         per_dataset_docs: Counter,
         per_dataset_words: Counter,
         word_freq: Counter,
-        ngram_freqs: Dict[int, Counter],
-        keyword_buckets: Dict[Tuple[str, str], Counter],
-    ) -> Dict[str, Any]:
-        """Assemble the final stats dict in the canonical aggregate.json shape."""
-        def _distribution(docs: Counter, words: Counter) -> Dict[str, Dict[str, float]]:
-            out: Dict[str, Dict[str, float]] = {}
-            for key in sorted(docs):
-                d = docs[key]
-                w = words[key]
-                out[key] = {
-                    "doc_count": int(d),
-                    "word_count": int(w),
-                    "avg_doc_words": (w / d) if d else 0.0,
-                    "share_of_total_words": (w / total_words) if total_words else 0.0,
-                }
-            return out
+        dataset_to_domain: Dict[str, str],
+    ) -> None:
+        """Pickle this rank's raw counters into `partials_dir`.
 
-        ngrams_out: Dict[str, List[List[Any]]] = {}
-        for order, counter in ngram_freqs.items():
-            label = {2: "bigram", 3: "trigram"}.get(order, f"{order}gram")
-            ngrams_out[f"{label}_top_{self.top_k_ngrams}"] = [
-                [" ".join(gram), int(count)] for gram, count in counter.most_common(self.top_k_ngrams)
-            ]
+        Args:
+            rank: Worker rank, used to name the partial file.
+            total_docs: Local doc count.
+            total_words: Local word count.
+            per_domain_docs: Local per-domain doc counter.
+            per_domain_words: Local per-domain word counter.
+            per_dataset_docs: Local per-dataset doc counter.
+            per_dataset_words: Local per-dataset word counter.
+            word_freq: Local word-frequency counter.
+            dataset_to_domain: Local dataset→domain mapping.
+        """
+        assert self.partials_dir is not None  # for type-checkers
+        self.partials_dir.mkdir(parents=True, exist_ok=True)
+        path = self.partials_dir / f"partial.{rank:05d}.pkl"
+        payload = {
+            "total_docs": total_docs,
+            "total_words": total_words,
+            "per_domain_docs": per_domain_docs,
+            "per_domain_words": per_domain_words,
+            "per_dataset_docs": per_dataset_docs,
+            "per_dataset_words": per_dataset_words,
+            "word_freq": word_freq,
+            "dataset_to_domain": dataset_to_domain,
+        }
+        with path.open("wb") as fh:
+            pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        logger.info("Wrote stats partial (rank=%d, docs=%d) to %s", rank, total_docs, path)
 
-        keywords: Dict[str, Dict[str, List[List[Any]]]] = {"by_domain": {}, "by_dataset": {}}
-        if keyword_buckets:
-            keywords = self._tfidf(keyword_buckets)
+
+class CorpusStatsReduce(PipelineStep):
+    """Reduce step: merge per-rank partial pickles into the final bundle.
+
+    Reads every `partial.*.pkl` under `partials_dir`, sums all
+    counters, derives the top-K word-frequency table on the merged
+    totals, then writes `output_path` (and, if given, per-dataset
+    breakdowns under `per_dataset_dir`). Partials are loaded one at a
+    time, so peak memory is the merged accumulators plus a single
+    partial. After a successful write the partials are deleted so the
+    stats stage folder only carries the canonical aggregate output.
+
+    Attributes:
+        partials_dir: Folder of `partial.*.pkl` written by `CorpusStats`.
+        output_path: Aggregate JSON destination.
+        per_dataset_dir: Optional folder for per-dataset breakdowns.
+        top_k_words: Word-frequency table size.
+        cleanup: When True, remove partials after a successful reduce.
+    """
+
+    type = "📊 - STATS"
+    name = "📈 Corpus stats reduce"
+
+    def __init__(
+        self,
+        partials_dir: Path,
+        output_path: Path,
+        per_dataset_dir: Optional[Path] = None,
+        top_k_words: int = 5_000,
+        cleanup: bool = True,
+    ) -> None:
+        """Initialize the reduce step.
+
+        Args:
+            partials_dir: Where the map step wrote `partial.*.pkl`.
+            output_path: Aggregate JSON destination.
+            per_dataset_dir: Optional folder for per-dataset breakdowns.
+            top_k_words: Word-frequency table size.
+            cleanup: When True (default), remove `partial.*.pkl` from
+                `partials_dir` after writing the aggregate.
+        """
+        super().__init__()
+        self.partials_dir = Path(partials_dir)
+        self.output_path = Path(output_path)
+        self.per_dataset_dir = Path(per_dataset_dir) if per_dataset_dir is not None else None
+        self.top_k_words = top_k_words
+        self.cleanup = cleanup
+
+    def run(self, data: DocumentsPipeline = None, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
+        """Merge partials and emit the final JSON bundle.
+
+        Args:
+            data: Unused; kept for `PipelineStep` compatibility. Any
+                upstream documents are passed through (typically the
+                reduce step is the only step in its executor and `data`
+                is `None`).
+            rank: Worker rank (must be 0; reduce is single-process).
+            world_size: Number of parallel workers (must be 1).
+
+        Yields:
+            Forwarded upstream documents, if any. The step's effect is
+            on disk — it writes the aggregate JSON.
+        """
+        if data is not None:
+            yield from data
+
+        partials = sorted(self.partials_dir.glob("partial.*.pkl"))
+        if not partials:
+            raise FileNotFoundError(
+                f"No partial.*.pkl files found under {self.partials_dir}; "
+                "did the map step run?"
+            )
+
+        with self.track_time():
+            merged = self._merge_partials(partials)
+
+            bundle = _build_bundle(
+                top_k_words=self.top_k_words,
+                total_docs=merged["total_docs"],
+                total_words=merged["total_words"],
+                per_domain_docs=merged["per_domain_docs"],
+                per_domain_words=merged["per_domain_words"],
+                per_dataset_docs=merged["per_dataset_docs"],
+                per_dataset_words=merged["per_dataset_words"],
+                word_freq=merged["word_freq"],
+            )
+            _write_bundle(
+                bundle,
+                output_path=self.output_path,
+                per_dataset_dir=self.per_dataset_dir,
+                dataset_to_domain=merged["dataset_to_domain"],
+                rank=0,
+                world_size=1,
+            )
+
+        if self.cleanup:
+            for p in partials:
+                p.unlink()
+            # Drop the partials dir if empty; harmless if not.
+            try:
+                self.partials_dir.rmdir()
+            except OSError:
+                pass
+
+    def _merge_partials(self, partials: Sequence[Path]) -> Dict[str, Any]:
+        """Load and sum all partial pickles into one combined dict.
+
+        Partials are loaded and merged one at a time so peak memory is
+        the running accumulators plus a single partial.
+
+        Args:
+            partials: Sorted list of partial pickle paths.
+
+        Returns:
+            Dict with the same keys as a single partial payload but
+            with all counters summed and `dataset_to_domain` resolved.
+        """
+        total_docs = 0
+        total_words = 0
+        per_domain_docs: Counter[str] = Counter()
+        per_domain_words: Counter[str] = Counter()
+        per_dataset_docs: Counter[str] = Counter()
+        per_dataset_words: Counter[str] = Counter()
+        word_freq: Counter[str] = Counter()
+        dataset_to_domain: Dict[str, str] = {}
+
+        for path in partials:
+            with path.open("rb") as fh:
+                payload = pickle.load(fh)
+            total_docs += int(payload.get("total_docs", 0))
+            total_words += int(payload.get("total_words", 0))
+            per_domain_docs.update(payload.get("per_domain_docs", {}))
+            per_domain_words.update(payload.get("per_domain_words", {}))
+            per_dataset_docs.update(payload.get("per_dataset_docs", {}))
+            per_dataset_words.update(payload.get("per_dataset_words", {}))
+            word_freq.update(payload.get("word_freq", {}))
+            for dataset, domain in payload.get("dataset_to_domain", {}).items():
+                if dataset in dataset_to_domain and dataset_to_domain[dataset] != domain:
+                    dataset_to_domain[dataset] = "_mixed"
+                else:
+                    dataset_to_domain.setdefault(dataset, domain)
 
         return {
             "total_docs": total_docs,
             "total_words": total_words,
-            "by_domain": _distribution(per_domain_docs, per_domain_words),
-            "by_dataset": _distribution(per_dataset_docs, per_dataset_words),
-            f"word_freq_top_{self.top_k_words}": [
-                [tok, int(count)] for tok, count in word_freq.most_common(self.top_k_words)
-            ],
-            **ngrams_out,
-            "keywords": keywords,
+            "per_domain_docs": per_domain_docs,
+            "per_domain_words": per_domain_words,
+            "per_dataset_docs": per_dataset_docs,
+            "per_dataset_words": per_dataset_words,
+            "word_freq": word_freq,
+            "dataset_to_domain": dataset_to_domain,
         }
-
-    def _tfidf(self, buckets: Dict[Tuple[str, str], Counter]) -> Dict[str, Dict[str, List[List[Any]]]]:
-        """Compute top-K TF-IDF keywords per domain and per dataset.
-
-        We fold the (domain, dataset) buckets into two separate views:
-        one grouping by domain (summing across datasets) and one
-        grouping by dataset. TF-IDF then treats each view as its own
-        "corpus" of buckets-as-documents.
-
-        Args:
-            buckets: Lemma counters keyed by `(domain, dataset)`.
-
-        Returns:
-            Mapping `{"by_domain": {...}, "by_dataset": {...}}`,
-            each value a mapping from group key to a list of
-            `[lemma, score]` pairs sorted by descending TF-IDF.
-        """
-        domain_buckets: Dict[str, Counter] = defaultdict(Counter)
-        dataset_buckets: Dict[str, Counter] = defaultdict(Counter)
-        for (domain, dataset), counter in buckets.items():
-            domain_buckets[domain].update(counter)
-            dataset_buckets[dataset].update(counter)
-
-        return {
-            "by_domain": self._tfidf_for(domain_buckets),
-            "by_dataset": self._tfidf_for(dataset_buckets),
-        }
-
-    def _tfidf_for(self, buckets: Dict[str, Counter]) -> Dict[str, List[List[Any]]]:
-        """Compute top-K TF-IDF keywords for one bucket grouping.
-
-        Args:
-            buckets: Mapping bucket name to a lemma counter.
-
-        Returns:
-            Mapping bucket name to a list of `[lemma, score]` pairs
-            (top `keyword_top_k` entries, descending score).
-        """
-        if not buckets:
-            return {}
-        n_buckets = len(buckets)
-        document_freq: Counter[str] = Counter()
-        for counter in buckets.values():
-            for lemma in counter:
-                document_freq[lemma] += 1
-
-        result: Dict[str, List[List[Any]]] = {}
-        for bucket_name, counter in buckets.items():
-            total = sum(counter.values()) or 1
-            scored: List[Tuple[str, float]] = []
-            for lemma, count in counter.items():
-                tf = count / total
-                idf = math.log((1 + n_buckets) / (1 + document_freq[lemma])) + 1.0
-                scored.append((lemma, tf * idf))
-            scored.sort(key=lambda item: item[1], reverse=True)
-            result[bucket_name] = [[lemma, round(score, 6)] for lemma, score in scored[: self.keyword_top_k]]
-        return result
-
-    def _write_bundle(
-        self,
-        bundle: Dict[str, Any],
-        *,
-        rank: int,
-        world_size: int,
-        dataset_to_domain: Optional[Dict[str, str]] = None,
-    ) -> None:
-        """Write the JSON bundle to disk under `output_path`.
-
-        When `per_dataset_dir` was configured, also writes one
-        per-dataset JSON next to the aggregate. Each per-dataset bundle
-        carries `doc_count` / `word_count` for that dataset, the
-        domain it belongs to, and its share of the corpus word count.
-
-        Args:
-            bundle: The aggregate stats dict produced by `_build_bundle`.
-            rank: Worker rank; appended to the filename when
-                `world_size > 1` to avoid clobbering across shards.
-            world_size: Total number of workers.
-            dataset_to_domain: Mapping from dataset key to domain label,
-                captured during `run`.
-        """
-        path = self.output_path
-        if world_size > 1:
-            path = path.with_name(f"{path.stem}.{rank:05d}{path.suffix}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as fh:
-            json.dump(bundle, fh, ensure_ascii=False, indent=2)
-        logger.info("Wrote aggregate stats bundle to %s", path)
-
-        if self.per_dataset_dir is None or world_size > 1:
-            return
-        self.per_dataset_dir.mkdir(parents=True, exist_ok=True)
-        by_dataset = bundle.get("by_dataset", {})
-        domain_lookup = dataset_to_domain or {}
-        for dataset_key, dataset_stats in by_dataset.items():
-            slim = {
-                "dataset": dataset_key,
-                "domain": domain_lookup.get(dataset_key),
-                "doc_count": dataset_stats["doc_count"],
-                "word_count": dataset_stats["word_count"],
-                "avg_doc_words": dataset_stats["avg_doc_words"],
-                "share_of_total_words": dataset_stats["share_of_total_words"],
-            }
-            with (self.per_dataset_dir / f"{dataset_key}.json").open("w", encoding="utf-8") as fh:
-                json.dump(slim, fh, ensure_ascii=False, indent=2)
-        logger.info(
-            "Wrote %d per-dataset stats files under %s",
-            len(by_dataset), self.per_dataset_dir,
-        )

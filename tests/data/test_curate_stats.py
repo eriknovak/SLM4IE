@@ -32,14 +32,7 @@ class TestCorpusStats:
     def test_per_domain_and_per_dataset_word_counts(self, tmp_path: Path) -> None:
         """Grouped word counts match a hand-summed expectation."""
         out = tmp_path / "agg.json"
-        stats = CorpusStats(
-            output_path=out,
-            stopwords=set(),
-            top_k_words=100,
-            top_k_ngrams=100,
-            keyword_top_k=20,
-            compute_keywords=False,
-        )
+        stats = CorpusStats(output_path=out, stopwords=set(), top_k_words=100)
         docs = [
             _doc(
                 "Slovenščina je uradni jezik Republike Slovenije.",
@@ -73,62 +66,30 @@ class TestCorpusStats:
         # Per-domain and per-dataset words must agree on the total.
         assert kzb["word_count"] + coleslaw["word_count"] == bundle["total_words"]
 
-    def test_word_freq_table_excludes_stopwords(self, tmp_path: Path) -> None:
-        """Stopwords passed in are dropped from the frequency table."""
+    def test_word_freq_table_excludes_stopwords_and_short_tokens(self, tmp_path: Path) -> None:
+        """Stopwords and sub-`_MIN_WORD_LEN` tokens are dropped from the table."""
         out = tmp_path / "agg.json"
-        stats = CorpusStats(
-            output_path=out,
-            stopwords={"in"},
-            top_k_words=50,
-            top_k_ngrams=50,
-            compute_keywords=False,
-        )
-        _run(
-            stats,
-            [
-                _doc("jezik in jezik in jezik", dataset="kzb", domain="scientific", doc_id="x1"),
-            ],
-        )
-        bundle = json.loads(out.read_text(encoding="utf-8"))
-        table = dict(bundle["word_freq_top_50"])
-        assert "jezik" in table
-        assert table["jezik"] == 3
-        assert "in" not in table
-
-    def test_ngrams_emitted_at_requested_orders(self, tmp_path: Path) -> None:
-        """Bigrams and trigrams appear under the canonical labels."""
-        out = tmp_path / "agg.json"
-        stats = CorpusStats(
-            output_path=out,
-            stopwords=set(),
-            top_k_words=50,
-            top_k_ngrams=50,
-            ngram_orders=(2, 3),
-            compute_keywords=False,
-        )
+        stats = CorpusStats(output_path=out, stopwords={"in"}, top_k_words=50)
         _run(
             stats,
             [
                 _doc(
-                    "jezikovne raziskave preučujejo družbene vzorce in jezikovne pojave",
+                    "jezik in jezik a in jezik besedilo",
                     dataset="kzb", domain="scientific", doc_id="x1",
                 ),
             ],
         )
         bundle = json.loads(out.read_text(encoding="utf-8"))
-        assert "bigram_top_50" in bundle
-        assert "trigram_top_50" in bundle
-        # Each n-gram entry is a 2-list of [phrase, count].
-        for phrase, count in bundle["bigram_top_50"]:
-            assert isinstance(phrase, str) and " " in phrase
-            assert isinstance(count, int) and count >= 1
+        table = dict(bundle["word_freq_top_50"])
+        assert table["jezik"] == 3
+        assert "besedilo" in table
+        assert "in" not in table  # stopword
+        assert "a" not in table  # shorter than _MIN_WORD_LEN
 
     def test_share_of_total_words_sums_to_one(self, tmp_path: Path) -> None:
         """Per-domain shares sum to 1 (within float tolerance)."""
         out = tmp_path / "agg.json"
-        stats = CorpusStats(
-            output_path=out, compute_keywords=False, stopwords=set(),
-        )
+        stats = CorpusStats(output_path=out, stopwords=set())
         _run(
             stats,
             [

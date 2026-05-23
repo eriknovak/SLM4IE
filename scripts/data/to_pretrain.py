@@ -545,12 +545,9 @@ def _stage_runner(
         def run() -> Tuple[int, int]:
             execs = build_stats_executors(
                 paths,
+                tasks=workers,
                 stopwords=stopwords,
                 top_k_words=int(stcfg.get("top_k_words", 5_000)),
-                top_k_ngrams=int(stcfg.get("top_k_ngrams", 5_000)),
-                keyword_top_k=int(stcfg.get("keyword_top_k", 200)),
-                compute_keywords=bool(stcfg.get("compute_keywords", True)),
-                ngram_orders=stcfg.get("ngram_orders") or (2, 3),
             )
             # The stats stage emits a JSON bundle, not shards: report the
             # documents it consumed and a zero output count.

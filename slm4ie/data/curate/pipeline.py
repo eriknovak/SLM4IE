@@ -42,7 +42,7 @@ from datatrove.utils.typeshelper import Languages
 from slm4ie.data.curate.dedup import default_exact_config
 from slm4ie.data.curate.language import LinguaLanguageFilter
 from slm4ie.data.curate.stages import STAGE_DIRS
-from slm4ie.data.curate.stats import CorpusStats
+from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce
 
 logger = logging.getLogger(__name__)
 
@@ -473,54 +473,66 @@ def build_sentence_dedup_executors(
 def build_stats_executors(
     paths: CuratePaths,
     *,
+    tasks: int = 1,
     language: str = Languages.slovenian,
     stopwords: Optional[Set[str]] = None,
     top_k_words: int = 5_000,
-    top_k_ngrams: int = 5_000,
-    keyword_top_k: int = 200,
-    compute_keywords: bool = True,
-    ngram_orders: Sequence[int] = (2, 3),
 ) -> List[LocalPipelineExecutor]:
-    """Build the stats stage: read 04_2_dedup/ → CorpusStats → 05_statistics/.
+    """Build the stats stage: map → reduce → 05_statistics/.
 
-    Single-process by design: `CorpusStats` keeps every counter on the
-    instance, so worker fan-out is not supported.
+    Two executors are returned. The map executor fans `CorpusStats`
+    out across `tasks` workers; each rank writes a per-shard partial
+    pickle to `05_statistics/_partials/`. The reduce executor runs
+    single-process, sums the partials, derives the top-K
+    word-frequency table, and writes the final `aggregate.json` plus
+    per-dataset breakdowns.
 
     Args:
         paths: Resolved input/output locations.
+        tasks: Number of map workers. The reduce executor is always
+            single-process.
         language: ISO-3 code for the tokenizer.
         stopwords: Stopword set used by `CorpusStats`.
         top_k_words: Word-frequency table size.
-        top_k_ngrams: Per-order n-gram table size.
-        keyword_top_k: TF-IDF keywords per bucket.
-        compute_keywords: Disable to skip the classla pass.
-        ngram_orders: N-gram orders to compute.
 
     Returns:
-        A list with one single-process `LocalPipelineExecutor`.
+        A list `[map_executor, reduce_executor]`. The reduce executor
+        depends on the map executor, so callers can run the stage by
+        invoking `executors[-1].run()`.
     """
     in_ = paths.stage_dir("sentence_dedup")
     out = paths.stage_dir("stats")
     out.mkdir(parents=True, exist_ok=True)
+    partials_dir = out / "_partials"
 
-    executor = LocalPipelineExecutor(
+    map_exec = LocalPipelineExecutor(
         pipeline=[
             _reader(in_),
             CorpusStats(
-                output_path=out / "aggregate.json",
-                per_dataset_dir=out / "per_dataset",
+                partials_dir=partials_dir,
                 language=language,
                 stopwords=stopwords or set(),
                 top_k_words=top_k_words,
-                top_k_ngrams=top_k_ngrams,
-                keyword_top_k=keyword_top_k,
-                compute_keywords=compute_keywords,
-                ngram_orders=ngram_orders,
+            ),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("stats") / "1_map"),
+        skip_completed=False,
+    )
+    reduce_exec = LocalPipelineExecutor(
+        pipeline=[
+            CorpusStatsReduce(
+                partials_dir=partials_dir,
+                output_path=out / "aggregate.json",
+                per_dataset_dir=out / "per_dataset",
+                top_k_words=top_k_words,
             ),
         ],
         tasks=1,
         workers=1,
-        logging_dir=str(paths.logs_dir("stats")),
+        logging_dir=str(paths.logs_dir("stats") / "2_reduce"),
+        depends=map_exec,
         skip_completed=False,
     )
-    return [executor]
+    return [map_exec, reduce_exec]

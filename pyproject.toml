@@ -36,24 +36,11 @@ curate = [
     "nltk>=3.8",                      # fallback sentence splitter
     "pyahocorasick>=2.0",             # filters
     "lingua-language-detector>=2.0.0",
-    "classla>=2.1.0",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.uv]
-# classla pins ancient exact versions of tqdm/requests/protobuf/etc. that
-# conflict with datatrove[multilingual] and our own deps. classla itself
-# works with newer versions at runtime; override the resolver to match the
-# rest of the project's ecosystem.
-override-dependencies = [
-    "tqdm>=4.66.0",
-    "requests>=2.31.0",
-    "protobuf>=5.28.0",
-    "numpy>=1.26",
-]
 
 [tool.ruff]
 line-length = 120

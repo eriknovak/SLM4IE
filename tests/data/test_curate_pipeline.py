@@ -39,7 +39,7 @@ from slm4ie.data.curate.pipeline import (  # noqa: E402
     build_sentence_dedup_executors,
     build_stats_executors,
 )
-from slm4ie.data.curate.stats import CorpusStats  # noqa: E402
+from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce  # noqa: E402
 
 
 def _paths(tmp_path: Path) -> CuratePaths:
@@ -201,21 +201,33 @@ class TestSentenceDedupStage:
 
 
 class TestStatsStage:
-    """The stats stage runs single-process and reads 04_2_dedup/."""
+    """The stats stage runs as map (N workers) → reduce (1 worker)."""
 
-    def test_returns_one_executor(self, tmp_path: Path) -> None:
-        """Stats is a single, single-worker executor."""
-        execs = build_stats_executors(_paths(tmp_path))
-        assert len(execs) == 1
-        assert execs[0].tasks == 1
-        assert execs[0].workers == 1
+    def test_returns_map_and_reduce_executors(self, tmp_path: Path) -> None:
+        """Stats returns two executors with the reduce depending on the map."""
+        execs = build_stats_executors(_paths(tmp_path), tasks=4)
+        assert len(execs) == 2
+        map_exec, reduce_exec = execs
+        assert map_exec.tasks == 4
+        assert map_exec.workers == 4
+        assert reduce_exec.tasks == 1
+        assert reduce_exec.workers == 1
+        assert reduce_exec.depends is map_exec
 
-    def test_pipeline_contains_corpus_stats(self, tmp_path: Path) -> None:
-        """The pipeline reads JSONL and runs CorpusStats."""
+    def test_map_pipeline_contains_reader_and_corpus_stats(self, tmp_path: Path) -> None:
+        """The map pipeline reads JSONL and runs CorpusStats in partials mode."""
         execs = build_stats_executors(_paths(tmp_path))
-        types_ = [type(s) for s in execs[0].pipeline]
-        assert JsonlReader in types_
-        assert CorpusStats in types_
+        map_types = [type(s) for s in execs[0].pipeline]
+        assert JsonlReader in map_types
+        assert CorpusStats in map_types
+        stats_step = next(s for s in execs[0].pipeline if isinstance(s, CorpusStats))
+        assert stats_step.partials_dir is not None
+
+    def test_reduce_pipeline_contains_corpus_stats_reduce(self, tmp_path: Path) -> None:
+        """The reduce pipeline is a single CorpusStatsReduce step."""
+        execs = build_stats_executors(_paths(tmp_path))
+        reduce_types = [type(s) for s in execs[1].pipeline]
+        assert reduce_types == [CorpusStatsReduce]
 
     def test_stats_reads_from_final_corpus_folder(self, tmp_path: Path) -> None:
         """The reader's data_folder is `<output_dir>/04_2_dedup`."""
@@ -345,7 +357,7 @@ def test_final_corpus_drops_cross_dataset_duplicates(tmp_path: Path) -> None:
     build_repetition_executors(paths, tasks=1)[-1].run()
     build_exact_dedup_executors(paths, tasks=1)[-1].run()
     build_sentence_dedup_executors(paths, tasks=1, sentence_config=loose_sentence)[-1].run()
-    build_stats_executors(paths, stopwords=set(), compute_keywords=False)[-1].run()
+    build_stats_executors(paths, stopwords=set())[-1].run()
 
     final_folder = paths.stage_dir("sentence_dedup")
     survivors: List[str] = []
