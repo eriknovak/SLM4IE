@@ -11,46 +11,69 @@ from slm4ie.data.extractors.tei import (
     _parse_msd,
 )
 
-_ANNOTATED_TEI = """\
+# parlamint_si / siParl style — annotated TEI wrapping each speech in
+# a <u> element. Two utterances by different speakers, each carrying
+# multiple <s> sentences.
+_UTTERANCE_TEI = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <TEI xmlns="http://www.tei-c.org/ns/1.0">
   <text>
     <body>
-      <u xml:id="u1" who="#speaker1">
-        <seg xml:id="seg1">
-          <s xml:id="s1">
-            <w lemma="predsednik" msd="UPosTag=NOUN|Case=Nom">Predsednik</w>
-            <w lemma="biti" msd="UPosTag=AUX">je</w>
-            <w lemma="odpreti" msd="UPosTag=VERB">odprl</w>
-            <w lemma="seja" msd="UPosTag=NOUN|Case=Acc">sejo</w>
-            <pc msd="UPosTag=PUNCT">.</pc>
-          </s>
-        </seg>
+      <u xml:id="u1" who="#speakerA" ana="#regular">
+        <s xml:id="u1.s1">
+          <w lemma="predsednik" msd="UPosTag=NOUN|Case=Nom">Predsednik</w>
+          <w lemma="biti" msd="UPosTag=AUX">je</w>
+          <w lemma="odpreti" msd="UPosTag=VERB">odprl</w>
+          <w lemma="seja" msd="UPosTag=NOUN|Case=Acc">sejo</w>
+          <pc msd="UPosTag=PUNCT">.</pc>
+        </s>
+        <s xml:id="u1.s2">
+          <w lemma="hvala" msd="UPosTag=NOUN">Hvala</w>
+          <pc msd="UPosTag=PUNCT">.</pc>
+        </s>
+      </u>
+      <u xml:id="u2" who="#speakerB">
+        <s xml:id="u2.s1">
+          <w lemma="dober" msd="UPosTag=ADJ">Dober</w>
+          <w lemma="dan" msd="UPosTag=NOUN">dan</w>
+          <pc msd="UPosTag=PUNCT">.</pc>
+        </s>
       </u>
     </body>
   </text>
 </TEI>
 """
 
+# kas style — annotated TEI with no <u> elements (scientific monographs,
+# not parliamentary). One Document per file should fall out of the
+# fallback path.
 _KAS_TEI = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <TEI xmlns="http://www.tei-c.org/ns/1.0">
   <text>
     <body>
-      <p xml:id="p1">
-        <s xml:id="kas.s1">
-          <w lemma="gospodarstvo" ana="mte:Ncnsn">Gospodarstvo</w>
-          <w lemma="in" ana="mte:Cc">in</w>
-          <w lemma="javen" ana="mte:Agpfsn">javna</w>
-          <w lemma="uprava" ana="mte:Ncfsn">uprava</w>
-          <pc ana="mte:Z" join="right">.</pc>
-        </s>
-      </p>
+      <div type="chapter">
+        <p xml:id="p1">
+          <s xml:id="kas.s1">
+            <w lemma="gospodarstvo" ana="mte:Ncnsn">Gospodarstvo</w>
+            <w lemma="in" ana="mte:Cc">in</w>
+            <w lemma="javen" ana="mte:Agpfsn">javna</w>
+            <w lemma="uprava" ana="mte:Ncfsn">uprava</w>
+            <pc ana="mte:Z" join="right">.</pc>
+          </s>
+          <s xml:id="kas.s2">
+            <w lemma="razvoj" ana="mte:Ncmsn">Razvoj</w>
+            <w lemma="sektor" ana="mte:Ncmsg">sektorja</w>
+            <pc ana="mte:Z" join="right">.</pc>
+          </s>
+        </p>
+      </div>
     </body>
   </text>
 </TEI>
 """
 
+# Plain TEI — no <w> elements. Per-<p> behavior is unchanged.
 _PLAIN_TEI = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -71,9 +94,9 @@ def extractor() -> TeiExtractor:
 
 
 @pytest.fixture()
-def tmp_annotated(tmp_path: Path) -> Path:
-    """Write annotated TEI to a temp dir and return it."""
-    (tmp_path / "annotated.xml").write_text(_ANNOTATED_TEI, encoding="utf-8")
+def tmp_utterance(tmp_path: Path) -> Path:
+    """Write parliament-style annotated TEI to a temp dir and return it."""
+    (tmp_path / "session.xml").write_text(_UTTERANCE_TEI, encoding="utf-8")
     return tmp_path
 
 
@@ -86,7 +109,7 @@ def tmp_plain(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def tmp_kas(tmp_path: Path) -> Path:
-    """Write KAS-style annotated TEI to a temp dir and return it."""
+    """Write KAS-style annotated TEI (no <u>) to a temp dir and return it."""
     (tmp_path / "kas.xml").write_text(_KAS_TEI, encoding="utf-8")
     return tmp_path
 
@@ -192,36 +215,101 @@ class TestParseAna:
         assert _parse_ana(None) == (None, None)
 
 
-class TestTeiExtractor:
-    """Integration tests for TeiExtractor."""
+class TestTeiUtteranceExtraction:
+    """Integration tests for TEI with <u> utterance wrappers."""
 
-    def test_extracts_text_from_w_elements(
-        self, extractor: TeiExtractor, tmp_annotated: Path
+    def test_one_document_per_utterance(
+        self, extractor: TeiExtractor, tmp_utterance: Path
     ) -> None:
-        """Joined token forms become document text."""
-        docs = list(extractor.extract(tmp_annotated, "test", "parl"))
+        """Each <u> element becomes its own Document."""
+        docs = list(extractor.extract(tmp_utterance, "parlamint_si", "parliamentary"))
+        assert len(docs) == 2
+
+    def test_utterance_text_joins_sentences(
+        self, extractor: TeiExtractor, tmp_utterance: Path
+    ) -> None:
+        """Sentences inside a <u> are joined with newlines for sentence-dedup."""
+        docs = list(extractor.extract(tmp_utterance, "parlamint_si", "parliamentary"))
+        assert docs[0].text == "Predsednik je odprl sejo .\nHvala ."
+        assert docs[1].text == "Dober dan ."
+
+    def test_doc_id_from_utterance_xml_id(
+        self, extractor: TeiExtractor, tmp_utterance: Path
+    ) -> None:
+        """doc_id comes from <u>'s xml:id, not from individual <s>."""
+        docs = list(extractor.extract(tmp_utterance, "parlamint_si", "parliamentary"))
+        assert docs[0].doc_id == "u1"
+        assert docs[1].doc_id == "u2"
+
+    def test_utterance_metadata_carries_speaker(
+        self, extractor: TeiExtractor, tmp_utterance: Path
+    ) -> None:
+        """`who` and `ana` attributes on <u> flow into Document.metadata."""
+        docs = list(extractor.extract(tmp_utterance, "parlamint_si", "parliamentary"))
+        assert docs[0].metadata.get("who") == "#speakerA"
+        assert docs[0].metadata.get("ana") == "#regular"
+        assert docs[1].metadata.get("who") == "#speakerB"
+        # No `ana` on u2 — metadata key simply absent rather than None.
+        assert "ana" not in docs[1].metadata
+
+    def test_utterance_annotations_flat_with_sentence_spans(
+        self, extractor: TeiExtractor, tmp_utterance: Path
+    ) -> None:
+        """Tokens concatenate across sentences; sentences carries the spans."""
+        docs = list(extractor.extract(tmp_utterance, "parlamint_si", "parliamentary"))
+        ann = docs[0].annotations
+        assert ann is not None
+        # u1: 5 tokens (s1) + 2 tokens (s2) = 7 flat tokens.
+        assert len(ann.tokens) == 7
+        assert [t.form for t in ann.tokens] == [
+            "Predsednik", "je", "odprl", "sejo", ".", "Hvala", ".",
+        ]
+        assert ann.sentences == [[0, 4], [5, 6]]
+
+
+class TestTeiPerFileFallback:
+    """Annotated TEI without <u> (KAS-style) collapses to per-file Document."""
+
+    def test_one_document_per_file(
+        self, extractor: TeiExtractor, tmp_kas: Path
+    ) -> None:
+        """No <u> in the file → exactly one Document per file."""
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
         assert len(docs) == 1
-        assert docs[0].text == "Predsednik je odprl sejo ."
 
-    def test_extracts_lemma_and_msd(
-        self, extractor: TeiExtractor, tmp_annotated: Path
+    def test_doc_id_from_file_stem(
+        self, extractor: TeiExtractor, tmp_kas: Path
     ) -> None:
-        """Lemma and UPOS are parsed from annotated tokens."""
-        docs = list(extractor.extract(tmp_annotated, "test", "parl"))
-        assert docs[0].annotations is not None
-        tokens = docs[0].annotations.tokens
-        assert tokens[0].lemma == "predsednik"
-        assert tokens[0].upos == "NOUN"
-        assert tokens[0].feats == "Case=Nom"
-        # Token with no extra feats
-        assert tokens[1].upos == "AUX"
-        assert tokens[1].feats is None
+        """doc_id falls back to the source file's stem when no <u>."""
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
+        assert docs[0].doc_id == "kas"
+
+    def test_aggregated_text_and_annotations(
+        self, extractor: TeiExtractor, tmp_kas: Path
+    ) -> None:
+        """All <s> tokens land in one Document with multi-sentence spans."""
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
+        assert docs[0].text == "Gospodarstvo in javna uprava .\nRazvoj sektorja ."
+        ann = docs[0].annotations
+        assert ann is not None
+        assert [t.form for t in ann.tokens] == [
+            "Gospodarstvo", "in", "javna", "uprava", ".",
+            "Razvoj", "sektorja", ".",
+        ]
+        assert [t.upos for t in ann.tokens] == [
+            "NOUN", "CCONJ", "ADJ", "NOUN", "PUNCT",
+            "NOUN", "NOUN", "PUNCT",
+        ]
+        assert ann.sentences == [[0, 4], [5, 7]]
 
 
-    def test_extracts_plain_text_paragraphs(
+class TestTeiPlainParagraphs:
+    """Plain TEI (no <w>) keeps the original per-<p> Document behavior."""
+
+    def test_one_document_per_paragraph(
         self, extractor: TeiExtractor, tmp_plain: Path
     ) -> None:
-        """Plain TEI yields one Document per non-empty <p>."""
+        """Two <p> elements → two Documents, no annotations."""
         docs = list(extractor.extract(tmp_plain, "test", "web"))
         assert len(docs) == 2
         texts = [d.text for d in docs]
@@ -229,14 +317,6 @@ class TestTeiExtractor:
         assert "Hvala, dobro." in texts
         for doc in docs:
             assert doc.annotations is None
-
-    def test_doc_id_from_xml_id(
-        self, extractor: TeiExtractor, tmp_annotated: Path
-    ) -> None:
-        """doc_id is set from xml:id on <s> element."""
-        docs = list(extractor.extract(tmp_annotated, "test", "parl"))
-        assert docs[0].doc_id is not None
-        assert docs[0].doc_id == "s1"
 
     def test_processes_multiple_xml_files(
         self, extractor: TeiExtractor, tmp_path: Path
@@ -257,23 +337,6 @@ class TestTeiExtractor:
         docs = list(extractor.extract(tmp_path, "test", "web"))
         assert len(docs) == 2
 
-    def test_extracts_kas_ana_annotations(
-        self, extractor: TeiExtractor, tmp_kas: Path
-    ) -> None:
-        """KAS-style ana="mte:..." tokens get UPOS + MTE feats."""
-        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
-        assert len(docs) == 1
-        assert docs[0].doc_id == "kas.s1"
-        assert docs[0].text == "Gospodarstvo in javna uprava ."
-        assert docs[0].annotations is not None
-        tokens = docs[0].annotations.tokens
-        assert [t.upos for t in tokens] == [
-            "NOUN", "CCONJ", "ADJ", "NOUN", "PUNCT",
-        ]
-        assert tokens[0].lemma == "gospodarstvo"
-        assert tokens[0].feats == "MTE=Ncnsn"
-        assert tokens[4].feats == "MTE=Z"
-
 
 class TestTeiMetadata:
     """End-to-end metadata injection from an external TSV."""
@@ -281,7 +344,7 @@ class TestTeiMetadata:
     def test_metadata_attached_via_filename_stem(
         self, extractor: TeiExtractor, tmp_path: Path
     ) -> None:
-        """KAS-style: lookup by the TEI file's stem (e.g. ``kas-10000``)."""
+        """KAS-style: lookup by the TEI file's stem (e.g. `kas-10000`)."""
         (tmp_path / "kas-10000.xml").write_text(_KAS_TEI, encoding="utf-8")
         tsv = tmp_path / "meta.tsv"
         tsv.write_text(
@@ -303,6 +366,8 @@ class TestTeiMetadata:
             )
         )
 
+        # KAS-style file aggregates to a single per-file Document; the
+        # TSV row keyed by the filename stem populates its metadata.
         assert len(docs) == 1
         assert docs[0].metadata == {"cerif": "P000", "doctype": "Diplomsko delo"}
 
@@ -331,9 +396,48 @@ class TestTeiMetadata:
         for doc in docs:
             assert doc.metadata == {"note": "hello"}
 
-    def test_no_metadata_kwarg_keeps_empty_dict(
-        self, extractor: TeiExtractor, tmp_annotated: Path
+    def test_metadata_layers_under_utterance_attributes(
+        self, extractor: TeiExtractor, tmp_path: Path
     ) -> None:
-        """Without the kwarg, metadata stays empty (backward compatible)."""
-        docs = list(extractor.extract(tmp_annotated, "test", "parl"))
+        """TSV per-file fields appear alongside <u>'s `who`/`ana`."""
+        (tmp_path / "session-7.xml").write_text(_UTTERANCE_TEI, encoding="utf-8")
+        tsv = tmp_path / "meta.tsv"
+        tsv.write_text("id\tsitting\nsession-7\t2023-11-15\n", encoding="utf-8")
+
+        docs = list(
+            extractor.extract(
+                tmp_path,
+                source="parlamint_si",
+                domain="parliamentary",
+                metadata={
+                    "path": "meta.tsv",
+                    "key_column": "id",
+                    "fields": {"sitting": "sitting"},
+                },
+            )
+        )
+
+        assert len(docs) == 2
+        # Per-file `sitting` is on every utterance; per-utterance `who`
+        # and `ana` come from the <u> element.
+        assert docs[0].metadata == {
+            "sitting": "2023-11-15",
+            "who": "#speakerA",
+            "ana": "#regular",
+        }
+        assert docs[1].metadata == {
+            "sitting": "2023-11-15",
+            "who": "#speakerB",
+        }
+
+    def test_no_metadata_kwarg_keeps_empty_dict(
+        self, extractor: TeiExtractor, tmp_kas: Path
+    ) -> None:
+        """Without the kwarg, per-file metadata stays empty.
+
+        Uses the KAS-style fixture (no `<u>` and no `<p>` paragraph
+        metadata) so the resulting Document has nothing in `metadata`
+        at all when no TSV is configured.
+        """
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
         assert docs[0].metadata == {}

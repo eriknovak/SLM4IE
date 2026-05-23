@@ -1,58 +1,74 @@
 """TEI XML extractor for the SLM4IE pipeline.
 
-Supports annotated TEI (with <w> elements) and plain TEI (<p> text
-only). Handles ParlaMint-SI, siParl, KAS, Janes-Forum, Janes-Blog,
-and Janes-News formats.
+Yields one `Document` per real document, aggregating sentence-level
+`<s>` units the way each corpus encodes them structurally:
+
+- **Annotated TEI with `<u>` utterances** (ParlaMint-SI, siParl):
+  one Document per `<u>`. The utterance's `who` and `ana`
+  attributes flow into `Document.metadata`.
+- **Annotated TEI without `<u>`** (KAS, similar academic corpora):
+  one Document per file (`doc_id` = filename stem).
+- **Plain TEI** (no `<w>` elements; e.g. Janes-Forum/Blog/News):
+  unchanged — one Document per `<p>`.
+
+Sentence boundaries inside an aggregated document are preserved in
+`Annotations.sentences` as inclusive `[start, end]` token-index
+spans over the flat `Annotations.tokens` list.
 
 Example:
-    Annotated TEI (one Document per <s>):
+    Annotated TEI with two utterances:
 
         <TEI xmlns="http://www.tei-c.org/ns/1.0">
           <text>
             <body>
-              <s xml:id="ParlaMint-SI.s1">
-                <w lemma="dober"
-                   msd="UPosTag=ADJ|Case=Nom|Gender=Masc">Dober</w>
-                <w lemma="dan" msd="UPosTag=NOUN|Case=Nom">dan</w>
-                <pc msd="UPosTag=PUNCT">.</pc>
-              </s>
+              <u xml:id="u1" who="#chair">
+                <s xml:id="u1.s1">
+                  <w lemma="dober" msd="UPosTag=ADJ">Dober</w>
+                  <w lemma="dan" msd="UPosTag=NOUN">dan</w>
+                  <pc msd="UPosTag=PUNCT">.</pc>
+                </s>
+                <s xml:id="u1.s2">
+                  <w lemma="hvala" msd="UPosTag=NOUN">Hvala</w>
+                  <pc msd="UPosTag=PUNCT">.</pc>
+                </s>
+              </u>
+              <u xml:id="u2" who="#regular">
+                <s xml:id="u2.s1">
+                  <w lemma="ja" msd="UPosTag=INTJ">Ja</w>
+                  <pc msd="UPosTag=PUNCT">.</pc>
+                </s>
+              </u>
             </body>
           </text>
         </TEI>
 
-    KAS-style ana attribute instead of msd:
+    Yields two Documents — the first with `doc_id="u1"`,
+    `metadata={"who": "#chair"}`, `annotations.sentences=[[0, 2],
+    [3, 4]]`, and `text` formed by joining its two sentence strings
+    with a newline; the second with `doc_id="u2"`,
+    `metadata={"who": "#regular"}`, `annotations.sentences=[[0,
+    1]]`, and a single-sentence `text`.
 
-        <w lemma="dober" ana="mte:Agpmsny">Dober</w>
-
-    Plain TEI (one Document per <p>):
-
-        <TEI xmlns="http://www.tei-c.org/ns/1.0">
-          <text>
-            <body>
-              <p xml:id="janes.p1">Dober dan, kako ste?</p>
-            </body>
-          </text>
-        </TEI>
-
-    Schema mapping:
-        text:        annotated -> token forms joined with a single
-                     space. Plain -> the <p> element's text content
-                     (stripped).
+    Schema mapping (annotated):
+        text:        per-sentence token forms joined with a single
+                     space, then sentence strings joined with newlines
+                     so datatrove's sentence splitter retains the cue.
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      xml:id of the originating <s> (annotated) or
-                     <p> (plain).
-        metadata:    empty by default; populated per-file when the
-                     ``metadata:`` config block is supplied (see
-                     :class:`MetadataLookup`).
-        annotations: annotated only.
-            tokens.form:  text content of <w> / <pc>.
-            tokens.lemma: lemma attribute.
-            tokens.upos:  derived from msd (UPosTag=...) or from
-                          ana (mte:<MULTEXT-East-v6 code>).
-            tokens.feats: remaining Key=Value parts of msd, or
-                          MTE=<code> when only ana is present.
-            sentences:    single span [0, len(tokens)-1].
+        doc_id:      `<u>`'s `xml:id` (utterance path) or the
+                     source filename's stem (per-file fallback).
+        metadata:    `who` / `ana` from the `<u>` element (utterance
+                     path) layered on top of any per-file fields
+                     from a `metadata:` config block (see
+                     `MetadataLookup`); empty when neither applies.
+        annotations:
+            tokens:    flat concatenation across every contained `<s>`.
+            sentences: one inclusive `[start, end]` per sentence,
+                       in reading order.
+
+    Plain TEI: one Document per `<p>` with `doc_id` from the
+    paragraph's `xml:id`, no annotations, and per-file `metadata:`
+    fields when configured.
 """
 
 import logging
@@ -71,6 +87,7 @@ _W_TAG = f"{{{_TEI_NS}}}w"
 _PC_TAG = f"{{{_TEI_NS}}}pc"
 _S_TAG = f"{{{_TEI_NS}}}s"
 _P_TAG = f"{{{_TEI_NS}}}p"
+_U_TAG = f"{{{_TEI_NS}}}u"
 _NAME_TAG = f"{{{_TEI_NS}}}name"
 _XML_ID = f"{{{_XML_NS}}}id"
 
@@ -252,47 +269,161 @@ def _extract_tokens_from_sentence(
     return tokens
 
 
-def _parse_annotated(
+def _build_document(
+    s_elems: List["ElementTree.Element"],
+    doc_id: str,
+    source: str,
+    domain: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[Document]:
+    """Combine `<s>` siblings into one document-level Document.
+
+    Sentence texts are formed by space-joining each sentence's token
+    forms; the sentence strings are then joined with newlines.
+    Annotations carry the flat token sequence and inclusive
+    `[start, end]` token-index spans for every contained sentence.
+
+    Args:
+        s_elems (List[ElementTree.Element]): The `<s>` elements
+            that constitute this document, in reading order.
+        doc_id (str): Identifier for the resulting Document.
+        source (str): Dataset key.
+        domain (str): Domain label.
+        metadata (Optional[Dict[str, Any]]): Optional metadata to
+            attach to the Document. For utterance-level docs this
+            typically merges per-file `MetadataLookup` fields with
+            the utterance's `who` / `ana` attributes.
+
+    Returns:
+        Optional[Document]: One Document, or `None` when every
+            `<s>` element parsed to zero tokens.
+    """
+    sentence_texts: List[str] = []
+    flat_tokens: List[Token] = []
+    spans: List[List[int]] = []
+    cursor = 0
+
+    for s_elem in s_elems:
+        tokens = _extract_tokens_from_sentence(s_elem)
+        if not tokens:
+            continue
+        sentence_texts.append(" ".join(t.form for t in tokens))
+        start = cursor
+        flat_tokens.extend(tokens)
+        cursor += len(tokens)
+        spans.append([start, cursor - 1])
+
+    if not flat_tokens:
+        return None
+
+    annotations = Annotations(tokens=flat_tokens, sentences=spans)
+    return Document(
+        text="\n".join(sentence_texts),
+        source=source,
+        domain=domain,
+        doc_id=doc_id,
+        metadata=dict(metadata) if metadata else {},
+        annotations=annotations,
+    )
+
+
+def _utterance_metadata(u_elem: "ElementTree.Element") -> Dict[str, Any]:
+    """Return `Document.metadata` derived from a `<u>` element.
+
+    Args:
+        u_elem (ElementTree.Element): The `<u>` element.
+
+    Returns:
+        Dict[str, Any]: `who` and `ana` attribute values when
+            present; the key is omitted when the attribute is absent
+            so that callers can use `"key" in metadata` cleanly.
+    """
+    md: Dict[str, Any] = {}
+    who = u_elem.get("who")
+    if who is not None:
+        md["who"] = who
+    ana = u_elem.get("ana")
+    if ana is not None:
+        md["ana"] = ana
+    return md
+
+
+def _parse_annotated_with_utterances(
     root: "ElementTree.Element",
     source: str,
     domain: str,
     extra_metadata: Optional[Dict[str, Any]] = None,
 ) -> Iterator[Document]:
-    """Yield Documents from an annotated TEI tree (has <w>).
+    """Yield one Document per `<u>` element in an annotated TEI tree.
 
-    One Document is produced per <s> element. Text is the
-    space-joined token forms. The doc_id comes from the xml:id
-    attribute on <s>.
+    Each `<u>`'s sentence descendants are aggregated into a single
+    Document; the utterance's `xml:id` becomes the `doc_id` and
+    its `who` / `ana` attributes flow into `metadata`, layered on
+    top of any per-file fields supplied via *extra_metadata*.
 
     Args:
         root (ElementTree.Element): Parsed XML root element.
         source (str): Dataset key.
         domain (str): Domain label.
-        extra_metadata (Optional[Dict[str, Any]]): Per-document
-            fields copied into every yielded Document.metadata.
+        extra_metadata (Optional[Dict[str, Any]]): Per-file fields
+            from `MetadataLookup`. Utterance attributes (`who`,
+            `ana`) take precedence on key collision since they are
+            more specific.
 
     Yields:
-        Document: One document per sentence.
+        Document: One document per non-empty `<u>`.
     """
-    for s_elem in root.iter(_S_TAG):
-        tokens = _extract_tokens_from_sentence(s_elem)
-        if not tokens:
-            continue
-
-        text = " ".join(t.form for t in tokens)
-        doc_id = s_elem.get(_XML_ID)
-        annotations = Annotations(
-            tokens=tokens,
-            sentences=[[0, len(tokens) - 1]],
-        )
-        yield Document(
-            text=text,
+    base: Dict[str, Any] = dict(extra_metadata) if extra_metadata else {}
+    for u_elem in root.iter(_U_TAG):
+        s_elems = list(u_elem.iter(_S_TAG))
+        doc_id = u_elem.get(_XML_ID) or ""
+        merged = {**base, **_utterance_metadata(u_elem)}
+        doc = _build_document(
+            s_elems=s_elems,
+            doc_id=doc_id,
             source=source,
             domain=domain,
-            doc_id=doc_id,
-            metadata=dict(extra_metadata) if extra_metadata else {},
-            annotations=annotations,
+            metadata=merged,
         )
+        if doc is not None:
+            yield doc
+
+
+def _parse_annotated_per_file(
+    root: "ElementTree.Element",
+    source: str,
+    domain: str,
+    doc_id: str,
+    extra_metadata: Optional[Dict[str, Any]] = None,
+) -> Iterator[Document]:
+    """Yield exactly one Document by aggregating every `<s>` in *root*.
+
+    Used when an annotated TEI file has no `<u>` elements (e.g.
+    KAS). `doc_id` is supplied by the caller (typically the
+    source filename's stem).
+
+    Args:
+        root (ElementTree.Element): Parsed XML root element.
+        source (str): Dataset key.
+        domain (str): Domain label.
+        doc_id (str): Identifier for the single produced Document.
+        extra_metadata (Optional[Dict[str, Any]]): Per-file fields
+            from `MetadataLookup`, copied onto the produced Document.
+
+    Yields:
+        Document: One document per file, or nothing if the file had
+            no token-bearing sentences.
+    """
+    s_elems = list(root.iter(_S_TAG))
+    doc = _build_document(
+        s_elems=s_elems,
+        doc_id=doc_id,
+        source=source,
+        domain=domain,
+        metadata=extra_metadata,
+    )
+    if doc is not None:
+        yield doc
 
 
 def _parse_plain(
@@ -333,12 +464,19 @@ def _parse_plain(
 class TeiExtractor(BaseExtractor):
     """Extracts Documents from TEI XML files.
 
-    Handles both annotated TEI (containing <w> word elements) and
-    plain TEI (paragraph text only). Recursively discovers all .xml
-    files under the given input directory.
+    For annotated TEI (containing `<w>` word elements), the
+    grouping strategy depends on whether the file uses `<u>`
+    utterance wrappers:
 
-    Supported corpora: ParlaMint-SI, siParl, KAS, Janes-Forum,
-    Janes-Blog, Janes-News.
+    - With `<u>`: one Document per utterance (parliamentary
+      corpora — ParlaMint-SI, siParl). Speaker (`who`) and topic
+      (`ana`) attributes flow into `Document.metadata`.
+    - Without `<u>`: one Document per file (academic corpora
+      like KAS). `doc_id` falls back to the filename's stem.
+
+    Plain TEI (no `<w>`) keeps the per-`<p>` Document behavior
+    used by Janes-Forum/Blog/News (currently disabled in the
+    download catalogue but supported).
     """
 
     def extract(
@@ -355,11 +493,11 @@ class TeiExtractor(BaseExtractor):
                 .xml files.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
-            metadata (Optional[Dict[str, Any]]): Optional ``metadata:``
+            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
                 When given, every Document is enriched with the row
-                matched on the source filename. See
-                :class:`MetadataLookup` for the expected schema.
+                matched on the source filename. See `MetadataLookup`
+                for the expected schema.
 
         Yields:
             Document: Extracted documents in unified schema format.
@@ -383,10 +521,20 @@ class TeiExtractor(BaseExtractor):
             root = tree.getroot()
             is_annotated = next(root.iter(_W_TAG), None) is not None
 
-            if is_annotated:
-                yield from _parse_annotated(root, source, domain, extra)
-            else:
+            if not is_annotated:
                 yield from _parse_plain(root, source, domain, extra)
+                continue
+
+            # Annotated: prefer <u>-based grouping when the file uses
+            # it; otherwise fall back to one Document per file.
+            if next(root.iter(_U_TAG), None) is not None:
+                yield from _parse_annotated_with_utterances(
+                    root, source, domain, extra
+                )
+            else:
+                yield from _parse_annotated_per_file(
+                    root, source, domain, doc_id=filepath.stem, extra_metadata=extra
+                )
 
 
 register_extractor("tei", TeiExtractor)

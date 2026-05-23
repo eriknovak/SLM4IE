@@ -36,12 +36,19 @@ class Token:
 
 @dataclasses.dataclass
 class Annotations:
-    """Sentence-level annotations for a document.
+    """Token-level annotations for a document, with sentence boundaries.
+
+    Tokens are the document's flat token sequence in reading order;
+    sentence structure is recovered from `sentences`, which carries
+    one inclusive `[start, end]` token-index pair per sentence.
+    A two-sentence document with 5 + 7 tokens has
+    `sentences == [[0, 4], [5, 11]]`.
 
     Attributes:
-        tokens (List[Token]): Annotated tokens.
-        sentences (List[List[int]]): Sentence boundaries as
-            [start, end] index pairs (inclusive).
+        tokens (List[Token]): Flat token sequence across all
+            sentences in the document.
+        sentences (List[List[int]]): One inclusive `[start, end]`
+            token-index pair per sentence, in document order.
     """
 
     tokens: List[Token]
@@ -151,7 +158,7 @@ class NerExample(TypedDict):
         id: Document identifier.
         text: Raw text.
         spans: List of entity spans; each is
-            ``{"start": int, "end": int, "label": str}``.
+            `{"start": int, "end": int, "label": str}`.
     """
 
     id: str
@@ -180,9 +187,9 @@ class NliExample(TypedDict):
         id: Example identifier.
         premise: Premise text.
         hypothesis: Hypothesis text.
-        label: Entailment label (e.g. ``"entailment"``,
-            ``"neutral"``, ``"contradiction"``, or
-            ``"not_entailment"`` depending on the task).
+        label: Entailment label (e.g. `"entailment"`,
+            `"neutral"`, `"contradiction"`, or
+            `"not_entailment"` depending on the task).
     """
 
     id: str
@@ -199,7 +206,7 @@ class QaExtractiveExample(TypedDict):
         context: Passage text.
         question: Question text.
         answers: List of answer dicts of the form
-            ``{"text": str, "start": int}``.
+            `{"text": str, "start": int}`.
     """
 
     id: str
@@ -231,8 +238,8 @@ class CorefExample(TypedDict):
         id: Example identifier.
         text: Raw text containing both spans.
         span1: Span dict of the form
-            ``{"start": int, "end": int, "text": str}``.
-        span2: Second span dict with the same shape as ``span1``.
+            `{"start": int, "end": int, "text": str}`.
+        span2: Second span dict with the same shape as `span1`.
         label: True if the two spans corefer.
     """
 
@@ -270,8 +277,8 @@ class CommonsenseCopaExample(TypedDict):
         premise: Premise text.
         choice1: First candidate continuation.
         choice2: Second candidate continuation.
-        question: Either ``"cause"`` or ``"effect"``.
-        label: Index of the correct choice (``0`` or ``1``).
+        question: Either `"cause"` or `"effect"`.
+        label: Index of the correct choice (`0` or `1`).
     """
 
     id: str

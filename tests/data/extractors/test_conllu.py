@@ -36,7 +36,30 @@ SENTENCE_2 = textwrap.dedent("""\
     7\t.\t.\tPUNCT\tZ\t_\t4\tpunct\t_\tNER=O
 """)
 
-TWO_SENTENCE_CONLLU = SENTENCE_1 + "\n" + SENTENCE_2
+# `SENTENCE_2` opens a fresh CoNLL-U newdoc so the two sentences land in
+# separate documents when concatenated. Used by the multi-newdoc tests.
+SENTENCE_2_NEWDOC = "# newdoc id = doc2\n" + SENTENCE_2
+
+# Two sentences sharing a single newdoc — one Document with 12 tokens.
+ONE_NEWDOC_TWO_SENTENCES = SENTENCE_1 + "\n" + SENTENCE_2
+
+# Two newdoc blocks — two Documents, one per block.
+TWO_NEWDOCS = SENTENCE_1 + "\n" + SENTENCE_2_NEWDOC
+
+# Sentences with no newdoc marker at all — per-file fallback kicks in.
+NO_NEWDOC_MARKER = textwrap.dedent("""\
+    # sent_id = a.s1
+    # text = Prva poved.
+    1\tPrva\tprv\tADJ\tAgpfsn\tCase=Nom|Gender=Fem|Number=Sing\t2\tamod\t_\t_
+    2\tpoved\tpoved\tNOUN\tNcfsn\tCase=Nom|Gender=Fem|Number=Sing\t0\troot\t_\t_
+    3\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
+
+    # sent_id = a.s2
+    # text = Druga poved.
+    1\tDruga\tdrug\tADJ\tAgpfsn\tCase=Nom|Gender=Fem|Number=Sing\t2\tamod\t_\t_
+    2\tpoved\tpoved\tNOUN\tNcfsn\tCase=Nom|Gender=Fem|Number=Sing\t0\troot\t_\t_
+    3\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
+""")
 
 NER_SENTENCE = textwrap.dedent("""\
     # sent_id = ner.s1
@@ -77,17 +100,20 @@ def _write_conllu(tmp_path: Path, filename: str, content: str) -> Path:
     return p
 
 
-def _extract(tmp_path: Path, content: str) -> List[Document]:
+def _extract(tmp_path: Path, content: str, filename: str = "test.conllu") -> List[Document]:
     """Write content to a .conllu file and extract documents.
 
     Args:
         tmp_path (Path): Temporary directory.
         content (str): CoNLL-U content.
+        filename (str): Name of the .conllu file to write (drives the
+            per-file-fallback doc_id when no `# newdoc id` markers
+            appear in the content).
 
     Returns:
         List[Document]: Extracted documents.
     """
-    _write_conllu(tmp_path, "test.conllu", content)
+    _write_conllu(tmp_path, filename, content)
     extractor = ConlluExtractor()
     return list(extractor.extract(tmp_path, source="test", domain="news"))
 
@@ -99,43 +125,66 @@ def _extract(tmp_path: Path, content: str) -> List[Document]:
 class TestConlluExtractor:
     """Tests for ConlluExtractor."""
 
-    def test_extracts_text(self, tmp_path: Path) -> None:
-        """Text field is populated from # text = comment."""
-        docs = _extract(tmp_path, TWO_SENTENCE_CONLLU)
+    def test_one_newdoc_two_sentences_yields_single_document(
+        self, tmp_path: Path
+    ) -> None:
+        """Sentences sharing one `# newdoc id` collapse to one Document."""
+        docs = _extract(tmp_path, ONE_NEWDOC_TWO_SENTENCES)
+        assert len(docs) == 1
+        # Text is the two sentence strings joined by a sentence-boundary
+        # newline so datatrove's sentence splitter retains the cue.
+        assert docs[0].text == (
+            "Predsednik je odprl sejo.\nSeja se je začela ob devetih."
+        )
+
+    def test_one_newdoc_flat_tokens_across_sentences(
+        self, tmp_path: Path
+    ) -> None:
+        """Annotations.tokens concatenates tokens from every sentence."""
+        docs = _extract(tmp_path, ONE_NEWDOC_TWO_SENTENCES)
+        tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
+        # 5 tokens from sentence 1 + 7 from sentence 2.
+        assert len(tokens) == 12
+        assert tokens[0].form == "Predsednik"
+        assert tokens[0].upos == "NOUN"
+        # First token of sentence 2 sits at flat index 5.
+        assert tokens[5].form == "Seja"
+        assert tokens[5].upos == "NOUN"
+
+    def test_one_newdoc_sentence_spans(self, tmp_path: Path) -> None:
+        """Annotations.sentences carries one [start, end] per sentence."""
+        docs = _extract(tmp_path, ONE_NEWDOC_TWO_SENTENCES)
+        ann = docs[0].annotations
+        assert ann is not None
+        assert ann.sentences == [[0, 4], [5, 11]]
+
+    def test_doc_id_from_newdoc_marker(self, tmp_path: Path) -> None:
+        """doc_id comes from `# newdoc id`, not per-sentence `# sent_id`."""
+        docs = _extract(tmp_path, ONE_NEWDOC_TWO_SENTENCES)
+        assert docs[0].doc_id == "doc1"
+
+    def test_two_newdocs_yield_two_documents(self, tmp_path: Path) -> None:
+        """Each `# newdoc id` marker starts a fresh Document."""
+        docs = _extract(tmp_path, TWO_NEWDOCS)
         assert len(docs) == 2
+        assert docs[0].doc_id == "doc1"
+        assert docs[1].doc_id == "doc2"
+        # Each document carries only its own sentences.
+        assert docs[0].annotations.sentences == [[0, 4]]  # type: ignore[union-attr]
+        assert docs[1].annotations.sentences == [[0, 6]]  # type: ignore[union-attr]
         assert docs[0].text == "Predsednik je odprl sejo."
         assert docs[1].text == "Seja se je začela ob devetih."
 
-    def test_extracts_tokens(self, tmp_path: Path) -> None:
-        """Token fields (form, lemma, upos, feats) are parsed."""
-        docs = _extract(tmp_path, TWO_SENTENCE_CONLLU)
-        tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
-        assert len(tokens) == 5
-
-        t0 = tokens[0]
-        assert t0.form == "Predsednik"
-        assert t0.lemma == "predsednik"
-        assert t0.upos == "NOUN"
-        assert t0.feats == "Case=Nom|Gender=Masc|Number=Sing"
-
-        t4 = tokens[4]
-        assert t4.form == "."
-        assert t4.upos == "PUNCT"
-
-    def test_doc_id_from_sent_id(self, tmp_path: Path) -> None:
-        """doc_id is set from the # sent_id = comment."""
-        docs = _extract(tmp_path, TWO_SENTENCE_CONLLU)
-        assert docs[0].doc_id == "doc1.s1"
-        assert docs[1].doc_id == "doc1.s2"
-
-    def test_sentence_boundaries(self, tmp_path: Path) -> None:
-        """Sentences list is [[0, N-1]] for each document."""
-        docs = _extract(tmp_path, TWO_SENTENCE_CONLLU)
-        ann0 = docs[0].annotations  # type: ignore[union-attr]
-        assert ann0.sentences == [[0, 4]]  # 5 tokens, indices 0-4
-
-        ann1 = docs[1].annotations  # type: ignore[union-attr]
-        assert ann1.sentences == [[0, 6]]  # 7 tokens, indices 0-6
+    def test_per_file_fallback_when_no_newdoc(self, tmp_path: Path) -> None:
+        """A file with no `# newdoc id` collapses to one Document per file."""
+        docs = _extract(tmp_path, NO_NEWDOC_MARKER, filename="essay.conllu")
+        assert len(docs) == 1
+        assert docs[0].doc_id == "essay"
+        ann = docs[0].annotations
+        assert ann is not None
+        # Both sentences end up in the one Document.
+        assert ann.sentences == [[0, 2], [3, 5]]
+        assert docs[0].text == "Prva poved.\nDruga poved."
 
     def test_source_and_domain(self, tmp_path: Path) -> None:
         """Source and domain are passed through to each Document."""
@@ -150,12 +199,16 @@ class TestConlluExtractor:
     def test_processes_multiple_files(self, tmp_path: Path) -> None:
         """Both .conllu and .conll files are discovered and processed."""
         _write_conllu(tmp_path, "file1.conllu", SENTENCE_1)
+        # SENTENCE_2 alone has no newdoc id; per-file fallback gives it
+        # its own Document keyed off the file stem.
         _write_conllu(tmp_path, "file2.conll", SENTENCE_2)
         extractor = ConlluExtractor()
         docs = list(
             extractor.extract(tmp_path, source="test", domain="test")
         )
         assert len(docs) == 2
+        assert docs[0].doc_id == "doc1"          # from `# newdoc id`
+        assert docs[1].doc_id == "file2"         # per-file fallback
 
     def test_handles_underscore_feats(self, tmp_path: Path) -> None:
         """_ in feats column is converted to None."""
@@ -175,6 +228,9 @@ class TestConlluExtractor:
         """)
         docs = _extract(tmp_path, content)
         assert len(docs) == 1
+        # Per-file fallback yields one Document whose text is the single
+        # reconstructed sentence — no trailing newline because there is
+        # only one sentence to join.
         assert docs[0].text == "Lepa beseda."
 
     def test_directory_named_like_conll_is_skipped(
@@ -201,10 +257,14 @@ class TestConlluExtractor:
 class TestConlluMetadata:
     """End-to-end metadata injection from an external TSV."""
 
-    def test_metadata_attached_to_every_sentence(self, tmp_path: Path) -> None:
-        """Sentences from a file all share the same per-doc metadata."""
-        # CoNLL-U named to match a sidecar TSV row by filename stem.
-        _write_conllu(tmp_path, "kzb-001.conllu", TWO_SENTENCE_CONLLU)
+    def test_metadata_attached_to_every_doc_in_file(self, tmp_path: Path) -> None:
+        """Every Document from a file shares the file's per-doc metadata.
+
+        Uses the two-newdoc fixture so the file yields two Documents
+        — both should carry the same metadata since sidecar TSV rows
+        are keyed by filename, not by `# newdoc id`.
+        """
+        _write_conllu(tmp_path, "kzb-001.conllu", TWO_NEWDOCS)
         tsv = tmp_path / "meta.tsv"
         tsv.write_text(
             "ID\tFields\tType\n"
