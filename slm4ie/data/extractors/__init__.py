@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Iterator, Type
+from typing import Any, Dict, Iterator, Optional, Type
 
 from slm4ie.data.schema import Document
 
@@ -22,6 +22,7 @@ class BaseExtractor(ABC):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Extract documents from input_dir and yield them.
 
@@ -29,6 +30,11 @@ class BaseExtractor(ABC):
             input_dir (Path): Directory containing the raw source data.
             source (str): Dataset key (e.g. "ssj500k").
             domain (str): Text domain (e.g. "web").
+            metadata (Optional[Dict[str, Any]]): Optional parsed
+                ``metadata:`` config block from extract.yaml. When given,
+                extractors that support it merge per-document fields
+                from an external TSV into ``Document.metadata``.
+                Extractors that ignore the kwarg simply pass through.
 
         Yields:
             Document: Extracted documents in unified schema format.

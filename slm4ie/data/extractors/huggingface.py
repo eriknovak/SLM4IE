@@ -39,7 +39,7 @@ Example:
 import datetime
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 from datasets import load_from_disk
 
@@ -81,6 +81,7 @@ class HuggingFaceExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all Arrow config dirs in input_dir.
 
@@ -94,10 +95,13 @@ class HuggingFaceExtractor(BaseExtractor):
                 Arrow datasets saved with save_to_disk().
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Ignored; this
+                extractor sources metadata from each row's columns.
 
         Yields:
             Document: One document per non-empty row.
         """
+        del metadata
         config_dirs: List[Path] = sorted(
             p for p in input_dir.iterdir() if p.is_dir()
         )

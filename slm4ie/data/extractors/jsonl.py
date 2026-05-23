@@ -50,7 +50,7 @@ Example:
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
 from slm4ie.data.schema import Annotations, Document, Token
@@ -117,6 +117,7 @@ class JsonlExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all JSONL files under input_dir.
 
@@ -125,10 +126,13 @@ class JsonlExtractor(BaseExtractor):
                 (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Ignored; this
+                extractor sources metadata from each record itself.
 
         Yields:
             Document: One document per valid JSONL line.
         """
+        del metadata
         files: List[Path] = sorted(input_dir.rglob("*.jsonl"))
 
         for filepath in files:

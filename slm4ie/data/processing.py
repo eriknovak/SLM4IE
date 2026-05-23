@@ -119,6 +119,7 @@ def _extract_one(
     """
     extractor_name = ds_cfg["extractor"]
     domain = ds_cfg["domain"]
+    metadata_cfg = ds_cfg.get("metadata")
     input_dir = input_base / key
 
     if not input_dir.exists():
@@ -176,7 +177,9 @@ def _extract_one(
         ann_fh = None
         try:
             for index, doc in enumerate(tqdm(
-                extractor.extract(input_dir, key, domain),
+                extractor.extract(
+                    input_dir, key, domain, metadata=metadata_cfg
+                ),
                 desc=key,
                 unit="doc",
                 disable=workers_quiet(),

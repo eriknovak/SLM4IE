@@ -26,6 +26,20 @@
 #                academic, legal, medical, scientific, forum, blog, news,
 #                student, mixed). Flows into Document.metadata and drives
 #                source-weighted sampling downstream.
+#   metadata     Optional. Per-document metadata loaded from an external
+#                TSV alongside the text files. Joined per source file
+#                (kas/kzb: filename stem; oss: numeric ID extracted via
+#                key_pattern). Recognized keys:
+#                  path         TSV path relative to input_dir/<key>/.
+#                  key_column   Column in the TSV used for lookups.
+#                  key_from     Strategy for deriving the lookup key
+#                               from a source file. "filename_stem" only.
+#                  key_pattern  Optional regex; group 1 becomes the key.
+#                  fields       {tsv_column: metadata_field} renames.
+#                  splits       Optional {tsv_column: separator} to turn
+#                               list-typed columns (e.g. pipe-separated
+#                               keywords) into JSON arrays.
+#                Currently honored by the conllu and tei extractors.
 #
 # Selection: pass dataset keys positionally, or --all for every entry.
 #   --force re-extracts existing outputs; --max-workers sets parallelism.
@@ -53,6 +67,20 @@ datasets:
   kas:
     extractor: tei
     domain: academic
+    metadata:
+      path: kas-meta.tsv
+      key_column: id              # values like "kas-10000" match the TEI filename stem
+      key_from: filename_stem
+      fields:
+        cerif: cerif
+        cerif_conf: cerif_conf
+        udc: udc
+        udc_desc: udc_desc
+        type: doctype
+        publisher_abbr: faculty
+        keywords: keywords
+      splits:
+        keywords: "|"
 
   coleslaw:
     extractor: coleslaw
@@ -65,6 +93,22 @@ datasets:
   oss:
     extractor: conllu
     domain: scientific
+    metadata:
+      path: OSS.CoNLL-U/OSS-metadata.tsv
+      key_column: id
+      key_from: filename_stem
+      key_pattern: '^oss-(\d+)$'  # filenames like oss-10000.conllu
+      fields:
+        cerif: cerif
+        udc: udc
+        udc_desc: udc_desc
+        type: doctype
+        publisher_abbr: faculty
+        keywords: keywords
+      splits:
+        cerif: "|"
+        keywords: "|"
+        udc_desc: "|"
 
   siparl:
     extractor: tei
@@ -85,6 +129,18 @@ datasets:
   kzb:
     extractor: conllu
     domain: scientific
+    metadata:
+      path: KZB.conll/KZB.tsv
+      key_column: ID
+      key_from: filename_stem
+      fields:
+        Fields: field
+        Type: doctype
+        Keywords: keywords
+        Publisher: publisher
+      splits:
+        Fields: ","
+        Keywords: ","
 
   solar:
     extractor: conllu

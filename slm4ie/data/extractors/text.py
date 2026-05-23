@@ -25,7 +25,7 @@ Example:
 
 import logging
 from pathlib import Path
-from typing import Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
 from slm4ie.data.schema import Document
@@ -47,6 +47,7 @@ class TextExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all .txt files under input_dir.
 
@@ -55,10 +56,13 @@ class TextExtractor(BaseExtractor):
                 (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Ignored; this
+                extractor does not consume external metadata.
 
         Yields:
             Document: One document per blank-line-separated block.
         """
+        del metadata
         files: List[Path] = sorted(input_dir.rglob("*.txt"))
 
         for filepath in files:

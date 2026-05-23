@@ -273,3 +273,67 @@ class TestTeiExtractor:
         assert tokens[0].lemma == "gospodarstvo"
         assert tokens[0].feats == "MTE=Ncnsn"
         assert tokens[4].feats == "MTE=Z"
+
+
+class TestTeiMetadata:
+    """End-to-end metadata injection from an external TSV."""
+
+    def test_metadata_attached_via_filename_stem(
+        self, extractor: TeiExtractor, tmp_path: Path
+    ) -> None:
+        """KAS-style: lookup by the TEI file's stem (e.g. ``kas-10000``)."""
+        (tmp_path / "kas-10000.xml").write_text(_KAS_TEI, encoding="utf-8")
+        tsv = tmp_path / "meta.tsv"
+        tsv.write_text(
+            "id\tcerif\tdoctype\n"
+            "kas-10000\tP000\tDiplomsko delo\n",
+            encoding="utf-8",
+        )
+
+        docs = list(
+            extractor.extract(
+                tmp_path,
+                source="kas",
+                domain="academic",
+                metadata={
+                    "path": "meta.tsv",
+                    "key_column": "id",
+                    "fields": {"cerif": "cerif", "doctype": "doctype"},
+                },
+            )
+        )
+
+        assert len(docs) == 1
+        assert docs[0].metadata == {"cerif": "P000", "doctype": "Diplomsko delo"}
+
+    def test_metadata_attached_to_plain_paragraphs(
+        self, extractor: TeiExtractor, tmp_path: Path
+    ) -> None:
+        """Plain TEI (no <w>) also receives the per-file metadata."""
+        (tmp_path / "doc-1.xml").write_text(_PLAIN_TEI, encoding="utf-8")
+        tsv = tmp_path / "meta.tsv"
+        tsv.write_text("id\tnote\ndoc-1\thello\n", encoding="utf-8")
+
+        docs = list(
+            extractor.extract(
+                tmp_path,
+                source="test",
+                domain="web",
+                metadata={
+                    "path": "meta.tsv",
+                    "key_column": "id",
+                    "fields": {"note": "note"},
+                },
+            )
+        )
+
+        assert len(docs) == 2
+        for doc in docs:
+            assert doc.metadata == {"note": "hello"}
+
+    def test_no_metadata_kwarg_keeps_empty_dict(
+        self, extractor: TeiExtractor, tmp_annotated: Path
+    ) -> None:
+        """Without the kwarg, metadata stays empty (backward compatible)."""
+        docs = list(extractor.extract(tmp_annotated, "test", "parl"))
+        assert docs[0].metadata == {}

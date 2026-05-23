@@ -196,3 +196,66 @@ class TestConlluExtractor:
 
         extractor = get_extractor("conllu")
         assert isinstance(extractor, ConlluExtractor)
+
+
+class TestConlluMetadata:
+    """End-to-end metadata injection from an external TSV."""
+
+    def test_metadata_attached_to_every_sentence(self, tmp_path: Path) -> None:
+        """Sentences from a file all share the same per-doc metadata."""
+        # CoNLL-U named to match a sidecar TSV row by filename stem.
+        _write_conllu(tmp_path, "kzb-001.conllu", TWO_SENTENCE_CONLLU)
+        tsv = tmp_path / "meta.tsv"
+        tsv.write_text(
+            "ID\tFields\tType\n"
+            "kzb-001\tgeografija,zgodovina\tmonografija\n",
+            encoding="utf-8",
+        )
+
+        extractor = ConlluExtractor()
+        docs = list(
+            extractor.extract(
+                tmp_path,
+                source="kzb",
+                domain="scientific",
+                metadata={
+                    "path": "meta.tsv",
+                    "key_column": "ID",
+                    "fields": {"Fields": "field", "Type": "doctype"},
+                    "splits": {"Fields": ","},
+                },
+            )
+        )
+
+        assert len(docs) == 2
+        expected = {"field": ["geografija", "zgodovina"], "doctype": "monografija"}
+        assert docs[0].metadata == expected
+        assert docs[1].metadata == expected
+
+    def test_regex_key_pattern_extracts_id(self, tmp_path: Path) -> None:
+        """key_pattern lets the OSS numeric ID drive the lookup."""
+        _write_conllu(tmp_path, "oss-42.conllu", SENTENCE_1)
+        tsv = tmp_path / "meta.tsv"
+        tsv.write_text("id\tudc\n42\t502\n", encoding="utf-8")
+
+        extractor = ConlluExtractor()
+        docs = list(
+            extractor.extract(
+                tmp_path,
+                source="oss",
+                domain="scientific",
+                metadata={
+                    "path": "meta.tsv",
+                    "key_column": "id",
+                    "key_pattern": r"^oss-(\d+)$",
+                    "fields": {"udc": "udc"},
+                },
+            )
+        )
+
+        assert docs[0].metadata == {"udc": "502"}
+
+    def test_no_metadata_kwarg_keeps_empty_dict(self, tmp_path: Path) -> None:
+        """Without the kwarg, metadata stays empty (backward compatible)."""
+        docs = _extract(tmp_path, SENTENCE_1)
+        assert docs[0].metadata == {}

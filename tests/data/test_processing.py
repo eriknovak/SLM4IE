@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Dict, Iterator, Optional
 
 import pytest
 import yaml
@@ -31,6 +31,7 @@ class _StubExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yields a single stub document.
 
@@ -38,6 +39,7 @@ class _StubExtractor(BaseExtractor):
             input_dir (Path): Not used.
             source (str): Not used.
             domain (str): Not used.
+            metadata (Optional[Dict[str, Any]]): Not used.
 
         Yields:
             Document: A single stub document.
@@ -61,6 +63,7 @@ class _AnnotatedStubExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yields a single annotated document.
 
@@ -68,6 +71,7 @@ class _AnnotatedStubExtractor(BaseExtractor):
             input_dir (Path): Not used.
             source (str): Dataset key.
             domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
 
         Yields:
             Document: A single annotated document.
@@ -103,6 +107,7 @@ class _IdlessStubExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield three documents lacking `doc_id`.
 
@@ -110,6 +115,7 @@ class _IdlessStubExtractor(BaseExtractor):
             input_dir (Path): Not used.
             source (str): Dataset key.
             domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
 
         Yields:
             Document: A document without doc_id.
@@ -133,6 +139,7 @@ class _IdlessAnnotatedStubExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield two annotated documents lacking `doc_id`.
 
@@ -140,6 +147,7 @@ class _IdlessAnnotatedStubExtractor(BaseExtractor):
             input_dir (Path): Not used.
             source (str): Dataset key.
             domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
 
         Yields:
             Document: An annotated document without doc_id.
@@ -172,6 +180,7 @@ class _MixedStubExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield four documents alternating annotated and plain.
 
@@ -179,6 +188,7 @@ class _MixedStubExtractor(BaseExtractor):
             input_dir (Path): Not used.
             source (str): Dataset key.
             domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
 
         Yields:
             Document: Mixed annotated/unannotated documents.
@@ -228,6 +238,7 @@ class _RaisingMidStreamExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield two documents, then raise to simulate mid-stream failure.
 
@@ -235,6 +246,7 @@ class _RaisingMidStreamExtractor(BaseExtractor):
             input_dir (Path): Not used.
             source (str): Dataset key.
             domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
 
         Yields:
             Document: Two documents before the explosion.

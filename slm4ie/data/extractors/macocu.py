@@ -32,7 +32,7 @@ Example:
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 from xml.etree import ElementTree
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
@@ -106,6 +106,7 @@ class MacocuExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all MaCoCu XML files under input_dir.
 
@@ -118,10 +119,13 @@ class MacocuExtractor(BaseExtractor):
                 (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Ignored; this
+                extractor sources metadata from <doc> attributes.
 
         Yields:
             Document: One document per non-empty <doc> element.
         """
+        del metadata
         files = sorted(p for p in input_dir.rglob("*.xml") if p.is_file())
 
         for filepath in files:

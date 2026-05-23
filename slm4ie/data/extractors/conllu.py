@@ -27,7 +27,9 @@ Example:
         source:      provided by caller.
         domain:      provided by caller.
         doc_id:      "# sent_id = ..." comment.
-        metadata:    not produced.
+        metadata:    empty by default; populated per-file when the
+                     ``metadata:`` config block is supplied (see
+                     :class:`MetadataLookup`).
         annotations:
             tokens.form:  column 2 (FORM).
             tokens.lemma: column 3 (LEMMA).
@@ -37,9 +39,10 @@ Example:
 """
 
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.metadata_lookup import MetadataLookup
 from slm4ie.data.schema import Annotations, Document, Token
 
 
@@ -173,6 +176,7 @@ class ConlluExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all CoNLL-U files under input_dir.
 
@@ -181,10 +185,21 @@ class ConlluExtractor(BaseExtractor):
                 .conll files (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Optional ``metadata:``
+                config block describing an external per-document TSV.
+                When given, every Document is enriched with the row
+                matched on the source filename. See
+                :class:`MetadataLookup` for the expected schema.
 
         Yields:
             Document: One document per sentence block.
         """
+        lookup: Optional[MetadataLookup] = (
+            MetadataLookup.from_config(input_dir, metadata)
+            if metadata
+            else None
+        )
+
         patterns = ["*.conllu", "*.conll"]
         files: List[Path] = []
         for pattern in patterns:
@@ -192,13 +207,15 @@ class ConlluExtractor(BaseExtractor):
         files.sort()
 
         for filepath in files:
-            yield from self._parse_file(filepath, source, domain)
+            extra = lookup.get_for_path(filepath) if lookup else {}
+            yield from self._parse_file(filepath, source, domain, extra)
 
     def _parse_file(
         self,
         filepath: Path,
         source: str,
         domain: str,
+        extra_metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Parse a single CoNLL-U file and yield Documents.
 
@@ -206,6 +223,8 @@ class ConlluExtractor(BaseExtractor):
             filepath (Path): Path to the CoNLL-U file.
             source (str): Dataset key.
             domain (str): Domain label.
+            extra_metadata (Optional[Dict[str, Any]]): Per-document
+                fields copied into every yielded ``Document.metadata``.
 
         Yields:
             Document: One document per sentence block.
@@ -219,6 +238,8 @@ class ConlluExtractor(BaseExtractor):
                     if current_block:
                         doc = _parse_block(current_block, source, domain)
                         if doc is not None:
+                            if extra_metadata:
+                                doc.metadata = dict(extra_metadata)
                             yield doc
                         current_block = []
                 else:
@@ -228,6 +249,8 @@ class ConlluExtractor(BaseExtractor):
         if current_block:
             doc = _parse_block(current_block, source, domain)
             if doc is not None:
+                if extra_metadata:
+                    doc.metadata = dict(extra_metadata)
                 yield doc
 
 

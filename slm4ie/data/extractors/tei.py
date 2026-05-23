@@ -42,7 +42,9 @@ Example:
         domain:      provided by caller.
         doc_id:      xml:id of the originating <s> (annotated) or
                      <p> (plain).
-        metadata:    not produced.
+        metadata:    empty by default; populated per-file when the
+                     ``metadata:`` config block is supplied (see
+                     :class:`MetadataLookup`).
         annotations: annotated only.
             tokens.form:  text content of <w> / <pc>.
             tokens.lemma: lemma attribute.
@@ -55,10 +57,11 @@ Example:
 
 import logging
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from xml.etree import ElementTree
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.metadata_lookup import MetadataLookup
 from slm4ie.data.schema import Annotations, Document, Token
 
 _TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -253,6 +256,7 @@ def _parse_annotated(
     root: "ElementTree.Element",
     source: str,
     domain: str,
+    extra_metadata: Optional[Dict[str, Any]] = None,
 ) -> Iterator[Document]:
     """Yield Documents from an annotated TEI tree (has <w>).
 
@@ -264,6 +268,8 @@ def _parse_annotated(
         root (ElementTree.Element): Parsed XML root element.
         source (str): Dataset key.
         domain (str): Domain label.
+        extra_metadata (Optional[Dict[str, Any]]): Per-document
+            fields copied into every yielded Document.metadata.
 
     Yields:
         Document: One document per sentence.
@@ -284,6 +290,7 @@ def _parse_annotated(
             source=source,
             domain=domain,
             doc_id=doc_id,
+            metadata=dict(extra_metadata) if extra_metadata else {},
             annotations=annotations,
         )
 
@@ -292,6 +299,7 @@ def _parse_plain(
     root: "ElementTree.Element",
     source: str,
     domain: str,
+    extra_metadata: Optional[Dict[str, Any]] = None,
 ) -> Iterator[Document]:
     """Yield Documents from a plain TEI tree (no <w> elements).
 
@@ -302,6 +310,8 @@ def _parse_plain(
         root (ElementTree.Element): Parsed XML root element.
         source (str): Dataset key.
         domain (str): Domain label.
+        extra_metadata (Optional[Dict[str, Any]]): Per-document
+            fields copied into every yielded Document.metadata.
 
     Yields:
         Document: One document per non-empty paragraph.
@@ -316,6 +326,7 @@ def _parse_plain(
             source=source,
             domain=domain,
             doc_id=doc_id,
+            metadata=dict(extra_metadata) if extra_metadata else {},
         )
 
 
@@ -335,6 +346,7 @@ class TeiExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all TEI XML files in input_dir.
 
@@ -343,10 +355,21 @@ class TeiExtractor(BaseExtractor):
                 .xml files.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Optional ``metadata:``
+                config block describing an external per-document TSV.
+                When given, every Document is enriched with the row
+                matched on the source filename. See
+                :class:`MetadataLookup` for the expected schema.
 
         Yields:
             Document: Extracted documents in unified schema format.
         """
+        lookup: Optional[MetadataLookup] = (
+            MetadataLookup.from_config(input_dir, metadata)
+            if metadata
+            else None
+        )
+
         for filepath in sorted(input_dir.rglob("*.xml")):
             try:
                 tree = ElementTree.parse(filepath)
@@ -356,13 +379,14 @@ class TeiExtractor(BaseExtractor):
                 )
                 continue
 
+            extra = lookup.get_for_path(filepath) if lookup else {}
             root = tree.getroot()
             is_annotated = next(root.iter(_W_TAG), None) is not None
 
             if is_annotated:
-                yield from _parse_annotated(root, source, domain)
+                yield from _parse_annotated(root, source, domain, extra)
             else:
-                yield from _parse_plain(root, source, domain)
+                yield from _parse_plain(root, source, domain, extra)
 
 
 register_extractor("tei", TeiExtractor)

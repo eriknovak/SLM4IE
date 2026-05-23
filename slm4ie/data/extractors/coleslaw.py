@@ -148,6 +148,7 @@ class ColeslawExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
         """Yield Documents from all COLESLAW JSONL files under input_dir.
 
@@ -156,10 +157,13 @@ class ColeslawExtractor(BaseExtractor):
                 subcorpora (searched recursively).
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            metadata (Optional[Dict[str, Any]]): Ignored; this
+                extractor sources metadata from each record itself.
 
         Yields:
             Document: One document per record with non-empty text.
         """
+        del metadata
         files = sorted(p for p in input_dir.rglob("*.jsonl") if p.is_file())
 
         for filepath in files:
