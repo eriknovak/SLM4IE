@@ -59,10 +59,16 @@ datasets:
     enabled: true
     source: http
     provider: clarin.si
-    name: "ParlaMint-SI 5.0"
+    name: "ParlaMint-SI 5.0 (linguistically annotated)"
     urls:
-      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2004/ParlaMint-SI.tgz?sequence=27&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2005/ParlaMint-SI.ana.tgz?sequence=27&isAllowed=y"
     output_dir: parlamint_si
+    note: >
+      The .ana variant (handle 11356/2005) ships TEI XML with <w>/<pc>
+      token annotations inside <u>/<seg> utterances — required by the
+      utterance-aware TEI extractor. The plain variant (handle
+      11356/2004) lacks <w> tokens and would silently fall back to
+      paragraph parsing on registry/header content.
 
   kas:
     enabled: false

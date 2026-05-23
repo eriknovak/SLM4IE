@@ -1,11 +1,19 @@
 """CoNLL-U format extractor for the SLM4IE pipeline.
 
 Reads .conllu and .conll files and yields one `Document` per real
-document. Documents are bounded by `# newdoc id = ...` markers when
-present; files lacking that marker collapse to a single Document per
-file (`doc_id` derived from the filename stem). Sentence-level
-structure is preserved inside `Annotations.sentences` as inclusive
-`[start, end]` token-index spans.
+document. Document boundaries are detected in this order:
+
+1. `# newdoc id = ...` markers (the standard CoNLL-U signal).
+2. Changes in the leading component of a hierarchical `# sent_id`
+   (e.g. `solar1.1.1` → `solar2.1.1` opens a new document with
+   `doc_id = "solar2"`). Only used when no `# newdoc id` marker
+   has appeared in the file — once one is seen the file is treated
+   as marker-driven and the prefix heuristic is disabled.
+3. Per file (`doc_id` derived from the filename stem) when neither
+   signal is present.
+
+Sentence-level structure is preserved inside `Annotations.sentences`
+as inclusive `[start, end]` token-index spans.
 
 Multiword tokens (ID containing `-`) and empty nodes (ID containing
 `.`) are skipped. Columns are tab-separated: ID, FORM, LEMMA, UPOS,
@@ -41,8 +49,9 @@ Example:
                      when the comment is absent.
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      value of `# newdoc id = ...` when present,
-                     otherwise the file's stem.
+        doc_id:      value of `# newdoc id = ...` when present;
+                     otherwise the leading `# sent_id` prefix
+                     when hierarchical; otherwise the file's stem.
         metadata:    empty by default; populated per-file when the
                      `metadata:` config block is supplied (see
                      `MetadataLookup`).
@@ -173,6 +182,36 @@ def _newdoc_id(lines: List[str]) -> Optional[str]:
     return None
 
 
+def _sent_id_prefix(lines: List[str]) -> Optional[str]:
+    """Return the leading component of `# sent_id = <prefix>.X.Y...`.
+
+    Sources such as Solar pack thousands of essays into a single
+    `.conllu` file without ever emitting `# newdoc id` markers, but
+    encode the essay identifier as the first dot-separated component
+    of every `# sent_id` (e.g. `solar1.1.1`, `solar2.4.7`). When
+    that prefix changes between sentence blocks the corpus intends a
+    document boundary.
+
+    Args:
+        lines (List[str]): Non-empty lines of a sentence block.
+
+    Returns:
+        Optional[str]: The portion of `# sent_id` before the first
+            `.`, or `None` when no `# sent_id` is present or the
+            value does not contain a `.` (in which case the prefix
+            cannot be distinguished from the full sentence id).
+    """
+    for line in lines:
+        if line.startswith("# sent_id = "):
+            value = line[len("# sent_id = "):]
+            if "." in value:
+                return value.split(".", 1)[0]
+            return None
+        if not line.startswith("#"):
+            return None
+    return None
+
+
 def _build_document(
     sentence_texts: List[str],
     sentence_tokens: List[List[Token]],
@@ -226,10 +265,11 @@ class ConlluExtractor(BaseExtractor):
     """Extracts Documents from CoNLL-U / CoNLL files.
 
     Groups sentence blocks into Documents using `# newdoc id`
-    markers when present; falls back to one Document per file
-    (`doc_id` = filename stem) for sources that don't emit the
-    marker. Recursively discovers all .conllu and .conll files under
-    the given directory (sorted).
+    markers when present; otherwise uses changes in the leading
+    component of hierarchical `# sent_id` values as boundaries;
+    otherwise falls back to one Document per file (`doc_id` =
+    filename stem). Recursively discovers all .conllu and .conll
+    files under the given directory (sorted).
     """
 
     def extract(
@@ -253,8 +293,9 @@ class ConlluExtractor(BaseExtractor):
                 for the expected schema.
 
         Yields:
-            Document: One Document per `# newdoc id` block, or one
-                Document per file when the marker is absent.
+            Document: One Document per `# newdoc id` block when those
+                markers are present; otherwise one per leading
+                `# sent_id` prefix; otherwise one per file.
         """
         lookup: Optional[MetadataLookup] = (
             MetadataLookup.from_config(input_dir, metadata)
@@ -282,10 +323,10 @@ class ConlluExtractor(BaseExtractor):
         """Parse a single CoNLL-U file and yield Documents.
 
         Walks blank-line-separated sentence blocks, accumulating them
-        into the current document. A new document starts on each
-        `# newdoc id = ...` marker; the final document is flushed
-        at EOF. Files with no `# newdoc id` markers produce one
-        Document whose `doc_id` is the file's stem.
+        into the current document. Document boundaries come from (in
+        priority order) `# newdoc id` markers, changes in the
+        leading component of hierarchical `# sent_id` values, or the
+        file itself. The final document is flushed at EOF.
 
         Args:
             filepath (Path): Path to the CoNLL-U file.
@@ -297,13 +338,17 @@ class ConlluExtractor(BaseExtractor):
                 this file (sidecar TSV rows are keyed by filename).
 
         Yields:
-            Document: One Document per newdoc block, or one per file
-                when no markers are present.
+            Document: One Document per detected boundary, or one per
+                file when no boundary signal is present.
         """
         current_block: List[str] = []
         sentence_texts: List[str] = []
         sentence_tokens: List[List[Token]] = []
         current_doc_id: Optional[str] = None
+        # Once any `# newdoc id` appears the file is treated as
+        # marker-driven and the sent_id-prefix heuristic is off.
+        seen_newdoc_marker = False
+        current_prefix: Optional[str] = None
 
         def _flush() -> Optional[Document]:
             if not sentence_tokens:
@@ -319,16 +364,35 @@ class ConlluExtractor(BaseExtractor):
             )
 
         def _consume(block: List[str]) -> Iterator[Document]:
-            nonlocal sentence_texts, sentence_tokens, current_doc_id
+            nonlocal sentence_texts, sentence_tokens
+            nonlocal current_doc_id, seen_newdoc_marker, current_prefix
+
             newdoc = _newdoc_id(block)
-            if newdoc is not None and sentence_tokens:
-                doc = _flush()
-                if doc is not None:
-                    yield doc
-                sentence_texts = []
-                sentence_tokens = []
             if newdoc is not None:
+                if sentence_tokens:
+                    doc = _flush()
+                    if doc is not None:
+                        yield doc
+                    sentence_texts = []
+                    sentence_tokens = []
+                seen_newdoc_marker = True
                 current_doc_id = newdoc
+                current_prefix = None
+            elif not seen_newdoc_marker:
+                prefix = _sent_id_prefix(block)
+                if prefix is not None:
+                    if current_prefix is None:
+                        current_prefix = prefix
+                        current_doc_id = prefix
+                    elif prefix != current_prefix:
+                        if sentence_tokens:
+                            doc = _flush()
+                            if doc is not None:
+                                yield doc
+                            sentence_texts = []
+                            sentence_tokens = []
+                        current_prefix = prefix
+                        current_doc_id = prefix
 
             parsed = _parse_block(block)
             if parsed is not None:

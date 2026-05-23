@@ -46,19 +46,49 @@ ONE_NEWDOC_TWO_SENTENCES = SENTENCE_1 + "\n" + SENTENCE_2
 # Two newdoc blocks — two Documents, one per block.
 TWO_NEWDOCS = SENTENCE_1 + "\n" + SENTENCE_2_NEWDOC
 
-# Sentences with no newdoc marker at all — per-file fallback kicks in.
+# Sentences with no newdoc marker and flat (non-hierarchical) sent_ids
+# — per-file fallback kicks in. (Sent_ids without a `.` disable the
+# sent_id-prefix heuristic.)
 NO_NEWDOC_MARKER = textwrap.dedent("""\
-    # sent_id = a.s1
+    # sent_id = s1
     # text = Prva poved.
     1\tPrva\tprv\tADJ\tAgpfsn\tCase=Nom|Gender=Fem|Number=Sing\t2\tamod\t_\t_
     2\tpoved\tpoved\tNOUN\tNcfsn\tCase=Nom|Gender=Fem|Number=Sing\t0\troot\t_\t_
     3\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
 
-    # sent_id = a.s2
+    # sent_id = s2
     # text = Druga poved.
     1\tDruga\tdrug\tADJ\tAgpfsn\tCase=Nom|Gender=Fem|Number=Sing\t2\tamod\t_\t_
     2\tpoved\tpoved\tNOUN\tNcfsn\tCase=Nom|Gender=Fem|Number=Sing\t0\troot\t_\t_
     3\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
+""")
+
+# Solar-style: no newdoc markers, hierarchical sent_ids whose
+# leading dot-separated component identifies the essay. Two essays.
+SOLAR_STYLE_TWO_ESSAYS = textwrap.dedent("""\
+    # sent_id = solar1.1.1
+    # text = Prva poved prvega eseja.
+    1\tPrva\tprv\tADJ\tAgpfsn\t_\t2\tamod\t_\t_
+    2\tpoved\tpoved\tNOUN\tNcfsn\t_\t0\troot\t_\t_
+    3\tprvega\tprv\tADJ\tAgpmsg\t_\t4\tamod\t_\t_
+    4\teseja\tesej\tNOUN\tNcmsg\t_\t2\tnmod\t_\t_
+    5\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
+
+    # sent_id = solar1.2.1
+    # text = Druga poved prvega eseja.
+    1\tDruga\tdrug\tADJ\tAgpfsn\t_\t2\tamod\t_\t_
+    2\tpoved\tpoved\tNOUN\tNcfsn\t_\t0\troot\t_\t_
+    3\tprvega\tprv\tADJ\tAgpmsg\t_\t4\tamod\t_\t_
+    4\teseja\tesej\tNOUN\tNcmsg\t_\t2\tnmod\t_\t_
+    5\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
+
+    # sent_id = solar2.1.1
+    # text = Prva poved drugega eseja.
+    1\tPrva\tprv\tADJ\tAgpfsn\t_\t2\tamod\t_\t_
+    2\tpoved\tpoved\tNOUN\tNcfsn\t_\t0\troot\t_\t_
+    3\tdrugega\tdrug\tADJ\tAgpmsg\t_\t4\tamod\t_\t_
+    4\teseja\tesej\tNOUN\tNcmsg\t_\t2\tnmod\t_\t_
+    5\t.\t.\tPUNCT\tZ\t_\t2\tpunct\t_\t_
 """)
 
 NER_SENTENCE = textwrap.dedent("""\
@@ -176,7 +206,7 @@ class TestConlluExtractor:
         assert docs[1].text == "Seja se je začela ob devetih."
 
     def test_per_file_fallback_when_no_newdoc(self, tmp_path: Path) -> None:
-        """A file with no `# newdoc id` collapses to one Document per file."""
+        """No newdoc and flat sent_ids collapse to one Document per file."""
         docs = _extract(tmp_path, NO_NEWDOC_MARKER, filename="essay.conllu")
         assert len(docs) == 1
         assert docs[0].doc_id == "essay"
@@ -185,6 +215,64 @@ class TestConlluExtractor:
         # Both sentences end up in the one Document.
         assert ann.sentences == [[0, 2], [3, 5]]
         assert docs[0].text == "Prva poved.\nDruga poved."
+
+    def test_sent_id_prefix_splits_solar_style_essays(
+        self, tmp_path: Path
+    ) -> None:
+        """No newdoc + hierarchical sent_ids → split by leading prefix."""
+        docs = _extract(
+            tmp_path, SOLAR_STYLE_TWO_ESSAYS, filename="solar-orig.conllu"
+        )
+        assert len(docs) == 2
+        # The prefix becomes the doc_id, surfacing the source's own
+        # document identifier instead of the file stem.
+        assert docs[0].doc_id == "solar1"
+        assert docs[1].doc_id == "solar2"
+        # Essay 1 has 2 sentences (5 + 5 tokens), essay 2 has 1
+        # (5 tokens).
+        ann0 = docs[0].annotations
+        ann1 = docs[1].annotations
+        assert ann0 is not None and ann1 is not None
+        assert ann0.sentences == [[0, 4], [5, 9]]
+        assert ann1.sentences == [[0, 4]]
+        assert docs[0].text == (
+            "Prva poved prvega eseja.\nDruga poved prvega eseja."
+        )
+        assert docs[1].text == "Prva poved drugega eseja."
+
+    def test_newdoc_marker_overrides_sent_id_prefix_heuristic(
+        self, tmp_path: Path
+    ) -> None:
+        """A `# newdoc id` marker disables the prefix heuristic.
+
+        When both signals are present, `# newdoc id` takes priority;
+        subsequent sent_id prefix changes within the same newdoc are
+        ignored (the source has explicitly declared the boundaries).
+        """
+        # Two newdocs, but the sent_ids' leading components vary
+        # within each newdoc — those variations must NOT split docs.
+        content = textwrap.dedent("""\
+            # newdoc id = paper1
+            # sent_id = chapter1.s1
+            # text = Prvo.
+            1\tPrvo\tprv\tADJ\t_\t_\t0\troot\t_\t_
+            2\t.\t.\tPUNCT\tZ\t_\t1\tpunct\t_\t_
+
+            # sent_id = chapter2.s1
+            # text = Drugo.
+            1\tDrugo\tdrug\tADJ\t_\t_\t0\troot\t_\t_
+            2\t.\t.\tPUNCT\tZ\t_\t1\tpunct\t_\t_
+
+            # newdoc id = paper2
+            # sent_id = chapter1.s1
+            # text = Tretje.
+            1\tTretje\ttretji\tADJ\t_\t_\t0\troot\t_\t_
+            2\t.\t.\tPUNCT\tZ\t_\t1\tpunct\t_\t_
+        """)
+        docs = _extract(tmp_path, content)
+        assert len(docs) == 2
+        assert docs[0].doc_id == "paper1"
+        assert docs[1].doc_id == "paper2"
 
     def test_source_and_domain(self, tmp_path: Path) -> None:
         """Source and domain are passed through to each Document."""
@@ -199,16 +287,17 @@ class TestConlluExtractor:
     def test_processes_multiple_files(self, tmp_path: Path) -> None:
         """Both .conllu and .conll files are discovered and processed."""
         _write_conllu(tmp_path, "file1.conllu", SENTENCE_1)
-        # SENTENCE_2 alone has no newdoc id; per-file fallback gives it
-        # its own Document keyed off the file stem.
+        # SENTENCE_2 has no newdoc id but its `# sent_id = doc1.s2`
+        # has a hierarchical prefix — the sent_id-prefix heuristic
+        # surfaces "doc1" as the doc_id.
         _write_conllu(tmp_path, "file2.conll", SENTENCE_2)
         extractor = ConlluExtractor()
         docs = list(
             extractor.extract(tmp_path, source="test", domain="test")
         )
         assert len(docs) == 2
-        assert docs[0].doc_id == "doc1"          # from `# newdoc id`
-        assert docs[1].doc_id == "file2"         # per-file fallback
+        assert docs[0].doc_id == "doc1"  # from `# newdoc id` in SENTENCE_1
+        assert docs[1].doc_id == "doc1"  # from sent_id prefix in SENTENCE_2
 
     def test_handles_underscore_feats(self, tmp_path: Path) -> None:
         """_ in feats column is converted to None."""
