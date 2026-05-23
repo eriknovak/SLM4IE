@@ -101,11 +101,11 @@ def _run_cli(
         monkeypatch: pytest's monkeypatch fixture.
         cfg: pretrain.yaml-equivalent dict.
         args: CLI argv tail (excluding the script name).
-        project_root: Project root used for stopword resolution.
+        project_root: Stubbed return value for `_find_project_root`.
     """
     monkeypatch.setattr(curate_cli, "_load_yaml", lambda _p: cfg)
     monkeypatch.setattr(
-        curate_cli, "_load_stopwords", lambda _root, _cfg: (set(), b"")
+        curate_cli, "_load_stopwords", lambda _cfg: (set(), b"")
     )
     monkeypatch.setattr(curate_cli, "_find_project_root", lambda: project_root)
     monkeypatch.setattr(curate_cli, "_list_datasets", lambda _p: [])

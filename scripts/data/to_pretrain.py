@@ -81,6 +81,7 @@ from slm4ie.data.curate.pipeline import (
     pipeline_io_counts,
 )
 from slm4ie.data.io_utils import DEFAULT_MAX_SHARD_BYTES, find_project_root as _find_project_root
+from slm4ie.data.stopwords import load_stopwords
 
 logger = logging.getLogger(__name__)
 
@@ -201,32 +202,31 @@ def _resolve_dirs(
     return Path(raw_input), Path(raw_output)
 
 
-def _load_stopwords(project_root: Path, cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
+def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
     """Load the stopword set and return (set, raw_bytes_for_hashing).
 
+    Thin wrapper over `slm4ie.data.stopwords.load_stopwords`. Reads the
+    language code from `cfg['stopwords']`. A missing or empty key
+    disables stopwords (returns an empty set and empty bytes, after
+    logging a warning). An unknown code is propagated as `ValueError`
+    so a config typo fails the run.
+
     Args:
-        project_root: Project root for resolving relative stopword paths.
         cfg: Parsed pretrain.yaml.
 
     Returns:
-        Tuple of `(stopword set, raw file bytes)`. When `stopwords:` is
-        not configured or the file is missing, returns `(set(), b"")`.
+        Tuple of `(stopword set, raw file bytes)`. The bytes are folded
+        into the sentinel hash for stages that consume stopwords.
+
+    Raises:
+        ValueError: If `cfg['stopwords']` is set to a code that has no
+            bundled list under `slm4ie/data/stopwords/`.
     """
-    rel = cfg.get("stopwords")
-    if not rel:
+    code = cfg.get("stopwords")
+    if not code:
+        logger.warning("stopwords code not configured; using empty set.")
         return set(), b""
-    path = project_root / rel
-    if not path.exists():
-        logger.warning("stopwords file %s not found; using empty set.", path)
-        return set(), b""
-    raw = path.read_bytes()
-    out: Set[str] = set()
-    for line in raw.decode("utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        out.add(line.lower())
-    return out, raw
+    return load_stopwords(code)
 
 
 def _filter_convert_subset(convert_dir: Path, keys: List[str]) -> Path:
@@ -628,7 +628,7 @@ def main() -> None:
     extract_path = args.extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_path)
     input_dir, output_dir = _resolve_dirs(args, cfg)
-    stopwords, stopwords_raw = _load_stopwords(project_root, cfg)
+    stopwords, stopwords_raw = _load_stopwords(cfg)
 
     if args.all:
         dataset_keys = _list_datasets(extract_path)

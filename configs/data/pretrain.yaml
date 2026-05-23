@@ -8,7 +8,10 @@
 # Top-level keys:
 #   input_dir    Root of the extracted/ tier.
 #   output_dir   Root of the pretrain-owned stage tree.
-#   stopwords    Stopword file used by the `quality` and `stats` stages.
+#   stopwords    Language code (e.g. `sl`) selecting the bundled
+#                stopword list at slm4ie/data/stopwords/<code>.txt;
+#                used by the `quality` and `stats` stages. Omit the
+#                key to disable stopwords; an unknown code is an error.
 #   <stage>      One section per stage (convert, language, quality,
 #                repetition, exact_dedup, sentence_dedup, stats); each is
 #                documented inline below and is the exclusive input to
@@ -22,9 +25,11 @@
 input_dir: /vault/data/SLM4IE/extracted
 output_dir: /vault/data/SLM4IE/pretrain
 
-# Stopword file used by both the quality stage (Gopher's min_stop_words)
-# and the stats stage (word/n-gram/keyword filtering).
-stopwords: configs/data/stopwords_sl.txt
+# Language code selecting the bundled stopword list at
+# slm4ie/data/stopwords/<code>.txt. Used by both the quality stage
+# (Gopher's min_stop_words) and the stats stage (word/n-gram/keyword
+# filtering). Omit to disable; unknown code raises at startup.
+stopwords: sl
 
 # 00_convert — Stage 0: lift extracted <key>.jsonl into datatrove
 #   `Document`-shaped shards (text / id / metadata).
@@ -91,7 +96,7 @@ language:
 #   Drops docs on their own text alone; never compares across docs.
 #   Consumed by: datatrove GopherQualityFilter, wired by
 #                pipeline.build_quality_executors (QualityConfig). Also
-#                reads the shared `stopwords` file above.
+#                reads the shared `stopwords` configuration above.
 #   Reads:  <output_dir>/01_language/  Writes: <output_dir>/02_quality/
 #   Keys:
 #     min_doc_words               Drop docs shorter than this.
@@ -108,7 +113,8 @@ language:
 #                                 contain an alphabetic character
 #                                 (datatrove keeps the legacy name).
 #     min_stop_words              Minimum stopword tokens a doc must
-#                                 contain (uses the `stopwords` file).
+#                                 contain (uses the `stopwords` list
+#                                 selected above).
 quality:
   min_doc_words: 50
   max_doc_words: 100000
