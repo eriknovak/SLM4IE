@@ -200,6 +200,11 @@ def _extract_shard(
             )
         ):
             if doc.doc_id is None:
+                # Shard-namespaced fallback id (vs. the serial writer's
+                # global `idx-{index:014d}`). Only differs for extractors
+                # that yield null doc_ids; the converted file-based
+                # extractors assign real ids except `text`, whose only
+                # dataset (cc100) is a single file and never shards.
                 doc.doc_id = f"idx-{index:05d}-{local:010d}"
             tf.write(doc.to_jsonl_line())
             tf.write("\n")
@@ -265,6 +270,8 @@ def _extract_serial(
                 disable=workers_quiet(),
             )):
                 if doc.doc_id is None:
+                    # Global fallback id. The sharded path uses a
+                    # shard-namespaced scheme; see _extract_shard.
                     doc.doc_id = f"idx-{index:014d}"
 
                 tf.write(doc.to_jsonl_line())
@@ -351,6 +358,9 @@ def _extract_sharded(
     results: List[Optional[ShardResult]] = [None] * len(chunks)
 
     try:
+        # The dataset loop runs serially (run_parallel max_workers=1),
+        # so the parent process is single-threaded here and forking the
+        # pool is safe. Keep the dataset axis serial if revisiting.
         with ProcessPoolExecutor(max_workers=shard_workers) as executor:
             future_to_index = {
                 executor.submit(
@@ -474,6 +484,13 @@ def _extract_one(
             "Removing orphan partial annotations file for '%s'", key,
         )
         ann_partial.unlink()
+
+    # A prior sharded run that was hard-killed (no finally) can leave
+    # its shard temp dir behind; remove it so it cannot accumulate.
+    stale_shards = output_base / f".{key}.shards"
+    if stale_shards.exists():
+        logger.info("Removing orphan shard temp dir for '%s'", key)
+        shutil.rmtree(stale_shards, ignore_errors=True)
 
     # Decompress any archives before extraction
     for archive in sorted(input_dir.iterdir()):
