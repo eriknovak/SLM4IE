@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 from xml.etree import ElementTree
 
-from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def _doc_metadata(doc_elem: "ElementTree.Element") -> Dict[str, Any]:
     return metadata
 
 
-class MacocuExtractor(BaseExtractor):
+class MacocuExtractor(FileBasedExtractor):
     """Extracts Documents from MaCoCu monolingual XML files.
 
     Recursively discovers .xml files under the given input directory.
@@ -101,33 +101,42 @@ class MacocuExtractor(BaseExtractor):
     the entire tree into memory.
     """
 
-    def extract(
+    def iter_input_files(self, input_dir: Path) -> List[Path]:
+        """Return sorted .xml files under input_dir.
+
+        Args:
+            input_dir (Path): Directory searched recursively.
+
+        Returns:
+            List[Path]: Sorted .xml file paths.
+        """
+        return sorted(p for p in input_dir.rglob("*.xml") if p.is_file())
+
+    def extract_files(
         self,
-        input_dir: Path,
+        files: List[Path],
         source: str,
         domain: str,
+        input_dir: Path,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Document]:
-        """Yield Documents from all MaCoCu XML files under input_dir.
+        """Yield Documents from the given MaCoCu XML files.
 
         Parse errors are logged as warnings and the offending file is
         skipped. <doc> elements with no paragraph text are skipped
         silently.
 
         Args:
-            input_dir (Path): Directory containing .xml files
-                (searched recursively).
+            files (List[Path]): .xml files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
-            metadata (Optional[Dict[str, Any]]): Ignored; this
-                extractor sources metadata from <doc> attributes.
+            input_dir (Path): Unused; metadata comes from <doc> attrs.
+            metadata (Optional[Dict[str, Any]]): Ignored.
 
         Yields:
             Document: One document per non-empty <doc> element.
         """
-        del metadata
-        files = sorted(p for p in input_dir.rglob("*.xml") if p.is_file())
-
+        del input_dir, metadata
         for filepath in files:
             try:
                 yield from self._parse_file(filepath, source, domain)
