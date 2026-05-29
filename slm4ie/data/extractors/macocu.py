@@ -33,7 +33,7 @@ Example:
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
-from xml.etree import ElementTree
+from lxml import etree
 
 from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.schema import Document
@@ -51,14 +51,14 @@ _DOC_METADATA_KEYS = (
 )
 
 
-def _doc_text(doc_elem: "ElementTree.Element") -> str:
+def _doc_text(doc_elem: "etree._Element") -> str:
     """Build a document's text by joining its <p> contents.
 
     Paragraphs are joined with a single newline. Leading and trailing
     whitespace on each paragraph is stripped.
 
     Args:
-        doc_elem (ElementTree.Element): A <doc> element.
+        doc_elem (etree._Element): A <doc> element.
 
     Returns:
         str: Concatenated paragraph text. Empty if no paragraph
@@ -72,11 +72,11 @@ def _doc_text(doc_elem: "ElementTree.Element") -> str:
     return "\n".join(parts)
 
 
-def _doc_metadata(doc_elem: "ElementTree.Element") -> Dict[str, Any]:
+def _doc_metadata(doc_elem: "etree._Element") -> Dict[str, Any]:
     """Collect metadata from a <doc> element's attributes.
 
     Args:
-        doc_elem (ElementTree.Element): A <doc> element.
+        doc_elem (etree._Element): A <doc> element.
 
     Returns:
         Dict[str, Any]: Selected attributes (title, url, etc.) that
@@ -97,8 +97,8 @@ class MacocuExtractor(FileBasedExtractor):
     One Document is emitted per <doc> element with non-empty paragraph
     text. The element's id attribute is used as doc_id.
 
-    Uses ElementTree.iterparse to stream large corpora without loading
-    the entire tree into memory.
+    Uses lxml's tag-filtered iterparse to stream large corpora without
+    loading the entire tree into memory.
     """
 
     def iter_input_files(self, input_dir: Path) -> List[Path]:
@@ -140,7 +140,7 @@ class MacocuExtractor(FileBasedExtractor):
         for filepath in files:
             try:
                 yield from self._parse_file(filepath, source, domain)
-            except ElementTree.ParseError as exc:
+            except etree.XMLSyntaxError as exc:
                 logger.warning(
                     "Skipping %s — parse error: %s", filepath, exc
                 )
@@ -161,10 +161,7 @@ class MacocuExtractor(FileBasedExtractor):
         Yields:
             Document: One document per non-empty <doc> element.
         """
-        for _, elem in ElementTree.iterparse(filepath, events=("end",)):
-            if elem.tag != "doc":
-                continue
-
+        for _, elem in etree.iterparse(str(filepath), events=("end",), tag="doc"):
             text = _doc_text(elem)
             if text:
                 yield Document(
