@@ -79,8 +79,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         type=int,
         default=0,
         help=(
-            "Extract datasets in parallel. 0=auto (cpu_count // 2), "
-            "1=serial, N=N workers. Capped at the number of datasets."
+            "Shard workers used WITHIN each dataset (datasets run "
+            "sequentially). 0=auto (all cores), 1=serial single pass, "
+            "N=N worker processes. Only file-based extractors with "
+            "enough input files are sharded."
         ),
     )
     args = parser.parse_args(argv)
