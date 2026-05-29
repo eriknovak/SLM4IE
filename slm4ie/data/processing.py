@@ -4,6 +4,8 @@ import gzip
 import json
 import logging
 import os
+import shutil
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,7 +23,7 @@ import slm4ie.data.extractors.macocu  # noqa: F401
 import slm4ie.data.extractors.tei  # noqa: F401
 import slm4ie.data.extractors.text  # noqa: F401
 from slm4ie.data.extract import extract_archive
-from slm4ie.data.extractors import get_extractor
+from slm4ie.data.extractors import BaseExtractor, FileBasedExtractor, get_extractor
 from slm4ie.data.parallel import (
     cpu_default,
     resolve_workers,
@@ -34,6 +36,10 @@ logger = logging.getLogger(__name__)
 #: Minimum number of input files before intra-dataset sharding kicks in.
 #: Below this, the per-file overhead of a process pool is not worth it.
 _SHARD_MIN_FILES = 8
+
+#: Chunks per worker for shard work-stealing. Over-provisioning past the
+#: worker count keeps all workers busy when shards finish unevenly.
+_SHARD_OVERPROVISION = 4
 
 
 @dataclass
@@ -211,12 +217,208 @@ def _extract_shard(
     return ShardResult(index, text_path, ann_path, count, had_real_ann)
 
 
+def _extract_serial(
+    key: str,
+    extractor: BaseExtractor,
+    domain: str,
+    metadata_cfg: Optional[Dict[str, Any]],
+    input_dir: Path,
+    text_file: Path,
+    ann_file: Path,
+) -> int:
+    """Stream a dataset to JSONL in a single pass (no sharding).
+
+    This is the original single-process writer: it consumes the
+    extractor generator in order, writing the text JSONL and the
+    gzipped annotations sidecar in lockstep, buffering stubs until the
+    first real annotation appears, then promoting the `.partial` files
+    atomically.
+
+    Args:
+        key (str): Dataset key (used as `source` and in messages).
+        extractor (BaseExtractor): Instantiated extractor.
+        domain (str): Domain label assigned to every Document.
+        metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
+            config block forwarded to the extractor.
+        input_dir (Path): Directory containing the raw source data.
+        text_file (Path): Final destination for the text JSONL.
+        ann_file (Path): Final destination for the gzipped annotations.
+
+    Returns:
+        int: Number of documents written.
+    """
+    text_partial = text_file.parent / f"{text_file.name}.partial"
+    ann_partial = ann_file.parent / f"{ann_file.name}.partial"
+
+    count = 0
+    has_annotations = False
+    pending_stubs: List[Tuple[Optional[str], Optional[str]]] = []
+
+    with open(text_partial, "w", encoding="utf-8") as tf:
+        ann_fh = None
+        try:
+            for index, doc in enumerate(tqdm(
+                extractor.extract(
+                    input_dir, key, domain, metadata=metadata_cfg
+                ),
+                desc=key,
+                unit="doc",
+                disable=workers_quiet(),
+            )):
+                if doc.doc_id is None:
+                    doc.doc_id = f"idx-{index:014d}"
+
+                tf.write(doc.to_jsonl_line())
+                tf.write("\n")
+
+                ann_line = doc.to_annotation_line()
+                if ann_line is not None:
+                    if ann_fh is None:
+                        ann_fh = gzip.open(ann_partial, "wt", encoding="utf-8")
+                        has_annotations = True
+                        for stub_doc_id, stub_uid in pending_stubs:
+                            ann_fh.write(_stub_line(stub_doc_id, stub_uid))
+                            ann_fh.write("\n")
+                        pending_stubs = []
+                    ann_fh.write(ann_line)
+                    ann_fh.write("\n")
+                elif ann_fh is not None:
+                    ann_fh.write(_stub_line(doc.doc_id, doc.uid))
+                    ann_fh.write("\n")
+                else:
+                    pending_stubs.append((doc.doc_id, doc.uid))
+
+                count += 1
+        finally:
+            if ann_fh is not None:
+                ann_fh.close()
+
+    os.replace(text_partial, text_file)
+    if has_annotations:
+        os.replace(ann_partial, ann_file)
+
+    logger.info(
+        "Extracted %d documents from '%s' -> %s%s",
+        count,
+        key,
+        text_file,
+        f" + {ann_file}" if has_annotations else "",
+    )
+    return count
+
+
+def _extract_sharded(
+    key: str,
+    extractor_name: str,
+    domain: str,
+    metadata_cfg: Optional[Dict[str, Any]],
+    input_dir: Path,
+    files: List[Path],
+    text_file: Path,
+    ann_file: Path,
+    shard_workers: int,
+) -> int:
+    """Parse a dataset's files in parallel shards, then merge in order.
+
+    Splits `files` into ordered chunks, parses each chunk in a worker
+    process to its own temp text + annotation shard, then concatenates
+    the shards in order into the canonical outputs and promotes them
+    atomically. The merged text file is byte-identical to the serial
+    writer's; the merged annotations file is a multi-member gzip whose
+    decompressed content matches the serial writer's.
+
+    Args:
+        key (str): Dataset key.
+        extractor_name (str): Registry name of a `FileBasedExtractor`.
+        domain (str): Domain label assigned to every Document.
+        metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
+            config block forwarded to the extractor.
+        input_dir (Path): Dataset root, for sidecar resolution.
+        files (List[Path]): All input files for this dataset, sorted.
+        text_file (Path): Final destination for the text JSONL.
+        ann_file (Path): Final destination for the gzipped annotations.
+        shard_workers (int): Number of worker processes.
+
+    Returns:
+        int: Total number of documents written.
+    """
+    tmp_dir = text_file.parent / f".{key}.shards"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True)
+
+    n_chunks = min(len(files), max(1, shard_workers) * _SHARD_OVERPROVISION)
+    chunks = _chunk_files(files, n_chunks)
+    results: List[Optional[ShardResult]] = [None] * len(chunks)
+
+    try:
+        with ProcessPoolExecutor(max_workers=shard_workers) as executor:
+            future_to_index = {
+                executor.submit(
+                    _extract_shard,
+                    i,
+                    chunk,
+                    key,
+                    extractor_name,
+                    domain,
+                    metadata_cfg,
+                    input_dir,
+                    tmp_dir,
+                ): i
+                for i, chunk in enumerate(chunks)
+            }
+            for future in tqdm(
+                as_completed(future_to_index),
+                total=len(future_to_index),
+                desc=key,
+                unit="shard",
+                disable=workers_quiet(),
+            ):
+                idx = future_to_index[future]
+                results[idx] = future.result()
+
+        ordered = [r for r in results if r is not None]
+        total = sum(r.count for r in ordered)
+        # Keep the merged annotations file only if at least one shard
+        # produced a real annotation; otherwise every line would be a
+        # stub and the serial path would have written no file at all.
+        has_annotations = any(r.had_real_ann for r in ordered)
+
+        text_partial = text_file.parent / f"{text_file.name}.partial"
+        with open(text_partial, "wb") as out:
+            for r in ordered:
+                with open(r.text_path, "rb") as src:
+                    shutil.copyfileobj(src, out)
+        os.replace(text_partial, text_file)
+
+        if has_annotations:
+            ann_partial = ann_file.parent / f"{ann_file.name}.partial"
+            with open(ann_partial, "wb") as out:
+                for r in ordered:
+                    with open(r.ann_path, "rb") as src:
+                        shutil.copyfileobj(src, out)
+            os.replace(ann_partial, ann_file)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    logger.info(
+        "Extracted %d documents from '%s' (%d shards) -> %s%s",
+        total,
+        key,
+        len(ordered),
+        text_file,
+        f" + {ann_file}" if has_annotations else "",
+    )
+    return total
+
+
 def _extract_one(
     key: str,
     ds_cfg: Dict[str, Any],
     input_base: Path,
     output_base: Path,
     force: bool,
+    requested_workers: int = 0,
 ) -> Optional[int]:
     """Extract one dataset to unified JSONL (and optional annotations).
 
@@ -227,6 +429,10 @@ def _extract_one(
         output_base: Directory to write `<key>.jsonl` (+ optional
             `<key>.annotations.jsonl.gz`) into.
         force: When True, overwrite an existing output file.
+        requested_workers: Shard-worker count for intra-dataset
+            parallelism. `0` means auto (all cores). Sharding only
+            engages for `FileBasedExtractor`s with at least
+            `_SHARD_MIN_FILES` input files and more than one worker.
 
     Returns:
         Optional[int]: Document count written, or None when the input
@@ -281,69 +487,41 @@ def _extract_one(
 
     extractor = get_extractor(extractor_name)
 
-    count = 0
-    has_annotations = False
+    cores = os.cpu_count() or 1
+    shard_workers = resolve_workers(requested_workers, cores, cores)
 
-    # Buffer of (doc_id, uid) pairs for text-only docs seen before
-    # the first annotated doc. When annotations begin, these are
-    # backfilled as stub lines so the two streams stay in lockstep.
-    pending_stubs: List[Tuple[Optional[str], Optional[str]]] = []
-
-    with open(text_partial, "w", encoding="utf-8") as tf:
-        ann_fh = None
-        try:
-            for index, doc in enumerate(tqdm(
-                extractor.extract(
-                    input_dir, key, domain, metadata=metadata_cfg
-                ),
-                desc=key,
-                unit="doc",
-                disable=workers_quiet(),
-            )):
-                if doc.doc_id is None:
-                    doc.doc_id = f"idx-{index:014d}"
-
-                tf.write(doc.to_jsonl_line())
-                tf.write("\n")
-
-                ann_line = doc.to_annotation_line()
-                if ann_line is not None:
-                    if ann_fh is None:
-                        ann_fh = gzip.open(ann_partial, "wt", encoding="utf-8")
-                        has_annotations = True
-                        for stub_doc_id, stub_uid in pending_stubs:
-                            ann_fh.write(_stub_line(stub_doc_id, stub_uid))
-                            ann_fh.write("\n")
-                        pending_stubs = []
-                    ann_fh.write(ann_line)
-                    ann_fh.write("\n")
-                elif ann_fh is not None:
-                    ann_fh.write(_stub_line(doc.doc_id, doc.uid))
-                    ann_fh.write("\n")
-                else:
-                    pending_stubs.append((doc.doc_id, doc.uid))
-
-                count += 1
-        finally:
-            if ann_fh is not None:
-                ann_fh.close()
-
-    # Promote partials atomically; single-file os.replace is atomic
-    # on POSIX. If the function raised mid-stream above, control
-    # never reaches here and the orphan recovery on the next run
-    # cleans up the `.partial` files.
-    os.replace(text_partial, text_file)
-    if has_annotations:
-        os.replace(ann_partial, ann_file)
-
-    logger.info(
-        "Extracted %d documents from '%s' -> %s%s",
-        count,
-        key,
-        text_file,
-        f" + {ann_file}" if has_annotations else "",
+    files = (
+        extractor.iter_input_files(input_dir)
+        if isinstance(extractor, FileBasedExtractor)
+        else None
     )
-    return count
+
+    if (
+        files is not None
+        and shard_workers > 1
+        and len(files) >= _SHARD_MIN_FILES
+    ):
+        return _extract_sharded(
+            key,
+            extractor_name,
+            domain,
+            metadata_cfg,
+            input_dir,
+            files,
+            text_file,
+            ann_file,
+            shard_workers,
+        )
+
+    return _extract_serial(
+        key,
+        extractor,
+        domain,
+        metadata_cfg,
+        input_dir,
+        text_file,
+        ann_file,
+    )
 
 
 def extract_datasets(
