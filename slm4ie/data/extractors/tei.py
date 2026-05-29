@@ -74,7 +74,7 @@ Example:
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
-from xml.etree import ElementTree
+from lxml import etree
 
 from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.metadata_sidecar import MetadataSidecar
@@ -208,14 +208,14 @@ def _parse_ana(
 
 
 def _parse_morph(
-    elem: "ElementTree.Element",
+    elem: "etree._Element",
 ) -> Tuple[Optional[str], Optional[str]]:
     """Extract UPOS and feats from a token element.
 
     Prefers msd (ParlaMint, siParl) over ana (KAS).
 
     Args:
-        elem (ElementTree.Element): A <w> or <pc> element.
+        elem (etree._Element): A <w> or <pc> element.
 
     Returns:
         Tuple[Optional[str], Optional[str]]: (upos, feats).
@@ -227,7 +227,7 @@ def _parse_morph(
 
 
 def _extract_tokens_from_sentence(
-    s_elem: "ElementTree.Element",
+    s_elem: "etree._Element",
 ) -> List[Token]:
     """Extract Token objects from a <s> element.
 
@@ -235,7 +235,7 @@ def _extract_tokens_from_sentence(
     <pc> token elements.
 
     Args:
-        s_elem (ElementTree.Element): The <s> XML element.
+        s_elem (etree._Element): The <s> XML element.
 
     Returns:
         List[Token]: Extracted tokens in document order.
@@ -270,7 +270,7 @@ def _extract_tokens_from_sentence(
 
 
 def _build_document(
-    s_elems: List["ElementTree.Element"],
+    s_elems: List["etree._Element"],
     doc_id: str,
     source: str,
     domain: str,
@@ -284,7 +284,7 @@ def _build_document(
     `[start, end]` token-index spans for every contained sentence.
 
     Args:
-        s_elems (List[ElementTree.Element]): The `<s>` elements
+        s_elems (List[etree._Element]): The `<s>` elements
             that constitute this document, in reading order.
         doc_id (str): Identifier for the resulting Document.
         source (str): Dataset key.
@@ -327,11 +327,11 @@ def _build_document(
     )
 
 
-def _utterance_metadata(u_elem: "ElementTree.Element") -> Dict[str, Any]:
+def _utterance_metadata(u_elem: "etree._Element") -> Dict[str, Any]:
     """Return `Document.metadata` derived from a `<u>` element.
 
     Args:
-        u_elem (ElementTree.Element): The `<u>` element.
+        u_elem (etree._Element): The `<u>` element.
 
     Returns:
         Dict[str, Any]: `who` and `ana` attribute values when
@@ -349,7 +349,7 @@ def _utterance_metadata(u_elem: "ElementTree.Element") -> Dict[str, Any]:
 
 
 def _parse_annotated_with_utterances(
-    root: "ElementTree.Element",
+    root: "etree._Element",
     source: str,
     domain: str,
     extra_metadata: Optional[Dict[str, Any]] = None,
@@ -362,7 +362,7 @@ def _parse_annotated_with_utterances(
     top of any per-file fields supplied via *extra_metadata*.
 
     Args:
-        root (ElementTree.Element): Parsed XML root element.
+        root (etree._Element): Parsed XML root element.
         source (str): Dataset key.
         domain (str): Domain label.
         extra_metadata (Optional[Dict[str, Any]]): Per-file fields
@@ -390,7 +390,7 @@ def _parse_annotated_with_utterances(
 
 
 def _parse_annotated_per_file(
-    root: "ElementTree.Element",
+    root: "etree._Element",
     source: str,
     domain: str,
     doc_id: str,
@@ -403,7 +403,7 @@ def _parse_annotated_per_file(
     source filename's stem).
 
     Args:
-        root (ElementTree.Element): Parsed XML root element.
+        root (etree._Element): Parsed XML root element.
         source (str): Dataset key.
         domain (str): Domain label.
         doc_id (str): Identifier for the single produced Document.
@@ -427,7 +427,7 @@ def _parse_annotated_per_file(
 
 
 def _parse_plain(
-    root: "ElementTree.Element",
+    root: "etree._Element",
     source: str,
     domain: str,
     extra_metadata: Optional[Dict[str, Any]] = None,
@@ -438,7 +438,7 @@ def _parse_plain(
     The doc_id comes from the xml:id attribute on <p>.
 
     Args:
-        root (ElementTree.Element): Parsed XML root element.
+        root (etree._Element): Parsed XML root element.
         source (str): Dataset key.
         domain (str): Domain label.
         extra_metadata (Optional[Dict[str, Any]]): Per-document
@@ -520,8 +520,8 @@ class TeiExtractor(FileBasedExtractor):
 
         for filepath in files:
             try:
-                tree = ElementTree.parse(filepath)
-            except ElementTree.ParseError as exc:
+                tree = etree.parse(str(filepath))
+            except etree.XMLSyntaxError as exc:
                 logger.warning(
                     "Skipping %s — parse error: %s", filepath, exc
                 )
@@ -529,7 +529,7 @@ class TeiExtractor(FileBasedExtractor):
 
             extra = sidecar.get_for_path(filepath) if sidecar else {}
             root = tree.getroot()
-            is_annotated = next(root.iter(_W_TAG), None) is not None
+            is_annotated = root.find(f".//{_W_TAG}") is not None
 
             if not is_annotated:
                 yield from _parse_plain(root, source, domain, extra)
@@ -537,7 +537,7 @@ class TeiExtractor(FileBasedExtractor):
 
             # Annotated: prefer <u>-based grouping when the file uses
             # it; otherwise fall back to one Document per file.
-            if next(root.iter(_U_TAG), None) is not None:
+            if root.find(f".//{_U_TAG}") is not None:
                 yield from _parse_annotated_with_utterances(
                     root, source, domain, extra
                 )
