@@ -25,7 +25,6 @@ import slm4ie.data.extractors.text  # noqa: F401
 from slm4ie.data.extract import extract_archive
 from slm4ie.data.extractors import BaseExtractor, FileBasedExtractor, get_extractor
 from slm4ie.data.parallel import (
-    cpu_default,
     resolve_workers,
     run_parallel,
     workers_quiet,
@@ -540,10 +539,12 @@ def extract_datasets(
         dataset_keys: Specific dataset keys to extract. If None, extracts all configured datasets.
         force: When True, re-extract datasets whose output already
             exists. Defaults to False (skip already-extracted datasets).
-        max_workers: Number of datasets to extract in parallel.
-            `0` (default) picks `min(cpu_count // 2, n_datasets)`;
-            `1` runs serially with unwrapped tracebacks; `N > 1`
-            spins up that many worker processes.
+        max_workers: Shard-worker count used *within* each dataset for
+            intra-dataset parallelism. Datasets themselves are always
+            processed sequentially. `0` (default) means auto (all
+            cores); `1` forces the single-pass serial writer; `N > 1`
+            parses each dataset's files across `N` worker processes
+            (only for file-based extractors with enough input files).
         log_dir: When set, per-dataset logs are written to
             `<log_dir>/<key>.log`. The directory is created if it
             does not exist. When extractions fail, the failed dataset
@@ -575,7 +576,6 @@ def extract_datasets(
     output_base.mkdir(parents=True, exist_ok=True)
 
     keys = list(selected.keys())
-    workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
 
     def kwargs_for(key: str) -> Dict[str, Any]:
         return {
@@ -583,12 +583,17 @@ def extract_datasets(
             "input_base": input_base,
             "output_base": output_base,
             "force": force,
+            "requested_workers": max_workers,
         }
 
+    # Datasets are processed strictly sequentially (max_workers=1 on
+    # the dataset axis); parallelism happens *inside* each dataset via
+    # shard workers in `_extract_one`. This keeps exactly one process
+    # pool alive at a time.
     _, failures = run_parallel(
         _extract_one,
         keys,
-        max_workers=workers,
+        max_workers=1,
         desc="extract",
         pool="process",
         kwargs_for=kwargs_for,
