@@ -76,7 +76,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from xml.etree import ElementTree
 
-from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.metadata_sidecar import MetadataSidecar
 from slm4ie.data.schema import Annotations, Document, Token
 
@@ -461,7 +461,7 @@ def _parse_plain(
         )
 
 
-class TeiExtractor(BaseExtractor):
+class TeiExtractor(FileBasedExtractor):
     """Extracts Documents from TEI XML files.
 
     For annotated TEI (containing `<w>` word elements), the
@@ -479,25 +479,35 @@ class TeiExtractor(BaseExtractor):
     download catalogue but supported).
     """
 
-    def extract(
-        self,
-        input_dir: Path,
-        source: str,
-        domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Document]:
-        """Yield Documents from all TEI XML files in input_dir.
+    def iter_input_files(self, input_dir: Path) -> List[Path]:
+        """Return sorted .xml files under input_dir.
 
         Args:
-            input_dir (Path): Directory to search recursively for
-                .xml files.
+            input_dir (Path): Directory searched recursively.
+
+        Returns:
+            List[Path]: Sorted .xml file paths.
+        """
+        return sorted(input_dir.rglob("*.xml"))
+
+    def extract_files(
+        self,
+        files: List[Path],
+        source: str,
+        domain: str,
+        input_dir: Path,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield Documents from the given TEI XML files.
+
+        Args:
+            files (List[Path]): .xml files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            input_dir (Path): Dataset root, used to locate an optional
+                `MetadataSidecar` TSV.
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
-                When given, every Document is enriched with the row
-                matched on the source filename. See `MetadataSidecar`
-                for the expected schema.
 
         Yields:
             Document: Extracted documents in unified schema format.
@@ -508,7 +518,7 @@ class TeiExtractor(BaseExtractor):
             else None
         )
 
-        for filepath in sorted(input_dir.rglob("*.xml")):
+        for filepath in files:
             try:
                 tree = ElementTree.parse(filepath)
             except ElementTree.ParseError as exc:
