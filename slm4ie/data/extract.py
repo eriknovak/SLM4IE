@@ -8,6 +8,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import zstandard
 from tqdm import tqdm
 
 from slm4ie.data.parallel import workers_quiet
@@ -151,6 +152,40 @@ def _extract_tar(archive_path: Path, output_dir: Path) -> Path:
     return output_dir
 
 
+def _extract_tar_zst(archive_path: Path, output_dir: Path) -> Path:
+    """Extract a .tar.zst or .tar.zstd file to output_dir.
+
+    Streams the zstd frame through `tarfile` so members are extracted
+    incrementally without ever materializing the full uncompressed
+    archive on disk. Uses filter="data" for safe extraction.
+
+    Args:
+        archive_path (Path): Path to the zstd-compressed tar archive.
+        output_dir (Path): Directory to extract contents into.
+
+    Returns:
+        Path: The output_dir path.
+    """
+    logger.info("Extracting %s -> %s", archive_path, output_dir)
+    total = archive_path.stat().st_size
+    dctx = zstandard.ZstdDecompressor()
+    with open(archive_path, "rb") as raw_in:
+        with tqdm.wrapattr(
+            raw_in,
+            "read",
+            total=total,
+            unit="B",
+            unit_scale=True,
+            desc=archive_path.name,
+            disable=workers_quiet(),
+        ) as wrapped_in:
+            with dctx.stream_reader(wrapped_in) as reader:
+                with tarfile.open(fileobj=reader, mode="r|") as tf:
+                    for member in tf:
+                        tf.extract(member, output_dir, filter="data")
+    return output_dir
+
+
 def extract_archive(
     archive_path: Path, output_dir: Path
 ) -> Path:
@@ -163,6 +198,8 @@ def extract_archive(
       Skips if output already exists.
     - .zip: extract all contents to output_dir.
     - .tar.gz / .tgz: extract with filter="data" to output_dir.
+    - .tar.zst / .tar.zstd: stream-decompress and extract with
+      filter="data" to output_dir.
 
     Args:
         archive_path (Path): Path to the archive file.
@@ -170,7 +207,7 @@ def extract_archive(
 
     Returns:
         Path: Path to the extracted file (for .gz / .xz) or
-            output_dir (for .zip, .tar.gz, .tgz).
+            output_dir (for .zip, .tar.gz, .tgz, .tar.zst, .tar.zstd).
 
     Raises:
         ValueError: If the archive format is not supported.
@@ -179,6 +216,8 @@ def extract_archive(
 
     if name.endswith(".tar.gz") or name.endswith(".tgz"):
         return _extract_tar(archive_path, output_dir)
+    elif name.endswith(".tar.zst") or name.endswith(".tar.zstd"):
+        return _extract_tar_zst(archive_path, output_dir)
     elif name.endswith(".gz"):
         return _extract_gzip(archive_path, output_dir)
     elif name.endswith(".xz"):

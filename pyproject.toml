@@ -11,6 +11,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "pyyaml>=6.0",
     "datasets>=3.0.0",
+    "zstandard>=0.22",
 ]
 
 [project.optional-dependencies]

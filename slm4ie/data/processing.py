@@ -157,7 +157,7 @@ def _extract_one(
     # Decompress any archives before extraction
     for archive in sorted(input_dir.iterdir()):
         if archive.name.endswith(
-            (".gz", ".xz", ".zip", ".tgz", ".tar.gz")
+            (".gz", ".xz", ".zip", ".tgz", ".tar.gz", ".tar.zst", ".tar.zstd")
         ):
             extract_archive(archive, input_dir)
 
