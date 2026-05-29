@@ -64,7 +64,7 @@ Example:
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.metadata_sidecar import MetadataSidecar
 from slm4ie.data.schema import Annotations, Document, Token
 
@@ -261,7 +261,7 @@ def _build_document(
     )
 
 
-class ConlluExtractor(BaseExtractor):
+class ConlluExtractor(FileBasedExtractor):
     """Extracts Documents from CoNLL-U / CoNLL files.
 
     Groups sentence blocks into Documents using `# newdoc id`
@@ -272,25 +272,39 @@ class ConlluExtractor(BaseExtractor):
     files under the given directory (sorted).
     """
 
-    def extract(
-        self,
-        input_dir: Path,
-        source: str,
-        domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Document]:
-        """Yield Documents from all CoNLL-U files under input_dir.
+    def iter_input_files(self, input_dir: Path) -> List[Path]:
+        """Return sorted .conllu and .conll files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing .conllu and
-                .conll files (searched recursively).
+            input_dir (Path): Directory searched recursively.
+
+        Returns:
+            List[Path]: Sorted CoNLL-U/CoNLL file paths.
+        """
+        files: List[Path] = []
+        for pattern in ("*.conllu", "*.conll"):
+            files.extend(p for p in input_dir.rglob(pattern) if p.is_file())
+        files.sort()
+        return files
+
+    def extract_files(
+        self,
+        files: List[Path],
+        source: str,
+        domain: str,
+        input_dir: Path,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield Documents from the given CoNLL-U/CoNLL files.
+
+        Args:
+            files (List[Path]): Files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            input_dir (Path): Dataset root, used to locate an optional
+                `MetadataSidecar` TSV.
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
-                When given, every Document is enriched with the row
-                matched on the source filename. See `MetadataSidecar`
-                for the expected schema.
 
         Yields:
             Document: One Document per `# newdoc id` block when those
@@ -302,13 +316,6 @@ class ConlluExtractor(BaseExtractor):
             if metadata
             else None
         )
-
-        patterns = ["*.conllu", "*.conll"]
-        files: List[Path] = []
-        for pattern in patterns:
-            files.extend(p for p in input_dir.rglob(pattern) if p.is_file())
-        files.sort()
-
         for filepath in files:
             extra = sidecar.get_for_path(filepath) if sidecar else {}
             yield from self._parse_file(filepath, source, domain, extra)
