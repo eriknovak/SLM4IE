@@ -128,6 +128,89 @@ def _chunk_files(files: List[Path], n_chunks: int) -> List[List[Path]]:
     return [c for c in chunks if c]
 
 
+@dataclass(frozen=True)
+class ShardResult:
+    """Outcome of parsing one file shard.
+
+    Attributes:
+        index (int): Shard ordinal, used to concatenate in order.
+        text_path (Path): Temp file holding this shard's text JSONL.
+        ann_path (Path): Temp file holding this shard's gzipped
+            annotations (one line per document, real or stub).
+        count (int): Documents written by this shard.
+        had_real_ann (bool): True if any document carried a real
+            annotation line (not just a stub).
+    """
+
+    index: int
+    text_path: Path
+    ann_path: Path
+    count: int
+    had_real_ann: bool
+
+
+def _extract_shard(
+    index: int,
+    files: List[Path],
+    key: str,
+    extractor_name: str,
+    domain: str,
+    metadata_cfg: Optional[Dict[str, Any]],
+    input_dir: Path,
+    tmp_dir: Path,
+) -> ShardResult:
+    """Parse one file shard into per-shard text + annotation files.
+
+    Writes exactly one annotation line per document (a real line when
+    the document carries annotations, otherwise a stub), so the shard
+    files stay internally lockstep and concatenate cleanly. Documents
+    without a `doc_id` get a shard-namespaced fallback id.
+
+    Args:
+        index (int): Shard ordinal.
+        files (List[Path]): Files assigned to this shard, in order.
+        key (str): Dataset key (used as the `source` field).
+        extractor_name (str): Registry name of a `FileBasedExtractor`.
+        domain (str): Domain label assigned to every Document.
+        metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
+            config block forwarded to the extractor.
+        input_dir (Path): Dataset root, for sidecar resolution.
+        tmp_dir (Path): Directory to write this shard's temp files into.
+
+    Returns:
+        ShardResult: Paths, document count, and annotation flag.
+    """
+    extractor = get_extractor(extractor_name)
+    text_path = tmp_dir / f"{index:05d}.jsonl"
+    ann_path = tmp_dir / f"{index:05d}.annotations.jsonl.gz"
+    count = 0
+    had_real_ann = False
+
+    with open(text_path, "w", encoding="utf-8") as tf, gzip.open(
+        ann_path, "wt", encoding="utf-8"
+    ) as af:
+        for local, doc in enumerate(
+            extractor.extract_files(
+                files, key, domain, input_dir, metadata_cfg
+            )
+        ):
+            if doc.doc_id is None:
+                doc.doc_id = f"idx-{index:05d}-{local:010d}"
+            tf.write(doc.to_jsonl_line())
+            tf.write("\n")
+
+            ann_line = doc.to_annotation_line()
+            if ann_line is not None:
+                had_real_ann = True
+                af.write(ann_line)
+            else:
+                af.write(_stub_line(doc.doc_id, doc.uid))
+            af.write("\n")
+            count += 1
+
+    return ShardResult(index, text_path, ann_path, count, had_real_ann)
+
+
 def _extract_one(
     key: str,
     ds_cfg: Dict[str, Any],
