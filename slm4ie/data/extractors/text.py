@@ -27,13 +27,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
 
 
-class TextExtractor(BaseExtractor):
+class TextExtractor(FileBasedExtractor):
     """Extracts Documents from plain .txt files.
 
     Documents are delimited by blank lines (the CC100 convention).
@@ -42,29 +42,38 @@ class TextExtractor(BaseExtractor):
     produced.
     """
 
-    def extract(
-        self,
-        input_dir: Path,
-        source: str,
-        domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Document]:
-        """Yield Documents from all .txt files under input_dir.
+    def iter_input_files(self, input_dir: Path) -> List[Path]:
+        """Return sorted .txt files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing .txt files
-                (searched recursively).
+            input_dir (Path): Directory searched recursively.
+
+        Returns:
+            List[Path]: Sorted .txt file paths.
+        """
+        return sorted(input_dir.rglob("*.txt"))
+
+    def extract_files(
+        self,
+        files: List[Path],
+        source: str,
+        domain: str,
+        input_dir: Path,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield Documents from the given .txt files.
+
+        Args:
+            files (List[Path]): .txt files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
-            metadata (Optional[Dict[str, Any]]): Ignored; this
-                extractor does not consume external metadata.
+            input_dir (Path): Unused; this extractor has no sidecar.
+            metadata (Optional[Dict[str, Any]]): Ignored.
 
         Yields:
             Document: One document per blank-line-separated block.
         """
-        del metadata
-        files: List[Path] = sorted(input_dir.rglob("*.txt"))
-
+        del input_dir, metadata
         for filepath in files:
             yield from self._parse_file(filepath, source, domain)
 
