@@ -31,6 +31,10 @@ from slm4ie.data.parallel import (
 
 logger = logging.getLogger(__name__)
 
+#: Minimum number of input files before intra-dataset sharding kicks in.
+#: Below this, the per-file overhead of a process pool is not worth it.
+_SHARD_MIN_FILES = 8
+
 
 @dataclass
 class ExtractionConfig:
@@ -93,6 +97,35 @@ def _stub_line(doc_id: Optional[str], uid: Optional[str]) -> str:
     if uid is not None:
         data["uid"] = uid
     return json.dumps(data, ensure_ascii=False)
+
+
+def _chunk_files(files: List[Path], n_chunks: int) -> List[List[Path]]:
+    """Split files into contiguous, order-preserving slices.
+
+    The first `len(files) % n_chunks` slices get one extra item so the
+    sizes differ by at most one. Empty slices are dropped, so the
+    result has at most `min(n_chunks, len(files))` chunks.
+
+    Args:
+        files (List[Path]): Files to split, in their final order.
+        n_chunks (int): Desired number of chunks (clamped to
+            `[1, len(files)]`).
+
+    Returns:
+        List[List[Path]]: Non-empty chunks whose concatenation equals
+            `files`.
+    """
+    if not files:
+        return []
+    n = max(1, min(n_chunks, len(files)))
+    size, remainder = divmod(len(files), n)
+    chunks: List[List[Path]] = []
+    start = 0
+    for i in range(n):
+        end = start + size + (1 if i < remainder else 0)
+        chunks.append(files[start:end])
+        start = end
+    return [c for c in chunks if c]
 
 
 def _extract_one(

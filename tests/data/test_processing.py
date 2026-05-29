@@ -10,6 +10,7 @@ import yaml
 from slm4ie.data.extractors import register_extractor, BaseExtractor
 from slm4ie.data.schema import Annotations, Document, Token
 from slm4ie.data.processing import (
+    _chunk_files,
     _extract_one,
     extract_datasets,
     load_extraction_config,
@@ -760,3 +761,29 @@ class TestFailuresArtifact:
         assert failures_file.exists()
         lines = failures_file.read_text().strip().splitlines()
         assert lines == ["ds_bad"]
+
+
+def test_chunk_files_contiguous_and_ordered() -> None:
+    """Chunks are contiguous, order-preserving, and cover all files."""
+    from pathlib import Path
+
+    files = [Path(f"{i}.xml") for i in range(10)]
+    chunks = _chunk_files(files, 3)
+
+    assert [len(c) for c in chunks] == [4, 3, 3]
+    assert [p for c in chunks for p in c] == files
+
+
+def test_chunk_files_more_chunks_than_files() -> None:
+    """Requesting more chunks than files yields one file per chunk."""
+    from pathlib import Path
+
+    files = [Path("a.xml"), Path("b.xml")]
+    chunks = _chunk_files(files, 8)
+
+    assert chunks == [[Path("a.xml")], [Path("b.xml")]]
+
+
+def test_chunk_files_empty() -> None:
+    """An empty file list yields no chunks."""
+    assert _chunk_files([], 4) == []
