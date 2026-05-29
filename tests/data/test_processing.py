@@ -1,8 +1,9 @@
 """Tests for slm4ie.data.processing module."""
 
+import gzip
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pytest
 import yaml
@@ -787,3 +788,76 @@ def test_chunk_files_more_chunks_than_files() -> None:
 def test_chunk_files_empty() -> None:
     """An empty file list yields no chunks."""
     assert _chunk_files([], 4) == []
+
+
+def _write_tei_file(path: Path, doc_id: str, words: list) -> None:
+    """Write a minimal annotated TEI file with one sentence.
+
+    Args:
+        path (Path): Destination .xml path.
+        doc_id (str): Value for the file's xml:id and document id.
+        words (list): Word forms to emit as <w> tokens.
+    """
+    w_elems = "".join(
+        f'<w lemma="{w}" msd="UPosTag=NOUN">{w}</w>' for w in words
+    )
+    path.write_text(
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0" '
+        f'xml:id="{doc_id}" xml:lang="sl"><text><body>'
+        f'<s xml:id="{doc_id}.s1">{w_elems}</s>'
+        "</body></text></TEI>",
+        encoding="utf-8",
+    )
+
+
+def _read_gz_lines(path: Path) -> List[str]:
+    """Return decompressed, newline-split lines of a gzip file.
+
+    Args:
+        path (Path): Path to a gzip-compressed text file.
+
+    Returns:
+        List[str]: The decompressed lines without trailing newlines.
+    """
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return fh.read().splitlines()
+
+
+def test_sharded_matches_serial(tmp_path: Path) -> None:
+    """Sharded extraction equals serial output for the same input.
+
+    Text JSONL must be byte-identical; annotations must match after
+    decompression (the sharded gzip is multi-member).
+    """
+    n_files = 12
+    assert n_files >= 8  # _SHARD_MIN_FILES
+    src = tmp_path / "raw" / "tei_ds"
+    src.mkdir(parents=True)
+    for i in range(n_files):
+        _write_tei_file(
+            src / f"doc{i:03d}.xml", f"doc{i:03d}", [f"w{i}a", f"w{i}b"]
+        )
+
+    ds_cfg = {"extractor": "tei", "domain": "mixed"}
+    out_serial = tmp_path / "serial"
+    out_shard = tmp_path / "shard"
+    out_serial.mkdir()
+    out_shard.mkdir()
+
+    _extract_one(
+        "tei_ds", ds_cfg, tmp_path / "raw", out_serial, force=True,
+        requested_workers=1,
+    )
+    _extract_one(
+        "tei_ds", ds_cfg, tmp_path / "raw", out_shard, force=True,
+        requested_workers=4,
+    )
+
+    serial_text = (out_serial / "tei_ds.jsonl").read_bytes()
+    shard_text = (out_shard / "tei_ds.jsonl").read_bytes()
+    assert serial_text == shard_text
+
+    serial_ann = _read_gz_lines(out_serial / "tei_ds.annotations.jsonl.gz")
+    shard_ann = _read_gz_lines(out_shard / "tei_ds.annotations.jsonl.gz")
+    assert serial_ann == shard_ann
+    assert len(serial_ann) == n_files
