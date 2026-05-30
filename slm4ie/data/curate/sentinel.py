@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from slm4ie.data.curate.stages import STAGE_DIRS, cascade_from
+from slm4ie.data.curate.stages import STAGE_DIRS, cascade_from, is_scoped
 
 
 #: Sentinel filename, matching the `to_datatrove.py` convention.
@@ -241,6 +241,34 @@ def invalidate_dataset_sentinels(stage_folder: Path, datasets: List[str]) -> Non
     """
     for dataset in datasets:
         dataset_sentinel_path(stage_folder, dataset).unlink(missing_ok=True)
+
+
+def cascade_invalidate_scoped(
+    output_dir: Path, stage: str, keys: List[str]
+) -> Tuple[str, ...]:
+    """Invalidate *stage* and downstream, honoring per-dataset granularity.
+
+    For scoped stages, only the named *keys*' per-dataset sentinels are
+    removed; for corpus stages the whole stage-level sentinel is removed.
+    A scoped stage's downstream set spans into the corpus stages, so a
+    scoped edit also drops the corpus sentinels.
+
+    Args:
+        output_dir: The curation output root.
+        stage: First stage to invalidate.
+        keys: Dataset keys whose scoped-stage sentinels should drop.
+
+    Returns:
+        The stage names considered (i.e. `cascade_from(stage)`).
+    """
+    affected = cascade_from(stage)
+    for name in affected:
+        stage_folder = output_dir / STAGE_DIRS[name]
+        if is_scoped(name):
+            invalidate_dataset_sentinels(stage_folder, keys)
+        else:
+            (stage_folder / SENTINEL_NAME).unlink(missing_ok=True)
+    return affected
 
 
 def cascade_invalidate(output_dir: Path, stage: str) -> Tuple[str, ...]:

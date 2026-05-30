@@ -222,3 +222,34 @@ def test_invalidate_dataset_sentinels(tmp_path: Path) -> None:
     invalidate_dataset_sentinels(stage_dir, ["a"])
     assert dataset_sentinel_is_current(stage_dir, "a", "h") is False
     assert dataset_sentinel_is_current(stage_dir, "b", "h") is True
+
+
+def test_cascade_invalidate_scoped_mixes_per_dataset_and_corpus(tmp_path: Path) -> None:
+    """Scoped stages drop per-dataset sentinels; corpus stages drop stage sentinels."""
+    from slm4ie.data.curate.sentinel import (
+        cascade_invalidate_scoped,
+        dataset_sentinel_is_current,
+        sentinel_is_current,
+        write_dataset_sentinel,
+        write_sentinel,
+    )
+
+    out = tmp_path
+    # Scoped stage quality has per-dataset sentinels for a, b.
+    q = out / "02_quality"
+    for key in ("a", "b"):
+        write_dataset_sentinel(q, key, config_slice={}, config_hash_value="h",
+                               records_in=1, records_out=1)
+    # Corpus stage exact_dedup has a stage-level sentinel.
+    d = out / "04_1_dedup"
+    write_sentinel(d, config_slice={}, config_hash_value="h",
+                   records_in=1, records_out=1)
+
+    # Invalidate from quality, only for dataset 'a'.
+    cascade_invalidate_scoped(out, "quality", ["a"])
+
+    # quality/a dropped, quality/b kept (only requested keys invalidated).
+    assert dataset_sentinel_is_current(q, "a", "h") is False
+    assert dataset_sentinel_is_current(q, "b", "h") is True
+    # Downstream corpus stage dropped wholesale (roster/inputs changed).
+    assert sentinel_is_current(d, "h") is False
