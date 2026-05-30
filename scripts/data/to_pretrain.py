@@ -62,6 +62,7 @@ from slm4ie.data.curate import (
     upstream_stage,
     write_sentinel,
 )
+from slm4ie.data.curate.stages import is_scoped
 from slm4ie.data.curate.convert import (
     DEFAULT_ID_FIELD,
     DEFAULT_METADATA_FIELDS,
@@ -591,24 +592,25 @@ def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
 def _stage_extra(stage: str, stopwords_bytes: bytes, dataset_keys_bytes: bytes) -> bytes:
     """Return extra bytes folded into the hash for a stage.
 
-    The dataset key list is included for every stage so that switching
-    between `--all` and a positional subset (or adding/removing a
-    dataset from `extract.yaml`) invalidates the sentinels. Stopword
-    file contents are included only for stages that consume them
-    (`quality`, `stats`).
+    Corpus stages (exact_dedup, sentence_dedup, stats) fold in the
+    dataset roster so adding or removing a dataset invalidates them.
+    Scoped stages (convert, language, quality, repetition) exclude the
+    roster so per-dataset work survives roster changes. Stopword file
+    contents are folded for the stages that consume them (quality,
+    stats).
 
     Args:
         stage: Stage name.
         stopwords_bytes: Raw bytes of the stopword file.
-        dataset_keys_bytes: Canonical JSON bytes of the sorted dataset
-            key list.
+        dataset_keys_bytes: Canonical JSON bytes of the sorted roster.
 
     Returns:
-        Bytes to fold into the sentinel hash.
+        Bytes to fold into the stage's sentinel hash.
     """
+    roster = b"" if is_scoped(stage) else dataset_keys_bytes
     if stage in ("quality", "stats"):
-        return stopwords_bytes + b"\x00" + dataset_keys_bytes
-    return dataset_keys_bytes
+        return stopwords_bytes + b"\x00" + roster if roster else stopwords_bytes
+    return roster
 
 
 def main() -> None:

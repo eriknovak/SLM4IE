@@ -30,3 +30,18 @@ def test_filter_stage_subset_missing_key_raises(tmp_path: Path) -> None:
     (stage / "a" / "000.jsonl.gz").write_bytes(b"x")
     with pytest.raises(FileNotFoundError):
         _filter_stage_subset(stage, ["a", "missing"])
+
+
+def test_stage_extra_folds_roster_only_for_corpus_stages() -> None:
+    """Scoped stages exclude the roster; corpus stages include it."""
+    from scripts.data.to_pretrain import _stage_extra
+
+    roster = b'["a","b"]'
+    sw = b"stopwords"
+    # Scoped: roster must NOT appear.
+    assert _stage_extra("language", sw, roster) == b""
+    assert _stage_extra("quality", sw, roster) == sw  # stopwords only, no roster
+    # Corpus: roster present.
+    assert roster in _stage_extra("exact_dedup", sw, roster)
+    assert roster in _stage_extra("stats", sw, roster)
+    assert sw in _stage_extra("stats", sw, roster)  # stats also folds stopwords
