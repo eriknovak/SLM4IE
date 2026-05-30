@@ -2,11 +2,14 @@
 
 from slm4ie.data.curate.stages import (
     ALL_STAGE_NAMES,
+    CORPUS_STAGES,
+    SCOPED_STAGES,
     STAGE_DIRS,
     STAGE_NAMES,
     cascade_from,
     config_slice_keys,
     final_corpus_dir,
+    is_scoped,
     stats_dir,
 )
 
@@ -124,3 +127,21 @@ def test_upstream_stage_rejects_unknown_stage() -> None:
 
     with pytest.raises(KeyError):
         upstream_stage("not_a_stage")
+
+
+def test_scoped_and_corpus_partition_stage_names() -> None:
+    """SCOPED_STAGES + CORPUS_STAGES is exactly STAGE_NAMES, in order."""
+    assert SCOPED_STAGES + CORPUS_STAGES == STAGE_NAMES
+    assert set(SCOPED_STAGES).isdisjoint(CORPUS_STAGES)
+
+
+def test_scoped_membership() -> None:
+    """convert/language/quality/repetition are scoped; dedup/stats are not."""
+    assert SCOPED_STAGES == ("convert", "language", "quality", "repetition")
+    assert CORPUS_STAGES == ("exact_dedup", "sentence_dedup", "stats")
+
+
+def test_is_scoped() -> None:
+    """is_scoped returns True only for scoped stages."""
+    assert is_scoped("quality") is True
+    assert is_scoped("exact_dedup") is False

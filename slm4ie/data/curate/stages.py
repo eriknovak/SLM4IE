@@ -26,6 +26,17 @@ STAGE_NAMES: Tuple[str, ...] = (
 )
 
 
+#: Stages that process one dataset at a time. They honor a dataset
+#: subset, write to canonical `<stage_dir>/<dataset>/`, and are tracked
+#: by per-dataset sentinels.
+SCOPED_STAGES: Tuple[str, ...] = ("convert", "language", "quality", "repetition")
+
+#: Stages that operate over the whole corpus at once. They read every
+#: dataset under their input folder, are tracked by a corpus-level
+#: sentinel whose hash includes the dataset roster, and run only under
+#: `--all`.
+CORPUS_STAGES: Tuple[str, ...] = ("exact_dedup", "sentence_dedup", "stats")
+
 #: Stage names plus the `"all"` sentinel that the CLI uses for the default
 #: "run everything that needs running" mode.
 ALL_STAGE_NAMES: Tuple[str, ...] = STAGE_NAMES + ("all",)
@@ -112,6 +123,24 @@ def cascade_from(stage: str) -> Tuple[str, ...]:
         raise KeyError(stage)
     idx = STAGE_NAMES.index(stage)
     return STAGE_NAMES[idx:]
+
+
+def is_scoped(stage: str) -> bool:
+    """Return True if *stage* is a per-dataset scoped stage.
+
+    Args:
+        stage: One of the values in `STAGE_NAMES`.
+
+    Returns:
+        True for convert/language/quality/repetition; False for the
+        corpus-wide dedup/stats stages.
+
+    Raises:
+        KeyError: If *stage* is not a known stage name.
+    """
+    if stage not in STAGE_NAMES:
+        raise KeyError(stage)
+    return stage in SCOPED_STAGES
 
 
 def upstream_stage(stage: str) -> Optional[str]:
