@@ -63,8 +63,10 @@ from slm4ie.data.curate import (
 )
 from slm4ie.data.curate.stages import CORPUS_STAGES, SCOPED_STAGES, is_scoped
 from slm4ie.data.curate.sentinel import (
+    SENTINEL_NAME,
     cascade_invalidate_scoped,
     dataset_sentinel_is_current,
+    invalidate_dataset_sentinels,
     write_dataset_sentinel,
 )
 from slm4ie.data.curate.convert import (
@@ -650,6 +652,65 @@ def _resolve_requested_stages(stage: str, run_all: bool) -> Tuple[str, ...]:
     return STAGE_NAMES if run_all else SCOPED_STAGES
 
 
+def _apply_force(
+    output_dir: Path, *, stage: str, run_all: bool, dataset_keys: List[str]
+) -> None:
+    """Apply `--force` per the scoped/corpus force matrix.
+
+    Args:
+        output_dir: Curation output root.
+        stage: The `--stage` value (`"all"` or a stage name).
+        run_all: True when `--all` was passed.
+        dataset_keys: Keys in play (the full roster under `--all`, else
+            the positional subset).
+    """
+    paths = CuratePaths(input_folder=output_dir, output_dir=output_dir)
+
+    # Whole-corpus reset only when --all is combined with the default
+    # (all) stage. A subset `--stage all` must never wipe other datasets.
+    if run_all and stage == "all":
+        if output_dir.exists():
+            for child in output_dir.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        logger.warning("--force: cleared %s", output_dir)
+        return
+
+    # Forcing a corpus stage (only reachable under --all): drop the
+    # corpus stage folders (data + sentinel) from that stage downstream.
+    if stage in CORPUS_STAGES:
+        affected = cascade_from(stage)
+        for name in affected:
+            shutil.rmtree(paths.stage_dir(name), ignore_errors=True)
+        if set(affected) & {"exact_dedup", "sentence_dedup"}:
+            shutil.rmtree(paths.dedup_state_dir, ignore_errors=True)
+        logger.warning("--force --stage %s: removed %s", stage, list(affected))
+        return
+
+    # Forcing scoped work: drop the requested keys' per-dataset sentinels
+    # and shard subfolders for the affected scoped stages, then drop the
+    # corpus stages' sentinels (their data is rebuilt on the next --all).
+    scoped_affected = (
+        SCOPED_STAGES
+        if stage == "all"
+        else tuple(s for s in cascade_from(stage) if is_scoped(s))
+    )
+    for name in scoped_affected:
+        folder = paths.stage_dir(name)
+        invalidate_dataset_sentinels(folder, dataset_keys)
+        for key in dataset_keys:
+            shutil.rmtree(folder / key, ignore_errors=True)
+    for name in CORPUS_STAGES:
+        (paths.stage_dir(name) / SENTINEL_NAME).unlink(missing_ok=True)
+    shutil.rmtree(paths.dedup_state_dir, ignore_errors=True)
+    logger.warning(
+        "--force: reset scoped stages %s for %s + corpus sentinels",
+        list(scoped_affected), dataset_keys,
+    )
+
+
 def main() -> None:
     """Entry point for the to_pretrain CLI."""
     logging.basicConfig(
@@ -687,29 +748,8 @@ def main() -> None:
     paths = CuratePaths(input_folder=input_dir, output_dir=output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.force and args.stage == "all":
-        if output_dir.exists():
-            for child in output_dir.iterdir():
-                if child.is_dir():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-            logger.warning("--force: cleared %s", output_dir)
-
-    if args.force and args.stage != "all":
-        affected = cascade_from(args.stage)
-        for name in affected:
-            folder = paths.stage_dir(name)
-            if folder.exists():
-                shutil.rmtree(folder)
-        if any(s in affected for s in ("exact_dedup", "sentence_dedup")):
-            if paths.dedup_state_dir.exists():
-                shutil.rmtree(paths.dedup_state_dir)
-        cascade_invalidate(output_dir, args.stage)
-        logger.warning(
-            "--force --stage %s: removed data folders and sentinels for %s",
-            args.stage, list(affected),
-        )
+    if args.force:
+        _apply_force(output_dir, stage=args.stage, run_all=args.all, dataset_keys=dataset_keys)
 
     requested_stages = _resolve_requested_stages(args.stage, args.all)
 

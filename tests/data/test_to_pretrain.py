@@ -84,3 +84,50 @@ def test_resolve_requested_stages() -> None:
     assert _resolve_requested_stages(stage="all", run_all=True) == STAGE_NAMES
     assert _resolve_requested_stages(stage="quality", run_all=False) == ("quality",)
     assert _resolve_requested_stages(stage="exact_dedup", run_all=True) == ("exact_dedup",)
+
+
+def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
+    """--force gigafida --stage quality drops gigafida's quality sentinel, keeps others."""
+    from slm4ie.data.curate.sentinel import (
+        dataset_sentinel_is_current,
+        write_dataset_sentinel,
+    )
+    from scripts.data.to_pretrain import _apply_force
+
+    out = tmp_path / "pretrain"
+    q = out / "02_quality"
+    for key in ("gigafida", "kas"):
+        write_dataset_sentinel(q, key, config_slice={}, config_hash_value="h",
+                               records_in=1, records_out=1)
+    _apply_force(out, stage="quality", run_all=False, dataset_keys=["gigafida"])
+    assert dataset_sentinel_is_current(q, "gigafida", "h") is False
+    assert dataset_sentinel_is_current(q, "kas", "h") is True
+
+
+def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
+    """--force --all --stage exact_dedup removes dedup data + sentinel and dedup state."""
+    from slm4ie.data.curate.sentinel import write_sentinel
+    from scripts.data.to_pretrain import _apply_force
+
+    out = tmp_path / "pretrain"
+    dedup = out / "04_1_dedup"
+    write_sentinel(dedup, config_slice={}, config_hash_value="h",
+                   records_in=1, records_out=1)
+    (dedup / "alfa").mkdir(parents=True)
+    (dedup / "alfa" / "000.jsonl.gz").write_bytes(b"x")
+    state = out / "_dedup_state"
+    state.mkdir(parents=True)
+    _apply_force(out, stage="exact_dedup", run_all=True, dataset_keys=["alfa"])
+    assert not dedup.exists()
+    assert not state.exists()
+
+
+def test_force_all_stage_all_nukes_output(tmp_path: Path) -> None:
+    """--force --all (default stage all) clears the whole output dir."""
+    from scripts.data.to_pretrain import _apply_force
+
+    out = tmp_path / "pretrain"
+    (out / "00_convert" / "alfa").mkdir(parents=True)
+    (out / "00_convert" / "alfa" / "000.jsonl.gz").write_bytes(b"x")
+    _apply_force(out, stage="all", run_all=True, dataset_keys=["alfa"])
+    assert list(out.iterdir()) == []
