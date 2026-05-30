@@ -89,6 +89,13 @@ _S_TAG = f"{{{_TEI_NS}}}s"
 _P_TAG = f"{{{_TEI_NS}}}p"
 _BODY_TAG = f"{{{_TEI_NS}}}body"
 _U_TAG = f"{{{_TEI_NS}}}u"
+
+#: Files larger than this are parsed with a memory-bounded streaming
+#: reader instead of a full in-memory DOM. GigaFida contains whole-
+#: document segments up to hundreds of MB; an `etree.parse` DOM of such
+#: a file is ~10-15x its size, which OOMs the extractor under parallel
+#: sharding. Smaller files keep the faster full-DOM path.
+_LARGE_FILE_BYTES = 64 * 1024 * 1024
 _NAME_TAG = f"{{{_TEI_NS}}}name"
 _XML_ID = f"{{{_XML_NS}}}id"
 
@@ -328,6 +335,92 @@ def _build_document(
     )
 
 
+def _stream_per_file_document(
+    filepath: Path,
+    doc_id: str,
+    source: str,
+    domain: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[Document], bool]:
+    """Stream-aggregate a large per-file annotated TEI into one Document.
+
+    Reads `<s>` elements via `etree.iterparse` (with `huge_tree`) and
+    clears each one immediately after extracting its tokens, so peak
+    memory tracks the accumulated token list rather than a full DOM.
+    The result is identical to `_parse_annotated_per_file` for the
+    per-file case: iterparse emits `<s>` end events in document order,
+    the same order `root.iter` yields them.
+
+    The function only handles the per-file annotated structure (no
+    `<u>`). It detects an utterance- or plain-structured file and signals
+    the caller to fall back to the full-DOM path: if the first `<s>` is
+    wrapped in a `<u>`, or if the file has no `<s>` at all.
+
+    Args:
+        filepath (Path): Path to the large TEI XML file.
+        doc_id (str): Identifier for the produced Document.
+        source (str): Dataset key.
+        domain (str): Domain label.
+        metadata (Optional[Dict[str, Any]]): Per-file sidecar fields.
+
+    Returns:
+        Tuple[Optional[Document], bool]: `(document, handled)`. When
+            `handled` is True the streaming path applies: `document` is
+            the aggregated Document, or `None` if every `<s>` parsed to
+            zero tokens. When `handled` is False the file is not
+            per-file annotated and the caller must use the full-DOM path.
+    """
+    sentence_texts: List[str] = []
+    flat_tokens: List[Token] = []
+    spans: List[List[int]] = []
+    cursor = 0
+    saw_sentence = False
+
+    context = etree.iterparse(
+        str(filepath), events=("end",), tag=_S_TAG, huge_tree=True
+    )
+    for _, s_elem in context:
+        if not saw_sentence:
+            saw_sentence = True
+            parent = s_elem.getparent()
+            if parent is not None and parent.tag == _U_TAG:
+                # Utterance-structured; per-file aggregation does not
+                # apply. Caller falls back to the full-DOM dispatch.
+                return None, False
+
+        tokens = _extract_tokens_from_sentence(s_elem)
+        if tokens:
+            sentence_texts.append(" ".join(t.form for t in tokens))
+            start = cursor
+            flat_tokens.extend(tokens)
+            cursor += len(tokens)
+            spans.append([start, cursor - 1])
+
+        # Free the parsed sentence and any already-processed siblings so
+        # the in-memory tree never grows past the current sentence.
+        s_elem.clear()
+        while s_elem.getprevious() is not None:
+            del s_elem.getparent()[0]
+
+    if not saw_sentence:
+        # No <s> at all: plain or empty. Let the caller decide.
+        return None, False
+
+    if not flat_tokens:
+        return None, True
+
+    annotations = Annotations(tokens=flat_tokens, sentences=spans)
+    document = Document(
+        text="\n".join(sentence_texts),
+        source=source,
+        domain=domain,
+        doc_id=doc_id,
+        metadata=dict(metadata) if metadata else {},
+        annotations=annotations,
+    )
+    return document, True
+
+
 def _utterance_metadata(u_elem: "etree._Element") -> Dict[str, Any]:
     """Return `Document.metadata` derived from a `<u>` element.
 
@@ -527,6 +620,26 @@ class TeiExtractor(FileBasedExtractor):
         )
 
         for filepath in files:
+            extra = sidecar.get_for_path(filepath) if sidecar else {}
+
+            # Large files would build a multi-GB DOM under etree.parse,
+            # OOMing the extractor under parallel sharding. Stream them
+            # with bounded memory. Non per-file structures (utterance /
+            # plain) — none of which are large in practice — fall through
+            # to the full-DOM path below.
+            try:
+                is_large = filepath.stat().st_size > _LARGE_FILE_BYTES
+            except OSError:
+                is_large = False
+            if is_large:
+                doc, handled = _stream_per_file_document(
+                    filepath, filepath.stem, source, domain, extra
+                )
+                if handled:
+                    if doc is not None:
+                        yield doc
+                    continue
+
             try:
                 tree = etree.parse(str(filepath))
             except etree.XMLSyntaxError as exc:
@@ -535,7 +648,6 @@ class TeiExtractor(FileBasedExtractor):
                 )
                 continue
 
-            extra = sidecar.get_for_path(filepath) if sidecar else {}
             root = tree.getroot()
             is_annotated = root.find(f".//{_W_TAG}") is not None
 

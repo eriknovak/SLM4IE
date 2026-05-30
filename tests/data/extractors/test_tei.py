@@ -4,12 +4,17 @@ from pathlib import Path
 
 import pytest
 
+from lxml import etree
+
 from slm4ie.data.extractors.tei import (
     TeiExtractor,
     _mte_to_upos,
+    _parse_annotated_per_file,
     _parse_ana,
     _parse_msd,
+    _stream_per_file_document,
 )
+import slm4ie.data.extractors.tei as tei_module
 
 # parlamint_si / siParl style — annotated TEI wrapping each speech in
 # a <u> element. Two utterances by different speakers, each carrying
@@ -530,3 +535,77 @@ class TestParsePlainBodyScoped:
             "In drugi odstavek.",
         ]
         assert all("HEADER COPYRIGHT" not in t for t in texts)
+
+
+class TestStreamingLargeFile:
+    """Memory-bounded streaming path for large files must match full-DOM."""
+
+    def test_streaming_matches_full_dom_per_file(self, tmp_path: Path) -> None:
+        """Streamed per-file Document equals the full-DOM Document."""
+        f = tmp_path / "kas.xml"
+        f.write_text(_KAS_TEI, encoding="utf-8")
+
+        root = etree.parse(str(f)).getroot()
+        full = list(
+            _parse_annotated_per_file(
+                root, "kas", "academic", doc_id="kas", extra_metadata={}
+            )
+        )
+        doc, handled = _stream_per_file_document(f, "kas", "kas", "academic", {})
+
+        assert handled is True
+        assert doc is not None
+        assert len(full) == 1
+        assert doc.to_jsonl_line() == full[0].to_jsonl_line()
+        assert doc.to_annotation_line() == full[0].to_annotation_line()
+
+    def test_streaming_aborts_on_utterance(self, tmp_path: Path) -> None:
+        """An utterance-structured file signals fall-back (handled=False)."""
+        f = tmp_path / "u.xml"
+        f.write_text(_UTTERANCE_TEI, encoding="utf-8")
+        doc, handled = _stream_per_file_document(f, "u", "parl", "parl", {})
+        assert handled is False
+        assert doc is None
+
+    def test_streaming_aborts_on_plain(self, tmp_path: Path) -> None:
+        """A plain file (no <s>) signals fall-back (handled=False)."""
+        f = tmp_path / "p.xml"
+        f.write_text(_PLAIN_TEI, encoding="utf-8")
+        doc, handled = _stream_per_file_document(f, "p", "x", "y", {})
+        assert handled is False
+
+    def test_large_gate_streaming_equiv_per_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Routing a per-file dataset through the large-file gate is identical."""
+        d = tmp_path / "ds"
+        d.mkdir()
+        (d / "kas.xml").write_text(_KAS_TEI, encoding="utf-8")
+        ext = TeiExtractor()
+
+        normal = [
+            (x.to_jsonl_line(), x.to_annotation_line())
+            for x in ext.extract(d, "kas", "academic")
+        ]
+        monkeypatch.setattr(tei_module, "_LARGE_FILE_BYTES", 0)
+        streamed = [
+            (x.to_jsonl_line(), x.to_annotation_line())
+            for x in ext.extract(d, "kas", "academic")
+        ]
+        assert streamed == normal
+        assert len(normal) == 1
+
+    def test_large_gate_utterance_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A large utterance file falls back and yields the same documents."""
+        d = tmp_path / "ds"
+        d.mkdir()
+        (d / "u.xml").write_text(_UTTERANCE_TEI, encoding="utf-8")
+        ext = TeiExtractor()
+
+        normal = [x.to_jsonl_line() for x in ext.extract(d, "parl", "parl")]
+        monkeypatch.setattr(tei_module, "_LARGE_FILE_BYTES", 0)
+        streamed = [x.to_jsonl_line() for x in ext.extract(d, "parl", "parl")]
+        assert streamed == normal
+        assert len(normal) == 2
