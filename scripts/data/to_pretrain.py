@@ -62,7 +62,7 @@ from slm4ie.data.curate import (
     upstream_stage,
     write_sentinel,
 )
-from slm4ie.data.curate.stages import is_scoped
+from slm4ie.data.curate.stages import CORPUS_STAGES, is_scoped
 from slm4ie.data.curate.convert import (
     DEFAULT_ID_FIELD,
     DEFAULT_METADATA_FIELDS,
@@ -146,6 +146,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parser.error("argument --all: not allowed with positional datasets")
     if not args.all and not args.datasets:
         parser.error("one of the arguments datasets --all is required")
+    if args.datasets and args.stage in CORPUS_STAGES:
+        parser.error(
+            f"--stage {args.stage} is corpus-wide; run it with --all, "
+            "not with positional dataset keys."
+        )
     return args
 
 

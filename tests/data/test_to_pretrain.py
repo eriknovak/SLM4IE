@@ -45,3 +45,31 @@ def test_stage_extra_folds_roster_only_for_corpus_stages() -> None:
     assert roster in _stage_extra("exact_dedup", sw, roster)
     assert roster in _stage_extra("stats", sw, roster)
     assert sw in _stage_extra("stats", sw, roster)  # stats also folds stopwords
+
+
+def test_corpus_stage_with_positional_keys_errors() -> None:
+    """--stage exact_dedup with positional keys is rejected."""
+    import pytest
+
+    from scripts.data.to_pretrain import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["gigafida", "--stage", "exact_dedup"])
+
+
+def test_corpus_stage_with_all_is_ok() -> None:
+    """--all --stage stats parses fine."""
+    from scripts.data.to_pretrain import parse_args
+
+    args = parse_args(["--all", "--stage", "stats"])
+    assert args.all is True
+    assert args.stage == "stats"
+
+
+def test_scoped_stage_with_positional_keys_ok() -> None:
+    """--stage quality with positional keys is allowed (scoped stage)."""
+    from scripts.data.to_pretrain import parse_args
+
+    args = parse_args(["gigafida", "--stage", "quality"])
+    assert args.datasets == ["gigafida"]
+    assert args.stage == "quality"
