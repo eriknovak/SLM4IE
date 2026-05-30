@@ -258,6 +258,7 @@ def build_quality_executors(
     quality_config: Optional[QualityConfig] = None,
     language: str = Languages.slovenian,
     stopwords: Optional[Set[str]] = None,
+    input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the quality stage: read 01_language/ → Gopher quality → write 02_quality/.
 
@@ -268,12 +269,15 @@ def build_quality_executors(
             Gopher paper values.
         language: ISO-3 code for the word/sentence tokenizer.
         stopwords: Stopword set used by `GopherQualityFilter`.
+        input_override: Optional folder to read from instead of the
+            language stage's output, used to restrict the stage to a
+            symlinked subset of datasets.
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
     cfg = quality_config or QualityConfig()
-    in_ = paths.stage_dir("language")
+    in_ = input_override if input_override is not None else paths.stage_dir("language")
     out = paths.stage_dir("quality")
     executor = LocalPipelineExecutor(
         pipeline=[
@@ -306,6 +310,7 @@ def build_repetition_executors(
     *,
     tasks: int = 1,
     language: str = Languages.slovenian,
+    input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the repetition stage: read 02_quality/ → Gopher repetition → write 03_repetition/.
 
@@ -314,11 +319,14 @@ def build_repetition_executors(
         tasks: Parallel worker count.
         language: ISO-3 code for the word/sentence tokenizer the
             repetition filter uses.
+        input_override: Optional folder to read from instead of the
+            quality stage's output, used to restrict the stage to a
+            symlinked subset of datasets.
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
-    in_ = paths.stage_dir("quality")
+    in_ = input_override if input_override is not None else paths.stage_dir("quality")
     out = paths.stage_dir("repetition")
     executor = LocalPipelineExecutor(
         pipeline=[

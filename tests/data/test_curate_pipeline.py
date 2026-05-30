@@ -531,3 +531,27 @@ class TestCurateCLISelection:
         assert "missing1" in msg
         assert "missing2" in msg
         assert "'kzb'" not in msg
+
+
+def test_quality_executor_honors_input_override(tmp_path: Path) -> None:
+    """build_quality_executors reads from input_override when provided."""
+    from slm4ie.data.curate.pipeline import CuratePaths, build_quality_executors
+
+    paths = CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
+    override = tmp_path / "view"
+    override.mkdir()
+    execs = build_quality_executors(paths, tasks=1, input_override=override)
+    reader = execs[0].pipeline[0]
+    assert str(override) in reader.data_folder.path
+
+
+def test_repetition_executor_honors_input_override(tmp_path: Path) -> None:
+    """build_repetition_executors reads from input_override when provided."""
+    from slm4ie.data.curate.pipeline import CuratePaths, build_repetition_executors
+
+    paths = CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
+    override = tmp_path / "view"
+    override.mkdir()
+    execs = build_repetition_executors(paths, tasks=1, input_override=override)
+    reader = execs[0].pipeline[0]
+    assert str(override) in reader.data_folder.path
