@@ -500,15 +500,15 @@ class TestCurateCLISelection:
         args = curate_cli.parse_args(["--all", "--tasks", "4"])
         assert args.workers == 4
 
-    def test_filter_convert_subset_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
-        """`_filter_convert_subset` builds symlinks for every requested key."""
+    def test_filter_stage_subset_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
+        """`_filter_stage_subset` builds symlinks for every requested key."""
         convert_dir = tmp_path / "00_convert"
         for key in ("kzb", "solar"):
             shard_dir = convert_dir / key
             shard_dir.mkdir(parents=True)
             (shard_dir / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
-        holder = curate_cli._filter_convert_subset(convert_dir, ["kzb", "solar"])
+        holder = curate_cli._filter_stage_subset(convert_dir, ["kzb", "solar"])
         try:
             assert (holder / "kzb" / "00000.jsonl.gz").is_symlink()
             assert (holder / "solar" / "00000.jsonl.gz").is_symlink()
@@ -517,14 +517,14 @@ class TestCurateCLISelection:
 
             shutil.rmtree(holder, ignore_errors=True)
 
-    def test_filter_convert_subset_lists_all_missing_keys(self, tmp_path: Path) -> None:
+    def test_filter_stage_subset_lists_all_missing_keys(self, tmp_path: Path) -> None:
         """Missing shard folders are reported together in one error."""
         convert_dir = tmp_path / "00_convert"
         (convert_dir / "kzb").mkdir(parents=True)
         (convert_dir / "kzb" / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
         with pytest.raises(FileNotFoundError) as excinfo:
-            curate_cli._filter_convert_subset(
+            curate_cli._filter_stage_subset(
                 convert_dir, ["kzb", "missing1", "missing2"]
             )
         msg = str(excinfo.value)

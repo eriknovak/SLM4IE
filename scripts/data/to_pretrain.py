@@ -229,36 +229,35 @@ def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
     return load_stopwords(code)
 
 
-def _filter_convert_subset(convert_dir: Path, keys: List[str]) -> Path:
-    """Materialize a tempdir of symlinks restricted to *keys* under `00_convert/`.
+def _filter_stage_subset(stage_dir: Path, keys: List[str]) -> Path:
+    """Materialize a tempdir of symlinks restricted to *keys* under *stage_dir*.
 
     Args:
-        convert_dir: The convert stage's output folder (typically
-            `<output_dir>/00_convert/`).
+        stage_dir: A scoped stage's output folder (e.g.
+            `<output_dir>/01_language/`).
         keys: Dataset keys to expose.
 
     Returns:
-        Path to a tempdir mirroring the requested keys via symlinks.
-        Downstream stages can be pointed at this folder so their
-        readers walk only the subset's shards.
+        Path to a tempdir mirroring the requested keys via symlinks, so a
+        downstream stage's reader walks only the subset's shards.
 
     Raises:
         FileNotFoundError: If any requested shard folder is missing or
-            empty under *convert_dir*.
+            empty under *stage_dir*.
     """
     missing: List[str] = []
     for key in keys:
-        src = convert_dir / key
+        src = stage_dir / key
         if not src.is_dir() or not any(src.glob("*.jsonl.gz")):
             missing.append(key)
     if missing:
         raise FileNotFoundError(
-            f"No converted shard folder(s) under {convert_dir} for dataset(s): "
+            f"No converted shard folder(s) under {stage_dir} for dataset(s): "
             + ", ".join(repr(k) for k in missing)
         )
     holder = Path(tempfile.mkdtemp(prefix="slm4ie-pretrain-subset-"))
     for key in keys:
-        src = convert_dir / key
+        src = stage_dir / key
         holder_key = holder / key
         holder_key.mkdir()
         for shard in src.glob("*.jsonl.gz"):
@@ -693,7 +692,7 @@ def main() -> None:
                 # run we still need a symlink view of its on-disk output so
                 # downstream readers don't see other keys.
                 if stage == "convert" and not args.all and subset_holder is None:
-                    subset_holder = _filter_convert_subset(stage_folder, dataset_keys)
+                    subset_holder = _filter_stage_subset(stage_folder, dataset_keys)
                 continue
 
             if not cascaded:
@@ -734,7 +733,7 @@ def main() -> None:
             # stages will then read through it rather than seeing every
             # dataset previously written under 00_convert/.
             if stage == "convert" and not args.all and subset_holder is None:
-                subset_holder = _filter_convert_subset(stage_folder, dataset_keys)
+                subset_holder = _filter_stage_subset(stage_folder, dataset_keys)
             write_sentinel(
                 stage_folder,
                 config_slice=slice_,
