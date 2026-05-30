@@ -52,7 +52,6 @@ from datatrove.pipeline.dedup import SentDedupConfig
 
 from slm4ie.data.curate import (
     ALL_STAGE_NAMES,
-    STAGE_DIRS,
     STAGE_NAMES,
     cascade_from,
     cascade_invalidate,
@@ -62,7 +61,12 @@ from slm4ie.data.curate import (
     upstream_stage,
     write_sentinel,
 )
-from slm4ie.data.curate.stages import CORPUS_STAGES, is_scoped
+from slm4ie.data.curate.stages import CORPUS_STAGES, SCOPED_STAGES, is_scoped
+from slm4ie.data.curate.sentinel import (
+    cascade_invalidate_scoped,
+    dataset_sentinel_is_current,
+    write_dataset_sentinel,
+)
 from slm4ie.data.curate.convert import (
     DEFAULT_ID_FIELD,
     DEFAULT_METADATA_FIELDS,
@@ -262,12 +266,16 @@ def _filter_stage_subset(stage_dir: Path, keys: List[str]) -> Path:
             + ", ".join(repr(k) for k in missing)
         )
     holder = Path(tempfile.mkdtemp(prefix="slm4ie-pretrain-subset-"))
-    for key in keys:
-        src = stage_dir / key
-        holder_key = holder / key
-        holder_key.mkdir()
-        for shard in src.glob("*.jsonl.gz"):
-            (holder_key / shard.name).symlink_to(shard.resolve())
+    try:
+        for key in keys:
+            src = stage_dir / key
+            holder_key = holder / key
+            holder_key.mkdir()
+            for shard in src.glob("*.jsonl.gz"):
+                (holder_key / shard.name).symlink_to(shard.resolve())
+    except BaseException:
+        shutil.rmtree(holder, ignore_errors=True)
+        raise
     return holder
 
 
@@ -366,7 +374,7 @@ def _stage_runner(
     workers: int,
     stopwords: Set[str],
     dataset_keys: List[str],
-    convert_view: Optional[Path] = None,
+    input_view: Optional[Path] = None,
     log_dir: Optional[Path] = None,
 ) -> Callable[[], Tuple[int, int]]:
     """Return a zero-arg callable that runs *stage*'s executor chain.
@@ -379,8 +387,11 @@ def _stage_runner(
         stopwords: Loaded stopword set (used by quality and stats).
         dataset_keys: Dataset keys to process; consumed by the convert
             stage to know which `<key>.jsonl` files to read.
-        convert_view: Optional symlink view of `00_convert/` for subset
-            runs (used by the language stage).
+        input_view: Optional symlink view of the stage's upstream output,
+            restricting a scoped stage's reader to the keys being
+            (re)run. Consumed by the language, quality, and repetition
+            stages; ignored by convert (scoped by `dataset_keys`) and by
+            the corpus stages (full-corpus read).
         log_dir: Optional directory for per-task log files (currently
             only consumed by the convert stage).
 
@@ -432,10 +443,9 @@ def _stage_runner(
 
     if stage == "language":
         lang_cfg = cfg.get("language") or {}
-        # Read from the convert subset view when running on a dataset
-        # subset, so downstream readers don't pick up shards from
-        # previously-converted but currently-excluded keys.
-        override = convert_view
+        # Read through the upstream subset view when only some keys are
+        # being (re)run, so the reader skips shards from currently
+        # untouched keys.
 
         def run() -> Tuple[int, int]:
             execs = build_language_executors(
@@ -449,7 +459,7 @@ def _stage_runner(
                 ),
                 lang_low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
                 lang_max_chars=lang_cfg.get("max_chars"),
-                input_override=override,
+                input_override=input_view,
             )
             return pipeline_io_counts(execs[-1].run())
 
@@ -475,6 +485,7 @@ def _stage_runner(
                 tasks=workers,
                 quality_config=quality_config,
                 stopwords=stopwords,
+                input_override=input_view,
             )
             return pipeline_io_counts(execs[-1].run())
 
@@ -482,7 +493,9 @@ def _stage_runner(
 
     if stage == "repetition":
         def run() -> Tuple[int, int]:
-            execs = build_repetition_executors(paths, tasks=workers)
+            execs = build_repetition_executors(
+                paths, tasks=workers, input_override=input_view
+            )
             return pipeline_io_counts(execs[-1].run())
 
         return run
@@ -618,6 +631,25 @@ def _stage_extra(stage: str, stopwords_bytes: bytes, dataset_keys_bytes: bytes) 
     return roster
 
 
+def _resolve_requested_stages(stage: str, run_all: bool) -> Tuple[str, ...]:
+    """Resolve which stages a run executes.
+
+    A subset run (`run_all` False) with `--stage all` runs only the
+    scoped stages and stops before the corpus stages. With `--all`,
+    `all` means every stage. An explicit single stage is returned as-is.
+
+    Args:
+        stage: The `--stage` value (a stage name or `"all"`).
+        run_all: True when `--all` was passed.
+
+    Returns:
+        The stage names to execute, in pipeline order.
+    """
+    if stage != "all":
+        return (stage,)
+    return STAGE_NAMES if run_all else SCOPED_STAGES
+
+
 def main() -> None:
     """Entry point for the to_pretrain CLI."""
     logging.basicConfig(
@@ -679,44 +711,43 @@ def main() -> None:
             args.stage, list(affected),
         )
 
-    requested_stages = STAGE_NAMES if args.stage == "all" else (args.stage,)
+    requested_stages = _resolve_requested_stages(args.stage, args.all)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     convert_log_dir = project_root / "logs" / Path(__file__).stem / stamp / "convert"
 
-    subset_holder: Optional[Path] = None
-    try:
-        cascaded = False
-        for stage in requested_stages:
-            slice_ = _stage_slice(stage, cfg)
-            extra = _stage_extra(stage, stopwords_raw, dataset_keys_bytes)
-            current_hash = config_hash(slice_, extra=extra)
-            stage_folder = paths.stage_dir(stage)
+    # Keys whose per-dataset sentinel an upstream scoped stage just
+    # invalidated; the next scoped stage must re-run them even if their
+    # own sentinel still looks current.
+    force_keys: Set[str] = set()
+    for stage in requested_stages:
+        slice_ = _stage_slice(stage, cfg)
+        extra = _stage_extra(stage, stopwords_raw, dataset_keys_bytes)
+        current_hash = config_hash(slice_, extra=extra)
+        stage_folder = paths.stage_dir(stage)
 
-            if not cascaded and sentinel_is_current(stage_folder, current_hash):
-                logger.info("[%s] sentinel current; skipping.", stage)
-                # The convert stage is unique: when skipped under a subset
-                # run we still need a symlink view of its on-disk output so
-                # downstream readers don't see other keys.
-                if stage == "convert" and not args.all and subset_holder is None:
-                    subset_holder = _filter_stage_subset(stage_folder, dataset_keys)
+        if is_scoped(stage):
+            todo = [
+                k for k in dataset_keys
+                if k in force_keys
+                or not dataset_sentinel_is_current(stage_folder, k, current_hash)
+            ]
+            if not todo:
+                logger.info("[%s] all requested datasets current; skipping.", stage)
                 continue
-
-            if not cascaded:
-                pre_existing = [
-                    s for s in cascade_from(stage)
-                    if (output_dir / STAGE_DIRS[s] / ".complete").exists()
-                ]
-                cascade_invalidate(output_dir, stage)
-                if pre_existing:
-                    logger.warning(
-                        "[%s] cascade-invalidating sentinels for %s", stage, pre_existing
-                    )
-                cascaded = True
+            # Invalidate downstream sentinels for the keys we are about to
+            # (re)run, and force every later scoped stage to re-run them.
+            # Called per scoped stage with work (not just the first): the
+            # repeated drops are idempotent (unlink missing_ok), and each
+            # only invalidates keys in `todo`, which are about to re-run.
+            # Do NOT collapse to a single first-stage call — a later scoped
+            # stage may have its own todo when an earlier one was current.
+            cascade_invalidate_scoped(output_dir, stage, todo)
+            force_keys.update(todo)
 
             if stage == "convert":
                 n_datasets, input_bytes = _extracted_input_summary(
-                    paths.input_folder, dataset_keys
+                    paths.input_folder, todo
                 )
                 logger.info(
                     "[convert] starting (%d dataset(s), %s)",
@@ -724,6 +755,56 @@ def main() -> None:
                 )
             else:
                 logger.info("[%s] starting%s", stage, _starting_input_hint(paths, stage))
+
+            # Build a symlink view of the upstream output restricted to the
+            # keys being (re)run; convert reads extraction output directly.
+            upstream = upstream_stage(stage)
+            view = (
+                _filter_stage_subset(paths.stage_dir(upstream), todo)
+                if upstream is not None
+                else None
+            )
+            try:
+                runner = _stage_runner(
+                    stage,
+                    paths,
+                    cfg,
+                    workers,
+                    stopwords,
+                    dataset_keys=todo,
+                    input_view=view,
+                    log_dir=convert_log_dir if stage == "convert" else None,
+                )
+                records_in, records_out = runner()
+            finally:
+                if view is not None:
+                    shutil.rmtree(view, ignore_errors=True)
+
+            for key in todo:
+                write_dataset_sentinel(
+                    stage_folder,
+                    key,
+                    config_slice=slice_,
+                    config_hash_value=current_hash,
+                    records_in=records_in,
+                    records_out=records_out,
+                )
+            logger.info(
+                "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
+                stage, len(todo), records_in, records_out,
+            )
+        else:
+            # Corpus stage: only valid under --all (guaranteed by
+            # _resolve_requested_stages and parse_args). Stage-level
+            # sentinel; full-corpus read.
+            if not args.all:
+                logger.warning("[%s] corpus stage requires --all; skipping.", stage)
+                continue
+            if sentinel_is_current(stage_folder, current_hash):
+                logger.info("[%s] sentinel current; skipping.", stage)
+                continue
+            cascade_invalidate(output_dir, stage)
+            logger.info("[%s] starting%s", stage, _starting_input_hint(paths, stage))
             runner = _stage_runner(
                 stage,
                 paths,
@@ -731,16 +812,9 @@ def main() -> None:
                 workers,
                 stopwords,
                 dataset_keys=dataset_keys,
-                convert_view=subset_holder,
-                log_dir=convert_log_dir if stage == "convert" else None,
+                input_view=None,
             )
             records_in, records_out = runner()
-            # After the convert stage runs in subset mode, materialize a
-            # symlink view restricted to the requested keys; downstream
-            # stages will then read through it rather than seeing every
-            # dataset previously written under 00_convert/.
-            if stage == "convert" and not args.all and subset_holder is None:
-                subset_holder = _filter_stage_subset(stage_folder, dataset_keys)
             write_sentinel(
                 stage_folder,
                 config_slice=slice_,
@@ -752,9 +826,6 @@ def main() -> None:
                 "[%s] done (records_in=%d, records_out=%d)",
                 stage, records_in, records_out,
             )
-    finally:
-        if subset_holder is not None:
-            shutil.rmtree(subset_holder, ignore_errors=True)
 
 
 if __name__ == "__main__":

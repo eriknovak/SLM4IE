@@ -73,3 +73,14 @@ def test_scoped_stage_with_positional_keys_ok() -> None:
     args = parse_args(["gigafida", "--stage", "quality"])
     assert args.datasets == ["gigafida"]
     assert args.stage == "quality"
+
+
+def test_resolve_requested_stages() -> None:
+    """Subset 'all' = scoped stages; --all 'all' = every stage."""
+    from scripts.data.to_pretrain import _resolve_requested_stages
+    from slm4ie.data.curate.stages import SCOPED_STAGES, STAGE_NAMES
+
+    assert _resolve_requested_stages(stage="all", run_all=False) == SCOPED_STAGES
+    assert _resolve_requested_stages(stage="all", run_all=True) == STAGE_NAMES
+    assert _resolve_requested_stages(stage="quality", run_all=False) == ("quality",)
+    assert _resolve_requested_stages(stage="exact_dedup", run_all=True) == ("exact_dedup",)

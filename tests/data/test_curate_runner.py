@@ -17,6 +17,10 @@ from slm4ie.data.curate import (
     read_sentinel,
 )
 
+#: Single dataset key the stubbed roster exposes. Scoped stages now run
+#: per-dataset, so the runner needs at least one key to do any scoped work.
+_DATASET: str = "d1"
+
 
 def _setup_output(tmp_path: Path) -> Path:
     """Build a minimal <output_dir>/ for a test run.
@@ -54,7 +58,7 @@ def _stub_runner(
         workers: int,
         stopwords: Set[str],
         dataset_keys: List[str],
-        convert_view: Any = None,
+        input_view: Any = None,
         log_dir: Any = None,
     ):
         def run() -> Tuple[int, int]:
@@ -64,6 +68,14 @@ def _stub_runner(
         return run
 
     monkeypatch.setattr(curate_cli, "_stage_runner", fake_runner)
+    # Scoped stages materialize a symlink view of their upstream output.
+    # With the real executors stubbed out there are no shards to mirror,
+    # so stub the view builder to a harmless throwaway directory.
+    monkeypatch.setattr(
+        curate_cli,
+        "_filter_stage_subset",
+        lambda _stage_dir, _keys: None,
+    )
 
 
 def _common_cfg(input_dir: Path, output_dir: Path) -> Dict[str, Any]:
@@ -108,7 +120,7 @@ def _run_cli(
         curate_cli, "_load_stopwords", lambda _cfg: (set(), b"")
     )
     monkeypatch.setattr(curate_cli, "_find_project_root", lambda: project_root)
-    monkeypatch.setattr(curate_cli, "_list_datasets", lambda _p: [])
+    monkeypatch.setattr(curate_cli, "_list_datasets", lambda _p: [_DATASET])
     monkeypatch.setattr(curate_cli.sys, "argv", ["to_pretrain.py", *args])
     curate_cli.main()
 
@@ -230,7 +242,8 @@ def test_sentinel_records_config_slice(
     ran: List[str] = []
     _stub_runner(monkeypatch, ran)
     _run_cli(monkeypatch, cfg, ["--all", "--stage", "quality"], tmp_path)
-    sentinel = read_sentinel(output_dir / STAGE_DIRS["quality"])
+    # Scoped stages write a per-dataset sentinel under <stage>/<dataset>/.
+    sentinel = read_sentinel(output_dir / STAGE_DIRS["quality"] / _DATASET)
     assert sentinel is not None
     assert sentinel.config_slice == {"min_doc_words": 50}
     # The hash includes the dataset_keys_bytes payload, so it does NOT equal
@@ -250,7 +263,8 @@ def test_sentinel_records_counts_from_runner(
     ran: List[str] = []
     _stub_runner(monkeypatch, ran)
     _run_cli(monkeypatch, cfg, ["--all", "--stage", "quality"], tmp_path)
-    sentinel = read_sentinel(output_dir / STAGE_DIRS["quality"])
+    # Scoped stages write a per-dataset sentinel under <stage>/<dataset>/.
+    sentinel = read_sentinel(output_dir / STAGE_DIRS["quality"] / _DATASET)
     assert sentinel is not None
     records_in, records_out = _STUB_COUNTS
     assert sentinel.records_in == records_in
