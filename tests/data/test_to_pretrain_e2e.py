@@ -195,6 +195,18 @@ def test_subset_run_then_all_is_incremental(tmp_path: Path) -> None:
     assert not (out_dir / "04_1_dedup" / ".complete").exists()
     assert not (out_dir / "05_statistics" / ".complete").exists()
 
+    # Capture alfa's per-dataset sentinel mtimes before the --all run so we
+    # can prove they are NOT rewritten (i.e. alfa is skipped, not reprocessed).
+    alfa_sentinels = [
+        out_dir / "00_convert" / "alfa" / ".complete",
+        out_dir / "01_language" / "alfa" / ".complete",
+        out_dir / "02_quality" / "alfa" / ".complete",
+        out_dir / "03_repetition" / "alfa" / ".complete",
+    ]
+    for p in alfa_sentinels:
+        assert p.exists(), f"Expected alfa sentinel after subset run: {p}"
+    alfa_mtimes_before = {p: p.stat().st_mtime_ns for p in alfa_sentinels}
+
     # 2) --all: alfa scoped work skipped, beta processed, corpus stages run.
     _curate(
         datasets=[],
@@ -210,3 +222,10 @@ def test_subset_run_then_all_is_incremental(tmp_path: Path) -> None:
     assert _dataset_dirs(out_dir / "03_repetition") == {"alfa", "beta"}
     assert (out_dir / "04_1_dedup" / ".complete").exists()
     assert (out_dir / "05_statistics" / ".complete").exists()
+    # Prove alfa's scoped sentinels were NOT rewritten during --all (skip-proof).
+    for p in alfa_sentinels:
+        assert p.stat().st_mtime_ns == alfa_mtimes_before[p], (
+            f"{p} was rewritten — alfa should have been skipped during --all"
+        )
+    # Beta's scoped work must now be present too.
+    assert (out_dir / "03_repetition" / "beta" / ".complete").exists()

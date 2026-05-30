@@ -19,18 +19,30 @@ rerun, a stage's sentinel is compared against a fresh hash of its
 config slice; on mismatch the stage and every downstream stage are
 invalidated and re-executed.
 
+The pipeline has two modes:
+
+* **Positional-keys mode** (e.g. ``kzb solar``): runs the four scoped stages
+  (convert → language → quality → repetition) for the named datasets only and
+  stops there.  Corpus stages (exact_dedup, sentence_dedup, stats) are never
+  run in this mode; pass ``--all`` once all datasets are ready to run them.
+
+* **``--all`` mode**: runs every stage for every dataset declared in
+  ``extract.yaml``, skipping any per-dataset or corpus sentinels that are
+  already current.  Corpus stages (exact_dedup, sentence_dedup, stats) require
+  ``--all``; passing ``--stage exact_dedup`` without ``--all`` is an error.
+
 Examples:
-    # Run all stages, skipping any whose config slice hash is unchanged.
+    # Process scoped stages for two datasets; corpus stages run later.
+    uv run python scripts/data/to_pretrain.py kzb solar
+
+    # Run (or resume) the full pipeline over every dataset.
     uv run python scripts/data/to_pretrain.py --all
 
-    # Run only the quality stage. Re-run downstream stats etc. on next --all.
-    uv run python scripts/data/to_pretrain.py --all --stage quality
-
-    # Force-rebuild quality + downstream (drops their sentinels).
+    # Re-run quality and all downstream stages for every dataset.
     uv run python scripts/data/to_pretrain.py --all --force --stage quality
 
-    # Subset of datasets — dedup operates within the given subset only.
-    uv run python scripts/data/to_pretrain.py kzb solar
+    # Force-rebuild just the corpus dedup stages (requires --all).
+    uv run python scripts/data/to_pretrain.py --all --force --stage exact_dedup
 
     # Use cpu_count // 2 workers (default is serial: 1 worker).
     uv run python scripts/data/to_pretrain.py --all --max-workers 0
@@ -783,20 +795,20 @@ def _curate(
     # invalidated; the next scoped stage must re-run them even if their
     # own sentinel still looks current.
     force_keys: Set[str] = set()
-    for stage in requested_stages:
-        slice_ = _stage_slice(stage, cfg)
-        extra = _stage_extra(stage, stopwords_raw, dataset_keys_bytes)
+    for stage_name in requested_stages:
+        slice_ = _stage_slice(stage_name, cfg)
+        extra = _stage_extra(stage_name, stopwords_raw, dataset_keys_bytes)
         current_hash = config_hash(slice_, extra=extra)
-        stage_folder = paths.stage_dir(stage)
+        stage_folder = paths.stage_dir(stage_name)
 
-        if is_scoped(stage):
+        if is_scoped(stage_name):
             todo = [
                 k for k in dataset_keys
                 if k in force_keys
                 or not dataset_sentinel_is_current(stage_folder, k, current_hash)
             ]
             if not todo:
-                logger.info("[%s] all requested datasets current; skipping.", stage)
+                logger.info("[%s] all requested datasets current; skipping.", stage_name)
                 continue
             # Invalidate downstream sentinels for the keys we are about to
             # (re)run, and force every later scoped stage to re-run them.
@@ -805,10 +817,10 @@ def _curate(
             # only invalidates keys in `todo`, which are about to re-run.
             # Do NOT collapse to a single first-stage call — a later scoped
             # stage may have its own todo when an earlier one was current.
-            cascade_invalidate_scoped(output_dir, stage, todo)
+            cascade_invalidate_scoped(output_dir, stage_name, todo)
             force_keys.update(todo)
 
-            if stage == "convert":
+            if stage_name == "convert":
                 n_datasets, input_bytes = _extracted_input_summary(
                     paths.input_folder, todo
                 )
@@ -817,11 +829,11 @@ def _curate(
                     n_datasets, _human_bytes(input_bytes),
                 )
             else:
-                logger.info("[%s] starting%s", stage, _starting_input_hint(paths, stage))
+                logger.info("[%s] starting%s", stage_name, _starting_input_hint(paths, stage_name))
 
             # Build a symlink view of the upstream output restricted to the
             # keys being (re)run; convert reads extraction output directly.
-            upstream = upstream_stage(stage)
+            upstream = upstream_stage(stage_name)
             view = (
                 _filter_stage_subset(paths.stage_dir(upstream), todo)
                 if upstream is not None
@@ -829,14 +841,14 @@ def _curate(
             )
             try:
                 runner = _stage_runner(
-                    stage,
+                    stage_name,
                     paths,
                     cfg,
                     workers,
                     stopwords,
                     dataset_keys=todo,
                     input_view=view,
-                    log_dir=convert_log_dir if stage == "convert" else None,
+                    log_dir=convert_log_dir if stage_name == "convert" else None,
                 )
                 records_in, records_out = runner()
             finally:
@@ -854,22 +866,22 @@ def _curate(
                 )
             logger.info(
                 "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
-                stage, len(todo), records_in, records_out,
+                stage_name, len(todo), records_in, records_out,
             )
         else:
             # Corpus stage: only valid under --all (guaranteed by
             # _resolve_requested_stages and parse_args). Stage-level
             # sentinel; full-corpus read.
             if not run_all:
-                logger.warning("[%s] corpus stage requires --all; skipping.", stage)
+                logger.warning("[%s] corpus stage requires --all; skipping.", stage_name)
                 continue
             if sentinel_is_current(stage_folder, current_hash):
-                logger.info("[%s] sentinel current; skipping.", stage)
+                logger.info("[%s] sentinel current; skipping.", stage_name)
                 continue
-            cascade_invalidate(output_dir, stage)
-            logger.info("[%s] starting%s", stage, _starting_input_hint(paths, stage))
+            cascade_invalidate(output_dir, stage_name)
+            logger.info("[%s] starting%s", stage_name, _starting_input_hint(paths, stage_name))
             runner = _stage_runner(
-                stage,
+                stage_name,
                 paths,
                 cfg,
                 workers,
@@ -887,7 +899,7 @@ def _curate(
             )
             logger.info(
                 "[%s] done (records_in=%d, records_out=%d)",
-                stage, records_in, records_out,
+                stage_name, records_in, records_out,
             )
 
 
