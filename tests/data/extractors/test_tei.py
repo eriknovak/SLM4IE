@@ -86,6 +86,61 @@ _PLAIN_TEI = """\
 </TEI>
 """
 
+# GigaFida-style dedup segment whose body was emptied (near-duplicate
+# paragraphs removed → only a <gap>, no <w>). The teiHeader still carries
+# copyright and COBISS/COMARC <p> elements that must NOT leak as documents.
+_GIGAFIDA_EMPTY_SEGMENT = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:id="GF0011059-7" xml:lang="sl">
+  <teiHeader>
+    <fileDesc>
+      <publicationStmt>
+        <availability>
+          <p xml:lang="sl">Avtorske pravice za to izdajo ureja pogodba.</p>
+          <p xml:lang="en">The copyright for this edition is governed by an agreement.</p>
+        </availability>
+      </publicationStmt>
+      <sourceDesc>
+        <bibl>
+          <note n="COBISS COMARC">
+            <p>011  e0350-753X</p>
+            <p>1010 aslv - slovenski</p>
+          </note>
+        </bibl>
+      </sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <gap quantity="2" unit="paragraphs" reason="near-duplicates"/>
+    </body>
+  </text>
+</TEI>
+"""
+
+# Plain TEI whose teiHeader ALSO contains <p> elements. Only the <body>
+# paragraphs are real documents; the header <p> must be ignored.
+_PLAIN_TEI_WITH_HEADER_P = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <publicationStmt>
+        <availability>
+          <p>HEADER COPYRIGHT - must not appear as a document.</p>
+        </availability>
+      </publicationStmt>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <p>To je pravo besedilo prvega odstavka.</p>
+      <p>In drugi odstavek.</p>
+    </body>
+  </text>
+</TEI>
+"""
+
 
 @pytest.fixture()
 def extractor() -> TeiExtractor:
@@ -441,3 +496,37 @@ class TestTeiMetadata:
         """
         docs = list(extractor.extract(tmp_kas, "kas", "academic"))
         assert docs[0].metadata == {}
+
+
+class TestParsePlainBodyScoped:
+    """Regression tests: _parse_plain must read <body>, not the teiHeader."""
+
+    def test_empty_body_segment_yields_no_documents(
+        self, extractor: TeiExtractor, tmp_path: Path
+    ) -> None:
+        """A dedup segment with an emptied body produces zero documents.
+
+        Such files have no `<w>` and a body holding only a `<gap>`. The
+        extractor previously fell into the plain-TEI path and leaked the
+        teiHeader copyright and COBISS/COMARC `<p>` elements as documents.
+        """
+        (tmp_path / "GF0011059-7-dedup.xml").write_text(
+            _GIGAFIDA_EMPTY_SEGMENT, encoding="utf-8"
+        )
+        docs = list(extractor.extract(tmp_path, "gigafida", "mixed"))
+        assert docs == []
+
+    def test_header_paragraphs_never_extracted(
+        self, extractor: TeiExtractor, tmp_path: Path
+    ) -> None:
+        """Only `<body>` paragraphs become documents; header `<p>` is ignored."""
+        (tmp_path / "doc.xml").write_text(
+            _PLAIN_TEI_WITH_HEADER_P, encoding="utf-8"
+        )
+        docs = list(extractor.extract(tmp_path, "janes", "forum"))
+        texts = [d.text for d in docs]
+        assert texts == [
+            "To je pravo besedilo prvega odstavka.",
+            "In drugi odstavek.",
+        ]
+        assert all("HEADER COPYRIGHT" not in t for t in texts)

@@ -87,6 +87,7 @@ _W_TAG = f"{{{_TEI_NS}}}w"
 _PC_TAG = f"{{{_TEI_NS}}}pc"
 _S_TAG = f"{{{_TEI_NS}}}s"
 _P_TAG = f"{{{_TEI_NS}}}p"
+_BODY_TAG = f"{{{_TEI_NS}}}body"
 _U_TAG = f"{{{_TEI_NS}}}u"
 _NAME_TAG = f"{{{_TEI_NS}}}name"
 _XML_ID = f"{{{_XML_NS}}}id"
@@ -434,8 +435,12 @@ def _parse_plain(
 ) -> Iterator[Document]:
     """Yield Documents from a plain TEI tree (no <w> elements).
 
-    One Document is produced per <p> element with non-empty text.
-    The doc_id comes from the xml:id attribute on <p>.
+    One Document is produced per `<p>` element with non-empty text,
+    scoped to the `<body>` so that `<p>` elements in the `<teiHeader>`
+    (copyright notices, COBISS/COMARC catalog codes) are never emitted
+    as documents. A file whose body has no paragraphs (e.g. a dedup
+    segment emptied to a single `<gap>`) yields nothing. The doc_id
+    comes from the xml:id attribute on `<p>`.
 
     Args:
         root (etree._Element): Parsed XML root element.
@@ -445,9 +450,12 @@ def _parse_plain(
             fields copied into every yielded Document.metadata.
 
     Yields:
-        Document: One document per non-empty paragraph.
+        Document: One document per non-empty body paragraph.
     """
-    for p_elem in root.iter(_P_TAG):
+    body = root.find(f".//{_BODY_TAG}")
+    if body is None:
+        return
+    for p_elem in body.iter(_P_TAG):
         text = "".join(p_elem.itertext()).strip()
         if not text:
             continue
