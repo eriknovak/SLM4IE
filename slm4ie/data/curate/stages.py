@@ -151,8 +151,7 @@ def upstream_stage(stage: str) -> Optional[str]:
 
     Returns:
         The preceding stage's name, or `None` when *stage* is the first
-        stage (`language`) and therefore reads from the run's input
-        folder rather than a previous stage's output.
+        stage (`convert`) and therefore has no upstream stage.
 
     Raises:
         KeyError: If *stage* is not a known stage name.

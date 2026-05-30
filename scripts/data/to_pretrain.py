@@ -189,23 +189,24 @@ def _list_datasets(extract_config: Path) -> List[str]:
 
 
 def _resolve_dirs(
-    args: argparse.Namespace, cfg: Dict[str, Any]
+    input_dir: Optional[Path], output_dir: Optional[Path], cfg: Dict[str, Any]
 ) -> Tuple[Path, Path]:
-    """Resolve input/output dirs from CLI flags or pretrain.yaml.
+    """Resolve input/output dirs from overrides or pretrain.yaml.
 
     Args:
-        args: Parsed CLI namespace.
+        input_dir: Override for `pretrain.yaml::input_dir`, or None.
+        output_dir: Override for `pretrain.yaml::output_dir`, or None.
         cfg: Parsed pretrain.yaml.
 
     Returns:
         Tuple `(input_dir, output_dir)`.
 
     Raises:
-        FileNotFoundError: If neither the CLI flag nor the YAML key is
+        FileNotFoundError: If neither the override nor the YAML key is
             set on either side.
     """
-    raw_input = args.input_dir if args.input_dir is not None else cfg.get("input_dir")
-    raw_output = args.output_dir if args.output_dir is not None else cfg.get("output_dir")
+    raw_input = input_dir if input_dir is not None else cfg.get("input_dir")
+    raw_output = output_dir if output_dir is not None else cfg.get("output_dir")
     if raw_input is None or raw_output is None:
         raise FileNotFoundError(
             "Curation paths not set. Provide --input-dir/--output-dir or set "
@@ -711,32 +712,54 @@ def _apply_force(
     )
 
 
-def main() -> None:
-    """Entry point for the to_pretrain CLI."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    args = parse_args()
+def _curate(
+    *,
+    datasets: List[str],
+    run_all: bool,
+    stage: str,
+    input_dir: Optional[Path],
+    output_dir: Optional[Path],
+    force: bool,
+    workers: int,
+    pretrain_config: Optional[Path] = None,
+    extract_config: Optional[Path] = None,
+) -> None:
+    """Run the curation pipeline (argv-free entry point).
 
+    Args:
+        datasets: Positional dataset keys. Must be empty when run_all is True.
+        run_all: Process every dataset from the extract config.
+        stage: `--stage` value (`"all"` or a stage name).
+        input_dir: Override for pretrain.yaml input_dir, or None.
+        output_dir: Override for pretrain.yaml output_dir, or None.
+        force: Apply the `--force` reset matrix.
+        workers: Worker count (0 = auto).
+        pretrain_config: Path to pretrain.yaml, or None for the default.
+        extract_config: Path to extract.yaml, or None for the default.
+
+    Raises:
+        ValueError: If `datasets` is non-empty while `run_all` is True.
+    """
+    if run_all and datasets:
+        raise ValueError("datasets must be empty when run_all is True")
     project_root = _find_project_root()
-    pretrain_path = args.pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
-    extract_path = args.extract_config or (project_root / "configs" / "data" / "extract.yaml")
+    pretrain_path = pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
+    extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_path)
-    input_dir, output_dir = _resolve_dirs(args, cfg)
+    input_dir, output_dir = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
 
-    if args.all:
+    if run_all:
         dataset_keys = _list_datasets(extract_path)
     else:
-        dataset_keys = list(args.datasets)
+        dataset_keys = list(datasets)
     # `workers` is a CPU budget, not an item count. The convert stage caps
     # it at the dataset count itself (run_convert_stage); the datatrove
     # stages use it as their `tasks` rank count, where shards -- far more
     # numerous than datasets -- are the unit of work. So an explicit
     # --max-workers is honored as-is; auto (0) resolves to cpu_count // 2.
-    workers = args.workers if args.workers > 0 else max(1, (os.cpu_count() or 2) // 2)
-    if args.all:
+    workers = workers if workers > 0 else max(1, (os.cpu_count() or 2) // 2)
+    if run_all:
         logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
     else:
         logger.info(
@@ -748,10 +771,10 @@ def main() -> None:
     paths = CuratePaths(input_folder=input_dir, output_dir=output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.force:
-        _apply_force(output_dir, stage=args.stage, run_all=args.all, dataset_keys=dataset_keys)
+    if force:
+        _apply_force(output_dir, stage=stage, run_all=run_all, dataset_keys=dataset_keys)
 
-    requested_stages = _resolve_requested_stages(args.stage, args.all)
+    requested_stages = _resolve_requested_stages(stage, run_all)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     convert_log_dir = project_root / "logs" / Path(__file__).stem / stamp / "convert"
@@ -837,7 +860,7 @@ def main() -> None:
             # Corpus stage: only valid under --all (guaranteed by
             # _resolve_requested_stages and parse_args). Stage-level
             # sentinel; full-corpus read.
-            if not args.all:
+            if not run_all:
                 logger.warning("[%s] corpus stage requires --all; skipping.", stage)
                 continue
             if sentinel_is_current(stage_folder, current_hash):
@@ -866,6 +889,26 @@ def main() -> None:
                 "[%s] done (records_in=%d, records_out=%d)",
                 stage, records_in, records_out,
             )
+
+
+def main() -> None:
+    """Entry point for the to_pretrain CLI."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    args = parse_args()
+    _curate(
+        datasets=args.datasets,
+        run_all=args.all,
+        stage=args.stage,
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        force=args.force,
+        workers=args.workers,
+        pretrain_config=args.pretrain_config,
+        extract_config=args.extract_config,
+    )
 
 
 if __name__ == "__main__":
