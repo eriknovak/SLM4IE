@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from slm4ie.data.curate.stages import STAGE_DIRS, cascade_from
 
@@ -166,6 +166,81 @@ def sentinel_is_current(stage_folder: Path, expected_hash: str) -> bool:
     """
     sentinel = read_sentinel(stage_folder)
     return sentinel is not None and sentinel.config_hash == expected_hash
+
+
+def dataset_sentinel_path(stage_folder: Path, dataset: str) -> Path:
+    """Return the per-dataset sentinel path under *stage_folder*.
+
+    Args:
+        stage_folder: A scoped stage's output folder (e.g.
+            `<output_dir>/02_quality`).
+        dataset: Dataset key whose sentinel is addressed.
+
+    Returns:
+        Path to `<stage_folder>/<dataset>/.complete`.
+    """
+    return stage_folder / dataset / SENTINEL_NAME
+
+
+def write_dataset_sentinel(
+    stage_folder: Path,
+    dataset: str,
+    *,
+    config_slice: Dict[str, Any],
+    config_hash_value: str,
+    records_in: int,
+    records_out: int,
+) -> Path:
+    """Write a per-dataset `.complete` sentinel for a scoped stage.
+
+    Args:
+        stage_folder: The scoped stage's output folder.
+        dataset: Dataset key the sentinel covers.
+        config_slice: The config slice the run consumed.
+        config_hash_value: Pre-computed hash of *config_slice* (the
+            dataset roster is intentionally excluded for scoped stages).
+        records_in: Records read for this dataset.
+        records_out: Records written for this dataset.
+
+    Returns:
+        Path to the written sentinel file.
+    """
+    return write_sentinel(
+        stage_folder / dataset,
+        config_slice=config_slice,
+        config_hash_value=config_hash_value,
+        records_in=records_in,
+        records_out=records_out,
+    )
+
+
+def dataset_sentinel_is_current(
+    stage_folder: Path, dataset: str, expected_hash: str
+) -> bool:
+    """Return True iff *dataset*'s per-dataset sentinel matches *expected_hash*.
+
+    Args:
+        stage_folder: The scoped stage's output folder.
+        dataset: Dataset key to check.
+        expected_hash: The hash recomputed from current config.
+
+    Returns:
+        True if the recorded per-dataset hash matches; False otherwise
+        (including when the sentinel is missing).
+    """
+    return sentinel_is_current(stage_folder / dataset, expected_hash)
+
+
+def invalidate_dataset_sentinels(stage_folder: Path, datasets: List[str]) -> None:
+    """Remove the per-dataset sentinels for *datasets* under *stage_folder*.
+
+    Args:
+        stage_folder: The scoped stage's output folder.
+        datasets: Dataset keys whose sentinels should be removed. Keys
+            without a sentinel are ignored.
+    """
+    for dataset in datasets:
+        dataset_sentinel_path(stage_folder, dataset).unlink(missing_ok=True)
 
 
 def cascade_invalidate(output_dir: Path, stage: str) -> Tuple[str, ...]:

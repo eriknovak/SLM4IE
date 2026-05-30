@@ -179,3 +179,46 @@ def test_write_sentinel_does_not_leave_tmp_artifact(tmp_path: Path) -> None:
     )
     assert (folder / ".complete").exists()
     assert not (folder / ".complete.tmp").exists()
+
+
+def test_dataset_sentinel_roundtrip(tmp_path: Path) -> None:
+    """A per-dataset sentinel is current only when its hash matches."""
+    from slm4ie.data.curate.sentinel import (
+        dataset_sentinel_is_current,
+        dataset_sentinel_path,
+        write_dataset_sentinel,
+    )
+
+    stage_dir = tmp_path / "02_quality"
+    write_dataset_sentinel(
+        stage_dir,
+        "gigafida",
+        config_slice={"min_doc_words": 20},
+        config_hash_value="abc123",
+        records_in=10,
+        records_out=8,
+    )
+    assert dataset_sentinel_path(stage_dir, "gigafida").exists()
+    assert dataset_sentinel_is_current(stage_dir, "gigafida", "abc123") is True
+    assert dataset_sentinel_is_current(stage_dir, "gigafida", "different") is False
+    # A different dataset under the same stage is independent.
+    assert dataset_sentinel_is_current(stage_dir, "kas", "abc123") is False
+
+
+def test_invalidate_dataset_sentinels(tmp_path: Path) -> None:
+    """Invalidating removes only the named datasets' sentinels."""
+    from slm4ie.data.curate.sentinel import (
+        dataset_sentinel_is_current,
+        invalidate_dataset_sentinels,
+        write_dataset_sentinel,
+    )
+
+    stage_dir = tmp_path / "01_language"
+    for key in ("a", "b"):
+        write_dataset_sentinel(
+            stage_dir, key, config_slice={}, config_hash_value="h",
+            records_in=1, records_out=1,
+        )
+    invalidate_dataset_sentinels(stage_dir, ["a"])
+    assert dataset_sentinel_is_current(stage_dir, "a", "h") is False
+    assert dataset_sentinel_is_current(stage_dir, "b", "h") is True
