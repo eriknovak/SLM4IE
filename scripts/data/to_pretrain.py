@@ -294,6 +294,24 @@ def _filter_stage_subset(stage_dir: Path, keys: List[str]) -> Path:
     return holder
 
 
+def _has_stage_output(stage_dir: Path, key: str) -> bool:
+    """Return True if *key* has shard output under *stage_dir*.
+
+    Used to drop datasets that produced nothing upstream — declared in the
+    roster but never downloaded, or fully filtered out by an earlier stage
+    — before a scoped stage tries to read their (nonexistent) shards.
+
+    Args:
+        stage_dir: A stage's output folder (e.g. `<output_dir>/00_convert`).
+        key: Dataset key to check.
+
+    Returns:
+        True if `<stage_dir>/<key>/` exists and holds `.jsonl.gz` shards.
+    """
+    folder = stage_dir / key
+    return folder.is_dir() and any(folder.glob("*.jsonl.gz"))
+
+
 def _starting_input_hint(paths: CuratePaths, stage: str) -> str:
     """Return an ` (input records ~N)` suffix for a stage's start log line.
 
@@ -810,6 +828,24 @@ def _curate(
             if not todo:
                 logger.info("[%s] all requested datasets current; skipping.", stage_name)
                 continue
+            # Drop datasets with no upstream output: declared in the roster
+            # but never downloaded, or fully filtered out by an earlier
+            # stage. They have no shards to read, so there is nothing to
+            # process and the input-view builder would raise. convert reads
+            # the extraction tier directly and tolerates missing input.
+            upstream = upstream_stage(stage_name)
+            up_dir = paths.stage_dir(upstream) if upstream is not None else None
+            if up_dir is not None:
+                missing = [k for k in todo if not _has_stage_output(up_dir, k)]
+                if missing:
+                    logger.info(
+                        "[%s] skipping %d dataset(s) with no upstream output: %s",
+                        stage_name, len(missing), ", ".join(missing),
+                    )
+                    todo = [k for k in todo if k not in missing]
+                if not todo:
+                    logger.info("[%s] no datasets with upstream output; skipping.", stage_name)
+                    continue
             # Invalidate downstream sentinels for the keys we are about to
             # (re)run, and force every later scoped stage to re-run them.
             # Called per scoped stage with work (not just the first): the
@@ -833,12 +869,8 @@ def _curate(
 
             # Build a symlink view of the upstream output restricted to the
             # keys being (re)run; convert reads extraction output directly.
-            upstream = upstream_stage(stage_name)
-            view = (
-                _filter_stage_subset(paths.stage_dir(upstream), todo)
-                if upstream is not None
-                else None
-            )
+            # `upstream`/`up_dir` were resolved above when filtering `todo`.
+            view = _filter_stage_subset(up_dir, todo) if up_dir is not None else None
             try:
                 runner = _stage_runner(
                     stage_name,

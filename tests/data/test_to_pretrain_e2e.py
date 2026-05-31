@@ -229,3 +229,65 @@ def test_subset_run_then_all_is_incremental(tmp_path: Path) -> None:
         )
     # Beta's scoped work must now be present too.
     assert (out_dir / "03_repetition" / "beta" / ".complete").exists()
+
+
+def _write_extract_config_with_ghost(path: Path) -> None:
+    """Write an extract.yaml whose roster is {alfa, beta, ghost}.
+
+    `ghost` is declared but the test writes no `extracted/ghost.jsonl`, so
+    it produces no convert shards — mirroring a roster dataset that was
+    never downloaded.
+
+    Args:
+        path: Destination path for the extract config.
+    """
+    cfg = {
+        "input_dir": "unused",
+        "output_dir": "unused",
+        "datasets": {
+            "alfa": {"extractor": "jsonl", "domain": "web"},
+            "beta": {"extractor": "jsonl", "domain": "web"},
+            "ghost": {"extractor": "jsonl", "domain": "web"},
+        },
+    }
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+
+@pytest.mark.slow
+def test_all_skips_roster_dataset_with_no_input(tmp_path: Path) -> None:
+    """--all tolerates a roster dataset that was never extracted.
+
+    Regression: a dataset declared in extract.yaml but with no
+    `extracted/<key>.jsonl` (e.g. not downloaded) produces no convert
+    shards. The scoped stages must drop it instead of raising
+    FileNotFoundError when building the per-dataset input view.
+    """
+    in_dir = tmp_path / "extracted"
+    out_dir = tmp_path / "pretrain"
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS)
+    # 'ghost' is in the roster but has NO extracted/<key>.jsonl.
+
+    extract_cfg = tmp_path / "extract.yaml"
+    pretrain_cfg = tmp_path / "pretrain.yaml"
+    _write_extract_config_with_ghost(extract_cfg)
+    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+
+    # Must complete without FileNotFoundError on 'ghost'.
+    _curate(
+        datasets=[],
+        run_all=True,
+        stage="all",
+        input_dir=in_dir,
+        output_dir=out_dir,
+        force=False,
+        workers=1,
+        pretrain_config=pretrain_cfg,
+        extract_config=extract_cfg,
+    )
+    # alfa + beta are processed; ghost has no shards at any scoped stage.
+    assert _dataset_dirs(out_dir / "01_language") == {"alfa", "beta"}
+    assert _dataset_dirs(out_dir / "03_repetition") == {"alfa", "beta"}
+    # Corpus stages completed across the real datasets.
+    assert (out_dir / "04_1_dedup" / ".complete").exists()
+    assert (out_dir / "05_statistics" / ".complete").exists()

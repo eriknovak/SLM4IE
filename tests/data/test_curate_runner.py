@@ -70,11 +70,18 @@ def _stub_runner(
     monkeypatch.setattr(curate_cli, "_stage_runner", fake_runner)
     # Scoped stages materialize a symlink view of their upstream output.
     # With the real executors stubbed out there are no shards to mirror,
-    # so stub the view builder to a harmless throwaway directory.
+    # so stub the view builder to a harmless throwaway directory and treat
+    # every dataset as having upstream output (the no-output guard reads
+    # the real filesystem, which the stub runner never writes to).
     monkeypatch.setattr(
         curate_cli,
         "_filter_stage_subset",
         lambda _stage_dir, _keys: None,
+    )
+    monkeypatch.setattr(
+        curate_cli,
+        "_has_stage_output",
+        lambda _stage_dir, _key: True,
     )
 
 
