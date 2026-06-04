@@ -45,6 +45,20 @@ source .venv/bin/activate
 
 Or prefix individual commands with `uv run` to skip activation.
 
+### Enable the git hooks
+
+The repository ships a pre-commit hook under `.githooks/` that blocks commits
+containing presigned-URL credentials (`X-Amz-Signature` / `X-Amz-Credential`).
+Activate it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Secrets and ephemeral values (such as presigned download URLs) belong in a
+gitignored `configs/**/*.local.yaml` overlay, which `load_config` deep-merges
+over the matching base config — never in the committed YAML.
+
 ### HuggingFace authentication
 
 Some datasets (e.g., `FineWeb-2`, gated corpora) require a HuggingFace access token. Authenticate once via the new unified `hf` CLI (shipped with `huggingface_hub` ≥ 0.34, which replaces the deprecated `huggingface-cli`):

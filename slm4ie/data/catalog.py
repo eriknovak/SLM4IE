@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -108,10 +108,40 @@ class DatasetConfig:
         )
 
 
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge `override` into `base` without mutating either.
+
+    Mappings are merged key by key; for matching keys that are both
+    mappings the merge recurses, otherwise the `override` value wins.
+    This lets a local overlay patch individual dataset fields (e.g. add
+    a `urls` list) without restating the whole entry.
+
+    Args:
+        base: Base mapping (lower precedence).
+        override: Overlay mapping whose values take precedence.
+
+    Returns:
+        New merged mapping.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_config(
     config_path: Path,
 ) -> Tuple[str, Dict[str, DatasetConfig]]:
     """Load dataset download configuration from YAML file.
+
+    If a sibling `*.local.yaml` overlay exists (e.g. `download.local.yaml`
+    next to `download.yaml`), it is deep-merged over the base config. The
+    overlay is gitignored and holds secrets or ephemeral values (such as
+    presigned download URLs) that must not be committed.
 
     Args:
         config_path: Path to the YAML config file.
@@ -126,7 +156,13 @@ def load_config(
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     with open(config_path) as f:
-        raw = yaml.safe_load(f)
+        raw = yaml.safe_load(f) or {}
+
+    local_path = config_path.with_suffix(".local.yaml")
+    if local_path.exists():
+        with open(local_path) as f:
+            local_raw = yaml.safe_load(f) or {}
+        raw = _deep_merge(raw, local_raw)
 
     output_dir = raw.get("output_dir", "data/raw")
     datasets: Dict[str, DatasetConfig] = {}

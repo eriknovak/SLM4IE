@@ -269,10 +269,17 @@ datasets:
 
   gigafida:
     enabled: false
-    name: "Gigafida 2.0"
+    name: "Gigafida 2.2"
+    source: http
+    output_dir: gigafida
     note: >
-      Not available for bulk download. Access via concordancers only
-      (NoSketchEngine/Kontext, SketchEngine).
+      Not publicly downloadable. CJVT distributes it on request as
+      presigned MinIO URLs that embed short-lived S3 credentials (expire
+      after ~3 days). Those URLs are secrets and must never be committed,
+      so this stub stays `enabled: false`. Put the live `enabled: true`
+      entry and its `urls` list in configs/data/download.local.yaml
+      (gitignored); load_config deep-merges that overlay over this entry.
+      Contact: simon.krek@ijs.si
 
   metafida:
     enabled: false

@@ -101,6 +101,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Local config overlays — may hold secrets / presigned URLs. Never commit.
+# Deep-merged over the matching base config by slm4ie.data.catalog.load_config.
+configs/**/*.local.yaml
+
 # Environments
 .env
 .venv

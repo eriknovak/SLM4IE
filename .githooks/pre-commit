@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#
+# Pre-commit guard: refuse to commit presigned S3/MinIO URLs.
+#
+# These URLs embed short-lived credentials (X-Amz-Credential /
+# X-Amz-Signature) and are secrets. They belong only in gitignored
+# configs/**/*.local.yaml overlays, which load_config deep-merges over the
+# base config. This hook is a backstop for that workflow.
+#
+# Activate once with:  git config core.hooksPath .githooks
+# Bypass in an emergency with:  git commit --no-verify
+
+set -euo pipefail
+
+# Markers unique to AWS SigV4 presigned URLs. Written as an alternation so
+# this pattern string does not itself contain the literal it matches —
+# otherwise the hook would block its own commit.
+pattern='X-Amz-(Signature|Credential)='
+
+# Scan only staged additions (lines starting with '+', excluding the +++ header).
+offenders="$(git diff --cached --no-color -U0 \
+    | grep -E '^\+' \
+    | grep -Ev '^\+\+\+ ' \
+    | grep -nE "$pattern" || true)"
+
+if [ -n "$offenders" ]; then
+    echo "pre-commit: BLOCKED — staged changes contain presigned-URL credentials:" >&2
+    echo "$offenders" >&2
+    echo >&2
+    echo "Move these URLs into a gitignored configs/**/*.local.yaml overlay" >&2
+    echo "instead of committing them. Emergency bypass: git commit --no-verify" >&2
+    exit 1
+fi

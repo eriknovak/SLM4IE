@@ -248,3 +248,85 @@ class TestLoadConfig:
         assert len(datasets) == 2
         assert datasets["ds1"].enabled is True
         assert datasets["ds2"].enabled is False
+
+
+class TestLoadConfigOverlay:
+    """Tests for the sibling `*.local.yaml` overlay merge."""
+
+    def test_overlay_patches_individual_fields(self, tmp_path: Path):
+        """A local overlay patches fields without restating the entry."""
+        base = {
+            "output_dir": "data/raw",
+            "datasets": {
+                "gigafida": {
+                    "enabled": False,
+                    "name": "Gigafida 2.2",
+                    "source": "http",
+                    "output_dir": "gigafida",
+                    "note": "Stub.",
+                },
+            },
+        }
+        overlay = {
+            "datasets": {
+                "gigafida": {
+                    "enabled": True,
+                    "urls": ["https://example.com/a.gz"],
+                },
+            },
+        }
+        config_file = tmp_path / "download.yaml"
+        config_file.write_text(yaml.dump(base))
+        (tmp_path / "download.local.yaml").write_text(yaml.dump(overlay))
+
+        _output_dir, datasets = load_config(config_file)
+        gigafida = datasets["gigafida"]
+        # Overlay wins on patched fields.
+        assert gigafida.enabled is True
+        assert gigafida.urls == ["https://example.com/a.gz"]
+        # Base fields survive the merge.
+        assert gigafida.name == "Gigafida 2.2"
+        assert gigafida.source == "http"
+        assert gigafida.output_dir == "gigafida"
+        assert gigafida.note == "Stub."
+
+    def test_overlay_can_add_new_dataset(self, tmp_path: Path):
+        """An overlay may introduce a dataset absent from the base."""
+        base = {"output_dir": "data/raw", "datasets": {}}
+        overlay = {
+            "datasets": {
+                "secret_ds": {
+                    "enabled": True,
+                    "source": "http",
+                    "name": "Secret",
+                    "urls": ["https://example.com/s.gz"],
+                    "output_dir": "secret_ds",
+                },
+            },
+        }
+        config_file = tmp_path / "download.yaml"
+        config_file.write_text(yaml.dump(base))
+        (tmp_path / "download.local.yaml").write_text(yaml.dump(overlay))
+
+        _output_dir, datasets = load_config(config_file)
+        assert "secret_ds" in datasets
+        assert datasets["secret_ds"].urls == ["https://example.com/s.gz"]
+
+    def test_no_overlay_leaves_base_unchanged(self, tmp_path: Path):
+        """Without a sibling overlay the base config loads verbatim."""
+        base = {
+            "output_dir": "data/raw",
+            "datasets": {
+                "gigafida": {
+                    "enabled": False,
+                    "name": "Gigafida 2.2",
+                    "note": "Stub.",
+                },
+            },
+        }
+        config_file = tmp_path / "download.yaml"
+        config_file.write_text(yaml.dump(base))
+
+        _output_dir, datasets = load_config(config_file)
+        assert datasets["gigafida"].enabled is False
+        assert datasets["gigafida"].urls == []
