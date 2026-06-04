@@ -105,6 +105,9 @@ celerybeat.pid
 # Deep-merged over the matching base config by slm4ie.data.catalog.load_config.
 configs/**/*.local.yaml
 
+# Claude Code local state (settings, worktrees). Never commit.
+.claude/
+
 # Environments
 .env
 .venv
