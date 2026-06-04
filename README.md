@@ -1,6 +1,5 @@
-<p align="center">
-  <img src="https://github.com/eriknovak/SLM4IE/blob/main/docs/assets/imgs/logo.png?raw=true" alt="logo" style="width: 60%;">
-</p>
+![Image alt](./docs/assets/imgs/banner/slm4ie_banner_dark_bg.png#gh-dark-mode-only)
+![Image alt](./docs/assets/imgs/banner/slm4ie_banner_light_bg.png#gh-light-mode-only)
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
@@ -83,7 +82,7 @@ hf auth whoami
 
 ## Project Structure
 
-```
+```text
 SLM4IE/
 ├── configs/                # YAML configuration files
 │   ├── data/                 # download, extract, pretrain, tasks, tokenization, synthetic
@@ -138,13 +137,13 @@ tokenization/<dataset>.jsonl.gz                # tokenizer-quality data (to_toke
 
 Five YAML configs drive the seven data scripts:
 
-| Config | Script(s) | Purpose |
-|---|---|---|
-| [`configs/data/download.yaml`](configs/data/download.yaml) | `download.py` | Raw corpus + benchmark download catalog. |
-| [`configs/data/extract.yaml`](configs/data/extract.yaml) | `extract.py` | Sources to normalize into `extracted/`. |
-| [`configs/data/pretrain.yaml`](configs/data/pretrain.yaml) | `to_pretrain.py` | Seven-stage curate pipeline (stage 0 = datatrove convert; stages 1–6 = filter/dedup/stats). |
-| [`configs/data/tokenization.yaml`](configs/data/tokenization.yaml) | `to_tokenization.py` | Tokenizer-quality datasets (lexicon-derived). |
-| [`configs/data/tasks.yaml`](configs/data/tasks.yaml) | `to_spans.py`, `to_sentiment.py`, `to_superglue.py` | Registry of `<task>/<dataset>` entries with roles, sources, splits, labels. |
+| Config                                                             | Script(s)                                           | Purpose                                                                                     |
+| ------------------------------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`configs/data/download.yaml`](configs/data/download.yaml)         | `download.py`                                       | Raw corpus + benchmark download catalog.                                                    |
+| [`configs/data/extract.yaml`](configs/data/extract.yaml)           | `extract.py`                                        | Sources to normalize into `extracted/`.                                                     |
+| [`configs/data/pretrain.yaml`](configs/data/pretrain.yaml)         | `to_pretrain.py`                                    | Seven-stage curate pipeline (stage 0 = datatrove convert; stages 1–6 = filter/dedup/stats). |
+| [`configs/data/tokenization.yaml`](configs/data/tokenization.yaml) | `to_tokenization.py`                                | Tokenizer-quality datasets (lexicon-derived).                                               |
+| [`configs/data/tasks.yaml`](configs/data/tasks.yaml)               | `to_spans.py`, `to_sentiment.py`, `to_superglue.py` | Registry of `<task>/<dataset>` entries with roles, sources, splits, labels.                 |
 
 End-to-end command flow:
 
@@ -257,15 +256,15 @@ This iterates all seven stages in order, skipping any whose sentinel hash matche
 
 Each stage reads its predecessor's output and writes a numbered folder. The two dedup sub-stages are independent: `04_1_dedup` cleans whole-document duplicates across the corpus; `04_2_dedup` runs sentence-level dedup over that result.
 
-| CLI name | Folder | Operates on | What it does |
-|---|---|---|---|
-| `convert` | `00_convert/` | per-doc | lift `extracted/<key>.jsonl` into datatrove `Document` shards (`text` / `id` / `metadata`); carries `dataset` and `domain` for source-weighted sampling |
-| `language` | `01_language/` | per-doc | lingua-py language detection (tag or filter) |
-| `quality` | `02_quality/` | per-doc | Gopher within-document quality heuristics (length, word lengths, symbol/bullet/ellipsis ratios, stopword floor) |
-| `repetition` | `03_repetition/` | per-doc | Gopher within-document repetition heuristics (duplicate paragraphs/lines, top-n-gram saturation, dup-n-gram fractions) |
-| `exact_dedup` | `04_1_dedup/` | corpus-wide | whole-document exact dedup (xxhash64 of `doc.text`) |
-| `sentence_dedup` | `04_2_dedup/` | corpus-wide | N-sentence sliding-window dedup (final corpus) |
-| `stats` | `05_statistics/` | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process) |
+| CLI name         | Folder           | Operates on | What it does                                                                                                                                            |
+| ---------------- | ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `convert`        | `00_convert/`    | per-doc     | lift `extracted/<key>.jsonl` into datatrove `Document` shards (`text` / `id` / `metadata`); carries `dataset` and `domain` for source-weighted sampling |
+| `language`       | `01_language/`   | per-doc     | lingua-py language detection (tag or filter)                                                                                                            |
+| `quality`        | `02_quality/`    | per-doc     | Gopher within-document quality heuristics (length, word lengths, symbol/bullet/ellipsis ratios, stopword floor)                                         |
+| `repetition`     | `03_repetition/` | per-doc     | Gopher within-document repetition heuristics (duplicate paragraphs/lines, top-n-gram saturation, dup-n-gram fractions)                                  |
+| `exact_dedup`    | `04_1_dedup/`    | corpus-wide | whole-document exact dedup (xxhash64 of `doc.text`)                                                                                                     |
+| `sentence_dedup` | `04_2_dedup/`    | corpus-wide | N-sentence sliding-window dedup (final corpus)                                                                                                          |
+| `stats`          | `05_statistics/` | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process)                                                                              |
 
 Each stage's sentinel hash covers its own top-level `pretrain.yaml` section. The `quality` and `stats` hashes additionally fold in the contents of the stopword file, and every stage's hash folds in the sorted list of dataset keys this run will process — so editing `stopwords_sl.txt`, switching between `--all` and a positional subset, or adding a dataset to `extract.yaml` all correctly trigger rebuilds.
 
@@ -465,12 +464,12 @@ Optional sources requiring extra access (gated datasets, manual login, copyright
 
 Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are declared in [`configs/data/download.yaml`](configs/data/download.yaml) with `benchmark: true` and a `tasks:` list, so they share the download pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just the evaluation datasets.
 
-| Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                                                                                                                        |
-| ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)           | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0.                                                                                                       |
-| [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                                                                                                                      |
-| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`.                                                                                          |
-| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`.                                                                                             |
+| Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)           | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0.                                                                                                     |
+| [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                                                                                                                    |
+| [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `scripts/data/to_superglue.py`.                                                                                        |
+| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `scripts/data/to_sentiment.py`.                                                                                           |
 | [Sloleks 3.1](https://www.clarin.si/repository/xmlui/handle/11356/2080)       | CLARIN.SI | TOKENIZER                                 | Slovenian inflectional lexicon (lemmas + word forms with MULTEXT-East V6 / JOS MSDs). **Tokenizer / morphology evaluation only** — intentionally absent from `extract.yaml`, never enters the pretraining corpus. Distributed as TEI XML. License: CC BY-SA 4.0. Convert with `scripts/data/to_tokenization.py`. |
 
 ### Task abbreviations
