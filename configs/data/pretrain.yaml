@@ -55,7 +55,7 @@ convert:
   id_field: doc_id
   metadata_fields: [domain, doc_id]
   include_annotations: false
-  max_shard_bytes: 200000000  # ~200 MB compressed per shard
+  max_shard_bytes: 200000000 # ~200 MB compressed per shard
 
 # 01_language — Stage 1: lingua-py language detection.
 #   Consumed by: slm4ie/data/curate/language.py (LinguaLanguageFilter),
@@ -83,9 +83,43 @@ language:
   targets: [sl]
   candidates:
     [
-      be, bg, bs, ca, cs, cy, da, de, el, en, es, et, eu, fi, fr, ga,
-      hr, hu, is, it, lt, lv, mk, nb, nl, nn, pl, pt, ro, ru, sk, sl,
-      sq, sr, sv, tr, uk,
+      be,
+      bg,
+      bs,
+      ca,
+      cs,
+      cy,
+      da,
+      de,
+      el,
+      en,
+      es,
+      et,
+      eu,
+      fi,
+      fr,
+      ga,
+      hr,
+      hu,
+      is,
+      it,
+      lt,
+      lv,
+      mk,
+      nb,
+      nl,
+      nn,
+      pl,
+      pt,
+      ro,
+      ru,
+      sk,
+      sl,
+      sq,
+      sr,
+      sv,
+      tr,
+      uk,
     ]
   minimum_relative_distance: 0.1
   mode: filter
@@ -116,10 +150,10 @@ language:
 #                                 contain (uses the `stopwords` list
 #                                 selected above).
 quality:
-  min_doc_words: 50
-  max_doc_words: 100000
-  min_avg_word_length: 3
-  max_avg_word_length: 10
+  min_doc_words: 20
+  max_doc_words: 1000000
+  min_avg_word_length: 2
+  max_avg_word_length: 12
   max_symbol_word_ratio: 0.1
   max_bullet_lines_ratio: 0.9
   max_ellipsis_lines_ratio: 0.3
@@ -192,4 +226,4 @@ sentence_dedup:
 #   Keys:
 #     top_k_words   Size of the word-frequency table.
 stats:
-  top_k_words: 5000
+  top_k_words: 200
