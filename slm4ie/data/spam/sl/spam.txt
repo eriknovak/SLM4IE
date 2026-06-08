@@ -1,0 +1,24 @@
+# Slovenian SEO/scam spam terms — high precision only.
+# Pill spam, fake pharma, counterfeit goods, gambling promos. One token per
+# line; blank lines and #-comments ignored; lowercased on load. Ambiguous
+# legitimate words (kredit, zavarovanje, igre) are deliberately excluded.
+viagra
+cialis
+kamagra
+levitra
+casino
+kazino
+igralnica
+spletna-igralnica
+poker
+stave
+replika
+replike
+ponaredek
+rolex
+nakup-sledilcev
+sledilci-poceni
+hujšanje-tablete
+povečanje-penisa
+zaslužek-od-doma
+brezplačni-bitcoin

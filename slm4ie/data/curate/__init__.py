@@ -8,6 +8,8 @@ sentinel-tracked artifacts under `<output_dir>/`:
   pipeline without going through a separate `to_datatrove` script.
 * `language`: every document is tagged with a lingua-py language label
   and a target-language confidence score.
+* `spam`: adult/SEO-spam removal via per-language lexicons, a URL/domain
+  blocklist, and an optional pluggable model scorer.
 * `quality`, `repetition`: per-document Gopher heuristics.
 * `exact_dedup`, `sentence_dedup`: corpus-wide whole-document and
   N-sentence dedup (datatrove's six-block ladder).

@@ -53,8 +53,8 @@ extracted/                                     # extract.py — canonical L2
   <key>.annotations.jsonl.gz
 pretrain/                                      # to_pretrain.py
   00_convert/<key>/*.jsonl.gz                    # datatrove `Document` shape
-  01_language/ … 04_2_dedup/                     # filter/dedup stages
-  05_statistics/
+  01_language/ … 05_2_dedup/                     # filter/spam/dedup stages
+  06_statistics/
 tasks/<task>/<dataset>/{train,val,test}.jsonl.gz  # to_spans / to_sentiment / to_superglue
 tokenization/<dataset>.jsonl.gz                # to_tokenization.py
 ```
@@ -75,13 +75,13 @@ tokenization/<dataset>.jsonl.gz                # to_tokenization.py
 Downstream consumers fork after extraction. There are three routes, and
 they own disjoint output trees:
 
-1. **Pretraining (`to_pretrain.py`):** runs seven sentinel-skippable stages
+1. **Pretraining (`to_pretrain.py`):** runs eight sentinel-skippable stages
    on top of [datatrove](https://github.com/huggingface/datatrove). Stage 0
    (`convert`) lifts `extracted/<key>.jsonl` into the `Document` shape
    (`text` / `id` / `metadata`, with `dataset` and `domain` for
-   source-weighted sampling); stages 1–6 do language filtering, Gopher
-   quality + repetition heuristics, exact + sentence dedup, and corpus
-   stats. Output: `pretrain/00_convert/ … pretrain/05_statistics/`.
+   source-weighted sampling); stages 1–7 do language filtering, adult/SEO-spam
+   removal, Gopher quality + repetition heuristics, exact + sentence dedup,
+   and corpus stats. Output: `pretrain/00_convert/ … pretrain/06_statistics/`.
    Driven by `configs/data/pretrain.yaml`. The annotations sidecar is
    **not** read here — it would desync after any datatrove step that
    rewrites the text.

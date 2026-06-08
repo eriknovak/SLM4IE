@@ -38,13 +38,16 @@ def test_stage_extra_folds_roster_only_for_corpus_stages() -> None:
 
     roster = b'["a","b"]'
     sw = b"stopwords"
+    sp = b"spamlex"
     # Scoped: roster must NOT appear.
-    assert _stage_extra("language", sw, roster) == b""
-    assert _stage_extra("quality", sw, roster) == sw  # stopwords only, no roster
+    assert _stage_extra("language", sw, sp, roster) == b""
+    assert _stage_extra("quality", sw, sp, roster) == sw  # stopwords only, no roster
+    # Spam folds its lexicon/domain bytes (and never the roster — it is scoped).
+    assert _stage_extra("spam", sw, sp, roster) == sp
     # Corpus: roster present.
-    assert roster in _stage_extra("exact_dedup", sw, roster)
-    assert roster in _stage_extra("stats", sw, roster)
-    assert sw in _stage_extra("stats", sw, roster)  # stats also folds stopwords
+    assert roster in _stage_extra("exact_dedup", sw, sp, roster)
+    assert roster in _stage_extra("stats", sw, sp, roster)
+    assert sw in _stage_extra("stats", sw, sp, roster)  # stats also folds stopwords
 
 
 def test_corpus_stage_with_positional_keys_errors() -> None:
@@ -95,7 +98,7 @@ def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
     from scripts.data.to_pretrain import _apply_force
 
     out = tmp_path / "pretrain"
-    q = out / "02_quality"
+    q = out / "03_quality"
     for key in ("gigafida", "kas"):
         write_dataset_sentinel(q, key, config_slice={}, config_hash_value="h",
                                records_in=1, records_out=1)
@@ -110,7 +113,7 @@ def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
     from scripts.data.to_pretrain import _apply_force
 
     out = tmp_path / "pretrain"
-    dedup = out / "04_1_dedup"
+    dedup = out / "05_1_dedup"
     write_sentinel(dedup, config_slice={}, config_hash_value="h",
                    records_in=1, records_out=1)
     (dedup / "alfa").mkdir(parents=True)

@@ -1,0 +1,17 @@
+# Language-agnostic adult/spam domain blocklist (registered domains).
+# One domain per line; blank lines and #-comments ignored; lowercased on load.
+# A document is flagged when its metadata.url host equals one of these or is
+# a subdomain of it. This is a small curated seed; the UT1 adult domain list
+# can be auto-fetched and merged at runtime when enabled.
+pornhub.com
+xvideos.com
+xnxx.com
+xhamster.com
+redtube.com
+youporn.com
+onlyfans.com
+chaturbate.com
+livejasmin.com
+brazzers.com
+escortdirectory.com
+adultfriendfinder.com

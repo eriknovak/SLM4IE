@@ -1,0 +1,42 @@
+# Slovenian adult/pornography terms — high precision only.
+# One token per line; blank lines and #-comments ignored; lowercased on load.
+# Ambiguous common words (ženske, telo, masaža, zmenke) are deliberately
+# excluded; rely on the URL blocklist and the hit threshold for those.
+porno
+pornografija
+pornografski
+pornič
+seks
+seksi
+seksati
+analni
+analno
+oralni
+oralno
+masturbacija
+masturbirati
+erotika
+erotični
+erotika
+prostitutka
+prostitutke
+prostitutk
+prostitucija
+kurba
+kurbe
+kurbir
+fukati
+fuk
+pizda
+penis
+vagina
+vibrator
+dildo
+orgazem
+striptiz
+spolni
+spolnost
+golota
+nudisti
+xxx
+hardcore

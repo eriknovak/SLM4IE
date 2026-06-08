@@ -1,9 +1,9 @@
-# pretrain.yaml — Seven-stage pretraining-corpus build (datatrove-backed).
+# pretrain.yaml — Eight-stage pretraining-corpus build (datatrove-backed).
 #
 # Consumed by: scripts/data/to_pretrain.py. The dataset key list comes
 #   from configs/data/extract.yaml.
 # Reads:  <input_dir>/<key>.jsonl — the extracted/ tier.
-# Writes: <output_dir>/00_convert/ … 05_statistics/ — one subtree per stage.
+# Writes: <output_dir>/00_convert/ … 06_statistics/ — one subtree per stage.
 #
 # Top-level keys:
 #   input_dir    Root of the extracted/ tier.
@@ -12,7 +12,7 @@
 #                stopword list at slm4ie/data/stopwords/<code>.txt;
 #                used by the `quality` and `stats` stages. Omit the
 #                key to disable stopwords; an unknown code is an error.
-#   <stage>      One section per stage (convert, language, quality,
+#   <stage>      One section per stage (convert, language, spam, quality,
 #                repetition, exact_dedup, sentence_dedup, stats); each is
 #                documented inline below and is the exclusive input to
 #                that stage's sentinel hash.
@@ -126,12 +126,52 @@ language:
   low_accuracy: true
   max_chars: 2048
 
-# 02_quality — Stage 2: Gopher WITHIN-DOCUMENT quality heuristics.
+# 02_spam — Stage 2: adult / SEO-spam removal.
+#   Drops docs flagged by any of three language-aware signals: a curated
+#   per-language lexicon of unambiguous adult and SEO/scam terms, a
+#   language-agnostic URL/domain blocklist matched against metadata.url,
+#   and an optional pluggable model scorer. High precision by design — the
+#   lexicon excludes ambiguous common words and relies on the URL
+#   blocklist plus the hit thresholds for borderline cases.
+#   Consumed by: slm4ie/data/curate/spam.py (SpamFilter), wired by
+#                pipeline.build_spam_executors. Lexicons + domain list live
+#                under slm4ie/data/spam/ and are folded into this stage's
+#                sentinel hash, so editing a list re-runs the stage.
+#   Reads:  <output_dir>/01_language/  Writes: <output_dir>/02_spam/
+#   Keys:
+#     languages         Language codes whose curated lists (adult.txt +
+#                       spam.txt under slm4ie/data/spam/<code>/) load
+#                       eagerly. An unknown code raises at startup.
+#     use_ldnoobw       Auto-load an LDNOOBW adult list for a document's
+#                       language when no curated list is shipped for it.
+#     url_blocklist     Enable the URL/domain blocklist signal.
+#     min_adult_hits    Drop a doc once its adult-term occurrences reach
+#                       this count.
+#     min_spam_hits     Drop a doc once its SEO/scam-term occurrences
+#                       reach this count.
+#     keep_fraction     Fraction of flagged docs to retain anyway (seeded
+#                       sampling); retained docs get metadata.spam_reason.
+#     default_language  Language assumed for docs without metadata.language.
+#     model             Optional classifier spec; null = lexicon + URL only
+#                       (a non-null value requires a resolver to be wired).
+#     model_threshold   Score at/above which the model flags a document.
+spam:
+  languages: [sl, en]
+  use_ldnoobw: true
+  url_blocklist: true
+  min_adult_hits: 2
+  min_spam_hits: 2
+  keep_fraction: 0.0
+  default_language: sl
+  model: null
+  model_threshold: 0.5
+
+# 03_quality — Stage 3: Gopher WITHIN-DOCUMENT quality heuristics.
 #   Drops docs on their own text alone; never compares across docs.
 #   Consumed by: datatrove GopherQualityFilter, wired by
 #                pipeline.build_quality_executors (QualityConfig). Also
 #                reads the shared `stopwords` configuration above.
-#   Reads:  <output_dir>/01_language/  Writes: <output_dir>/02_quality/
+#   Reads:  <output_dir>/02_spam/  Writes: <output_dir>/03_quality/
 #   Keys:
 #     min_doc_words               Drop docs shorter than this.
 #     max_doc_words               Drop docs longer than this.
@@ -160,23 +200,23 @@ quality:
   max_non_alpha_words_ratio: 0.8
   min_stop_words: 2
 
-# 03_repetition — Stage 3: Gopher WITHIN-DOCUMENT repetition heuristics.
+# 04_repetition — Stage 4: Gopher WITHIN-DOCUMENT repetition heuristics.
 #   Drops docs whose own text repeats too much internally (duplicate
 #   paragraphs/lines, top-n-gram saturation, dup-n-gram fractions).
 #   Consumed by: datatrove GopherRepetitionFilter, wired by
 #                pipeline.build_repetition_executors.
-#   Reads:  <output_dir>/02_quality/  Writes: <output_dir>/03_repetition/
+#   Reads:  <output_dir>/03_quality/  Writes: <output_dir>/04_repetition/
 #   Keys: none — the empty mapping `{}` keeps datatrove's Gopher-paper
 #         defaults. The section must still exist (it drives this stage's
 #         sentinel hash slice).
 repetition: {}
 
-# 04_1_dedup — Stage 4: whole-document exact dedup ACROSS THE CORPUS.
+# 05_1_dedup — Stage 5: whole-document exact dedup ACROSS THE CORPUS.
 #   Two docs with byte-identical text collapse to one (runs as a
 #   signature -> find -> filter executor chain).
 #   Consumed by: slm4ie/data/curate/dedup.py (make_exact_config), wired
 #                by pipeline.build_exact_dedup_executors.
-#   Reads:  <output_dir>/03_repetition/  Writes: <output_dir>/04_1_dedup/
+#   Reads:  <output_dir>/04_repetition/  Writes: <output_dir>/05_1_dedup/
 #   Keys:
 #     precision             Hash width in bits (32 | 64). 64 is the
 #                           collision-safe default up to ~10B docs; 32
@@ -191,13 +231,13 @@ exact_dedup:
   hash_fc: xxhash
   only_dedup_in_index: true
 
-# 04_2_dedup — Stage 5: N-sentence sliding-window dedup ACROSS THE
+# 05_2_dedup — Stage 6: N-sentence sliding-window dedup ACROSS THE
 #   CORPUS. Removes sentence windows that recur across docs, then drops
 #   docs whose surviving text falls below the floors. Its output folder
 #   is the final pretraining corpus.
 #   Consumed by: datatrove SentDedupConfig / SentenceDedup* blocks,
 #                wired by pipeline.build_sentence_dedup_executors.
-#   Reads:  <output_dir>/04_1_dedup/  Writes: <output_dir>/04_2_dedup/
+#   Reads:  <output_dir>/05_1_dedup/  Writes: <output_dir>/05_2_dedup/
 #   Keys:
 #     n_sentences         Sentences per sliding window compared across
 #                         docs.
@@ -212,7 +252,7 @@ sentence_dedup:
   min_num_sentences: 2
   split_sentences: true
 
-# 05_statistics — Stage 6: corpus totals, per-domain / per-dataset
+# 06_statistics — Stage 7: corpus totals, per-domain / per-dataset
 #   distributions, and a global top-K word-frequency table.
 #   Map-reduce: each map worker accumulates counters and writes a
 #   partial pickle, then a single reduce worker sums partials and
@@ -221,8 +261,8 @@ sentence_dedup:
 #   Consumed by: slm4ie/data/curate/stats.py (CorpusStats), wired by
 #                pipeline.build_stats_executors. Also reads the shared
 #                `stopwords` configuration above.
-#   Reads:  <output_dir>/04_2_dedup/
-#   Writes: <output_dir>/05_statistics/ (aggregate.json + per_dataset/)
+#   Reads:  <output_dir>/05_2_dedup/
+#   Writes: <output_dir>/06_statistics/ (aggregate.json + per_dataset/)
 #   Keys:
 #     top_k_words   Size of the word-frequency table.
 stats:

@@ -1,0 +1,23 @@
+# English SEO/scam spam terms — high precision only.
+# Pill spam, fake pharma, counterfeit goods, gambling promos. One token per
+# line; blank lines and #-comments ignored; lowercased on load.
+viagra
+cialis
+kamagra
+levitra
+casino
+gambling
+slots
+sportsbook
+replica
+replicas
+rolex
+counterfeit
+cheap-followers
+buy-followers
+weight-loss-pills
+penis-enlargement
+work-from-home
+free-bitcoin
+forex-signals
+payday-loan

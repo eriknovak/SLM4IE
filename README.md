@@ -126,11 +126,12 @@ extracted/                                     # canonical unified form (extract
 pretrain/                                      # corpus-wide curate output (to_pretrain.py)
   00_convert/<key>/*.jsonl.gz                    # datatrove `Document` shape
   01_language/<key>/*.jsonl.gz
-  02_quality/<key>/*.jsonl.gz
-  03_repetition/<key>/*.jsonl.gz
-  04_1_dedup/<key>/*.jsonl.gz                    # exact dedup
-  04_2_dedup/<key>/*.jsonl.gz                    # sentence dedup — final corpus
-  05_statistics/                                 # corpus-wide stats
+  02_spam/<key>/*.jsonl.gz                       # adult/SEO-spam removal
+  03_quality/<key>/*.jsonl.gz
+  04_repetition/<key>/*.jsonl.gz
+  05_1_dedup/<key>/*.jsonl.gz                    # exact dedup
+  05_2_dedup/<key>/*.jsonl.gz                    # sentence dedup — final corpus
+  06_statistics/                                 # corpus-wide stats
 tasks/<task>/<dataset>/{train,val,test}.jsonl.gz  # SFT + eval (to_spans/sentiment/superglue)
 tokenization/<dataset>.jsonl.gz                # tokenizer-quality data (to_tokenization.py)
 ```
@@ -141,7 +142,7 @@ Five YAML configs drive the seven data scripts:
 | ------------------------------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | [`configs/data/download.yaml`](configs/data/download.yaml)         | `download.py`                                       | Raw corpus + benchmark download catalog.                                                    |
 | [`configs/data/extract.yaml`](configs/data/extract.yaml)           | `extract.py`                                        | Sources to normalize into `extracted/`.                                                     |
-| [`configs/data/pretrain.yaml`](configs/data/pretrain.yaml)         | `to_pretrain.py`                                    | Seven-stage curate pipeline (stage 0 = datatrove convert; stages 1–6 = filter/dedup/stats). |
+| [`configs/data/pretrain.yaml`](configs/data/pretrain.yaml)         | `to_pretrain.py`                                    | Eight-stage curate pipeline (stage 0 = datatrove convert; stages 1–7 = filter/spam/dedup/stats). |
 | [`configs/data/tokenization.yaml`](configs/data/tokenization.yaml) | `to_tokenization.py`                                | Tokenizer-quality datasets (lexicon-derived).                                               |
 | [`configs/data/tasks.yaml`](configs/data/tasks.yaml)               | `to_spans.py`, `to_sentiment.py`, `to_superglue.py` | Registry of `<task>/<dataset>` entries with roles, sources, splits, labels.                 |
 
@@ -234,7 +235,7 @@ The downstream task converters (`to_spans`, `to_sentiment`, `to_superglue`) join
 
 #### Pretraining corpus (`to_pretrain.py`)
 
-`to_pretrain.py` builds the **final pretraining corpus** as a sequence of seven independent, sentinel-skippable stages on top of [datatrove](https://github.com/huggingface/datatrove). Stage 0 lifts `extracted/*.jsonl` into datatrove's `Document` shape; stages 1–6 cover language filtering, Gopher within-document quality and repetition heuristics, cross-corpus exact and sentence deduplication, and corpus statistics. There is no separate datatrove-conversion step — the old `to_datatrove.py` lives inside stage 0 now. Each stage writes a durable on-disk artifact and a `.complete` sentinel under `output_dir`; on rerun, a stage whose config slice hash is unchanged is skipped, and editing one section of [`configs/data/pretrain.yaml`](configs/data/pretrain.yaml) cascade-invalidates that stage plus every downstream stage. `input_dir` is the folder of `<key>.jsonl` files from `extract.py`; `output_dir` is the pretrain-owned tree. The dataset key list still comes from `configs/data/extract.yaml`.
+`to_pretrain.py` builds the **final pretraining corpus** as a sequence of eight independent, sentinel-skippable stages on top of [datatrove](https://github.com/huggingface/datatrove). Stage 0 lifts `extracted/*.jsonl` into datatrove's `Document` shape; stages 1–7 cover language filtering, adult/SEO-spam removal, Gopher within-document quality and repetition heuristics, cross-corpus exact and sentence deduplication, and corpus statistics. There is no separate datatrove-conversion step — the old `to_datatrove.py` lives inside stage 0 now. Each stage writes a durable on-disk artifact and a `.complete` sentinel under `output_dir`; on rerun, a stage whose config slice hash is unchanged is skipped, and editing one section of [`configs/data/pretrain.yaml`](configs/data/pretrain.yaml) cascade-invalidates that stage plus every downstream stage. `input_dir` is the folder of `<key>.jsonl` files from `extract.py`; `output_dir` is the pretrain-owned tree. The dataset key list still comes from `configs/data/extract.yaml`.
 
 ##### Install the extra
 
@@ -250,23 +251,24 @@ The `curate` extra pulls in `datatrove`, `lingua-language-detector`, `spacy` (Sl
 uv run python scripts/data/to_pretrain.py --all
 ```
 
-This iterates all seven stages in order, skipping any whose sentinel hash matches the current config. The final corpus lands at `<output_dir>/04_2_dedup/<dataset>/<rank>.jsonl.gz`; statistics at `<output_dir>/05_statistics/`.
+This iterates all eight stages in order, skipping any whose sentinel hash matches the current config. The final corpus lands at `<output_dir>/05_2_dedup/<dataset>/<rank>.jsonl.gz`; statistics at `<output_dir>/06_statistics/`.
 
-##### Seven user-facing stages
+##### Eight user-facing stages
 
-Each stage reads its predecessor's output and writes a numbered folder. The two dedup sub-stages are independent: `04_1_dedup` cleans whole-document duplicates across the corpus; `04_2_dedup` runs sentence-level dedup over that result.
+Each stage reads its predecessor's output and writes a numbered folder. The two dedup sub-stages are independent: `05_1_dedup` cleans whole-document duplicates across the corpus; `05_2_dedup` runs sentence-level dedup over that result.
 
 | CLI name         | Folder           | Operates on | What it does                                                                                                                                            |
 | ---------------- | ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `convert`        | `00_convert/`    | per-doc     | lift `extracted/<key>.jsonl` into datatrove `Document` shards (`text` / `id` / `metadata`); carries `dataset` and `domain` for source-weighted sampling |
 | `language`       | `01_language/`   | per-doc     | lingua-py language detection (tag or filter)                                                                                                            |
-| `quality`        | `02_quality/`    | per-doc     | Gopher within-document quality heuristics (length, word lengths, symbol/bullet/ellipsis ratios, stopword floor)                                         |
-| `repetition`     | `03_repetition/` | per-doc     | Gopher within-document repetition heuristics (duplicate paragraphs/lines, top-n-gram saturation, dup-n-gram fractions)                                  |
-| `exact_dedup`    | `04_1_dedup/`    | corpus-wide | whole-document exact dedup (xxhash64 of `doc.text`)                                                                                                     |
-| `sentence_dedup` | `04_2_dedup/`    | corpus-wide | N-sentence sliding-window dedup (final corpus)                                                                                                          |
-| `stats`          | `05_statistics/` | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process)                                                                              |
+| `spam`           | `02_spam/`       | per-doc     | adult/SEO-spam removal via per-language lexicons + URL/domain blocklist + optional model hook                                                           |
+| `quality`        | `03_quality/`    | per-doc     | Gopher within-document quality heuristics (length, word lengths, symbol/bullet/ellipsis ratios, stopword floor)                                         |
+| `repetition`     | `04_repetition/` | per-doc     | Gopher within-document repetition heuristics (duplicate paragraphs/lines, top-n-gram saturation, dup-n-gram fractions)                                  |
+| `exact_dedup`    | `05_1_dedup/`    | corpus-wide | whole-document exact dedup (xxhash64 of `doc.text`)                                                                                                     |
+| `sentence_dedup` | `05_2_dedup/`    | corpus-wide | N-sentence sliding-window dedup (final corpus)                                                                                                          |
+| `stats`          | `06_statistics/` | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process)                                                                              |
 
-Each stage's sentinel hash covers its own top-level `pretrain.yaml` section. The `quality` and `stats` hashes additionally fold in the contents of the stopword file, and every stage's hash folds in the sorted list of dataset keys this run will process — so editing `stopwords_sl.txt`, switching between `--all` and a positional subset, or adding a dataset to `extract.yaml` all correctly trigger rebuilds.
+Each stage's sentinel hash covers its own top-level `pretrain.yaml` section. The `quality` and `stats` hashes additionally fold in the contents of the stopword file, the `spam` hash folds in the spam lexicon and domain-list contents, and every stage's hash folds in the sorted list of dataset keys this run will process — so editing `stopwords/sl.txt`, editing a `spam/<code>/*.txt` list, switching between `--all` and a positional subset, or adding a dataset to `extract.yaml` all correctly trigger rebuilds.
 
 Internally each dedup stage chains three datatrove executors via `depends=`: signature → find (single-worker reducer over signatures) → filter + write. The sig/find scratch lives at `<output_dir>/_dedup_state/` and is purged when the stage's sentinel lands. The stats stage is single-process because `CorpusStats` keeps global counters on its instance. The sentence-dedup blocks use `Languages.slovenian` so datatrove dispatches its bundled Slovenian `SpaCyTokenizer` for sentence boundaries.
 
@@ -284,19 +286,22 @@ Internally each dedup stage chains three datatrove executors via `depends=`: sig
 ├── 01_language/
 │   ├── <key>/<rank>.jsonl.gz               ← post-language-filter shards
 │   └── .complete
-├── 02_quality/
+├── 02_spam/
+│   ├── <key>/<rank>.jsonl.gz               ← post-spam-filter shards
+│   └── .complete
+├── 03_quality/
 │   ├── <key>/<rank>.jsonl.gz
 │   └── .complete
-├── 03_repetition/
+├── 04_repetition/
 │   ├── <key>/<rank>.jsonl.gz
 │   └── .complete
-├── 04_1_dedup/
+├── 05_1_dedup/
 │   ├── <key>/<rank>.jsonl.gz               ← post-exact-dedup shards
 │   └── .complete
-├── 04_2_dedup/
+├── 05_2_dedup/
 │   ├── <key>/<rank>.jsonl.gz               ← final pretraining corpus
 │   └── .complete
-├── 05_statistics/
+├── 06_statistics/
 │   ├── aggregate.json                      corpus-wide totals + tables
 │   ├── per_dataset/<key>.json              per-dataset doc/word breakdowns
 │   └── .complete
@@ -308,7 +313,7 @@ Internally each dedup stage chains three datatrove executors via `depends=`: sig
 ##### Useful invocations
 
 ```bash
-# Run all seven stages, skipping any whose config slice hash is unchanged.
+# Run all eight stages, skipping any whose config slice hash is unchanged.
 uv run python scripts/data/to_pretrain.py --all
 
 # Run only one stage. If its hash diverges from the recorded sentinel,

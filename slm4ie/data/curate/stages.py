@@ -14,10 +14,11 @@ from typing import Dict, Optional, Tuple
 
 #: Stage names in pipeline execution order. `convert` is stage 0: it
 #: turns extracted `<key>.jsonl` files into datatrove-shaped shards that
-#: the remaining six stages consume.
+#: the remaining stages consume.
 STAGE_NAMES: Tuple[str, ...] = (
     "convert",
     "language",
+    "spam",
     "quality",
     "repetition",
     "exact_dedup",
@@ -29,7 +30,7 @@ STAGE_NAMES: Tuple[str, ...] = (
 #: Stages that process one dataset at a time. They honor a dataset
 #: subset, write to canonical `<stage_dir>/<dataset>/`, and are tracked
 #: by per-dataset sentinels.
-SCOPED_STAGES: Tuple[str, ...] = ("convert", "language", "quality", "repetition")
+SCOPED_STAGES: Tuple[str, ...] = ("convert", "language", "spam", "quality", "repetition")
 
 #: Stages that operate over the whole corpus at once. They read every
 #: dataset under their input folder, are tracked by a corpus-level
@@ -46,11 +47,12 @@ ALL_STAGE_NAMES: Tuple[str, ...] = STAGE_NAMES + ("all",)
 STAGE_DIRS: Dict[str, str] = {
     "convert": "00_convert",
     "language": "01_language",
-    "quality": "02_quality",
-    "repetition": "03_repetition",
-    "exact_dedup": "04_1_dedup",
-    "sentence_dedup": "04_2_dedup",
-    "stats": "05_statistics",
+    "spam": "02_spam",
+    "quality": "03_quality",
+    "repetition": "04_repetition",
+    "exact_dedup": "05_1_dedup",
+    "sentence_dedup": "05_2_dedup",
+    "stats": "06_statistics",
 }
 
 
@@ -58,6 +60,7 @@ STAGE_DIRS: Dict[str, str] = {
 _CONFIG_SLICE_KEYS: Dict[str, Tuple[str, ...]] = {
     "convert": ("convert",),
     "language": ("language",),
+    "spam": ("spam",),
     "quality": ("quality",),
     "repetition": ("repetition",),
     "exact_dedup": ("exact_dedup",),

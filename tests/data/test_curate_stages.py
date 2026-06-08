@@ -15,10 +15,11 @@ from slm4ie.data.curate.stages import (
 
 
 def test_stage_names_are_in_pipeline_order() -> None:
-    """STAGE_NAMES lists the seven stages in execution order."""
+    """STAGE_NAMES lists the eight stages in execution order."""
     assert STAGE_NAMES == (
         "convert",
         "language",
+        "spam",
         "quality",
         "repetition",
         "exact_dedup",
@@ -37,28 +38,30 @@ def test_stage_dirs_use_numeric_prefix() -> None:
     assert STAGE_DIRS == {
         "convert": "00_convert",
         "language": "01_language",
-        "quality": "02_quality",
-        "repetition": "03_repetition",
-        "exact_dedup": "04_1_dedup",
-        "sentence_dedup": "04_2_dedup",
-        "stats": "05_statistics",
+        "spam": "02_spam",
+        "quality": "03_quality",
+        "repetition": "04_repetition",
+        "exact_dedup": "05_1_dedup",
+        "sentence_dedup": "05_2_dedup",
+        "stats": "06_statistics",
     }
 
 
 def test_final_corpus_dir_is_sentence_dedup() -> None:
-    """The final pretraining corpus lives under 04_2_dedup/."""
-    assert final_corpus_dir() == "04_2_dedup"
+    """The final pretraining corpus lives under 05_2_dedup/."""
+    assert final_corpus_dir() == "05_2_dedup"
 
 
 def test_stats_dir_matches_mapping() -> None:
-    """Stats lives under 05_statistics/."""
-    assert stats_dir() == "05_statistics"
+    """Stats lives under 06_statistics/."""
+    assert stats_dir() == "06_statistics"
 
 
 def test_config_slice_keys_per_stage() -> None:
     """Each stage advertises the top-level YAML key(s) that govern it."""
     assert config_slice_keys("convert") == ("convert",)
     assert config_slice_keys("language") == ("language",)
+    assert config_slice_keys("spam") == ("spam",)
     assert config_slice_keys("quality") == ("quality",)
     assert config_slice_keys("repetition") == ("repetition",)
     assert config_slice_keys("exact_dedup") == ("exact_dedup",)
@@ -70,8 +73,9 @@ def test_cascade_from_returns_stage_and_successors() -> None:
     """cascade_from yields the stage and every downstream stage in order."""
     assert cascade_from("convert") == STAGE_NAMES
     assert cascade_from("language") == STAGE_NAMES[1:]
-    assert cascade_from("quality") == STAGE_NAMES[2:]
-    assert cascade_from("exact_dedup") == STAGE_NAMES[4:]
+    assert cascade_from("spam") == STAGE_NAMES[2:]
+    assert cascade_from("quality") == STAGE_NAMES[3:]
+    assert cascade_from("exact_dedup") == STAGE_NAMES[5:]
     assert cascade_from("stats") == ("stats",)
 
 
@@ -112,7 +116,8 @@ def test_upstream_stage_returns_predecessor() -> None:
     from slm4ie.data.curate.stages import upstream_stage
 
     assert upstream_stage("language") == "convert"
-    assert upstream_stage("quality") == "language"
+    assert upstream_stage("spam") == "language"
+    assert upstream_stage("quality") == "spam"
     assert upstream_stage("repetition") == "quality"
     assert upstream_stage("exact_dedup") == "repetition"
     assert upstream_stage("sentence_dedup") == "exact_dedup"
@@ -136,8 +141,8 @@ def test_scoped_and_corpus_partition_stage_names() -> None:
 
 
 def test_scoped_membership() -> None:
-    """convert/language/quality/repetition are scoped; dedup/stats are not."""
-    assert SCOPED_STAGES == ("convert", "language", "quality", "repetition")
+    """convert/language/spam/quality/repetition are scoped; dedup/stats are not."""
+    assert SCOPED_STAGES == ("convert", "language", "spam", "quality", "repetition")
     assert CORPUS_STAGES == ("exact_dedup", "sentence_dedup", "stats")
 
 

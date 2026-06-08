@@ -6,6 +6,7 @@ test_curate_pipeline.py.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Set, Tuple
 
 import pytest
@@ -57,6 +58,7 @@ def _stub_runner(
         cfg: Dict[str, Any],
         workers: int,
         stopwords: Set[str],
+        spam_assets: Any,
         dataset_keys: List[str],
         input_view: Any = None,
         log_dir: Any = None,
@@ -100,6 +102,7 @@ def _common_cfg(input_dir: Path, output_dir: Path) -> Dict[str, Any]:
         "output_dir": str(output_dir),
         "convert": {"text_field": "text"},
         "language": {"targets": ["sl"]},
+        "spam": {"languages": ["sl"]},
         "quality": {"min_doc_words": 50},
         "repetition": {},
         "exact_dedup": {"precision": 64, "hash_fc": "xxhash"},
@@ -125,6 +128,13 @@ def _run_cli(
     monkeypatch.setattr(curate_cli, "_load_yaml", lambda _p: cfg)
     monkeypatch.setattr(
         curate_cli, "_load_stopwords", lambda _cfg: (set(), b"")
+    )
+    monkeypatch.setattr(
+        curate_cli,
+        "_load_spam_assets",
+        lambda _cfg: SimpleNamespace(
+            adult_words={}, spam_words={}, domains=set(), raw_bytes=b""
+        ),
     )
     monkeypatch.setattr(curate_cli, "_find_project_root", lambda: project_root)
     monkeypatch.setattr(curate_cli, "_list_datasets", lambda _p: [_DATASET])

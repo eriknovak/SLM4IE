@@ -85,22 +85,23 @@ def test_sentinel_is_current_false_when_missing(tmp_path: Path) -> None:
 
 def test_cascade_invalidate_removes_sentinels(tmp_path: Path) -> None:
     """cascade_invalidate removes sentinels for stage + every downstream stage."""
-    for name in ("02_quality", "03_repetition", "04_1_dedup", "04_2_dedup", "05_statistics"):
+    for name in ("03_quality", "04_repetition", "05_1_dedup", "05_2_dedup", "06_statistics"):
         folder = tmp_path / name
         folder.mkdir()
         (folder / ".complete").write_text("{}")
-    for name in ("00_convert", "01_language"):
+    for name in ("00_convert", "01_language", "02_spam"):
         (tmp_path / name).mkdir()
         (tmp_path / name / ".complete").write_text("{}")
 
     removed = cascade_invalidate(tmp_path, "quality")
     assert "quality" in removed
     assert "stats" in removed
-    # convert and language were before quality — must NOT be invalidated.
+    # convert, language, and spam were before quality — must NOT be invalidated.
     assert (tmp_path / "00_convert" / ".complete").exists()
     assert (tmp_path / "01_language" / ".complete").exists()
+    assert (tmp_path / "02_spam" / ".complete").exists()
     # quality + downstream sentinels gone.
-    for name in ("02_quality", "03_repetition", "04_1_dedup", "04_2_dedup", "05_statistics"):
+    for name in ("03_quality", "04_repetition", "05_1_dedup", "05_2_dedup", "06_statistics"):
         assert not (tmp_path / name / ".complete").exists()
 
 
@@ -236,12 +237,12 @@ def test_cascade_invalidate_scoped_mixes_per_dataset_and_corpus(tmp_path: Path) 
 
     out = tmp_path
     # Scoped stage quality has per-dataset sentinels for a, b.
-    q = out / "02_quality"
+    q = out / "03_quality"
     for key in ("a", "b"):
         write_dataset_sentinel(q, key, config_slice={}, config_hash_value="h",
                                records_in=1, records_out=1)
     # Corpus stage exact_dedup has a stage-level sentinel.
-    d = out / "04_1_dedup"
+    d = out / "05_1_dedup"
     write_sentinel(d, config_slice={}, config_hash_value="h",
                    records_in=1, records_out=1)
 

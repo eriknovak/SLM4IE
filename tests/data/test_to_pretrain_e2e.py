@@ -128,6 +128,15 @@ def _write_pretrain_config(path: Path, input_dir: Path, output_dir: Path) -> Non
             "low_accuracy": False,
             "max_chars": None,
         },
+        "spam": {
+            "languages": ["sl", "en"],
+            "use_ldnoobw": False,
+            "url_blocklist": True,
+            "min_adult_hits": 2,
+            "min_spam_hits": 2,
+            "keep_fraction": 0.0,
+            "default_language": "sl",
+        },
         "quality": {
             "min_doc_words": 5,
             "max_doc_words": 1000000,
@@ -189,19 +198,20 @@ def test_subset_run_then_all_is_incremental(tmp_path: Path) -> None:
         extract_config=extract_cfg,
     )
     assert _dataset_dirs(out_dir / "01_language") == {"alfa"}
-    assert _dataset_dirs(out_dir / "03_repetition") == {"alfa"}
-    assert (out_dir / "02_quality" / "alfa" / ".complete").exists()
+    assert _dataset_dirs(out_dir / "04_repetition") == {"alfa"}
+    assert (out_dir / "03_quality" / "alfa" / ".complete").exists()
     # No corpus stage ran during the subset pass.
-    assert not (out_dir / "04_1_dedup" / ".complete").exists()
-    assert not (out_dir / "05_statistics" / ".complete").exists()
+    assert not (out_dir / "05_1_dedup" / ".complete").exists()
+    assert not (out_dir / "06_statistics" / ".complete").exists()
 
     # Capture alfa's per-dataset sentinel mtimes before the --all run so we
     # can prove they are NOT rewritten (i.e. alfa is skipped, not reprocessed).
     alfa_sentinels = [
         out_dir / "00_convert" / "alfa" / ".complete",
         out_dir / "01_language" / "alfa" / ".complete",
-        out_dir / "02_quality" / "alfa" / ".complete",
-        out_dir / "03_repetition" / "alfa" / ".complete",
+        out_dir / "02_spam" / "alfa" / ".complete",
+        out_dir / "03_quality" / "alfa" / ".complete",
+        out_dir / "04_repetition" / "alfa" / ".complete",
     ]
     for p in alfa_sentinels:
         assert p.exists(), f"Expected alfa sentinel after subset run: {p}"
@@ -219,16 +229,16 @@ def test_subset_run_then_all_is_incremental(tmp_path: Path) -> None:
         pretrain_config=pretrain_cfg,
         extract_config=extract_cfg,
     )
-    assert _dataset_dirs(out_dir / "03_repetition") == {"alfa", "beta"}
-    assert (out_dir / "04_1_dedup" / ".complete").exists()
-    assert (out_dir / "05_statistics" / ".complete").exists()
+    assert _dataset_dirs(out_dir / "04_repetition") == {"alfa", "beta"}
+    assert (out_dir / "05_1_dedup" / ".complete").exists()
+    assert (out_dir / "06_statistics" / ".complete").exists()
     # Prove alfa's scoped sentinels were NOT rewritten during --all (skip-proof).
     for p in alfa_sentinels:
         assert p.stat().st_mtime_ns == alfa_mtimes_before[p], (
             f"{p} was rewritten — alfa should have been skipped during --all"
         )
     # Beta's scoped work must now be present too.
-    assert (out_dir / "03_repetition" / "beta" / ".complete").exists()
+    assert (out_dir / "04_repetition" / "beta" / ".complete").exists()
 
 
 def _write_extract_config_with_ghost(path: Path) -> None:
@@ -287,7 +297,7 @@ def test_all_skips_roster_dataset_with_no_input(tmp_path: Path) -> None:
     )
     # alfa + beta are processed; ghost has no shards at any scoped stage.
     assert _dataset_dirs(out_dir / "01_language") == {"alfa", "beta"}
-    assert _dataset_dirs(out_dir / "03_repetition") == {"alfa", "beta"}
+    assert _dataset_dirs(out_dir / "04_repetition") == {"alfa", "beta"}
     # Corpus stages completed across the real datasets.
-    assert (out_dir / "04_1_dedup" / ".complete").exists()
-    assert (out_dir / "05_statistics" / ".complete").exists()
+    assert (out_dir / "05_1_dedup" / ".complete").exists()
+    assert (out_dir / "06_statistics" / ".complete").exists()

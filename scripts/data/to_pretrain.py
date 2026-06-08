@@ -1,14 +1,15 @@
 """Build the final SLM4IE pretraining corpus stage-by-stage.
 
-`scripts/data/to_pretrain.py` runs the seven-stage curation pipeline:
+`scripts/data/to_pretrain.py` runs the eight-stage curation pipeline:
 
     0. convert        -> <output_dir>/00_convert/
     1. language       -> <output_dir>/01_language/
-    2. quality        -> <output_dir>/02_quality/
-    3. repetition     -> <output_dir>/03_repetition/
-    4. exact_dedup    -> <output_dir>/04_1_dedup/
-    5. sentence_dedup -> <output_dir>/04_2_dedup/   (final corpus)
-    6. stats          -> <output_dir>/05_statistics/
+    2. spam           -> <output_dir>/02_spam/
+    3. quality        -> <output_dir>/03_quality/
+    4. repetition     -> <output_dir>/04_repetition/
+    5. exact_dedup    -> <output_dir>/05_1_dedup/
+    6. sentence_dedup -> <output_dir>/05_2_dedup/   (final corpus)
+    7. stats          -> <output_dir>/06_statistics/
 
 Stage 0 turns the extraction-output `<key>.jsonl` files into
 datatrove-shaped `<key>/<NNNNN>.jsonl.gz` shards (formerly the job of
@@ -94,11 +95,13 @@ from slm4ie.data.curate.pipeline import (
     build_language_executors,
     build_quality_executors,
     build_repetition_executors,
+    build_spam_executors,
     build_exact_dedup_executors,
     build_sentence_dedup_executors,
     build_stats_executors,
     pipeline_io_counts,
 )
+from slm4ie.data.curate.spam import SpamAssets, SpamConfig, load_spam_assets
 from slm4ie.data.io_utils import DEFAULT_MAX_SHARD_BYTES, find_project_root as _find_project_root
 from slm4ie.data.stopwords import load_stopwords
 
@@ -254,6 +257,31 @@ def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
     return load_stopwords(code)
 
 
+def _load_spam_assets(cfg: Dict[str, Any]) -> SpamAssets:
+    """Load the spam-filter lexicons and domain blocklist from config.
+
+    Reads the languages and URL-blocklist toggle from `cfg['spam']`,
+    then resolves the curated per-language lexicons plus the domain
+    blocklist. The bundle's raw bytes are folded into the spam stage's
+    sentinel hash so editing any list invalidates the stage.
+
+    Args:
+        cfg: Parsed pretrain.yaml.
+
+    Returns:
+        A `SpamAssets` bundle (empty lexicons when no languages are
+        configured).
+
+    Raises:
+        ValueError: If a configured language has no curated list under
+            `slm4ie/data/spam/`.
+    """
+    scfg = cfg.get("spam") or {}
+    languages = scfg.get("languages") or []
+    url_blocklist = bool(scfg.get("url_blocklist", True))
+    return load_spam_assets(languages, url_blocklist=url_blocklist)
+
+
 def _filter_stage_subset(stage_dir: Path, keys: List[str]) -> Path:
     """Materialize a tempdir of symlinks restricted to *keys* under *stage_dir*.
 
@@ -406,6 +434,7 @@ def _stage_runner(
     cfg: Dict[str, Any],
     workers: int,
     stopwords: Set[str],
+    spam_assets: SpamAssets,
     dataset_keys: List[str],
     input_view: Optional[Path] = None,
     log_dir: Optional[Path] = None,
@@ -418,6 +447,8 @@ def _stage_runner(
         cfg: Parsed pretrain.yaml.
         workers: Resolved worker count.
         stopwords: Loaded stopword set (used by quality and stats).
+        spam_assets: Loaded spam lexicons and domain blocklist (used by
+            the spam stage).
         dataset_keys: Dataset keys to process; consumed by the convert
             stage to know which `<key>.jsonl` files to read.
         input_view: Optional symlink view of the stage's upstream output,
@@ -492,6 +523,38 @@ def _stage_runner(
                 ),
                 lang_low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
                 lang_max_chars=lang_cfg.get("max_chars"),
+                input_override=input_view,
+            )
+            return pipeline_io_counts(execs[-1].run())
+
+        return run
+
+    if stage == "spam":
+        spcfg = cfg.get("spam") or {}
+        if spcfg.get("model"):
+            raise ValueError(
+                "pretrain.yaml::spam.model is set, but no model resolver is "
+                "configured. Leave it null, or wire a scorer before enabling it."
+            )
+        spam_config = SpamConfig(
+            min_adult_hits=int(spcfg.get("min_adult_hits", 2)),
+            min_spam_hits=int(spcfg.get("min_spam_hits", 2)),
+            keep_fraction=float(spcfg.get("keep_fraction", 0.0)),
+            default_language=str(spcfg.get("default_language", "sl")),
+            url_blocklist=bool(spcfg.get("url_blocklist", True)),
+            use_ldnoobw=bool(spcfg.get("use_ldnoobw", True)),
+            model=spcfg.get("model"),
+            model_threshold=float(spcfg.get("model_threshold", 0.5)),
+        )
+
+        def run() -> Tuple[int, int]:
+            execs = build_spam_executors(
+                paths,
+                tasks=workers,
+                spam_config=spam_config,
+                adult_words=spam_assets.adult_words,
+                spam_words=spam_assets.spam_words,
+                domains=spam_assets.domains,
                 input_override=input_view,
             )
             return pipeline_io_counts(execs[-1].run())
@@ -640,25 +703,33 @@ def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
     return _json.dumps(sorted(dataset_keys), ensure_ascii=False).encode("utf-8")
 
 
-def _stage_extra(stage: str, stopwords_bytes: bytes, dataset_keys_bytes: bytes) -> bytes:
+def _stage_extra(
+    stage: str, stopwords_bytes: bytes, spam_bytes: bytes, dataset_keys_bytes: bytes
+) -> bytes:
     """Return extra bytes folded into the hash for a stage.
 
     Corpus stages (exact_dedup, sentence_dedup, stats) fold in the
     dataset roster so adding or removing a dataset invalidates them.
-    Scoped stages (convert, language, quality, repetition) exclude the
-    roster so per-dataset work survives roster changes. Stopword file
+    Scoped stages (convert, language, spam, quality, repetition) exclude
+    the roster so per-dataset work survives roster changes. Stopword file
     contents are folded for the stages that consume them (quality,
-    stats).
+    stats); the spam lexicon/domain contents are folded for the spam
+    stage so editing a list invalidates it.
 
     Args:
         stage: Stage name.
         stopwords_bytes: Raw bytes of the stopword file.
+        spam_bytes: Raw bytes of the spam lexicon and domain lists.
         dataset_keys_bytes: Canonical JSON bytes of the sorted roster.
 
     Returns:
         Bytes to fold into the stage's sentinel hash.
     """
     roster = b"" if is_scoped(stage) else dataset_keys_bytes
+    if stage == "spam":
+        # Spam is scoped, so `roster` is empty; the lexicon/domain bytes
+        # are what make an edited list invalidate the stage.
+        return spam_bytes
     if stage in ("quality", "stats"):
         return stopwords_bytes + b"\x00" + roster if roster else stopwords_bytes
     return roster
@@ -778,6 +849,7 @@ def _curate(
     cfg = _load_yaml(pretrain_path)
     input_dir, output_dir = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
+    spam_assets = _load_spam_assets(cfg)
 
     if run_all:
         dataset_keys = _list_datasets(extract_path)
@@ -815,7 +887,7 @@ def _curate(
     force_keys: Set[str] = set()
     for stage_name in requested_stages:
         slice_ = _stage_slice(stage_name, cfg)
-        extra = _stage_extra(stage_name, stopwords_raw, dataset_keys_bytes)
+        extra = _stage_extra(stage_name, stopwords_raw, spam_assets.raw_bytes, dataset_keys_bytes)
         current_hash = config_hash(slice_, extra=extra)
         stage_folder = paths.stage_dir(stage_name)
 
@@ -878,6 +950,7 @@ def _curate(
                     cfg,
                     workers,
                     stopwords,
+                    spam_assets,
                     dataset_keys=todo,
                     input_view=view,
                     log_dir=convert_log_dir if stage_name == "convert" else None,
@@ -918,6 +991,7 @@ def _curate(
                 cfg,
                 workers,
                 stopwords,
+                spam_assets,
                 dataset_keys=dataset_keys,
                 input_view=None,
             )

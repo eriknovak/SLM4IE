@@ -20,7 +20,7 @@ factories — they do not check, write, or honor sentinels.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.dedup import (
@@ -41,6 +41,7 @@ from datatrove.utils.typeshelper import Languages
 
 from slm4ie.data.curate.dedup import default_exact_config
 from slm4ie.data.curate.language import LinguaLanguageFilter
+from slm4ie.data.curate.spam import SpamConfig, SpamFilter
 from slm4ie.data.curate.stages import STAGE_DIRS
 from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce
 
@@ -251,6 +252,61 @@ def build_language_executors(
     return [executor]
 
 
+def build_spam_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    spam_config: Optional[SpamConfig] = None,
+    adult_words: Optional[Dict[str, Set[str]]] = None,
+    spam_words: Optional[Dict[str, Set[str]]] = None,
+    domains: Optional[Set[str]] = None,
+    model_fn: Optional[Callable[[str], float]] = None,
+    seed: Optional[int] = None,
+    input_override: Optional[Path] = None,
+) -> List[LocalPipelineExecutor]:
+    """Build the spam stage: read 01_language/ → SpamFilter → write 02_spam/.
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count.
+        spam_config: `SpamFilter` knob bundle; defaults to `SpamConfig()`.
+        adult_words: Per-language adult-term sets, keyed by language code.
+        spam_words: Per-language SEO/scam-term sets, keyed by language
+            code.
+        domains: Blocklisted registered domains.
+        model_fn: Optional text-to-score callable enabling the model
+            signal.
+        seed: Seed for the `keep_fraction` sampler.
+        input_override: Optional folder to read from instead of the
+            language stage's output, used to restrict the stage to a
+            symlinked subset of datasets.
+
+    Returns:
+        A list with one `LocalPipelineExecutor`.
+    """
+    in_ = input_override if input_override is not None else paths.stage_dir("language")
+    out = paths.stage_dir("spam")
+    executor = LocalPipelineExecutor(
+        pipeline=[
+            _reader(in_),
+            SpamFilter(
+                adult_words=adult_words or {},
+                spam_words=spam_words or {},
+                domains=domains or set(),
+                config=spam_config or SpamConfig(),
+                model_fn=model_fn,
+                seed=seed,
+            ),
+            _writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("spam")),
+        skip_completed=False,
+    )
+    return [executor]
+
+
 def build_quality_executors(
     paths: CuratePaths,
     *,
@@ -260,7 +316,7 @@ def build_quality_executors(
     stopwords: Optional[Set[str]] = None,
     input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
-    """Build the quality stage: read 01_language/ → Gopher quality → write 02_quality/.
+    """Build the quality stage: read 02_spam/ → Gopher quality → write 03_quality/.
 
     Args:
         paths: Resolved input/output locations.
@@ -312,7 +368,7 @@ def build_repetition_executors(
     language: str = Languages.slovenian,
     input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
-    """Build the repetition stage: read 02_quality/ → Gopher repetition → write 03_repetition/.
+    """Build the repetition stage: read 03_quality/ → Gopher repetition → write 04_repetition/.
 
     Args:
         paths: Resolved input/output locations.
@@ -349,12 +405,12 @@ def build_exact_dedup_executors(
     finder_workers: int = 1,
     exact_config: Optional[ExactDedupConfig] = None,
 ) -> List[LocalPipelineExecutor]:
-    """Build the exact-dedup stage: sig → find → filter+write 04_1_dedup/.
+    """Build the exact-dedup stage: sig → find → filter+write 05_1_dedup/.
 
     Three executors chained via `depends`:
-        1. (parallel) read 03_repetition/ → ExactDedupSignature → exact_sigs/
+        1. (parallel) read 04_repetition/ → ExactDedupSignature → exact_sigs/
         2. (single)   ExactFindDedups(exact_sigs/) → exact_dups/
-        3. (parallel) read 03_repetition/ → ExactDedupFilter → write 04_1_dedup/
+        3. (parallel) read 04_repetition/ → ExactDedupFilter → write 05_1_dedup/
 
     Args:
         paths: Resolved input/output locations.
@@ -417,12 +473,12 @@ def build_sentence_dedup_executors(
     sentence_config: Optional[SentDedupConfig] = None,
     language: str = Languages.slovenian,
 ) -> List[LocalPipelineExecutor]:
-    """Build the sentence-dedup stage: sig → find → filter+write 04_2_dedup/.
+    """Build the sentence-dedup stage: sig → find → filter+write 05_2_dedup/.
 
     Three executors chained via `depends`, mirroring the exact stage:
-        1. (parallel) read 04_1_dedup/ → SentenceDedupSignature → sent_sigs/
+        1. (parallel) read 05_1_dedup/ → SentenceDedupSignature → sent_sigs/
         2. (single)   SentenceFindDedups(sent_sigs/) → sent_dups/
-        3. (parallel) read 04_1_dedup/ → SentenceDedupFilter → write 04_2_dedup/
+        3. (parallel) read 05_1_dedup/ → SentenceDedupFilter → write 05_2_dedup/
 
     Args:
         paths: Resolved input/output locations.
@@ -486,11 +542,11 @@ def build_stats_executors(
     stopwords: Optional[Set[str]] = None,
     top_k_words: int = 5_000,
 ) -> List[LocalPipelineExecutor]:
-    """Build the stats stage: map → reduce → 05_statistics/.
+    """Build the stats stage: map → reduce → 06_statistics/.
 
     Two executors are returned. The map executor fans `CorpusStats`
     out across `tasks` workers; each rank writes a per-shard partial
-    pickle to `05_statistics/_partials/`. The reduce executor runs
+    pickle to `06_statistics/_partials/`. The reduce executor runs
     single-process, sums the partials, derives the top-K
     word-frequency table, and writes the final `aggregate.json` plus
     per-dataset breakdowns.

@@ -1,0 +1,30 @@
+# English adult/pornography terms — high precision only.
+# One token per line; blank lines and #-comments ignored; lowercased on load.
+porn
+pornography
+pornographic
+sex
+xxx
+hardcore
+blowjob
+handjob
+masturbation
+masturbate
+anal
+creampie
+cumshot
+deepthroat
+escort
+escorts
+prostitute
+prostitutes
+prostitution
+hooker
+whore
+brothel
+dildo
+vibrator
+orgasm
+striptease
+camgirl
+nsfw

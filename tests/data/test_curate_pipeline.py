@@ -37,8 +37,10 @@ from slm4ie.data.curate.pipeline import (  # noqa: E402
     build_quality_executors,
     build_repetition_executors,
     build_sentence_dedup_executors,
+    build_spam_executors,
     build_stats_executors,
 )
+from slm4ie.data.curate.spam import SpamConfig, SpamFilter  # noqa: E402
 from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce  # noqa: E402
 
 
@@ -83,8 +85,46 @@ class TestLanguageStage:
         assert lang.minimum_relative_distance == 0.15
 
 
+class TestSpamStage:
+    """The spam stage reads 01_language/ and writes 02_spam/."""
+
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """The spam stage runs as a single executor."""
+        execs = build_spam_executors(_paths(tmp_path))
+        assert len(execs) == 1
+
+    def test_pipeline_contains_spam_filter(self, tmp_path: Path) -> None:
+        """The pipeline reads input, applies SpamFilter, writes shards."""
+        execs = build_spam_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert JsonlReader in types_
+        assert SpamFilter in types_
+        assert JsonlWriter in types_
+
+    def test_writes_to_spam_folder(self, tmp_path: Path) -> None:
+        """The writer's output_folder is `<output_dir>/02_spam`."""
+        paths = _paths(tmp_path)
+        execs = build_spam_executors(paths)
+        writer = next(s for s in execs[0].pipeline if isinstance(s, JsonlWriter))
+        assert str(paths.stage_dir("spam")) in writer.output_folder.path
+
+    def test_config_and_assets_threaded(self, tmp_path: Path) -> None:
+        """SpamConfig and lexicon assets reach the underlying SpamFilter."""
+        cfg = SpamConfig(min_adult_hits=5, use_ldnoobw=False)
+        execs = build_spam_executors(
+            _paths(tmp_path),
+            spam_config=cfg,
+            adult_words={"sl": {"porno"}},
+            spam_words={"sl": {"viagra"}},
+            domains={"pornhub.com"},
+        )
+        spam = next(s for s in execs[0].pipeline if isinstance(s, SpamFilter))
+        assert spam.config.min_adult_hits == 5
+        assert "pornhub.com" in spam.domains
+
+
 class TestQualityStage:
-    """The quality stage reads 01_language/ and writes 02_quality/."""
+    """The quality stage reads 02_spam/ and writes 03_quality/."""
 
     def test_returns_one_executor(self, tmp_path: Path) -> None:
         """The quality stage runs as a single executor."""
