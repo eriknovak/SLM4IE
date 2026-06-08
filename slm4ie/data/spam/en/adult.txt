@@ -1,30 +1,70 @@
 # English adult/pornography terms — high precision only.
-# One token per line; blank lines and #-comments ignored; lowercased on load.
+# One token (or space-separated phrase) per line; blank lines and
+# #-comments ignored; lowercased on load. Matching is whole-word, so
+# multi-word phrases must use spaces (not hyphens) and 'sex' will not
+# match inside 'Sussex'.
+
+# pornography
 porn
+porno
 pornography
 pornographic
+pornstar
+pornstars
+sex tape
+sextape
+
+# explicit sexual acts / terms
 sex
 xxx
 hardcore
 blowjob
 handjob
+deepthroat
+creampie
+cumshot
+gangbang
+threesome
 masturbation
 masturbate
 anal
-creampie
-cumshot
-deepthroat
-escort
-escorts
+anal sex
+oral sex
+orgy
+orgasm
+fetish
+bdsm
+
+# explicit anatomy / vulgar
+dick
+pussy
+boobs
+cock
+fuck
+fucking
+
+# sex industry
 prostitute
 prostitutes
 prostitution
+escort
+escorts
+escort service
 hooker
 whore
 brothel
-dildo
-vibrator
-orgasm
+stripper
 striptease
 camgirl
+camgirls
+
+# sex toys / shops
+dildo
+vibrator
+sex toys
+sex shop
+
+# tags / labels
 nsfw
+milf
+hentai

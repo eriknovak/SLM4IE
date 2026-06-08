@@ -1,17 +1,88 @@
 # Language-agnostic adult/spam domain blocklist (registered domains).
-# One domain per line; blank lines and #-comments ignored; lowercased on load.
-# A document is flagged when its metadata.url host equals one of these or is
-# a subdomain of it. This is a small curated seed; the UT1 adult domain list
-# can be auto-fetched and merged at runtime when enabled.
+# One domain per line; blank lines and #-comments ignored; lowercased on
+# load. A document is flagged when its metadata.url host equals one of
+# these or is a subdomain of it. This is a curated seed; the UT1 adult
+# domain list can be auto-fetched and merged at runtime when enabled.
+
+# --- adult: porn tubes ---
 pornhub.com
 xvideos.com
 xnxx.com
 xhamster.com
 redtube.com
 youporn.com
-onlyfans.com
+tube8.com
+spankbang.com
+eporner.com
+txxx.com
+hclips.com
+porntrex.com
+tnaflix.com
+drtuber.com
+nuvid.com
+sunporno.com
+beeg.com
+spankwire.com
+keezmovies.com
+motherless.com
+porn.com
+porndig.com
+upornia.com
+gotporn.com
+pornone.com
+hqporner.com
+
+# --- adult: studios / paysites ---
+brazzers.com
+realitykings.com
+bangbros.com
+naughtyamerica.com
+digitalplayground.com
+
+# --- adult: hentai / animated ---
+nhentai.net
+hentaihaven.xxx
+rule34.xxx
+e-hentai.org
+hanime.tv
+
+# --- adult: cam sites ---
 chaturbate.com
 livejasmin.com
-brazzers.com
+stripchat.com
+bongacams.com
+cam4.com
+myfreecams.com
+camsoda.com
+flirt4free.com
+jerkmate.com
+
+# --- adult: creator / clip platforms ---
+onlyfans.com
+fansly.com
+manyvids.com
+fancentro.com
+clips4sale.com
+
+# --- adult: escort / adult dating ---
 escortdirectory.com
+adultwork.com
+eros.com
+slixa.com
+tryst.link
+skipthegames.com
+listcrawler.com
 adultfriendfinder.com
+ashleymadison.com
+benaughty.com
+fling.com
+
+# --- spam: counterfeit / replica storefronts ---
+replicamagic.com
+perfectwatches.cn
+replicawatches.to
+
+# --- spam: rogue online pharmacies ---
+canadianpharmacyking.com
+healthwarehouse-rx.com
+genericpharmacyrx.com

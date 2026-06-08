@@ -1,42 +1,112 @@
 # Slovenian adult/pornography terms — high precision only.
-# One token per line; blank lines and #-comments ignored; lowercased on load.
-# Ambiguous common words (ženske, telo, masaža, zmenke) are deliberately
-# excluded; rely on the URL blocklist and the hit threshold for those.
+# One token (or space-separated phrase) per line; blank lines and
+# #-comments ignored; lowercased on load. Matching is whole-word, so
+# multi-word phrases must use spaces (not hyphens) to hit real prose.
+# Ambiguous common words (ženske, telo, masaža, zmenke, prsi, rit) are
+# deliberately excluded; rely on the URL blocklist and the hit threshold
+# for those.
+
+# pornography
 porno
-pornografija
-pornografski
 pornič
+pornografija
+pornografije
+pornografski
+pornografsko
+pornozvezda
+pornozvezde
+pornozvezdnica
+pornofilm
+pornofilmi
+pornoposnetek
+pornoposnetki
+pornostran
+pornostrani
+pornoindustrija
+
+# explicit sexual acts / terms
 seks
 seksi
 seksati
+seksanje
+poseksati
+felacio
+kunilingus
+penetracija
+ejakulacija
+ejakulira
 analni
 analno
+analni seks
 oralni
 oralno
+oralni seks
+grupni seks
+grupnjak
 masturbacija
 masturbirati
-erotika
-erotični
-erotika
+samozadovoljevanje
+spolni odnos
+spolni odnosi
+fetiš
+fetiši
+orgija
+orgije
+orgazem
+
+# explicit anatomy / vulgar
+penis
+vagina
+pička
+pičke
+joški
+kurac
+kurc
+drkanje
+drkati
+fuk
+fukati
+fukanje
+pofukati
+jebanje
+jebati
+pojebati
+pizda
+
+# sex industry
+prostitucija
 prostitutka
 prostitutke
 prostitutk
-prostitucija
+prostitut
+prostituti
 kurba
 kurbe
 kurbir
-fukati
-fuk
-pizda
-penis
-vagina
-vibrator
-dildo
-orgazem
+vlačuga
+vlačuge
+bordel
+bordeli
 striptiz
-spolni
+striptizeta
+striptizete
+nimfomanka
+erotika
+erotično
+erotični
+erotika
 spolnost
 golota
 nudisti
+
+# sex toys / shops
+vibrator
+vibratorji
+dildo
+seks igrače
+seks oglasi
+sexshop
+
+# tags / labels
 xxx
 hardcore

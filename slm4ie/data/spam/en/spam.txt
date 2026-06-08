@@ -1,23 +1,46 @@
 # English SEO/scam spam terms — high precision only.
-# Pill spam, fake pharma, counterfeit goods, gambling promos. One token per
-# line; blank lines and #-comments ignored; lowercased on load.
+# Pill spam, fake pharma, counterfeit goods, gambling promos, follower/
+# crypto scams. One token (or space-separated phrase) per line; blank
+# lines and #-comments ignored; lowercased on load. Matching is
+# whole-word, so multi-word phrases must use spaces (not hyphens).
+# Ambiguous legitimate phrases (work from home, weight loss) are
+# deliberately excluded.
+
+# pill / ED spam
 viagra
 cialis
 kamagra
 levitra
+viagra without prescription
+no prescription needed
+penis enlargement
+male enhancement
+
+# gambling promos
 casino
 gambling
 slots
 sportsbook
+online casino
+free spins
+
+# counterfeit goods
 replica
 replicas
-rolex
+replica watches
+rolex replica
 counterfeit
-cheap-followers
-buy-followers
-weight-loss-pills
-penis-enlargement
-work-from-home
-free-bitcoin
-forex-signals
-payday-loan
+fake designer
+
+# follower / engagement scams
+buy followers
+cheap followers
+buy likes
+buy instagram followers
+
+# crypto / earnings / loan scams
+free bitcoin
+forex signals
+payday loan
+make money fast
+guaranteed income
