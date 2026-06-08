@@ -43,15 +43,29 @@ under-using high-quality text for zero-shot IE.
       downweight raw CommonCrawl).
 - [ ] Decide target domain mixture and document it in the training config.
 
-## 🟡 3. Residual foreign-language leakage
+## 🟡 3. Residual foreign-language leakage — ACCEPTED AS-IS (closed 2026-06-08)
 
-English/foreign tokens survive the `low_accuracy` trigram language filter:
-`the` (6.6M), `of` (4.3M), `and` (3.3M), `more`, `de` appear in the top 200
-(<1% of mass, but visible).
+English/foreign tokens appear in the top 200 (`the`, `of`, `and`, `more`, `de`;
+<1% of mass). Diagnosed with `scripts/analysis/diagnose_language_leakage.py`
+(read-only, 1,772 docs across all 20 datasets sampled from the existing corpus):
 
-- [ ] Tighten language detection: raise `minimum_relative_distance`, disable
-      `low_accuracy`, and/or increase `max_chars` (currently 2048).
-- [ ] Optionally add a sentence-level (not just doc-level) language filter.
+- **Whole foreign docs slipping past the doc-level filter: 0.11%** (2/1772) —
+  the lingua doc-level filter is working as intended.
+- **Embedded foreign text: 28% of docs** carry some non-`sl` paragraph, but only
+  **3.4% of character mass** is foreign, and **~88% of the leakage tokens
+  (`the`/`of`/`and`) sit inside paragraphs lingua labels Slovenian** — i.e. they
+  are isolated English words, brand names, and loanwords within Slovenian
+  sentences (e.g. "Chang-shu purple čaj", "Victoria's Secret", "SKF TMSP 1"),
+  not coherent foreign blocks.
+
+**Decision:** embedded foreign text inside Slovenian documents is acceptable; the
+problem is not whole-doc leakage (which is ~0). No scrubber and no config change.
+Even a paragraph-level scrubber would only touch ~12% of the leakage tokens.
+
+- [x] Diagnose embedded-vs-whole-doc leakage (read-only script; verdict above).
+- [x] Confirm doc-level filter is effective (0.11% whole-foreign) — no config
+      tightening needed.
+- [ ] (Descoped) sub-document scrubber — not worth it for embedded loanwords.
 
 ## 🟡 4. Under-represented domains
 
