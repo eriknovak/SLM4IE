@@ -5,32 +5,42 @@ finished 2026-06-07 (final corpus: 27,182,636 docs / ~7.87B words across 20
 datasets, 9 domains). Ordered by priority. Severity: 🔴 blocker · 🟠 important ·
 🟡 nice-to-have.
 
-## 🔴 1. Adult / SEO spam contamination
+## ✅ 1. Adult / SEO spam contamination — RESOLVED (closed 2026-06-10)
 
-The global top-200 word table is polluted with escort/porn/dating vocabulary at
-extreme ranks — `prostitutke` is the ~10th most frequent content word (10.9M),
+The global top-200 word table was polluted with escort/porn/dating vocabulary at
+extreme ranks — `prostitutke` was the ~10th most frequent content word (10.9M),
 plus `porno`, `seks`, `kurba`/`kurbe`, `zmenke`, `masaža`, and supporting
 `ženske`/`telo`/`posnetki`/`brezplačno`. This is grammatical Slovenian, so
-neither the language filter nor Gopher heuristics remove it. Treat as a blocker
-for a general/professional IE model.
+neither the language filter nor Gopher heuristics removed it — a blocker for a
+general/professional IE model.
 
-**Implemented (2026-06-08):** new `spam` stage at `02_spam` (after language,
-before quality). See `docs/superpowers/specs/2026-06-08-spam-adult-filter-design.md`.
-- [x] Add a URL/domain blocklist filter (adult/escort/SEO domains) — language-
-      agnostic, matched against `metadata.url`. Curated seed at
-      `slm4ie/data/spam/domains.txt`.
+**Fix:** new `spam` stage at `02_spam` (after language, before quality), using a
+per-language lexicon + URL/domain blocklist + optional pluggable model hook. See
+`docs/superpowers/specs/2026-06-08-spam-adult-filter-design.md`.
+
+- [x] URL/domain blocklist filter (adult/escort/SEO domains), language-agnostic,
+      matched against `metadata.url` (`slm4ie/data/spam/domains.txt`, 67 domains).
 - [x] Per-language lexicon filter — curated `sl` + `en` adult/spam lists under
-      `slm4ie/data/spam/<code>/`; LDNOOBW auto-loaded for other languages.
-- [x] Adult-content classifier: pluggable model hook (`spam.model`), off by
-      default; lexicon + URL is the shipped signal.
+      `slm4ie/data/spam/<code>/`; LDNOOBW auto-loaded for other languages. Lists
+      expanded 2026-06-08 (sl/adult 93, sl/spam 32, en/adult 53, en/spam 29).
+- [x] Pluggable model hook (`spam.model`), off by default; lexicon + URL shipped.
 - [x] Configurable, sentinel-tracked via `configs/data/pretrain.yaml::spam`;
-      folder renumber done; full test suite + dry-run on the existing corpus
-      green (~1.7% of a 40k sample dropped, correct reasons).
-- [ ] Quantify which datasets the spam concentrates in (per-source word-freq
-      pass over `05_2_dedup/`; suspects: cc100, hplt, macocu_sl, c4).
-- [ ] Re-run pipeline from `02_spam` onward (~1–2 days), delete orphaned old
-      `02_quality…05_statistics` dirs, and re-check the top-K table.
-- [ ] (Optional) merge the UT1 adult domain list into the blocklist at runtime.
+      stage folders renumbered; full test suite green.
+- [x] Full pipeline re-run from `02_spam` (finished 2026-06-10). Spam stage
+      dropped **1,109,079 docs (1.89%)** (adult_lexicon 662,987 · spam_lexicon
+      427,716 · url 827 · both 17,549).
+- [x] **Verified outcome:** every tracked offender is gone from the new top-200
+      (`prostitutke` 10.9M→below #200; `porno`/`seks`/`kurba`/`zmenke`/`masaža`
+      all gone), the new top-25 is clean, and the domain mix is undistorted
+      (web 82.3%→83.8%). New corpus: 26,502,111 docs / ~6.95B words at
+      `06_statistics/`.
+
+Remaining cleanup (not blockers):
+
+- [x] Delete orphaned old-numbered dirs (`02_quality…05_statistics`, ~370 GB)
+      (done 2026-06-10).
+- [ ] (Optional) per-source spam quantification; merge the UT1 adult domain list
+      into the blocklist at runtime.
 
 ## 🟠 2. Heavy web skew (82% of words)
 
