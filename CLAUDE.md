@@ -113,6 +113,20 @@ All converters skip existing outputs unless `--force` is passed and accept
 either a single dataset key (or `<task>/<dataset>` entry key for the task
 converters) or `--all`.
 
+### Tokenizer-comparison stage (not a conversion route)
+
+`scripts/tokenizers/{train,analyze}.py` (library code in `slm4ie/tokenizers/`,
+config `configs/tokenizers/tokenizers.yaml`, deps behind the `tokenize` extra)
+train five tokenizers across a vocab sweep and score them with six metrics. It
+is a **consumer**, not a fourth conversion route: it reads the deduplicated
+corpus (`pretrain/05_2_dedup/`) for training and `tokenization/sloleks.jsonl.gz`
+for the morpheme-derived gold, and writes artifacts + a report under
+`/vault/data/SLM4IE/tokenizers/`. The morpheme gold is derived from Sloleks
+(`slm4ie/tokenizers/morphology.py`) and is **inflectional silver gold** — the
+morph metrics are relative comparators, not absolute morphology. Adding new
+tokenizers means new `@register_tokenizer` backends under
+`slm4ie/tokenizers/backends/`, not new scripts.
+
 ## Documentation style — Google-style docstrings (REQUIRED)
 
 **Every public module, class, function, and method MUST have a Google-style

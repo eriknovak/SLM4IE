@@ -13,6 +13,7 @@ dependencies = [
     "datasets>=3.0.0",
     "zstandard>=0.22",
     "lxml>=6.1.1",
+    "numpy>=2.4.3",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,14 @@ curate = [
     "nltk>=3.8",                      # fallback sentence splitter
     "pyahocorasick>=2.0",             # filters
     "lingua-language-detector>=2.0.0",
+]
+tokenize = [
+    # Tokenizer training + morphological evaluation stage
+    # (scripts/tokenizers/*). Kept out of the base install so a plain
+    # `uv sync` stays light; pull in with `uv sync --extra tokenize`.
+    "tokenizers>=0.23.1",             # HF BPE / WordPiece trainers + fast runtime
+    "sentencepiece>=0.2.1",           # Unigram (SentencePiece) trainer
+    "mlflow>=3.13.0",                 # experiment tracking for the sweep
 ]
 
 [build-system]

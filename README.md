@@ -396,10 +396,35 @@ uv run python scripts/data/generate_synthetic.py # synthetic IE data via LLM API
 
 ### Tokenizer
 
+Trains five tokenizers — **BPE** and **WordPiece** (HuggingFace `tokenizers`),
+**Unigram** (SentencePiece), and the from-scratch **MorphBPE** and **MorphPiece**
+— at each of three vocab sizes (16k/32k/64k), then scores them with six metrics
+to determine which segments Slovenian most morphologically. Driven by
+[`configs/tokenizers/tokenizers.yaml`](configs/tokenizers/tokenizers.yaml).
+Requires the `tokenize` extra: `uv sync --extra tokenize`.
+
+The stage consumes the deduplicated corpus (`pretrain/05_2_dedup/`) for training
+and the Sloleks lexicon (`tokenization/sloleks.jsonl.gz`, produced by
+`to_tokenization.py`) for the morpheme-derived gold used by the morph metrics, so
+run `to_tokenization.py sloleks` first.
+
 ```bash
-uv run python scripts/tokenizers/train.py     # train tokenizer from config
-uv run python scripts/tokenizers/analyze.py   # compare tokenizers
+uv run python scripts/data/to_tokenization.py sloleks   # prerequisite: Sloleks gold
+uv run python scripts/tokenizers/train.py     --all      # train the 5x3 sweep
+uv run python scripts/tokenizers/analyze.py   --all      # 6 metrics + report.md/json
 ```
+
+Both accept positional `<name>-<vocab>` run keys (e.g. `bpe-16000`),
+`--tokenizer`/`--vocab` filters, `--max-workers`, and `--force`. Artifacts land
+under `/vault/data/SLM4IE/tokenizers/<name>-<vocab>/`; the comparison report is
+written to `tokenizers/_reports/report.md`. Set `mlflow.enabled: true` (and a
+tracking URI) in a `tokenizers.local.yaml` overlay to log the sweep to MLflow.
+
+The six metrics: **Fertility** (tokens/word, ↓), **CTC** compression
+(tokens-per-byte ↓ / chars-per-token ↑), **Rényi efficiency** (↑), **MorphScore**
+boundary F1 (↑), **Morph-Edit-Distance** score (↑), and **Morph-Consistency** (↑).
+The morph metrics use a Sloleks-derived *inflectional* silver gold, so read them
+as relative comparators, not absolute morphological accuracy.
 
 ### Model training and evaluation
 
@@ -414,6 +439,7 @@ Batch scripts for cluster execution live under [`slurm/`](slurm/):
 
 ```bash
 sbatch slurm/tokenizer_train.sbatch
+sbatch slurm/tokenizer_analyze.sbatch
 sbatch slurm/train.sbatch
 sbatch slurm/evaluate.sbatch
 sbatch slurm/generate.sbatch

@@ -1,0 +1,47 @@
+# Tokenizer training + morphological evaluation sweep.
+#
+# Trains five tokenizers (bpe, wordpiece, unigram, morphbpe, morphpiece) at
+# each vocab size and evaluates them with six metrics. Consumed by both
+# scripts/tokenizers/train.py and scripts/tokenizers/analyze.py.
+#
+# Secrets / machine-specific overrides (e.g. mlflow.tracking_uri) belong in a
+# gitignored sibling tokenizers.local.yaml, which is deep-merged over this file.
+
+# --- Training corpus -------------------------------------------------------
+corpus:
+  root: /vault/data/SLM4IE/pretrain/05_2_dedup   # final deduplicated corpus
+  datasets: []                                   # [] = all dataset subdirs
+  budget:
+    max_bytes: 2_000_000_000                     # ~2 GB sampled training text
+    max_docs: null
+    seed: 13
+    weight_key: dataset                          # source = dataset subdir name
+    source_weights: {}                           # per-source weights; default 1.0
+
+# --- Sweep -----------------------------------------------------------------
+tokenizers: [bpe, wordpiece, unigram, morphbpe, morphpiece]
+vocab_sizes: [16000, 32000, 64000]
+special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
+
+# --- Morphology (Sloleks-derived silver gold) ------------------------------
+morphology:
+  sloleks_path: /vault/data/SLM4IE/tokenization/sloleks.jsonl.gz
+  min_stem_len: 2
+
+# --- Output ----------------------------------------------------------------
+output:
+  root: /vault/data/SLM4IE/tokenizers            # per-run artifact subdirs
+  report_dir: /vault/data/SLM4IE/tokenizers/_reports
+
+# --- Evaluation ------------------------------------------------------------
+eval:
+  corpus_budget:
+    max_bytes: 200_000_000                       # held-out sample (different seed)
+    seed: 99
+  renyi_alpha: 2.5
+
+# --- MLflow ----------------------------------------------------------------
+mlflow:
+  experiment: tokenizer/slovenian
+  enabled: false                                 # set true (+ tracking_uri) in the overlay
+  tracking_uri: null                             # falls back to $MLFLOW_TRACKING_URI
