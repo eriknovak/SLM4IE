@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from slm4ie.data.extractors.jsonl import JsonlExtractor
 from slm4ie.data.schema import Document
@@ -25,19 +25,27 @@ def _write_jsonl(path: Path, records: List[Dict]) -> None:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _extract(tmp_path: Path, records: List[Dict]) -> List[Document]:
+def _extract(
+    tmp_path: Path,
+    records: List[Dict],
+    metadata: Optional[Dict] = None,
+) -> List[Document]:
     """Write records to a .jsonl file and extract documents.
 
     Args:
         tmp_path (Path): Temporary directory.
         records (List[Dict]): Records to write and extract.
+        metadata (Dict): Optional `metadata:` config block forwarded to
+            the extractor (text_field / id_field / metadata_fields).
 
     Returns:
         List[Document]: Extracted documents.
     """
     _write_jsonl(tmp_path / "test.jsonl", records)
     extractor = JsonlExtractor()
-    return list(extractor.extract(tmp_path, source="web", domain="web"))
+    return list(
+        extractor.extract(tmp_path, source="web", domain="web", metadata=metadata)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +152,63 @@ class TestJsonlExtractor:
         assert "text" not in meta
         assert "doc_id" not in meta
         assert "paragraphs" not in meta
+
+    def test_custom_text_and_id_fields(self, tmp_path: Path) -> None:
+        """Configured text_field / id_field map non-default record keys."""
+        records = [
+            {"body": "Novica.", "uri": "9339951075", "title": "Naslov"},
+        ]
+        docs = _extract(
+            tmp_path, records, metadata={"text_field": "body", "id_field": "uri"}
+        )
+        assert len(docs) == 1
+        assert docs[0].text == "Novica."
+        assert docs[0].doc_id == "9339951075"
+        # The mapped fields are excluded from metadata; the rest stays.
+        assert "body" not in docs[0].metadata
+        assert "uri" not in docs[0].metadata
+        assert docs[0].metadata["title"] == "Naslov"
+
+    def test_metadata_fields_whitelist(self, tmp_path: Path) -> None:
+        """metadata_fields keeps only the listed keys present on the record."""
+        records = [
+            {
+                "body": "Novica.",
+                "uri": "u1",
+                "url": "https://example.com",
+                "title": "Naslov",
+                "dateTime": "2026-06-01T00:00:00Z",
+                "source": {"uri": "vecer.com"},
+                "image": "https://example.com/x.jpg",
+                "wgt": 123,
+            }
+        ]
+        docs = _extract(
+            tmp_path,
+            records,
+            metadata={
+                "text_field": "body",
+                "id_field": "uri",
+                "metadata_fields": ["url", "title", "dateTime", "source"],
+            },
+        )
+        assert len(docs) == 1
+        meta = docs[0].metadata
+        assert set(meta) == {"url", "title", "dateTime", "source"}
+        assert meta["source"] == {"uri": "vecer.com"}
+        assert "image" not in meta
+        assert "wgt" not in meta
+
+    def test_skips_empty_custom_text_field(self, tmp_path: Path) -> None:
+        """Records with empty/missing configured text field are skipped."""
+        records = [
+            {"body": "", "uri": "u1"},
+            {"uri": "u2"},
+            {"body": "Veljavno.", "uri": "u3"},
+        ]
+        docs = _extract(tmp_path, records, metadata={"text_field": "body", "id_field": "uri"})
+        assert len(docs) == 1
+        assert docs[0].text == "Veljavno."
 
     def test_registered_as_jsonl(self) -> None:
         """JsonlExtractor is registered under the 'jsonl' key."""

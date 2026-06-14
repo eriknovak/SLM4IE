@@ -26,8 +26,19 @@
 #                academic, legal, medical, scientific, forum, blog, news,
 #                student, mixed). Flows into Document.metadata and drives
 #                source-weighted sampling downstream.
-#   metadata     Optional. Per-document metadata loaded from an external
-#                TSV alongside the text files. Joined per source file
+#   metadata     Optional. Two unrelated uses share this block:
+#                (a) For the conllu/tei extractors: per-document metadata
+#                    loaded from an external TSV (keys below).
+#                (b) For the jsonl extractor: field-mapping knobs for
+#                    feeds that don't use the default field names —
+#                      text_field       Record field copied into `text`
+#                                        (default "text").
+#                      id_field         Record field kept as `doc_id`
+#                                        (default "doc_id").
+#                      metadata_fields  Whitelist of record fields kept
+#                                        as metadata (default: every
+#                                        non-structural field).
+#                TSV keys, joined per source file
 #                (kas/kzb: filename stem; oss: numeric ID extracted via
 #                key_pattern). Recognized keys:
 #                  path         TSV path relative to input_dir/<key>/.
@@ -161,6 +172,18 @@ datasets:
   legal_mc4:
     extractor: jsonl
     domain: legal
+
+  slovenian_news:
+    # Living corpus of Slovenian news articles, refreshed weekly as new
+    # <YYYY-MM-DD>_<YYYY-MM-DD>.jsonl windows land under the raw dir.
+    # Records carry text in `body` and id in `uri`. Re-run
+    # extraction with --force to pick up newly added weekly files.
+    extractor: jsonl
+    domain: news
+    metadata:
+      text_field: body
+      id_field: uri
+      metadata_fields: [url, title, dateTime, source]
 
   c4:
     extractor: huggingface

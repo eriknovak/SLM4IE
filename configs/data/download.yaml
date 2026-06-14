@@ -281,6 +281,21 @@ datasets:
       (gitignored); load_config deep-merges that overlay over this entry.
       Contact: simon.krek@ijs.si
 
+  slovenian_news:
+    enabled: false
+    name: "Slovenian News (living corpus)"
+    output_dir: slovenian_news
+    note: >
+      Not downloadable via URL. A living corpus of Slovenian news
+      articles, refreshed weekly by a separate collection pipeline
+      that is not part of this repo.
+      Lands as <YYYY-MM-DD>_<YYYY-MM-DD>.jsonl windows directly under
+      data/raw/slovenian_news/. This stub stays `enabled: false` so
+      `download.py --all` skips it; extraction reads it via its
+      configs/data/extract.yaml entry (jsonl extractor, body/uri field
+      mapping). Re-run extraction with --force after new weekly windows
+      arrive to fold them into the corpus.
+
   metafida:
     enabled: false
     name: "Metafida 1.0"
