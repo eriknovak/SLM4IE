@@ -435,8 +435,9 @@ mechanism for aligning encoder predictions back to the original text.
 
 The six metrics: **Fertility** (tokens/word, ↓), **CTC** compression
 (tokens-per-byte ↓ / chars-per-token ↑), **Rényi efficiency** (↑), **MorphScore**
-boundary F1 (↑), **Morph-Edit-Distance** score (↑), and **Morph-Consistency** (↑).
-The morph metrics use a Sloleks-derived *inflectional* silver gold, so read them
+boundary F1 (↑), **Morph-Edit-Distance** (raw, ↓), and **Morph-Consistency** F1 (↑)
+— the last two following the MorphBPE paper (arXiv 2502.00894). The morph metrics
+are offset-based and use a Sloleks-derived *inflectional* silver gold, so read them
 as relative comparators, not absolute morphological accuracy.
 
 ### Model training and evaluation

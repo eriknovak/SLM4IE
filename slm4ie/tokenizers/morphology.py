@@ -7,7 +7,7 @@ handles the common Slovene stem alternations (palatalization/sibilarization and
 the fleeting "polglasnik" vowel). The result is a `MorphLexicon` that serves two
 roles: a morpheme table consumed by the morphological tokenizers
 (`morph_bpe`, `morph_piece`) and the silver-gold reference consumed by the morph
-metrics (`morph_score`, `morph_edit_distance_score`, `morph_consistency_score`).
+metrics (`morph_score`, `morph_edit_distance`, `morph_consistency_score`).
 
 The segmentation is inflectional only — derivation, prefixation and compounding
 are out of scope — and the alignment is heuristic, so treat the morph metrics as

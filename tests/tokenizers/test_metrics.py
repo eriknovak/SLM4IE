@@ -122,31 +122,33 @@ class TestMorphScore:
 class TestMorphEditDistance:
     """Tests for the morpheme edit-distance score."""
 
-    def test_exact_match_is_one(self):
-        """Pieces equal to gold morphemes score 1."""
+    def test_exact_match_is_zero(self):
+        """Segments equal to gold morphemes give edit distance 0 (best)."""
         lex = _lexicon([("hiše", ["hiš", "e"])])
         tok = _FakeTokenizer({"hiše": ["hiš", "e"]})
-        assert metrics.morph_edit_distance_score(tok, lex) == 1.0
+        assert metrics.morph_edit_distance(tok, lex) == 0.0
 
-    def test_mismatch_below_one(self):
-        """A different segmentation scores below 1."""
+    def test_mismatch_above_zero(self):
+        """A different segmentation gives a positive raw distance."""
         lex = _lexicon([("hiše", ["hiš", "e"])])
         tok = _FakeTokenizer({"hiše": ["h", "i", "š", "e"]})
-        assert metrics.morph_edit_distance_score(tok, lex) < 1.0
+        assert metrics.morph_edit_distance(tok, lex) > 0.0
 
 
 class TestMorphConsistency:
-    """Tests for cross-form morpheme consistency."""
+    """Tests for the morpheme/token consistency F1."""
 
-    def test_consistent_morpheme_scores_one(self):
-        """A morpheme tokenized identically across forms scores 1."""
-        lex = _lexicon([("hiše", ["hiš", "e"]), ("hiši", ["hiš", "i"])])
-        tok = _FakeTokenizer({"hiše": ["hiš", "e"], "hiši": ["hiš", "i"]})
+    _LEX = [("hiše", ["hiš", "e"]), ("hiši", ["hiš", "i"]), ("pesa", ["pes", "a"]), ("pesu", ["pes", "u"])]
+
+    def test_consistent_scores_one(self):
+        """Morpheme-sharing words sharing a token yield F1 = 1."""
+        lex = _lexicon(self._LEX)
+        tok = _FakeTokenizer({"hiše": ["hiš", "e"], "hiši": ["hiš", "i"], "pesa": ["pes", "a"], "pesu": ["pes", "u"]})
         assert metrics.morph_consistency_score(tok, lex) == 1.0
 
-    def test_inconsistent_morpheme_scores_below_one(self):
-        """A morpheme tokenized differently across forms scores below 1."""
-        lex = _lexicon([("hiše", ["hiš", "e"]), ("hiši", ["hiš", "i"])])
-        # 'hiš' is clean in one form but straddled (hi|ši) in the other.
-        tok = _FakeTokenizer({"hiše": ["hiš", "e"], "hiši": ["hi", "ši"]})
+    def test_inconsistent_scores_below_one(self):
+        """When a stem is split differently across forms, F1 drops below 1."""
+        lex = _lexicon(self._LEX)
+        # 'hiše' splits the 'hiš' stem differently, so hiše/hiši share no token.
+        tok = _FakeTokenizer({"hiše": ["hi", "še"], "hiši": ["hiš", "i"], "pesa": ["pes", "a"], "pesu": ["pes", "u"]})
         assert metrics.morph_consistency_score(tok, lex) < 1.0

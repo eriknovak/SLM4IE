@@ -14,9 +14,10 @@ Direction of each metric (higher/lower is better) is recorded in
 from __future__ import annotations
 
 import math
+import random
 from collections import Counter
 from typing import Counter as CounterType
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from slm4ie.tokenizers.base import TokenizerSpec, split_words
 from slm4ie.tokenizers.morphology import MorphLexicon
@@ -28,7 +29,7 @@ METRIC_DIRECTIONS: Dict[str, str] = {
     "chars_per_token": "higher",
     "renyi_efficiency": "higher",
     "morph_score_f1": "higher",
-    "morph_edit_score": "higher",
+    "morph_edit_distance": "lower",
     "morph_consistency": "higher",
 }
 
@@ -313,17 +314,20 @@ def _levenshtein(left: List[str], right: List[str]) -> int:
     return previous[-1]
 
 
-def morph_edit_distance_score(
+def morph_edit_distance(
     tokenizer: TokenizerSpec,
     lexicon: MorphLexicon,
     *,
     max_forms: Optional[int] = None,
 ) -> float:
-    """Return the mean normalized segment-edit similarity to gold morphemes.
+    """Return the mean raw segment-edit distance to gold morphemes.
 
-    For each reliable form, the segment-level Levenshtein distance between the
-    tokenizer's pieces and the gold morphemes is normalized by the longer
-    sequence; the score is `1 - mean(distance)`.
+    Implements the MorphBPE paper's Morphological Edit Distance (arXiv
+    2502.00894): a dynamic-programming alignment between a word's tokenizer
+    segments and its gold morphemes, kept in **raw** (unnormalized) form and
+    averaged over forms. The paper gives no closed-form expression, so the
+    standard segment-level Levenshtein distance is used. Lower is better; 0
+    means the tokenizer's segments equal the gold morphemes for every form.
 
     Args:
         tokenizer (TokenizerSpec): The tokenizer under evaluation.
@@ -331,7 +335,7 @@ def morph_edit_distance_score(
         max_forms (Optional[int]): Cap on forms evaluated, or None for all.
 
     Returns:
-        float: Similarity in `[0, 1]`; higher is better.
+        float: Mean raw segment-edit distance (>= 0); lower is better.
     """
     total = 0.0
     count = 0
@@ -340,44 +344,66 @@ def morph_edit_distance_score(
         if spans is None:
             continue
         segments = _segments(spans, segmentation.form)
-        gold = segmentation.morphemes
-        denominator = max(len(segments), len(gold))
-        if denominator == 0:
-            continue
-        distance = _levenshtein(segments, gold) / denominator
-        total += 1.0 - distance
+        total += _levenshtein(segments, segmentation.morphemes)
         count += 1
     return total / count if count else 0.0
 
 
-def _covering_segments(
-    spans: List[Tuple[str, int, int]],
-    form: str,
-    start: int,
-    end: int,
-) -> Optional[Tuple[str, ...]]:
-    """Return the segments covering `[start, end)`, or None if one straddles.
+#: Default cap on sampled word pairs per inverted-index group for consistency.
+_DEFAULT_MAX_PAIRS_PER_GROUP = 200
+
+
+def _build_index(keys_per_form: Dict[str, Set[str]]) -> Dict[str, List[str]]:
+    """Invert a form-to-keys mapping into a key-to-forms index.
 
     Args:
-        spans (List[Tuple[str, int, int]]): `(piece, start, end)` token spans.
-        form (str): The form the spans cover.
-        start (int): Morpheme start offset.
-        end (int): Morpheme end offset.
+        keys_per_form (Dict[str, Set[str]]): Form to its key set (tokens or
+            morphemes).
 
     Returns:
-        Optional[Tuple[str, ...]]: The contiguous surface segments inside the
-            span, or None when a token boundary does not fall on the morpheme
-            boundary (a straddling token).
+        Dict[str, List[str]]: Key to the forms that contain it.
     """
-    positions = _boundary_positions(spans, len(form))
-    boundary_set = set(positions)
-    if start not in boundary_set or end not in boundary_set:
-        return None
-    return tuple(
-        form[positions[i] : positions[i + 1]]
-        for i in range(len(positions) - 1)
-        if positions[i] >= start and positions[i + 1] <= end
-    )
+    index: Dict[str, List[str]] = {}
+    for form, keys in keys_per_form.items():
+        for key in keys:
+            index.setdefault(key, []).append(form)
+    return index
+
+
+def _grouped_pairs(
+    index: Dict[str, List[str]],
+    max_pairs_per_group: int,
+    rng: random.Random,
+) -> Set[Tuple[str, str]]:
+    """Sample distinct form pairs that co-occur in each index group.
+
+    Args:
+        index (Dict[str, List[str]]): Key to forms (e.g. morpheme to forms).
+        max_pairs_per_group (int): Cap on pairs drawn per group.
+        rng (random.Random): Seeded RNG for reproducible sampling.
+
+    Returns:
+        Set[Tuple[str, str]]: Ordered `(form_a, form_b)` pairs.
+    """
+    pairs: Set[Tuple[str, str]] = set()
+    for members in index.values():
+        unique = sorted(set(members))
+        if len(unique) < 2:
+            continue
+        total = len(unique) * (len(unique) - 1) // 2
+        if total <= max_pairs_per_group:
+            for i in range(len(unique)):
+                for j in range(i + 1, len(unique)):
+                    pairs.add((unique[i], unique[j]))
+        else:
+            drawn = 0
+            while drawn < max_pairs_per_group:
+                first, second = rng.sample(unique, 2)
+                pair = (first, second) if first < second else (second, first)
+                if pair not in pairs:
+                    pairs.add(pair)
+                    drawn += 1
+    return pairs
 
 
 def morph_consistency_score(
@@ -385,35 +411,46 @@ def morph_consistency_score(
     lexicon: MorphLexicon,
     *,
     max_forms: Optional[int] = None,
+    max_pairs_per_group: int = _DEFAULT_MAX_PAIRS_PER_GROUP,
+    seed: int = 0,
 ) -> float:
-    """Return how consistently each morpheme is tokenized across forms.
+    """Return the morpheme/token consistency F1 (MorphBPE, arXiv 2502.00894).
 
-    For every morpheme appearing in at least two reliable forms, the score is
-    the share of forms in which the morpheme's character span is tokenized the
-    same way (a straddling token counts as its own, distinct outcome). The
-    metric is the macro-average over qualifying morphemes.
+    A pair of words is token-positive when their token sets intersect and
+    morpheme-positive when their gold morpheme sets intersect. Over word pairs,
+    precision is `P(share morpheme | share token)` and recall is
+    `P(share token | share morpheme)`; the score is their F1. The paper samples
+    pairs with k-means clustering and bootstrapping; this computes the same
+    quantities directly from inverted indices (token to forms, morpheme to
+    forms), sampling at most `max_pairs_per_group` pairs per group so it stays
+    tractable and reproducible.
 
     Args:
         tokenizer (TokenizerSpec): The tokenizer under evaluation.
         lexicon (MorphLexicon): The gold lexicon.
         max_forms (Optional[int]): Cap on forms evaluated, or None for all.
+        max_pairs_per_group (int): Cap on sampled pairs per index group.
+        seed (int): Seed for reproducible pair sampling.
 
     Returns:
-        float: Consistency in `[0, 1]`; higher is better.
+        float: Consistency F1 in `[0, 1]`; higher is better.
     """
-    outcomes: Dict[str, CounterType[Optional[Tuple[str, ...]]]] = {}
+    token_sets: Dict[str, Set[str]] = {}
+    morph_sets: Dict[str, Set[str]] = {}
     for segmentation in _reliable_forms(lexicon, max_forms):
-        spans = _token_spans(tokenizer, segmentation.form)
-        if spans is None:
-            continue
-        cursor = 0
-        for morpheme in segmentation.morphemes:
-            start, end = cursor, cursor + len(morpheme)
-            cursor = end
-            covering = _covering_segments(spans, segmentation.form, start, end)
-            outcomes.setdefault(morpheme, Counter())[covering] += 1
+        form = segmentation.form
+        token_sets[form] = set(tokenizer.encode(form))
+        morph_sets[form] = set(segmentation.morphemes)
 
-    scores = [
-        max(counter.values()) / sum(counter.values()) for counter in outcomes.values() if sum(counter.values()) >= 2
-    ]
-    return sum(scores) / len(scores) if scores else 0.0
+    morph_pairs = _grouped_pairs(_build_index(morph_sets), max_pairs_per_group, random.Random(seed))
+    token_pairs = _grouped_pairs(_build_index(token_sets), max_pairs_per_group, random.Random(seed))
+    if not morph_pairs or not token_pairs:
+        return 0.0
+
+    # Recall: of morpheme-sharing pairs, the share that also share a token.
+    recall = sum(bool(token_sets[a] & token_sets[b]) for a, b in morph_pairs) / len(morph_pairs)
+    # Precision: of token-sharing pairs, the share that also share a morpheme.
+    precision = sum(bool(morph_sets[a] & morph_sets[b]) for a, b in token_pairs) / len(token_pairs)
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
