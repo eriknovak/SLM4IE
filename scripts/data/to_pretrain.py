@@ -687,6 +687,136 @@ def _stage_slice(stage: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
     return dict(cfg.get(stage) or {})
 
 
+def _convert_input_paths(
+    input_dir: Path, key: str, include_annotations: bool
+) -> List[Path]:
+    """Return the source files the convert stage reads for *key*.
+
+    Args:
+        input_dir: Root of the extracted tier holding `<key>.jsonl`.
+        key: Dataset key.
+        include_annotations: Whether the convert stage also joins the
+            `<key>.annotations.jsonl.gz` sidecar.
+
+    Returns:
+        The `<key>.jsonl` path, plus the annotations sidecar path when
+        `include_annotations` is True. Paths are returned whether or not
+        they exist on disk.
+    """
+    paths = [input_dir / f"{key}.jsonl"]
+    if include_annotations:
+        paths.append(input_dir / f"{key}.annotations.jsonl.gz")
+    return paths
+
+
+def _convert_input_fingerprint(
+    input_dir: Path, key: str, include_annotations: bool
+) -> str:
+    """Return a cheap size+mtime fingerprint of *key*'s convert inputs.
+
+    The fingerprint is derived from each source file's byte size and
+    modification time only — never its contents — so it is computable
+    with a single `os.stat` per file. Re-extracting a dataset rewrites
+    the file with a new size and/or mtime, which changes the fingerprint
+    and so invalidates the cached convert output. A missing file is
+    encoded as `absent` so its later appearance also changes the value.
+
+    Args:
+        input_dir: Root of the extracted tier holding `<key>.jsonl`.
+        key: Dataset key.
+        include_annotations: Whether the convert stage also joins the
+            `<key>.annotations.jsonl.gz` sidecar (folded in when True).
+
+    Returns:
+        A stable string fingerprint, e.g. `"<key>.jsonl=1234:1700000000000"`.
+    """
+    parts: List[str] = []
+    for path in _convert_input_paths(input_dir, key, include_annotations):
+        try:
+            st = path.stat()
+            parts.append(f"{path.name}={st.st_size}:{st.st_mtime_ns}")
+        except OSError:
+            parts.append(f"{path.name}=absent")
+    return ";".join(parts)
+
+
+def _convert_dataset_current(
+    stage_folder: Path,
+    key: str,
+    expected_hash: str,
+    input_dir: Path,
+    include_annotations: bool,
+) -> bool:
+    """Return True iff *key*'s convert output is current for its input.
+
+    Layers an input-freshness check on top of the usual config-hash
+    comparison: a convert sentinel is current only when its config hash
+    matches AND its recorded input fingerprint still matches the source
+    file on disk. Sentinels written before fingerprints existed carry
+    none; those are grandfathered by comparing the source file's mtime
+    against the sentinel's completion time, so a corpus that has not been
+    re-extracted is not needlessly re-converted on first upgrade.
+
+    Args:
+        stage_folder: The convert stage's output folder.
+        key: Dataset key to check.
+        expected_hash: Config hash recomputed from current config.
+        input_dir: Root of the extracted tier holding `<key>.jsonl`.
+        include_annotations: Whether convert joins the annotations sidecar.
+
+    Returns:
+        True if the cached convert output can be reused; False if the
+        stage must re-run for this dataset.
+    """
+    sentinel = read_sentinel(stage_folder / key)
+    if sentinel is None or sentinel.config_hash != expected_hash:
+        return False
+    current_fp = _convert_input_fingerprint(input_dir, key, include_annotations)
+    if sentinel.input_fingerprint is not None:
+        return sentinel.input_fingerprint == current_fp
+    # Legacy sentinel (no fingerprint): treat as current only when every
+    # source file predates the recorded completion time.
+    return _convert_inputs_predate(
+        input_dir, key, include_annotations, sentinel.completed_at
+    )
+
+
+def _convert_inputs_predate(
+    input_dir: Path, key: str, include_annotations: bool, completed_at: str
+) -> bool:
+    """Return True iff every convert input predates *completed_at*.
+
+    Used to grandfather pre-fingerprint convert sentinels: if the source
+    files are older than the recorded completion timestamp, the cached
+    output already reflects them and need not be rebuilt.
+
+    Args:
+        input_dir: Root of the extracted tier holding `<key>.jsonl`.
+        key: Dataset key.
+        include_annotations: Whether convert joins the annotations sidecar.
+        completed_at: ISO-8601 timestamp from the sentinel.
+
+    Returns:
+        True if all present input files have an mtime at or before
+        *completed_at*; False if any is newer or the timestamp cannot be
+        parsed (fail safe: re-run).
+    """
+    try:
+        completed = datetime.fromisoformat(completed_at)
+    except ValueError:
+        return False
+    if completed.tzinfo is None:
+        completed = completed.replace(tzinfo=timezone.utc)
+    for path in _convert_input_paths(input_dir, key, include_annotations):
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            continue
+        if mtime > completed:
+            return False
+    return True
+
+
 def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
     """Return canonical bytes for the dataset key list (for hashing).
 
@@ -892,10 +1022,30 @@ def _curate(
         stage_folder = paths.stage_dir(stage_name)
 
         if is_scoped(stage_name):
+            # Convert reads the extracted tier directly, so its currency
+            # also depends on whether each source file changed on disk —
+            # a size+mtime fingerprint check layered on the config hash.
+            # Later scoped stages read regenerated upstream output and use
+            # the plain config-hash check.
+            convert_include_annotations = bool(
+                (cfg.get("convert") or {}).get("include_annotations", False)
+            )
+            if stage_name == "convert":
+                def _is_current(k: str) -> bool:
+                    return _convert_dataset_current(
+                        stage_folder,
+                        k,
+                        current_hash,
+                        paths.input_folder,
+                        convert_include_annotations,
+                    )
+            else:
+                def _is_current(k: str) -> bool:
+                    return dataset_sentinel_is_current(stage_folder, k, current_hash)
+
             todo = [
                 k for k in dataset_keys
-                if k in force_keys
-                or not dataset_sentinel_is_current(stage_folder, k, current_hash)
+                if k in force_keys or not _is_current(k)
             ]
             if not todo:
                 logger.info("[%s] all requested datasets current; skipping.", stage_name)
@@ -961,6 +1111,16 @@ def _curate(
                     shutil.rmtree(view, ignore_errors=True)
 
             for key in todo:
+                # Only convert records an input fingerprint: it is the
+                # sole stage reading the extracted tier, so it is the only
+                # one whose currency depends on the source file on disk.
+                fingerprint = (
+                    _convert_input_fingerprint(
+                        paths.input_folder, key, convert_include_annotations
+                    )
+                    if stage_name == "convert"
+                    else None
+                )
                 write_dataset_sentinel(
                     stage_folder,
                     key,
@@ -968,6 +1128,7 @@ def _curate(
                     config_hash_value=current_hash,
                     records_in=records_in,
                     records_out=records_out,
+                    input_fingerprint=fingerprint,
                 )
             logger.info(
                 "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
