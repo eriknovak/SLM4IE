@@ -45,6 +45,11 @@ class Sentinel:
             (useful for human inspection).
         records_in: Number of records read into the stage.
         records_out: Number of records written out (i.e. surviving).
+        input_fingerprint: Cheap size+mtime fingerprint of the stage's
+            source input file(s), or `None` for stages that do not read
+            an external input (only the `convert` stage records one).
+            Lets a refreshed input invalidate the stage without hashing
+            its contents.
     """
 
     completed_at: str
@@ -52,6 +57,7 @@ class Sentinel:
     config_slice: Dict[str, Any]
     records_in: int
     records_out: int
+    input_fingerprint: Optional[str] = None
 
 
 def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
@@ -92,6 +98,7 @@ def write_sentinel(
     config_hash_value: str,
     records_in: int,
     records_out: int,
+    input_fingerprint: Optional[str] = None,
 ) -> Path:
     """Write the sentinel JSON file for *stage_folder*.
 
@@ -102,6 +109,10 @@ def write_sentinel(
             any extra payload like stopword file contents).
         records_in: Records read.
         records_out: Records written.
+        input_fingerprint: Optional size+mtime fingerprint of the stage's
+            source input file(s). Recorded so a refreshed input can be
+            detected without rehashing its contents. Omitted for stages
+            that read no external input.
 
     Returns:
         Path to the written sentinel file.
@@ -114,6 +125,7 @@ def write_sentinel(
         "config_slice": config_slice,
         "records_in": records_in,
         "records_out": records_out,
+        "input_fingerprint": input_fingerprint,
     }
     # Atomic write: render the payload to a sibling .tmp file, then rename.
     # os.replace is atomic on POSIX so a partially-written sentinel can never
@@ -142,12 +154,14 @@ def read_sentinel(stage_folder: Path) -> Optional[Sentinel]:
         return None
     try:
         data = json.loads(sentinel_path.read_text(encoding="utf-8"))
+        fingerprint = data.get("input_fingerprint")
         return Sentinel(
             completed_at=str(data.get("completed_at", "")),
             config_hash=str(data.get("config_hash", "")),
             config_slice=dict(data.get("config_slice") or {}),
             records_in=int(data.get("records_in", 0)),
             records_out=int(data.get("records_out", 0)),
+            input_fingerprint=str(fingerprint) if fingerprint is not None else None,
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
@@ -190,6 +204,7 @@ def write_dataset_sentinel(
     config_hash_value: str,
     records_in: int,
     records_out: int,
+    input_fingerprint: Optional[str] = None,
 ) -> Path:
     """Write a per-dataset `.complete` sentinel for a scoped stage.
 
@@ -201,6 +216,10 @@ def write_dataset_sentinel(
             dataset roster is intentionally excluded for scoped stages).
         records_in: Records read for this dataset.
         records_out: Records written for this dataset.
+        input_fingerprint: Optional size+mtime fingerprint of this
+            dataset's source input file(s). Only the `convert` stage
+            records one; later scoped stages read regenerated upstream
+            output and leave it `None`.
 
     Returns:
         Path to the written sentinel file.
@@ -211,6 +230,7 @@ def write_dataset_sentinel(
         config_hash_value=config_hash_value,
         records_in=records_in,
         records_out=records_out,
+        input_fingerprint=input_fingerprint,
     )
 
 

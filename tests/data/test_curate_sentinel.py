@@ -63,6 +63,39 @@ def test_read_sentinel_returns_none_when_missing(tmp_path: Path) -> None:
     assert read_sentinel(tmp_path / "01_language") is None
 
 
+def test_sentinel_input_fingerprint_roundtrips(tmp_path: Path) -> None:
+    """A recorded input fingerprint survives a write/read roundtrip."""
+    folder = tmp_path / "00_convert"
+    folder.mkdir()
+    write_sentinel(
+        folder,
+        config_slice={},
+        config_hash_value="sha256:abc",
+        records_in=1,
+        records_out=1,
+        input_fingerprint="news.jsonl=10:20",
+    )
+    sentinel = read_sentinel(folder)
+    assert sentinel is not None
+    assert sentinel.input_fingerprint == "news.jsonl=10:20"
+
+
+def test_sentinel_input_fingerprint_defaults_to_none(tmp_path: Path) -> None:
+    """Sentinels written without a fingerprint read back as None (legacy-safe)."""
+    folder = tmp_path / "02_quality"
+    folder.mkdir()
+    write_sentinel(
+        folder,
+        config_slice={},
+        config_hash_value="sha256:abc",
+        records_in=1,
+        records_out=1,
+    )
+    sentinel = read_sentinel(folder)
+    assert sentinel is not None
+    assert sentinel.input_fingerprint is None
+
+
 def test_sentinel_is_current_matches_hash(tmp_path: Path) -> None:
     """sentinel_is_current returns True iff the recorded hash equals the new hash."""
     folder = tmp_path / "02_quality"

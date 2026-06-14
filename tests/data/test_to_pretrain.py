@@ -1,10 +1,137 @@
 """Tests for scripts/data/to_pretrain.py helpers."""
 
+import os
 from pathlib import Path
 
 import pytest
 
-from scripts.data.to_pretrain import _filter_stage_subset
+from scripts.data.to_pretrain import (
+    _convert_dataset_current,
+    _convert_input_fingerprint,
+    _filter_stage_subset,
+)
+from slm4ie.data.curate.sentinel import write_dataset_sentinel
+
+
+def _write_extracted(input_dir: Path, key: str, text: str = "x") -> Path:
+    """Write a minimal extracted `<key>.jsonl` and return its path."""
+    input_dir.mkdir(parents=True, exist_ok=True)
+    path = input_dir / f"{key}.jsonl"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_convert_input_fingerprint_changes_on_size(tmp_path: Path) -> None:
+    """Growing the source file changes its fingerprint."""
+    _write_extracted(tmp_path, "news", "short")
+    before = _convert_input_fingerprint(tmp_path, "news", False)
+    _write_extracted(tmp_path, "news", "a much longer body of text")
+    after = _convert_input_fingerprint(tmp_path, "news", False)
+    assert before != after
+
+
+def test_convert_input_fingerprint_changes_on_mtime(tmp_path: Path) -> None:
+    """Rewriting with the same size but a newer mtime changes the fingerprint."""
+    path = _write_extracted(tmp_path, "news", "abcde")
+    before = _convert_input_fingerprint(tmp_path, "news", False)
+    os.utime(path, ns=(2_000_000_000_000_000_000, 2_000_000_000_000_000_000))
+    after = _convert_input_fingerprint(tmp_path, "news", False)
+    assert before != after
+
+
+def test_convert_input_fingerprint_marks_absent(tmp_path: Path) -> None:
+    """A missing source file is encoded distinctly, not raised."""
+    fp = _convert_input_fingerprint(tmp_path, "missing", False)
+    assert "absent" in fp
+
+
+def test_convert_input_fingerprint_folds_annotations(tmp_path: Path) -> None:
+    """With annotations on, the sidecar participates in the fingerprint."""
+    _write_extracted(tmp_path, "news", "abc")
+    without = _convert_input_fingerprint(tmp_path, "news", False)
+    (tmp_path / "news.annotations.jsonl.gz").write_bytes(b"gz")
+    with_ann = _convert_input_fingerprint(tmp_path, "news", True)
+    assert without != with_ann
+
+
+def test_convert_dataset_current_true_when_unchanged(tmp_path: Path) -> None:
+    """A fresh sentinel with a matching fingerprint is current."""
+    stage = tmp_path / "00_convert"
+    input_dir = tmp_path / "extracted"
+    _write_extracted(input_dir, "news")
+    fp = _convert_input_fingerprint(input_dir, "news", False)
+    write_dataset_sentinel(
+        stage, "news", config_slice={}, config_hash_value="h",
+        records_in=1, records_out=1, input_fingerprint=fp,
+    )
+    assert _convert_dataset_current(stage, "news", "h", input_dir, False) is True
+
+
+def test_convert_dataset_current_false_when_input_changed(tmp_path: Path) -> None:
+    """A changed source file makes a fingerprinted sentinel stale."""
+    stage = tmp_path / "00_convert"
+    input_dir = tmp_path / "extracted"
+    path = _write_extracted(input_dir, "news", "small")
+    fp = _convert_input_fingerprint(input_dir, "news", False)
+    write_dataset_sentinel(
+        stage, "news", config_slice={}, config_hash_value="h",
+        records_in=1, records_out=1, input_fingerprint=fp,
+    )
+    path.write_text("a substantially larger body", encoding="utf-8")
+    assert _convert_dataset_current(stage, "news", "h", input_dir, False) is False
+
+
+def test_convert_dataset_current_false_on_config_change(tmp_path: Path) -> None:
+    """A config-hash mismatch is stale regardless of the fingerprint."""
+    stage = tmp_path / "00_convert"
+    input_dir = tmp_path / "extracted"
+    _write_extracted(input_dir, "news")
+    fp = _convert_input_fingerprint(input_dir, "news", False)
+    write_dataset_sentinel(
+        stage, "news", config_slice={}, config_hash_value="old",
+        records_in=1, records_out=1, input_fingerprint=fp,
+    )
+    assert _convert_dataset_current(stage, "news", "new", input_dir, False) is False
+
+
+def test_convert_dataset_current_grandfathers_legacy_old_input(tmp_path: Path) -> None:
+    """A legacy sentinel (no fingerprint) is current when input predates it."""
+    stage = tmp_path / "00_convert"
+    input_dir = tmp_path / "extracted"
+    path = _write_extracted(input_dir, "news")
+    # Source file far in the past; sentinel completed_at is "now".
+    os.utime(path, ns=(1_000_000_000_000_000_000, 1_000_000_000_000_000_000))
+    write_dataset_sentinel(
+        stage, "news", config_slice={}, config_hash_value="h",
+        records_in=1, records_out=1,  # no input_fingerprint -> legacy
+    )
+    assert _convert_dataset_current(stage, "news", "h", input_dir, False) is True
+
+
+def test_convert_dataset_current_legacy_stale_when_input_newer(tmp_path: Path) -> None:
+    """A legacy sentinel is stale when the source file is newer than completion."""
+    import json
+
+    from slm4ie.data.curate.sentinel import SENTINEL_NAME
+
+    stage = tmp_path / "00_convert"
+    input_dir = tmp_path / "extracted"
+    path = _write_extracted(input_dir, "news")
+    # Hand-write a legacy sentinel completed in the distant past.
+    (stage / "news").mkdir(parents=True)
+    (stage / "news" / SENTINEL_NAME).write_text(
+        json.dumps({
+            "completed_at": "2000-01-01T00:00:00+00:00",
+            "config_hash": "h",
+            "config_slice": {},
+            "records_in": 1,
+            "records_out": 1,
+        }),
+        encoding="utf-8",
+    )
+    # Source file is "now" — newer than the recorded completion.
+    os.utime(path, ns=(4_000_000_000_000_000_000, 4_000_000_000_000_000_000))
+    assert _convert_dataset_current(stage, "news", "h", input_dir, False) is False
 
 
 def test_filter_stage_subset_links_requested_keys(tmp_path: Path) -> None:
