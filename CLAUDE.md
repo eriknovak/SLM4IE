@@ -128,10 +128,10 @@ MorphBPE = constrained-training/standard-inference, MorphPiece = byte-level BPE 
 MorphTable). The morpheme gold is derived from Sloleks
 (`slm4ie/tokenizers/morphology.py`) and is **inflectional silver gold** — the
 morph metrics are offset-based relative comparators, not absolute morphology.
-Adding new tokenizers means new `@register_tokenizer` backends under
-`slm4ie/tokenizers/backends/`, not new scripts. **Follow-up still required:**
-redefine Morph-Edit-Distance / Morph-Consistency to the MorphBPE paper's exact
-formulas (see the plan file).
+Morph-Edit-Distance (raw, lower-better) and Morph-Consistency (F1) follow the
+MorphBPE paper (arXiv 2502.00894); MorphScore follows Arnett et al. Adding new
+tokenizers means new `@register_tokenizer` backends under
+`slm4ie/tokenizers/backends/`, not new scripts.
 
 ## Documentation style — Google-style docstrings (REQUIRED)
 

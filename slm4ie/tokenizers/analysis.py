@@ -21,7 +21,7 @@ from slm4ie.tokenizers.metrics import (
     corpus_token_stats,
     fertility,
     morph_consistency_score,
-    morph_edit_distance_score,
+    morph_edit_distance,
     morph_score,
     renyi_efficiency,
 )
@@ -40,7 +40,7 @@ _REPORT_COLUMNS = [
     "chars_per_token",
     "renyi_efficiency",
     "morph_score_f1",
-    "morph_edit_score",
+    "morph_edit_distance",
     "morph_consistency",
 ]
 
@@ -116,7 +116,7 @@ def evaluate_artifact(
         "morph_score_precision": boundary["precision"],
         "morph_score_recall": boundary["recall"],
         "morph_coverage": boundary["coverage"],
-        "morph_edit_score": morph_edit_distance_score(tokenizer, lexicon, max_forms=max_forms),
+        "morph_edit_distance": morph_edit_distance(tokenizer, lexicon, max_forms=max_forms),
         "morph_consistency": morph_consistency_score(tokenizer, lexicon, max_forms=max_forms),
     }
     (artifact_dir / "metrics.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")

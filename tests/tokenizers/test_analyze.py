@@ -118,7 +118,7 @@ class TestReport:
                 "chars_per_token": 2.0,
                 "renyi_efficiency": 0.8,
                 "morph_score_f1": 0.5,
-                "morph_edit_score": 0.6,
+                "morph_edit_distance": 0.6,
                 "morph_consistency": 0.7,
             },
         ]
@@ -141,7 +141,7 @@ class TestReport:
                 "chars_per_token": 2.0,
                 "renyi_efficiency": 0.8,
                 "morph_score_f1": 0.5,
-                "morph_edit_score": 0.6,
+                "morph_edit_distance": 0.6,
                 "morph_consistency": 0.7,
             },
         ]
