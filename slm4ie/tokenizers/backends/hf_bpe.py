@@ -1,22 +1,24 @@
-"""Character-level Byte-Pair Encoding backend (HuggingFace `tokenizers`).
+"""Byte-level Byte-Pair Encoding backend (HuggingFace `tokenizers`).
 
-A standard BPE tokenizer trained over Unicode characters (NFC-normalized, no
-lowercasing). Character-level rather than byte-level so each emitted piece is a
-real surface substring, which the character-offset morph metrics depend on.
+The canonical modern BPE, as used by GPT-2 / RoBERTa / ModernBERT: byte-level
+pre-tokenization with the `Ġ` space marker, so whitespace is encoded into tokens
+and encode/decode round-trips. Pieces live in byte-mapped space; the metric
+harness relies on the fast tokenizer's offset mapping rather than the piece
+strings, so non-ASCII characters are handled correctly.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Iterable
 
-from slm4ie.tokenizers.base import BaseTokenizer, TrainContext
+from slm4ie.tokenizers.backends._hf_base import HfBackend
+from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.registry import register_tokenizer
 
 
 @register_tokenizer("bpe")
-class BpeTokenizer(BaseTokenizer):
-    """Byte-Pair Encoding tokenizer backed by HuggingFace `tokenizers`.
+class BpeTokenizer(HfBackend):
+    """Byte-level BPE tokenizer backed by HuggingFace `tokenizers`.
 
     Attributes:
         name (str): Registry key, `bpe`.
@@ -24,76 +26,25 @@ class BpeTokenizer(BaseTokenizer):
 
     name = "bpe"
 
-    def __init__(self, tokenizer: Any = None) -> None:
-        """Wrap an optional pre-built `tokenizers.Tokenizer`.
-
-        Args:
-            tokenizer (Any): A trained `tokenizers.Tokenizer`, or None for an
-                untrained instance.
-        """
-        super().__init__()
-        self._tokenizer = tokenizer
-
     def train(self, corpus: Iterable[str], vocab_size: int, *, config: TrainContext) -> None:
-        """Train a character-level BPE model over `corpus`.
+        """Train a byte-level BPE model over `corpus`.
 
         Args:
             corpus (Iterable[str]): Training sentences.
             vocab_size (int): Target vocabulary size.
             config (TrainContext): Shared training settings (special tokens).
         """
-        from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
+        from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
-        tokenizer = Tokenizer(models.BPE(unk_token=self.unk_token))
-        tokenizer.normalizer = normalizers.NFC()
-        tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+        tokenizer = Tokenizer(models.BPE())
+        tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=True, trim_offsets=True)
+        tokenizer.decoder = decoders.ByteLevel()
         trainer = trainers.BpeTrainer(
             vocab_size=vocab_size,
             special_tokens=list(config.special_tokens),
+            initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
             show_progress=False,
         )
         tokenizer.train_from_iterator(corpus, trainer=trainer)
         self._tokenizer = tokenizer
         self.vocab_size = vocab_size
-
-    def encode(self, text: str) -> List[str]:
-        """Return the BPE pieces for `text`.
-
-        Args:
-            text (str): Input text.
-
-        Returns:
-            List[str]: Vocabulary pieces.
-        """
-        return self._tokenizer.encode(text).tokens
-
-    @property
-    def vocab(self) -> Dict[str, int]:
-        """Return the token-to-id vocabulary.
-
-        Returns:
-            Dict[str, int]: Token string to integer id.
-        """
-        return self._tokenizer.get_vocab()
-
-    def _save_model(self, out_dir: Path) -> None:
-        """Write the tokenizer to `tokenizer.json`.
-
-        Args:
-            out_dir (Path): Destination directory.
-        """
-        self._tokenizer.save(str(out_dir / "tokenizer.json"))
-
-    @classmethod
-    def _load_model(cls, out_dir: Path) -> "BpeTokenizer":
-        """Load a tokenizer from `tokenizer.json`.
-
-        Args:
-            out_dir (Path): Directory holding the saved model.
-
-        Returns:
-            BpeTokenizer: The reconstructed tokenizer.
-        """
-        from tokenizers import Tokenizer
-
-        return cls(Tokenizer.from_file(str(out_dir / "tokenizer.json")))

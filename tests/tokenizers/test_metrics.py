@@ -1,6 +1,6 @@
 """Tests for slm4ie/tokenizers/metrics.py with hand-checked values."""
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from slm4ie.tokenizers import metrics
 from slm4ie.tokenizers.morphology import MorphemeSegmentation, MorphLexicon, _add_to_lexicon
@@ -27,6 +27,15 @@ class _FakeTokenizer:
     def encode_ids(self, text: str) -> List[int]:
         """Return positional ids for the pieces of `text`."""
         return list(range(len(self.encode(text))))
+
+    def encode_offsets(self, text: str) -> List[Tuple[str, int, int]]:
+        """Return each fixed piece with its character span in `text`."""
+        spans: List[Tuple[str, int, int]] = []
+        cursor = 0
+        for piece in self.encode(text):
+            spans.append((piece, cursor, cursor + len(piece)))
+            cursor += len(piece)
+        return spans
 
     @property
     def vocab(self) -> Dict[str, int]:

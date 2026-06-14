@@ -22,6 +22,7 @@ from typing import (
     List,
     Optional,
     Protocol,
+    Tuple,
     runtime_checkable,
 )
 
@@ -112,6 +113,10 @@ class TokenizerSpec(Protocol):
 
     def encode_ids(self, text: str) -> List[int]:
         """Return the vocabulary ids for `text`."""
+        ...
+
+    def encode_offsets(self, text: str) -> List[Tuple[str, int, int]]:
+        """Return each piece with its `(start, end)` char span in `text`."""
         ...
 
     def save(self, out_dir: Path) -> None:
@@ -221,6 +226,33 @@ class BaseTokenizer(abc.ABC):
             elif unk_id is not None:
                 ids.append(unk_id)
         return ids
+
+    def encode_offsets(self, text: str) -> List[Tuple[str, int, int]]:
+        """Return each encoded piece with its character span in `text`.
+
+        The default aligns cleaned pieces to `text` left to right, which is
+        correct for character-level and metaspace schemes. Byte-level backends
+        (whose pieces are not surface substrings) override this with the
+        tokenizer's own offset mapping.
+
+        Args:
+            text (str): Input text.
+
+        Returns:
+            List[Tuple[str, int, int]]: `(piece, char_start, char_end)` per
+                token, with spans into the original `text`.
+        """
+        spans: List[Tuple[str, int, int]] = []
+        cursor = 0
+        for piece in self.encode(text):
+            surface = clean_piece(piece)
+            index = text.find(surface, cursor) if surface else cursor
+            if index < 0:
+                index = cursor
+            end = index + len(surface)
+            spans.append((piece, index, end))
+            cursor = end
+        return spans
 
     def metadata(self) -> Dict[str, Any]:
         """Return the JSON-serializable metadata sidecar payload.

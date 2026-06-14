@@ -1,16 +1,18 @@
-"""Tests for the library tokenizer backends (BPE, WordPiece, Unigram).
+"""Tests for the library tokenizer backends (BPE, charBPE, WordPiece, Unigram).
 
 These train on a tiny corpus with a tiny vocabulary so they stay fast in CI;
-the real 16k/32k/64k sweeps run only outside the test suite.
+the real 16k/32k/64k sweeps run only outside the test suite. Reconstruction is
+checked via offset tiling so the assertion holds for byte-level and
+character-level schemes alike.
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import pytest
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends)
-from slm4ie.tokenizers.base import TrainContext, clean_piece
+from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.registry import get_tokenizer
 
 #: Small repeated Slovene corpus, enough for a tiny vocabulary to converge.
@@ -25,10 +27,11 @@ _CORPUS: List[str] = [
 
 _SPECIAL_TOKENS = ["<pad>", "<unk>", "<s>", "</s>"]
 
-_BACKENDS = ["bpe", "wordpiece", "unigram"]
+#: Library backends that train without a morpheme lexicon.
+_BACKENDS = ["bpe", "charbpe", "wordpiece", "unigram"]
 
 
-def _train(name: str, vocab_size: int = 120):
+def _train(name: str, vocab_size: int = 160):
     """Train a registered backend on the tiny corpus.
 
     Args:
@@ -43,6 +46,22 @@ def _train(name: str, vocab_size: int = 120):
     return tokenizer
 
 
+def _covers_word(offsets: List[Tuple[str, int, int]], word: str) -> bool:
+    """Return True when the token offsets exactly tile `word`.
+
+    Args:
+        offsets (List[Tuple[str, int, int]]): `(piece, start, end)` spans.
+        word (str): The encoded word.
+
+    Returns:
+        bool: True if the union of spans covers every character of `word`.
+    """
+    covered = set()
+    for _piece, start, end in offsets:
+        covered.update(range(start, end))
+    return covered == set(range(len(word)))
+
+
 class TestBackendsRegistered:
     """The backends register themselves on import."""
 
@@ -54,7 +73,7 @@ class TestBackendsRegistered:
 
 @pytest.mark.parametrize("name", _BACKENDS)
 class TestBackendTraining:
-    """Training, encoding, and persistence per backend."""
+    """Training, encoding, offsets, and persistence per backend."""
 
     def test_encode_non_empty(self, name: str):
         """A trained tokenizer encodes text into pieces."""
@@ -62,14 +81,14 @@ class TestBackendTraining:
         assert tokenizer.encode("hiša stoji") != []
         assert len(tokenizer.vocab) > 0
 
-    def test_pieces_reconstruct_word(self, name: str):
-        """Cleaned pieces of a known word concatenate back to the word."""
+    def test_offsets_tile_word(self, name: str):
+        """Token offsets cover every character of an encoded word."""
         tokenizer = _train(name)
-        cleaned = "".join(clean_piece(p) for p in tokenizer.encode("hiše"))
-        assert cleaned == "hiše"
+        offsets = tokenizer.encode_offsets("hiše")
+        assert _covers_word(offsets, "hiše")
 
     def test_save_load_round_trip(self, name: str, tmp_path: Path):
-        """save then load reproduces encoding and vocabulary."""
+        """Save then load reproduces encoding and vocabulary."""
         tokenizer = _train(name)
         tokenizer.save(tmp_path)
 

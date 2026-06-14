@@ -88,7 +88,7 @@ class TestBaseTokenizer:
         assert ids[2] == vocab["<unk>"]
 
     def test_save_load_round_trip(self, tmp_path: Path):
-        """save then load reproduces the vocabulary and metadata."""
+        """Save then load reproduces the vocabulary and metadata."""
         tok = _CharTokenizer()
         tok.train(["hiša"], vocab_size=20, config=TrainContext(special_tokens=["<unk>"]))
         tok.save(tmp_path)

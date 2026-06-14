@@ -115,17 +115,23 @@ converters) or `--all`.
 
 ### Tokenizer-comparison stage (not a conversion route)
 
-`scripts/tokenizers/{train,analyze}.py` (library code in `slm4ie/tokenizers/`,
-config `configs/tokenizers/tokenizers.yaml`, deps behind the `tokenize` extra)
-train five tokenizers across a vocab sweep and score them with six metrics. It
-is a **consumer**, not a fourth conversion route: it reads the deduplicated
-corpus (`pretrain/05_2_dedup/`) for training and `tokenization/sloleks.jsonl.gz`
-for the morpheme-derived gold, and writes artifacts + a report under
-`/vault/data/SLM4IE/tokenizers/`. The morpheme gold is derived from Sloleks
+`scripts/tokenizers/{train,analyze,export}.py` (library code in
+`slm4ie/tokenizers/`, config `configs/tokenizers/tokenizers.yaml`, deps behind the
+`tokenize` extra) train six tokenizers across a vocab sweep, score them with six
+metrics, and export each as a HuggingFace tokenizer for LM-pretraining. It is a
+**consumer**, not a fourth conversion route: it reads the deduplicated corpus
+(`pretrain/05_2_dedup/`) for training and `tokenization/sloleks.jsonl.gz` for the
+morpheme-derived gold, and writes artifacts + a report under
+`/vault/data/SLM4IE/tokenizers/`. Each backend is faithful to its original work
+(byte-level BPE, char-level charBPE, BERT WordPiece, SentencePiece Unigram,
+MorphBPE = constrained-training/standard-inference, MorphPiece = byte-level BPE +
+MorphTable). The morpheme gold is derived from Sloleks
 (`slm4ie/tokenizers/morphology.py`) and is **inflectional silver gold** — the
-morph metrics are relative comparators, not absolute morphology. Adding new
-tokenizers means new `@register_tokenizer` backends under
-`slm4ie/tokenizers/backends/`, not new scripts.
+morph metrics are offset-based relative comparators, not absolute morphology.
+Adding new tokenizers means new `@register_tokenizer` backends under
+`slm4ie/tokenizers/backends/`, not new scripts. **Follow-up still required:**
+redefine Morph-Edit-Distance / Morph-Consistency to the MorphBPE paper's exact
+formulas (see the plan file).
 
 ## Documentation style — Google-style docstrings (REQUIRED)
 

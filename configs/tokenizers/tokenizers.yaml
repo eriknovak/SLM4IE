@@ -19,7 +19,8 @@ corpus:
     source_weights: {}                           # per-source weights; default 1.0
 
 # --- Sweep -----------------------------------------------------------------
-tokenizers: [bpe, wordpiece, unigram, morphbpe, morphpiece]
+# bpe = byte-level (canonical); charbpe = char-level (clean MorphBPE ablation).
+tokenizers: [bpe, charbpe, wordpiece, unigram, morphbpe, morphpiece]
 vocab_sizes: [16000, 32000, 64000]
 special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
 

@@ -118,7 +118,7 @@ class TestBuildLexicon:
         assert lex.inventory["hiš"] == 2
 
     def test_segment_known_and_unknown(self, tmp_path: Path):
-        """segment returns gold morphemes for known forms, [word] otherwise."""
+        """Segment returns gold morphemes for known forms, [word] otherwise."""
         path = _write_fake_sloleks(tmp_path / "sloleks.jsonl.gz")
         lex = build_morph_lexicon(path)
         assert lex.segment("hiše") == ["hiš", "e"]

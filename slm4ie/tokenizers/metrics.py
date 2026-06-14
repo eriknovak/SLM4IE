@@ -18,7 +18,7 @@ from collections import Counter
 from typing import Counter as CounterType
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from slm4ie.tokenizers.base import TokenizerSpec, clean_piece, split_words
+from slm4ie.tokenizers.base import TokenizerSpec, split_words
 from slm4ie.tokenizers.morphology import MorphLexicon
 
 #: Whether a higher value is better for each reported metric.
@@ -169,36 +169,62 @@ def renyi_efficiency(freqs: Dict[str, int], alpha: float = 2.5) -> float:
     return min(1.0, max(0.0, efficiency))
 
 
-def _piece_offsets(pieces: List[str]) -> List[int]:
-    """Return cumulative character offsets at every piece boundary.
+def _boundary_positions(spans: List[Tuple[str, int, int]], form_len: int) -> List[int]:
+    """Return the sorted character boundary positions implied by token spans.
+
+    Works for any scheme: byte-level tokens that share a character span simply
+    contribute the same positions. Includes the endpoints 0 and `form_len`.
 
     Args:
-        pieces (List[str]): Cleaned pieces of a single word.
+        spans (List[Tuple[str, int, int]]): `(piece, start, end)` token spans.
+        form_len (int): Character length of the form.
 
     Returns:
-        List[int]: Offsets `[0, len(p0), len(p0)+len(p1), ...]`.
+        List[int]: Sorted distinct boundary offsets within `[0, form_len]`.
     """
-    offsets = [0]
-    for piece in pieces:
-        offsets.append(offsets[-1] + len(piece))
-    return offsets
+    positions = {0, form_len}
+    for _piece, start, end in spans:
+        if 0 <= start <= form_len:
+            positions.add(start)
+        if 0 <= end <= form_len:
+            positions.add(end)
+    return sorted(positions)
 
 
-def _encoded_pieces(tokenizer: TokenizerSpec, form: str) -> Optional[List[str]]:
-    """Encode `form` and return cleaned pieces, or None if they do not align.
+def _token_spans(tokenizer: TokenizerSpec, form: str) -> Optional[List[Tuple[str, int, int]]]:
+    """Return the token spans for `form`, or None when they do not tile it.
 
     Args:
         tokenizer (TokenizerSpec): The tokenizer under evaluation.
         form (str): A surface word form.
 
     Returns:
-        Optional[List[str]]: Cleaned pieces whose concatenation equals `form`,
-            or None when reconstruction fails (e.g. an unknown character).
+        Optional[List[Tuple[str, int, int]]]: `(piece, start, end)` spans whose
+            union covers every character of `form`, or None otherwise.
     """
-    pieces = [clean_piece(p) for p in tokenizer.encode(form)]
-    if "".join(pieces) != form:
+    spans = tokenizer.encode_offsets(form)
+    if not spans:
         return None
-    return pieces
+    covered = set()
+    for _piece, start, end in spans:
+        covered.update(range(start, end))
+    if covered != set(range(len(form))):
+        return None
+    return spans
+
+
+def _segments(spans: List[Tuple[str, int, int]], form: str) -> List[str]:
+    """Return the surface segments between consecutive token boundaries.
+
+    Args:
+        spans (List[Tuple[str, int, int]]): `(piece, start, end)` token spans.
+        form (str): The form the spans cover.
+
+    Returns:
+        List[str]: Surface substrings delimited by the token boundaries.
+    """
+    positions = _boundary_positions(spans, len(form))
+    return [form[positions[i] : positions[i + 1]] for i in range(len(positions) - 1)]
 
 
 def _reliable_forms(lexicon: MorphLexicon, max_forms: Optional[int]):
@@ -245,12 +271,13 @@ def morph_score(
     total = 0
     for segmentation in _reliable_forms(lexicon, max_forms):
         total += 1
-        pieces = _encoded_pieces(tokenizer, segmentation.form)
-        if pieces is None:
+        spans = _token_spans(tokenizer, segmentation.form)
+        if spans is None:
             continue
         evaluated += 1
+        form_len = len(segmentation.form)
         gold_boundaries = set(segmentation.boundaries())
-        pred_boundaries = set(_piece_offsets(pieces)[1:-1])
+        pred_boundaries = {p for p in _boundary_positions(spans, form_len) if 0 < p < form_len}
         true_positive += len(pred_boundaries & gold_boundaries)
         predicted += len(pred_boundaries)
         gold += len(gold_boundaries)
@@ -309,41 +336,48 @@ def morph_edit_distance_score(
     total = 0.0
     count = 0
     for segmentation in _reliable_forms(lexicon, max_forms):
-        pieces = _encoded_pieces(tokenizer, segmentation.form)
-        if pieces is None:
+        spans = _token_spans(tokenizer, segmentation.form)
+        if spans is None:
             continue
+        segments = _segments(spans, segmentation.form)
         gold = segmentation.morphemes
-        denominator = max(len(pieces), len(gold))
+        denominator = max(len(segments), len(gold))
         if denominator == 0:
             continue
-        distance = _levenshtein(pieces, gold) / denominator
+        distance = _levenshtein(segments, gold) / denominator
         total += 1.0 - distance
         count += 1
     return total / count if count else 0.0
 
 
-def _covering_pieces(
-    pieces: List[str],
-    offsets: List[int],
+def _covering_segments(
+    spans: List[Tuple[str, int, int]],
+    form: str,
     start: int,
     end: int,
 ) -> Optional[Tuple[str, ...]]:
-    """Return the pieces covering `[start, end)`, or None if a piece straddles.
+    """Return the segments covering `[start, end)`, or None if one straddles.
 
     Args:
-        pieces (List[str]): Cleaned pieces of a word.
-        offsets (List[int]): Cumulative piece offsets from `_piece_offsets`.
+        spans (List[Tuple[str, int, int]]): `(piece, start, end)` token spans.
+        form (str): The form the spans cover.
         start (int): Morpheme start offset.
         end (int): Morpheme end offset.
 
     Returns:
-        Optional[Tuple[str, ...]]: The contiguous pieces inside the span, or
-            None when a piece crosses the span boundary.
+        Optional[Tuple[str, ...]]: The contiguous surface segments inside the
+            span, or None when a token boundary does not fall on the morpheme
+            boundary (a straddling token).
     """
-    boundary_set = set(offsets)
+    positions = _boundary_positions(spans, len(form))
+    boundary_set = set(positions)
     if start not in boundary_set or end not in boundary_set:
         return None
-    return tuple(piece for piece, lo in zip(pieces, offsets) if lo >= start and lo + len(piece) <= end)
+    return tuple(
+        form[positions[i] : positions[i + 1]]
+        for i in range(len(positions) - 1)
+        if positions[i] >= start and positions[i + 1] <= end
+    )
 
 
 def morph_consistency_score(
@@ -356,7 +390,7 @@ def morph_consistency_score(
 
     For every morpheme appearing in at least two reliable forms, the score is
     the share of forms in which the morpheme's character span is tokenized the
-    same way (a straddling piece counts as its own, distinct outcome). The
+    same way (a straddling token counts as its own, distinct outcome). The
     metric is the macro-average over qualifying morphemes.
 
     Args:
@@ -369,15 +403,14 @@ def morph_consistency_score(
     """
     outcomes: Dict[str, CounterType[Optional[Tuple[str, ...]]]] = {}
     for segmentation in _reliable_forms(lexicon, max_forms):
-        pieces = _encoded_pieces(tokenizer, segmentation.form)
-        if pieces is None:
+        spans = _token_spans(tokenizer, segmentation.form)
+        if spans is None:
             continue
-        offsets = _piece_offsets(pieces)
         cursor = 0
         for morpheme in segmentation.morphemes:
             start, end = cursor, cursor + len(morpheme)
             cursor = end
-            covering = _covering_pieces(pieces, offsets, start, end)
+            covering = _covering_segments(spans, segmentation.form, start, end)
             outcomes.setdefault(morpheme, Counter())[covering] += 1
 
     scores = [

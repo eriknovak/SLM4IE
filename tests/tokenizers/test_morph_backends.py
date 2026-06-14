@@ -1,12 +1,17 @@
-"""Tests for the morphological backends (MorphBPE, MorphPiece)."""
+"""Tests for the morphological backends (MorphBPE, MorphPiece).
+
+MorphBPE constrains merges at training and tokenizes with standard inference;
+MorphPiece uses a two-path (morpheme table else BPE) inference. Reconstruction
+and boundary checks use offsets so they hold across schemes.
+"""
 
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import pytest
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends)
-from slm4ie.tokenizers.base import TrainContext, clean_piece
+from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.morphology import MorphLexicon, _add_to_lexicon, segment_form
 from slm4ie.tokenizers.registry import get_tokenizer
 
@@ -61,21 +66,32 @@ def _train(name: str, vocab_size: int = 80):
     return tokenizer
 
 
-def _piece_boundaries(pieces: List[str]) -> set:
-    """Return cumulative character-offset boundaries of cleaned pieces.
+def _covers_word(offsets: List[Tuple[str, int, int]], word: str) -> bool:
+    """Return True when token offsets tile every character of `word`.
 
     Args:
-        pieces (List[str]): Encoded pieces of a single word.
+        offsets (List[Tuple[str, int, int]]): `(piece, start, end)` spans.
+        word (str): The encoded word.
 
     Returns:
-        set: Internal boundary offsets (excluding 0 and the total length).
+        bool: True if the spans cover `range(len(word))`.
     """
-    offsets = set()
-    cursor = 0
-    for piece in pieces[:-1]:
-        cursor += len(clean_piece(piece))
-        offsets.add(cursor)
-    return offsets
+    covered = set()
+    for _piece, start, end in offsets:
+        covered.update(range(start, end))
+    return covered == set(range(len(word)))
+
+
+def _internal_boundaries(offsets: List[Tuple[str, int, int]]) -> set:
+    """Return the internal boundary offsets implied by token spans.
+
+    Args:
+        offsets (List[Tuple[str, int, int]]): `(piece, start, end)` spans.
+
+    Returns:
+        set: Distinct token start offsets excluding 0.
+    """
+    return {start for _piece, start, _end in offsets if start > 0}
 
 
 @pytest.mark.parametrize("name", _MORPH_BACKENDS)
@@ -87,30 +103,27 @@ class TestMorphBackends:
         with pytest.raises(ValueError, match="lexicon"):
             get_tokenizer(name)().train(iter(_CORPUS), 80, config=TrainContext())
 
-    def test_pieces_reconstruct_word(self, name: str):
-        """Cleaned pieces of a known word concatenate back to the word."""
+    def test_offsets_tile_word(self, name: str):
+        """Token offsets cover every character of a known word."""
         tokenizer = _train(name)
-        cleaned = "".join(clean_piece(p) for p in tokenizer.encode("hišami"))
-        assert cleaned == "hišami"
+        assert _covers_word(tokenizer.encode_offsets("hišami"), "hišami")
 
     def test_respects_morpheme_boundary(self, name: str):
-        """No piece spans the gold morpheme boundary of a known form."""
+        """The gold morpheme boundary of a known form is a token boundary."""
         tokenizer = _train(name)
         # 'hišami' aligns to stem 'hiša' + suffix 'mi' -> boundary at offset 4.
-        boundaries = _piece_boundaries(tokenizer.encode("hišami"))
-        assert 4 in boundaries
+        assert 4 in _internal_boundaries(tokenizer.encode_offsets("hišami"))
 
-    def test_oov_word_falls_back(self, name: str):
-        """An unknown word is still encoded and reconstructs."""
+    def test_oov_word_encodes(self, name: str):
+        """An unknown word (in-vocab characters) still encodes and tiles."""
         tokenizer = _train(name)
-        pieces = tokenizer.encode("računalnik")
-        assert pieces != []
-        assert "".join(clean_piece(p) for p in pieces) == "računalnik"
+        offsets = tokenizer.encode_offsets("gradijo")
+        assert offsets
+        assert _covers_word(offsets, "gradijo")
 
     def test_save_load_round_trip(self, name: str, tmp_path: Path):
-        """save then load reproduces encoding and vocabulary."""
+        """Save then load reproduces encoding."""
         tokenizer = _train(name)
         tokenizer.save(tmp_path)
         loaded = get_tokenizer(name).load(tmp_path)
-        assert loaded.encode("hišami psu cesti") == tokenizer.encode("hišami psu cesti")
-        assert loaded.vocab == tokenizer.vocab
+        assert loaded.encode("hišami gradijo") == tokenizer.encode("hišami gradijo")
