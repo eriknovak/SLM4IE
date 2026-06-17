@@ -55,6 +55,7 @@ import os
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, cast
@@ -75,6 +76,7 @@ from slm4ie.data.curate import (
     write_sentinel,
 )
 from slm4ie.data.curate.stages import CORPUS_STAGES, SCOPED_STAGES, is_scoped
+from slm4ie.data.curate.overrides import effective_stage_config, validate_overrides
 from slm4ie.data.curate.sentinel import (
     SENTINEL_NAME,
     cascade_invalidate_scoped,
@@ -428,6 +430,139 @@ def _purge_dedup_state(paths: CuratePaths, which: str) -> None:
             shutil.rmtree(sub, ignore_errors=True)
 
 
+@dataclass(frozen=True)
+class ConvertParams:
+    """Resolved convert-stage parameters for one config bucket.
+
+    Attributes:
+        text_field: Record field copied into `text`.
+        id_field: Record field kept as `doc_id`.
+        metadata_fields: Record fields kept under `Document.metadata`.
+        include_annotations: Whether to join the annotations sidecar.
+        max_shard_bytes: Compressed-byte ceiling per output shard.
+    """
+
+    text_field: str
+    id_field: str
+    metadata_fields: List[str]
+    include_annotations: bool
+    max_shard_bytes: int
+
+
+@dataclass(frozen=True)
+class LanguageParams:
+    """Resolved language-stage parameters for one config bucket.
+
+    Attributes:
+        target_languages: ISO 639-1 codes treated as in-language.
+        candidate_languages: Candidate set lingua chooses among, or None.
+        mode: `filter` drops out-of-target docs; `tag` only annotates.
+        minimum_relative_distance: Confidence gap lingua needs to commit.
+        low_accuracy: Use lingua's lighter trigram-only model.
+        max_chars: Truncate doc text to this many chars, or None.
+    """
+
+    target_languages: List[str]
+    candidate_languages: Optional[List[str]]
+    mode: str
+    minimum_relative_distance: float
+    low_accuracy: bool
+    max_chars: Optional[int]
+
+
+def _build_convert_params(ccfg: Dict[str, Any]) -> ConvertParams:
+    """Resolve a convert-stage config slice into typed parameters.
+
+    Args:
+        ccfg: The effective `convert` config slice for one bucket.
+
+    Returns:
+        The resolved `ConvertParams`, with defaults applied.
+    """
+    metadata_fields_raw = ccfg.get("metadata_fields")
+    return ConvertParams(
+        text_field=str(ccfg.get("text_field", DEFAULT_TEXT_FIELD)),
+        id_field=str(ccfg.get("id_field", DEFAULT_ID_FIELD)),
+        metadata_fields=(
+            [str(f) for f in metadata_fields_raw]
+            if metadata_fields_raw is not None
+            else list(DEFAULT_METADATA_FIELDS)
+        ),
+        include_annotations=bool(ccfg.get("include_annotations", False)),
+        max_shard_bytes=int(ccfg.get("max_shard_bytes", DEFAULT_MAX_SHARD_BYTES)),
+    )
+
+
+def _build_language_params(lang_cfg: Dict[str, Any]) -> LanguageParams:
+    """Resolve a language-stage config slice into typed parameters.
+
+    Args:
+        lang_cfg: The effective `language` config slice for one bucket.
+
+    Returns:
+        The resolved `LanguageParams`, with defaults applied.
+    """
+    return LanguageParams(
+        target_languages=lang_cfg.get("targets") or ["sl"],
+        candidate_languages=lang_cfg.get("candidates"),
+        mode=str(lang_cfg.get("mode", "filter")),
+        minimum_relative_distance=float(lang_cfg.get("minimum_relative_distance", 0.0)),
+        low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
+        max_chars=lang_cfg.get("max_chars"),
+    )
+
+
+def _build_spam_config(spcfg: Dict[str, Any]) -> SpamConfig:
+    """Resolve a spam-stage config slice into a `SpamConfig`.
+
+    Args:
+        spcfg: The effective `spam` config slice for one bucket.
+
+    Returns:
+        The resolved `SpamConfig`, with defaults applied.
+
+    Raises:
+        ValueError: If `model` is set; no model resolver is wired.
+    """
+    if spcfg.get("model"):
+        raise ValueError(
+            "pretrain.yaml::spam.model is set, but no model resolver is "
+            "configured. Leave it null, or wire a scorer before enabling it."
+        )
+    return SpamConfig(
+        min_adult_hits=int(spcfg.get("min_adult_hits", 2)),
+        min_spam_hits=int(spcfg.get("min_spam_hits", 2)),
+        keep_fraction=float(spcfg.get("keep_fraction", 0.0)),
+        default_language=str(spcfg.get("default_language", "sl")),
+        url_blocklist=bool(spcfg.get("url_blocklist", True)),
+        use_ldnoobw=bool(spcfg.get("use_ldnoobw", True)),
+        model=spcfg.get("model"),
+        model_threshold=float(spcfg.get("model_threshold", 0.5)),
+    )
+
+
+def _build_quality_config(qcfg: Dict[str, Any]) -> QualityConfig:
+    """Resolve a quality-stage config slice into a `QualityConfig`.
+
+    Args:
+        qcfg: The effective `quality` config slice for one bucket.
+
+    Returns:
+        The resolved `QualityConfig`, with defaults applied.
+    """
+    return QualityConfig(
+        min_doc_words=int(qcfg.get("min_doc_words", 50)),
+        max_doc_words=int(qcfg.get("max_doc_words", 100_000)),
+        min_avg_word_length=int(qcfg.get("min_avg_word_length", 3)),
+        max_avg_word_length=int(qcfg.get("max_avg_word_length", 10)),
+        max_symbol_word_ratio=float(qcfg.get("max_symbol_word_ratio", 0.1)),
+        max_bullet_lines_ratio=float(qcfg.get("max_bullet_lines_ratio", 0.9)),
+        max_ellipsis_lines_ratio=float(qcfg.get("max_ellipsis_lines_ratio", 0.3)),
+        max_non_alpha_words_ratio=float(qcfg.get("max_non_alpha_words_ratio", 0.8)),
+        min_stop_words=int(qcfg.get("min_stop_words", 2)),
+    )
+
+
 def _stage_runner(
     stage: str,
     paths: CuratePaths,
@@ -471,17 +606,7 @@ def _stage_runner(
         ValueError: If *stage* is not a known stage name.
     """
     if stage == "convert":
-        ccfg = cfg.get("convert") or {}
-        text_field = str(ccfg.get("text_field", DEFAULT_TEXT_FIELD))
-        id_field = str(ccfg.get("id_field", DEFAULT_ID_FIELD))
-        metadata_fields_raw = ccfg.get("metadata_fields")
-        metadata_fields = (
-            [str(f) for f in metadata_fields_raw]
-            if metadata_fields_raw is not None
-            else list(DEFAULT_METADATA_FIELDS)
-        )
-        include_annotations = bool(ccfg.get("include_annotations", False))
-        max_shard_bytes = int(ccfg.get("max_shard_bytes", DEFAULT_MAX_SHARD_BYTES))
+        cparams = _build_convert_params(cfg.get("convert") or {})
         out = paths.stage_dir("convert")
 
         def run() -> Tuple[int, int]:
@@ -489,11 +614,11 @@ def _stage_runner(
                 input_dir=paths.input_folder,
                 output_dir=out,
                 dataset_keys=dataset_keys,
-                text_field=text_field,
-                id_field=id_field,
-                metadata_fields=metadata_fields,
-                include_annotations=include_annotations,
-                max_shard_bytes=max_shard_bytes,
+                text_field=cparams.text_field,
+                id_field=cparams.id_field,
+                metadata_fields=cparams.metadata_fields,
+                include_annotations=cparams.include_annotations,
+                max_shard_bytes=cparams.max_shard_bytes,
                 workers=workers,
                 log_dir=log_dir,
             )
@@ -506,23 +631,21 @@ def _stage_runner(
         return run
 
     if stage == "language":
-        lang_cfg = cfg.get("language") or {}
         # Read through the upstream subset view when only some keys are
         # being (re)run, so the reader skips shards from currently
         # untouched keys.
+        lparams = _build_language_params(cfg.get("language") or {})
 
         def run() -> Tuple[int, int]:
             execs = build_language_executors(
                 paths,
                 tasks=workers,
-                target_languages=lang_cfg.get("targets") or ["sl"],
-                candidate_languages=lang_cfg.get("candidates"),
-                lang_mode=str(lang_cfg.get("mode", "filter")),
-                lang_minimum_relative_distance=float(
-                    lang_cfg.get("minimum_relative_distance", 0.0)
-                ),
-                lang_low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
-                lang_max_chars=lang_cfg.get("max_chars"),
+                target_languages=lparams.target_languages,
+                candidate_languages=lparams.candidate_languages,
+                lang_mode=lparams.mode,
+                lang_minimum_relative_distance=lparams.minimum_relative_distance,
+                lang_low_accuracy=lparams.low_accuracy,
+                lang_max_chars=lparams.max_chars,
                 input_override=input_view,
             )
             return pipeline_io_counts(execs[-1].run())
@@ -530,22 +653,7 @@ def _stage_runner(
         return run
 
     if stage == "spam":
-        spcfg = cfg.get("spam") or {}
-        if spcfg.get("model"):
-            raise ValueError(
-                "pretrain.yaml::spam.model is set, but no model resolver is "
-                "configured. Leave it null, or wire a scorer before enabling it."
-            )
-        spam_config = SpamConfig(
-            min_adult_hits=int(spcfg.get("min_adult_hits", 2)),
-            min_spam_hits=int(spcfg.get("min_spam_hits", 2)),
-            keep_fraction=float(spcfg.get("keep_fraction", 0.0)),
-            default_language=str(spcfg.get("default_language", "sl")),
-            url_blocklist=bool(spcfg.get("url_blocklist", True)),
-            use_ldnoobw=bool(spcfg.get("use_ldnoobw", True)),
-            model=spcfg.get("model"),
-            model_threshold=float(spcfg.get("model_threshold", 0.5)),
-        )
+        spam_config = _build_spam_config(cfg.get("spam") or {})
 
         def run() -> Tuple[int, int]:
             execs = build_spam_executors(
@@ -562,18 +670,7 @@ def _stage_runner(
         return run
 
     if stage == "quality":
-        qcfg = cfg.get("quality") or {}
-        quality_config = QualityConfig(
-            min_doc_words=int(qcfg.get("min_doc_words", 50)),
-            max_doc_words=int(qcfg.get("max_doc_words", 100_000)),
-            min_avg_word_length=int(qcfg.get("min_avg_word_length", 3)),
-            max_avg_word_length=int(qcfg.get("max_avg_word_length", 10)),
-            max_symbol_word_ratio=float(qcfg.get("max_symbol_word_ratio", 0.1)),
-            max_bullet_lines_ratio=float(qcfg.get("max_bullet_lines_ratio", 0.9)),
-            max_ellipsis_lines_ratio=float(qcfg.get("max_ellipsis_lines_ratio", 0.3)),
-            max_non_alpha_words_ratio=float(qcfg.get("max_non_alpha_words_ratio", 0.8)),
-            min_stop_words=int(qcfg.get("min_stop_words", 2)),
-        )
+        quality_config = _build_quality_config(cfg.get("quality") or {})
 
         def run() -> Tuple[int, int]:
             execs = build_quality_executors(
@@ -817,6 +914,39 @@ def _convert_inputs_predate(
     return True
 
 
+def _bucket_keys_by_effective_hash(
+    keys: List[str],
+    stage: str,
+    cfg: Dict[str, Any],
+    overrides: Dict[str, Any],
+    extra: bytes,
+) -> Dict[str, List[str]]:
+    """Group *keys* by their effective-config hash for *stage*.
+
+    Datasets that resolve to the same effective stage config share a hash
+    and can run in one executor; each distinct override forms its own
+    bucket. A dataset with no override hashes identically to the plain
+    global slice, so the all-defaults case stays a single bucket.
+
+    Args:
+        keys: Dataset keys to bucket, in run order.
+        stage: Scoped stage name.
+        cfg: Parsed pretrain.yaml.
+        overrides: The `overrides:` mapping.
+        extra: Stage-level extra bytes folded into the hash (stopwords /
+            spam lexicon / roster); identical across keys of a stage.
+
+    Returns:
+        Mapping of effective-config hash to the keys sharing it. Bucket
+        insertion order follows first appearance.
+    """
+    buckets: Dict[str, List[str]] = {}
+    for key in keys:
+        slice_ = effective_stage_config(cfg, overrides, key, stage)
+        buckets.setdefault(config_hash(slice_, extra=extra), []).append(key)
+    return buckets
+
+
 def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
     """Return canonical bytes for the dataset key list (for hashing).
 
@@ -977,6 +1107,10 @@ def _curate(
     pretrain_path = pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_path)
+    # Per-dataset config overrides: validate against the full roster up
+    # front so a typo or out-of-bounds section fails before any stage runs.
+    overrides = cfg.get("overrides") or {}
+    validate_overrides(overrides, _list_datasets(extract_path))
     input_dir, output_dir = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
     spam_assets = _load_spam_assets(cfg)
@@ -1022,26 +1156,29 @@ def _curate(
         stage_folder = paths.stage_dir(stage_name)
 
         if is_scoped(stage_name):
-            # Convert reads the extracted tier directly, so its currency
-            # also depends on whether each source file changed on disk —
-            # a size+mtime fingerprint check layered on the config hash.
-            # Later scoped stages read regenerated upstream output and use
-            # the plain config-hash check.
-            convert_include_annotations = bool(
-                (cfg.get("convert") or {}).get("include_annotations", False)
-            )
-            if stage_name == "convert":
-                def _is_current(k: str) -> bool:
-                    return _convert_dataset_current(
-                        stage_folder,
-                        k,
-                        current_hash,
-                        paths.input_folder,
-                        convert_include_annotations,
+            # Each dataset is judged against its EFFECTIVE (override-merged)
+            # config. Convert additionally reads the extracted tier, so its
+            # currency also depends on a size+mtime fingerprint of the
+            # source file; later scoped stages read regenerated upstream
+            # output and use the plain effective-config-hash check.
+            def _effective_hash(k: str) -> str:
+                return config_hash(
+                    effective_stage_config(cfg, overrides, k, stage_name),
+                    extra=extra,
+                )
+
+            def _is_current(k: str) -> bool:
+                expected = _effective_hash(k)
+                if stage_name == "convert":
+                    inc = bool(
+                        effective_stage_config(
+                            cfg, overrides, k, "convert"
+                        ).get("include_annotations", False)
                     )
-            else:
-                def _is_current(k: str) -> bool:
-                    return dataset_sentinel_is_current(stage_folder, k, current_hash)
+                    return _convert_dataset_current(
+                        stage_folder, k, expected, paths.input_folder, inc
+                    )
+                return dataset_sentinel_is_current(stage_folder, k, expected)
 
             todo = [
                 k for k in dataset_keys
@@ -1078,62 +1215,99 @@ def _curate(
             cascade_invalidate_scoped(output_dir, stage_name, todo)
             force_keys.update(todo)
 
-            if stage_name == "convert":
-                n_datasets, input_bytes = _extracted_input_summary(
-                    paths.input_folder, todo
-                )
-                logger.info(
-                    "[convert] starting (%d dataset(s), %s)",
-                    n_datasets, _human_bytes(input_bytes),
-                )
-            else:
-                logger.info("[%s] starting%s", stage_name, _starting_input_hint(paths, stage_name))
+            # Bucket todo by effective config so datasets sharing a config
+            # run together in one executor; each distinct override forms
+            # its own bucket (one extra executor per override).
+            buckets = _bucket_keys_by_effective_hash(
+                todo, stage_name, cfg, overrides, extra
+            )
+            logger.info(
+                "[%s] %d dataset(s) in %d config group(s)",
+                stage_name, len(todo), len(buckets),
+            )
 
-            # Build a symlink view of the upstream output restricted to the
-            # keys being (re)run; convert reads extraction output directly.
-            # `upstream`/`up_dir` were resolved above when filtering `todo`.
-            view = _filter_stage_subset(up_dir, todo) if up_dir is not None else None
-            try:
-                runner = _stage_runner(
-                    stage_name,
-                    paths,
-                    cfg,
-                    workers,
-                    stopwords,
-                    spam_assets,
-                    dataset_keys=todo,
-                    input_view=view,
-                    log_dir=convert_log_dir if stage_name == "convert" else None,
+            for bucket_hash, bucket_keys in buckets.items():
+                effective = effective_stage_config(
+                    cfg, overrides, bucket_keys[0], stage_name
                 )
-                records_in, records_out = runner()
-            finally:
-                if view is not None:
-                    shutil.rmtree(view, ignore_errors=True)
-
-            for key in todo:
-                # Only convert records an input fingerprint: it is the
-                # sole stage reading the extracted tier, so it is the only
-                # one whose currency depends on the source file on disk.
-                fingerprint = (
-                    _convert_input_fingerprint(
-                        paths.input_folder, key, convert_include_annotations
+                overridden = [
+                    k for k in bucket_keys
+                    if (overrides.get(k) or {}).get(stage_name)
+                ]
+                if overridden:
+                    logger.info(
+                        "[%s] override group %s <- %s",
+                        stage_name, overridden, effective,
                     )
-                    if stage_name == "convert"
+
+                if stage_name == "convert":
+                    n_datasets, input_bytes = _extracted_input_summary(
+                        paths.input_folder, bucket_keys
+                    )
+                    logger.info(
+                        "[convert] starting (%d dataset(s), %s)",
+                        n_datasets, _human_bytes(input_bytes),
+                    )
+                else:
+                    logger.info(
+                        "[%s] starting%s",
+                        stage_name, _starting_input_hint(paths, stage_name),
+                    )
+
+                # Build a symlink view of the upstream output restricted to
+                # this bucket; convert reads extraction output directly.
+                view = (
+                    _filter_stage_subset(up_dir, bucket_keys)
+                    if up_dir is not None
                     else None
                 )
-                write_dataset_sentinel(
-                    stage_folder,
-                    key,
-                    config_slice=slice_,
-                    config_hash_value=current_hash,
-                    records_in=records_in,
-                    records_out=records_out,
-                    input_fingerprint=fingerprint,
+                # Hand the bucket's effective slice to the runner by swapping
+                # just this stage's section in a shallow cfg copy;
+                # _stage_runner reads cfg.get(stage_name).
+                bucket_cfg = {**cfg, stage_name: effective}
+                try:
+                    runner = _stage_runner(
+                        stage_name,
+                        paths,
+                        bucket_cfg,
+                        workers,
+                        stopwords,
+                        spam_assets,
+                        dataset_keys=bucket_keys,
+                        input_view=view,
+                        log_dir=convert_log_dir if stage_name == "convert" else None,
+                    )
+                    records_in, records_out = runner()
+                finally:
+                    if view is not None:
+                        shutil.rmtree(view, ignore_errors=True)
+
+                for key in bucket_keys:
+                    # Only convert records an input fingerprint: it is the
+                    # sole stage reading the extracted tier, so it is the
+                    # only one whose currency depends on the source file.
+                    fingerprint = (
+                        _convert_input_fingerprint(
+                            paths.input_folder,
+                            key,
+                            bool(effective.get("include_annotations", False)),
+                        )
+                        if stage_name == "convert"
+                        else None
+                    )
+                    write_dataset_sentinel(
+                        stage_folder,
+                        key,
+                        config_slice=effective,
+                        config_hash_value=bucket_hash,
+                        records_in=records_in,
+                        records_out=records_out,
+                        input_fingerprint=fingerprint,
+                    )
+                logger.info(
+                    "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
+                    stage_name, len(bucket_keys), records_in, records_out,
                 )
-            logger.info(
-                "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
-                stage_name, len(todo), records_in, records_out,
-            )
         else:
             # Corpus stage: only valid under --all (guaranteed by
             # _resolve_requested_stages and parse_args). Stage-level

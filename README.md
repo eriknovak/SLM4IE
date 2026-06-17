@@ -272,6 +272,17 @@ Each stage's sentinel hash covers its own top-level `pretrain.yaml` section. The
 
 > **Note — refreshed inputs auto-rebuild.** `convert` is the only stage that reads the `extracted/` tier, so it also tracks a **size + modification-time fingerprint** of each source `<key>.jsonl` (and its `.annotations.jsonl.gz` sidecar when `include_annotations` is on). Re-extracting a dataset — e.g. folding new weekly windows into a living corpus with `extract.py <key> --force` — changes that fingerprint, which marks `convert` stale for that key and cascades through every downstream scoped and corpus stage. So a plain `to_pretrain.py --all` after re-extraction re-folds the updated data with no `--force` needed. The fingerprint is **size and time only, never the file contents** (hashing the whole multi-hundred-GB tier on every run would be prohibitive): an in-place edit that somehow preserved both byte size and mtime would go undetected, and a content-preserving copy/`touch` that bumps mtime triggers a harmless rebuild. Sentinels written before fingerprints existed are grandfathered — a key is rebuilt only if its source file is newer than the recorded completion time — so this upgrade does not force a one-off reconvert of the whole corpus.
 
+> **Note — per-dataset overrides.** An optional top-level `overrides:` block in `pretrain.yaml` lets a single dataset patch any **scoped** stage's config without forking the file. It is keyed by dataset, then by stage, and deep-merges over the global section (unspecified knobs inherit the default):
+>
+> ```yaml
+> overrides:
+>   slovenian_news:
+>     quality:
+>       max_ellipsis_lines_ratio: 0.9   # news prose uses "…" mid-article
+> ```
+>
+> Only scoped stages (`convert`, `language`, `spam`, `quality`, `repetition`) are overridable — naming a corpus stage (`exact_dedup`/`sentence_dedup`/`stats`) or a global key (`input_dir`/`output_dir`/`stopwords`), an unknown dataset, or an unknown knob is a hard error at load. Datasets are bucketed by their effective config: those sharing one run together in a single executor, so only overridden datasets pay isolation cost. Each dataset's sentinel hashes its effective (merged) config, so adding/editing an override re-runs only that dataset's stage plus its downstream and the corpus dedup/stats; a dataset with no override is byte-identical to before and never re-runs spuriously. (`repetition` exposes no knobs today, so it is effectively non-overridable until some are surfaced.)
+
 Internally each dedup stage chains three datatrove executors via `depends=`: signature → find (single-worker reducer over signatures) → filter + write. The sig/find scratch lives at `<output_dir>/_dedup_state/` and is purged when the stage's sentinel lands. The stats stage is single-process because `CorpusStats` keeps global counters on its instance. The sentence-dedup blocks use `Languages.slovenian` so datatrove dispatches its bundled Slovenian `SpaCyTokenizer` for sentence boundaries.
 
 ##### Output layout

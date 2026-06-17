@@ -44,6 +44,12 @@ from slm4ie.data.curate.sentinel import (
     sentinel_is_current,
     write_sentinel,
 )
+from slm4ie.data.curate.overrides import (
+    STAGE_KNOBS,
+    OverrideConfigError,
+    effective_stage_config,
+    validate_overrides,
+)
 
 __all__ = [
     "ALL_STAGE_NAMES",
@@ -64,4 +70,11 @@ __all__ += [
     "read_sentinel",
     "sentinel_is_current",
     "write_sentinel",
+]
+
+__all__ += [
+    "STAGE_KNOBS",
+    "OverrideConfigError",
+    "effective_stage_config",
+    "validate_overrides",
 ]
