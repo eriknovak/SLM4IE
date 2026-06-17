@@ -264,6 +264,73 @@ def _write_extract_config_with_ghost(path: Path) -> None:
 
 
 @pytest.mark.slow
+def test_override_reruns_only_target_dataset(tmp_path: Path) -> None:
+    """Adding a per-dataset override re-runs only that dataset's scoped stage.
+
+    Runs the full pipeline for {alfa, beta}, then adds a `beta` quality
+    override and re-runs. `alfa`'s quality sentinel must be untouched
+    (same hash, not rewritten); `beta`'s must change (re-run with the
+    merged config).
+    """
+    from slm4ie.data.curate.sentinel import Sentinel, read_sentinel
+
+    def sentinel(folder: Path) -> Sentinel:
+        s = read_sentinel(folder)
+        assert s is not None, f"expected a sentinel under {folder}"
+        return s
+
+    in_dir = tmp_path / "extracted"
+    out_dir = tmp_path / "pretrain"
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS)
+
+    extract_cfg = tmp_path / "extract.yaml"
+    pretrain_cfg = tmp_path / "pretrain.yaml"
+    _write_extract_config(extract_cfg)
+    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+
+    def run() -> None:
+        _curate(
+            datasets=[],
+            run_all=True,
+            stage="all",
+            input_dir=in_dir,
+            output_dir=out_dir,
+            force=False,
+            workers=1,
+            pretrain_config=pretrain_cfg,
+            extract_config=extract_cfg,
+        )
+
+    # 1) Full run, no overrides.
+    run()
+    alfa_q = out_dir / "03_quality" / "alfa" / ".complete"
+    beta_q = out_dir / "03_quality" / "beta" / ".complete"
+    alfa_hash0 = sentinel(alfa_q.parent).config_hash
+    beta_hash0 = sentinel(beta_q.parent).config_hash
+    alfa_mtime0 = alfa_q.stat().st_mtime_ns
+    beta_mtime0 = beta_q.stat().st_mtime_ns
+
+    # 2) Add a beta-only quality override (changes the hash, keeps docs).
+    cfg = yaml.safe_load(pretrain_cfg.read_text())
+    cfg["overrides"] = {"beta": {"quality": {"max_ellipsis_lines_ratio": 0.8}}}
+    pretrain_cfg.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    run()
+
+    alfa_hash1 = sentinel(alfa_q.parent).config_hash
+    beta_hash1 = sentinel(beta_q.parent).config_hash
+
+    # alfa: untouched (same hash, sentinel not rewritten).
+    assert alfa_hash1 == alfa_hash0
+    assert alfa_q.stat().st_mtime_ns == alfa_mtime0, "alfa quality should not re-run"
+    # beta: re-run with the merged override (hash changed, sentinel rewritten).
+    assert beta_hash1 != beta_hash0
+    assert beta_q.stat().st_mtime_ns != beta_mtime0, "beta quality should re-run"
+    # The effective slice stored in beta's sentinel carries the override.
+    assert sentinel(beta_q.parent).config_slice["max_ellipsis_lines_ratio"] == 0.8
+
+
+@pytest.mark.slow
 def test_all_skips_roster_dataset_with_no_input(tmp_path: Path) -> None:
     """--all tolerates a roster dataset that was never extracted.
 
