@@ -76,7 +76,7 @@ from slm4ie.data.curate import (
     write_sentinel,
 )
 from slm4ie.data.curate.stages import CORPUS_STAGES, SCOPED_STAGES, is_scoped
-from slm4ie.data.curate.overrides import validate_overrides
+from slm4ie.data.curate.overrides import effective_stage_config, validate_overrides
 from slm4ie.data.curate.sentinel import (
     SENTINEL_NAME,
     cascade_invalidate_scoped,
@@ -914,6 +914,39 @@ def _convert_inputs_predate(
     return True
 
 
+def _bucket_keys_by_effective_hash(
+    keys: List[str],
+    stage: str,
+    cfg: Dict[str, Any],
+    overrides: Dict[str, Any],
+    extra: bytes,
+) -> Dict[str, List[str]]:
+    """Group *keys* by their effective-config hash for *stage*.
+
+    Datasets that resolve to the same effective stage config share a hash
+    and can run in one executor; each distinct override forms its own
+    bucket. A dataset with no override hashes identically to the plain
+    global slice, so the all-defaults case stays a single bucket.
+
+    Args:
+        keys: Dataset keys to bucket, in run order.
+        stage: Scoped stage name.
+        cfg: Parsed pretrain.yaml.
+        overrides: The `overrides:` mapping.
+        extra: Stage-level extra bytes folded into the hash (stopwords /
+            spam lexicon / roster); identical across keys of a stage.
+
+    Returns:
+        Mapping of effective-config hash to the keys sharing it. Bucket
+        insertion order follows first appearance.
+    """
+    buckets: Dict[str, List[str]] = {}
+    for key in keys:
+        slice_ = effective_stage_config(cfg, overrides, key, stage)
+        buckets.setdefault(config_hash(slice_, extra=extra), []).append(key)
+    return buckets
+
+
 def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
     """Return canonical bytes for the dataset key list (for hashing).
 
@@ -1123,26 +1156,29 @@ def _curate(
         stage_folder = paths.stage_dir(stage_name)
 
         if is_scoped(stage_name):
-            # Convert reads the extracted tier directly, so its currency
-            # also depends on whether each source file changed on disk —
-            # a size+mtime fingerprint check layered on the config hash.
-            # Later scoped stages read regenerated upstream output and use
-            # the plain config-hash check.
-            convert_include_annotations = bool(
-                (cfg.get("convert") or {}).get("include_annotations", False)
-            )
-            if stage_name == "convert":
-                def _is_current(k: str) -> bool:
-                    return _convert_dataset_current(
-                        stage_folder,
-                        k,
-                        current_hash,
-                        paths.input_folder,
-                        convert_include_annotations,
+            # Each dataset is judged against its EFFECTIVE (override-merged)
+            # config. Convert additionally reads the extracted tier, so its
+            # currency also depends on a size+mtime fingerprint of the
+            # source file; later scoped stages read regenerated upstream
+            # output and use the plain effective-config-hash check.
+            def _effective_hash(k: str) -> str:
+                return config_hash(
+                    effective_stage_config(cfg, overrides, k, stage_name),
+                    extra=extra,
+                )
+
+            def _is_current(k: str) -> bool:
+                expected = _effective_hash(k)
+                if stage_name == "convert":
+                    inc = bool(
+                        effective_stage_config(
+                            cfg, overrides, k, "convert"
+                        ).get("include_annotations", False)
                     )
-            else:
-                def _is_current(k: str) -> bool:
-                    return dataset_sentinel_is_current(stage_folder, k, current_hash)
+                    return _convert_dataset_current(
+                        stage_folder, k, expected, paths.input_folder, inc
+                    )
+                return dataset_sentinel_is_current(stage_folder, k, expected)
 
             todo = [
                 k for k in dataset_keys
@@ -1179,62 +1215,99 @@ def _curate(
             cascade_invalidate_scoped(output_dir, stage_name, todo)
             force_keys.update(todo)
 
-            if stage_name == "convert":
-                n_datasets, input_bytes = _extracted_input_summary(
-                    paths.input_folder, todo
-                )
-                logger.info(
-                    "[convert] starting (%d dataset(s), %s)",
-                    n_datasets, _human_bytes(input_bytes),
-                )
-            else:
-                logger.info("[%s] starting%s", stage_name, _starting_input_hint(paths, stage_name))
+            # Bucket todo by effective config so datasets sharing a config
+            # run together in one executor; each distinct override forms
+            # its own bucket (one extra executor per override).
+            buckets = _bucket_keys_by_effective_hash(
+                todo, stage_name, cfg, overrides, extra
+            )
+            logger.info(
+                "[%s] %d dataset(s) in %d config group(s)",
+                stage_name, len(todo), len(buckets),
+            )
 
-            # Build a symlink view of the upstream output restricted to the
-            # keys being (re)run; convert reads extraction output directly.
-            # `upstream`/`up_dir` were resolved above when filtering `todo`.
-            view = _filter_stage_subset(up_dir, todo) if up_dir is not None else None
-            try:
-                runner = _stage_runner(
-                    stage_name,
-                    paths,
-                    cfg,
-                    workers,
-                    stopwords,
-                    spam_assets,
-                    dataset_keys=todo,
-                    input_view=view,
-                    log_dir=convert_log_dir if stage_name == "convert" else None,
+            for bucket_hash, bucket_keys in buckets.items():
+                effective = effective_stage_config(
+                    cfg, overrides, bucket_keys[0], stage_name
                 )
-                records_in, records_out = runner()
-            finally:
-                if view is not None:
-                    shutil.rmtree(view, ignore_errors=True)
-
-            for key in todo:
-                # Only convert records an input fingerprint: it is the
-                # sole stage reading the extracted tier, so it is the only
-                # one whose currency depends on the source file on disk.
-                fingerprint = (
-                    _convert_input_fingerprint(
-                        paths.input_folder, key, convert_include_annotations
+                overridden = [
+                    k for k in bucket_keys
+                    if (overrides.get(k) or {}).get(stage_name)
+                ]
+                if overridden:
+                    logger.info(
+                        "[%s] override group %s <- %s",
+                        stage_name, overridden, effective,
                     )
-                    if stage_name == "convert"
+
+                if stage_name == "convert":
+                    n_datasets, input_bytes = _extracted_input_summary(
+                        paths.input_folder, bucket_keys
+                    )
+                    logger.info(
+                        "[convert] starting (%d dataset(s), %s)",
+                        n_datasets, _human_bytes(input_bytes),
+                    )
+                else:
+                    logger.info(
+                        "[%s] starting%s",
+                        stage_name, _starting_input_hint(paths, stage_name),
+                    )
+
+                # Build a symlink view of the upstream output restricted to
+                # this bucket; convert reads extraction output directly.
+                view = (
+                    _filter_stage_subset(up_dir, bucket_keys)
+                    if up_dir is not None
                     else None
                 )
-                write_dataset_sentinel(
-                    stage_folder,
-                    key,
-                    config_slice=slice_,
-                    config_hash_value=current_hash,
-                    records_in=records_in,
-                    records_out=records_out,
-                    input_fingerprint=fingerprint,
+                # Hand the bucket's effective slice to the runner by swapping
+                # just this stage's section in a shallow cfg copy;
+                # _stage_runner reads cfg.get(stage_name).
+                bucket_cfg = {**cfg, stage_name: effective}
+                try:
+                    runner = _stage_runner(
+                        stage_name,
+                        paths,
+                        bucket_cfg,
+                        workers,
+                        stopwords,
+                        spam_assets,
+                        dataset_keys=bucket_keys,
+                        input_view=view,
+                        log_dir=convert_log_dir if stage_name == "convert" else None,
+                    )
+                    records_in, records_out = runner()
+                finally:
+                    if view is not None:
+                        shutil.rmtree(view, ignore_errors=True)
+
+                for key in bucket_keys:
+                    # Only convert records an input fingerprint: it is the
+                    # sole stage reading the extracted tier, so it is the
+                    # only one whose currency depends on the source file.
+                    fingerprint = (
+                        _convert_input_fingerprint(
+                            paths.input_folder,
+                            key,
+                            bool(effective.get("include_annotations", False)),
+                        )
+                        if stage_name == "convert"
+                        else None
+                    )
+                    write_dataset_sentinel(
+                        stage_folder,
+                        key,
+                        config_slice=effective,
+                        config_hash_value=bucket_hash,
+                        records_in=records_in,
+                        records_out=records_out,
+                        input_fingerprint=fingerprint,
+                    )
+                logger.info(
+                    "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
+                    stage_name, len(bucket_keys), records_in, records_out,
                 )
-            logger.info(
-                "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
-                stage_name, len(todo), records_in, records_out,
-            )
         else:
             # Corpus stage: only valid under --all (guaranteed by
             # _resolve_requested_stages and parse_args). Stage-level

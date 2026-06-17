@@ -127,6 +127,41 @@ def test_repetition_has_no_overridable_knobs() -> None:
     assert STAGE_KNOBS["repetition"] == frozenset()
 
 
+def test_bucket_keys_by_effective_hash_groups_shared_configs() -> None:
+    """Datasets sharing an effective config land in one bucket; overrides split out."""
+    from scripts.data.to_pretrain import _bucket_keys_by_effective_hash
+    from slm4ie.data.curate import config_hash
+
+    cfg = {"quality": {"min_doc_words": 20, "max_ellipsis_lines_ratio": 0.3}}
+    overrides = {"news": {"quality": {"max_ellipsis_lines_ratio": 0.9}}}
+    extra = b""
+    buckets = _bucket_keys_by_effective_hash(
+        ["a", "b", "news"], "quality", cfg, overrides, extra
+    )
+    groups = sorted(sorted(v) for v in buckets.values())
+    assert groups == [["a", "b"], ["news"]]
+    # The default bucket's hash equals the plain global-slice hash (rollout-safe).
+    default_hash = config_hash(
+        {"min_doc_words": 20, "max_ellipsis_lines_ratio": 0.3}, extra=extra
+    )
+    assert default_hash in buckets
+    assert sorted(buckets[default_hash]) == ["a", "b"]
+
+
+def test_bucket_keys_two_datasets_sharing_one_override_group_together() -> None:
+    """Two datasets with the SAME override share a single bucket."""
+    from scripts.data.to_pretrain import _bucket_keys_by_effective_hash
+
+    cfg = {"quality": {"min_doc_words": 20}}
+    overrides = {
+        "x": {"quality": {"min_doc_words": 5}},
+        "y": {"quality": {"min_doc_words": 5}},
+    }
+    buckets = _bucket_keys_by_effective_hash(["x", "y"], "quality", cfg, overrides, b"")
+    assert len(buckets) == 1
+    assert sorted(next(iter(buckets.values()))) == ["x", "y"]
+
+
 def test_curate_rejects_bad_override(tmp_path: Path) -> None:
     """_curate fails fast (before any stage) on an invalid override block."""
     import yaml
