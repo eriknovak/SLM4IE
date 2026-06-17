@@ -55,6 +55,7 @@ import os
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, cast
@@ -428,6 +429,139 @@ def _purge_dedup_state(paths: CuratePaths, which: str) -> None:
             shutil.rmtree(sub, ignore_errors=True)
 
 
+@dataclass(frozen=True)
+class ConvertParams:
+    """Resolved convert-stage parameters for one config bucket.
+
+    Attributes:
+        text_field: Record field copied into `text`.
+        id_field: Record field kept as `doc_id`.
+        metadata_fields: Record fields kept under `Document.metadata`.
+        include_annotations: Whether to join the annotations sidecar.
+        max_shard_bytes: Compressed-byte ceiling per output shard.
+    """
+
+    text_field: str
+    id_field: str
+    metadata_fields: List[str]
+    include_annotations: bool
+    max_shard_bytes: int
+
+
+@dataclass(frozen=True)
+class LanguageParams:
+    """Resolved language-stage parameters for one config bucket.
+
+    Attributes:
+        target_languages: ISO 639-1 codes treated as in-language.
+        candidate_languages: Candidate set lingua chooses among, or None.
+        mode: `filter` drops out-of-target docs; `tag` only annotates.
+        minimum_relative_distance: Confidence gap lingua needs to commit.
+        low_accuracy: Use lingua's lighter trigram-only model.
+        max_chars: Truncate doc text to this many chars, or None.
+    """
+
+    target_languages: List[str]
+    candidate_languages: Optional[List[str]]
+    mode: str
+    minimum_relative_distance: float
+    low_accuracy: bool
+    max_chars: Optional[int]
+
+
+def _build_convert_params(ccfg: Dict[str, Any]) -> ConvertParams:
+    """Resolve a convert-stage config slice into typed parameters.
+
+    Args:
+        ccfg: The effective `convert` config slice for one bucket.
+
+    Returns:
+        The resolved `ConvertParams`, with defaults applied.
+    """
+    metadata_fields_raw = ccfg.get("metadata_fields")
+    return ConvertParams(
+        text_field=str(ccfg.get("text_field", DEFAULT_TEXT_FIELD)),
+        id_field=str(ccfg.get("id_field", DEFAULT_ID_FIELD)),
+        metadata_fields=(
+            [str(f) for f in metadata_fields_raw]
+            if metadata_fields_raw is not None
+            else list(DEFAULT_METADATA_FIELDS)
+        ),
+        include_annotations=bool(ccfg.get("include_annotations", False)),
+        max_shard_bytes=int(ccfg.get("max_shard_bytes", DEFAULT_MAX_SHARD_BYTES)),
+    )
+
+
+def _build_language_params(lang_cfg: Dict[str, Any]) -> LanguageParams:
+    """Resolve a language-stage config slice into typed parameters.
+
+    Args:
+        lang_cfg: The effective `language` config slice for one bucket.
+
+    Returns:
+        The resolved `LanguageParams`, with defaults applied.
+    """
+    return LanguageParams(
+        target_languages=lang_cfg.get("targets") or ["sl"],
+        candidate_languages=lang_cfg.get("candidates"),
+        mode=str(lang_cfg.get("mode", "filter")),
+        minimum_relative_distance=float(lang_cfg.get("minimum_relative_distance", 0.0)),
+        low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
+        max_chars=lang_cfg.get("max_chars"),
+    )
+
+
+def _build_spam_config(spcfg: Dict[str, Any]) -> SpamConfig:
+    """Resolve a spam-stage config slice into a `SpamConfig`.
+
+    Args:
+        spcfg: The effective `spam` config slice for one bucket.
+
+    Returns:
+        The resolved `SpamConfig`, with defaults applied.
+
+    Raises:
+        ValueError: If `model` is set; no model resolver is wired.
+    """
+    if spcfg.get("model"):
+        raise ValueError(
+            "pretrain.yaml::spam.model is set, but no model resolver is "
+            "configured. Leave it null, or wire a scorer before enabling it."
+        )
+    return SpamConfig(
+        min_adult_hits=int(spcfg.get("min_adult_hits", 2)),
+        min_spam_hits=int(spcfg.get("min_spam_hits", 2)),
+        keep_fraction=float(spcfg.get("keep_fraction", 0.0)),
+        default_language=str(spcfg.get("default_language", "sl")),
+        url_blocklist=bool(spcfg.get("url_blocklist", True)),
+        use_ldnoobw=bool(spcfg.get("use_ldnoobw", True)),
+        model=spcfg.get("model"),
+        model_threshold=float(spcfg.get("model_threshold", 0.5)),
+    )
+
+
+def _build_quality_config(qcfg: Dict[str, Any]) -> QualityConfig:
+    """Resolve a quality-stage config slice into a `QualityConfig`.
+
+    Args:
+        qcfg: The effective `quality` config slice for one bucket.
+
+    Returns:
+        The resolved `QualityConfig`, with defaults applied.
+    """
+    return QualityConfig(
+        min_doc_words=int(qcfg.get("min_doc_words", 50)),
+        max_doc_words=int(qcfg.get("max_doc_words", 100_000)),
+        min_avg_word_length=int(qcfg.get("min_avg_word_length", 3)),
+        max_avg_word_length=int(qcfg.get("max_avg_word_length", 10)),
+        max_symbol_word_ratio=float(qcfg.get("max_symbol_word_ratio", 0.1)),
+        max_bullet_lines_ratio=float(qcfg.get("max_bullet_lines_ratio", 0.9)),
+        max_ellipsis_lines_ratio=float(qcfg.get("max_ellipsis_lines_ratio", 0.3)),
+        max_non_alpha_words_ratio=float(qcfg.get("max_non_alpha_words_ratio", 0.8)),
+        min_stop_words=int(qcfg.get("min_stop_words", 2)),
+    )
+
+
 def _stage_runner(
     stage: str,
     paths: CuratePaths,
@@ -471,17 +605,7 @@ def _stage_runner(
         ValueError: If *stage* is not a known stage name.
     """
     if stage == "convert":
-        ccfg = cfg.get("convert") or {}
-        text_field = str(ccfg.get("text_field", DEFAULT_TEXT_FIELD))
-        id_field = str(ccfg.get("id_field", DEFAULT_ID_FIELD))
-        metadata_fields_raw = ccfg.get("metadata_fields")
-        metadata_fields = (
-            [str(f) for f in metadata_fields_raw]
-            if metadata_fields_raw is not None
-            else list(DEFAULT_METADATA_FIELDS)
-        )
-        include_annotations = bool(ccfg.get("include_annotations", False))
-        max_shard_bytes = int(ccfg.get("max_shard_bytes", DEFAULT_MAX_SHARD_BYTES))
+        cparams = _build_convert_params(cfg.get("convert") or {})
         out = paths.stage_dir("convert")
 
         def run() -> Tuple[int, int]:
@@ -489,11 +613,11 @@ def _stage_runner(
                 input_dir=paths.input_folder,
                 output_dir=out,
                 dataset_keys=dataset_keys,
-                text_field=text_field,
-                id_field=id_field,
-                metadata_fields=metadata_fields,
-                include_annotations=include_annotations,
-                max_shard_bytes=max_shard_bytes,
+                text_field=cparams.text_field,
+                id_field=cparams.id_field,
+                metadata_fields=cparams.metadata_fields,
+                include_annotations=cparams.include_annotations,
+                max_shard_bytes=cparams.max_shard_bytes,
                 workers=workers,
                 log_dir=log_dir,
             )
@@ -506,23 +630,21 @@ def _stage_runner(
         return run
 
     if stage == "language":
-        lang_cfg = cfg.get("language") or {}
         # Read through the upstream subset view when only some keys are
         # being (re)run, so the reader skips shards from currently
         # untouched keys.
+        lparams = _build_language_params(cfg.get("language") or {})
 
         def run() -> Tuple[int, int]:
             execs = build_language_executors(
                 paths,
                 tasks=workers,
-                target_languages=lang_cfg.get("targets") or ["sl"],
-                candidate_languages=lang_cfg.get("candidates"),
-                lang_mode=str(lang_cfg.get("mode", "filter")),
-                lang_minimum_relative_distance=float(
-                    lang_cfg.get("minimum_relative_distance", 0.0)
-                ),
-                lang_low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
-                lang_max_chars=lang_cfg.get("max_chars"),
+                target_languages=lparams.target_languages,
+                candidate_languages=lparams.candidate_languages,
+                lang_mode=lparams.mode,
+                lang_minimum_relative_distance=lparams.minimum_relative_distance,
+                lang_low_accuracy=lparams.low_accuracy,
+                lang_max_chars=lparams.max_chars,
                 input_override=input_view,
             )
             return pipeline_io_counts(execs[-1].run())
@@ -530,22 +652,7 @@ def _stage_runner(
         return run
 
     if stage == "spam":
-        spcfg = cfg.get("spam") or {}
-        if spcfg.get("model"):
-            raise ValueError(
-                "pretrain.yaml::spam.model is set, but no model resolver is "
-                "configured. Leave it null, or wire a scorer before enabling it."
-            )
-        spam_config = SpamConfig(
-            min_adult_hits=int(spcfg.get("min_adult_hits", 2)),
-            min_spam_hits=int(spcfg.get("min_spam_hits", 2)),
-            keep_fraction=float(spcfg.get("keep_fraction", 0.0)),
-            default_language=str(spcfg.get("default_language", "sl")),
-            url_blocklist=bool(spcfg.get("url_blocklist", True)),
-            use_ldnoobw=bool(spcfg.get("use_ldnoobw", True)),
-            model=spcfg.get("model"),
-            model_threshold=float(spcfg.get("model_threshold", 0.5)),
-        )
+        spam_config = _build_spam_config(cfg.get("spam") or {})
 
         def run() -> Tuple[int, int]:
             execs = build_spam_executors(
@@ -562,18 +669,7 @@ def _stage_runner(
         return run
 
     if stage == "quality":
-        qcfg = cfg.get("quality") or {}
-        quality_config = QualityConfig(
-            min_doc_words=int(qcfg.get("min_doc_words", 50)),
-            max_doc_words=int(qcfg.get("max_doc_words", 100_000)),
-            min_avg_word_length=int(qcfg.get("min_avg_word_length", 3)),
-            max_avg_word_length=int(qcfg.get("max_avg_word_length", 10)),
-            max_symbol_word_ratio=float(qcfg.get("max_symbol_word_ratio", 0.1)),
-            max_bullet_lines_ratio=float(qcfg.get("max_bullet_lines_ratio", 0.9)),
-            max_ellipsis_lines_ratio=float(qcfg.get("max_ellipsis_lines_ratio", 0.3)),
-            max_non_alpha_words_ratio=float(qcfg.get("max_non_alpha_words_ratio", 0.8)),
-            min_stop_words=int(qcfg.get("min_stop_words", 2)),
-        )
+        quality_config = _build_quality_config(cfg.get("quality") or {})
 
         def run() -> Tuple[int, int]:
             execs = build_quality_executors(

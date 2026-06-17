@@ -6,10 +6,15 @@ from pathlib import Path
 import pytest
 
 from scripts.data.to_pretrain import (
+    _build_convert_params,
+    _build_language_params,
+    _build_quality_config,
+    _build_spam_config,
     _convert_dataset_current,
     _convert_input_fingerprint,
     _filter_stage_subset,
 )
+from slm4ie.data.curate.overrides import STAGE_KNOBS, effective_stage_config
 from slm4ie.data.curate.sentinel import write_dataset_sentinel
 
 
@@ -19,6 +24,107 @@ def _write_extracted(input_dir: Path, key: str, text: str = "x") -> Path:
     path = input_dir / f"{key}.jsonl"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+# ---------------------------------------------------------------------------
+# Override pass-through: every overridable knob of every scoped stage must
+# flow override -> effective_stage_config -> stage builder -> config object.
+# ---------------------------------------------------------------------------
+
+#: Distinct non-default value per quality knob (field name == knob name).
+_QUALITY_OVERRIDES = {
+    "min_doc_words": 7,
+    "max_doc_words": 12345,
+    "min_avg_word_length": 1,
+    "max_avg_word_length": 99,
+    "max_symbol_word_ratio": 0.42,
+    "max_bullet_lines_ratio": 0.55,
+    "max_ellipsis_lines_ratio": 0.9,
+    "max_non_alpha_words_ratio": 0.33,
+    "min_stop_words": 4,
+}
+
+#: Distinct non-default value per spam knob except `model` (field == knob).
+_SPAM_OVERRIDES = {
+    "min_adult_hits": 5,
+    "min_spam_hits": 6,
+    "keep_fraction": 0.25,
+    "default_language": "de",
+    "url_blocklist": False,
+    "use_ldnoobw": False,
+    "model_threshold": 0.77,
+}
+
+#: Distinct non-default value per convert knob (field name == knob name).
+_CONVERT_OVERRIDES = {
+    "text_field": "body",
+    "id_field": "uri",
+    "metadata_fields": ["url", "title"],
+    "include_annotations": True,
+    "max_shard_bytes": 4242,
+}
+
+#: language knob -> (override value, LanguageParams field) — knob names
+#: `targets`/`candidates` map to renamed fields.
+_LANGUAGE_OVERRIDES = {
+    "targets": (["de", "fr"], "target_languages"),
+    "candidates": (["sl", "hr"], "candidate_languages"),
+    "mode": ("tag", "mode"),
+    "minimum_relative_distance": (0.25, "minimum_relative_distance"),
+    "low_accuracy": (True, "low_accuracy"),
+    "max_chars": (2000, "max_chars"),
+}
+
+
+def test_quality_overrides_cover_every_knob_and_pass_through() -> None:
+    """Each quality knob, when overridden, reaches the QualityConfig."""
+    assert set(_QUALITY_OVERRIDES) == STAGE_KNOBS["quality"]
+    for knob, value in _QUALITY_OVERRIDES.items():
+        eff = effective_stage_config({"quality": {}}, {"d": {"quality": {knob: value}}}, "d", "quality")
+        qc = _build_quality_config(eff)
+        assert getattr(qc, knob) == value, f"quality knob {knob!r} did not pass through"
+
+
+def test_spam_overrides_cover_every_knob_and_pass_through() -> None:
+    """Each spam knob (bar `model`), when overridden, reaches the SpamConfig."""
+    # `model` is exercised separately because setting it raises.
+    assert set(_SPAM_OVERRIDES) | {"model"} == STAGE_KNOBS["spam"]
+    for knob, value in _SPAM_OVERRIDES.items():
+        eff = effective_stage_config({"spam": {}}, {"d": {"spam": {knob: value}}}, "d", "spam")
+        sc = _build_spam_config(eff)
+        assert getattr(sc, knob) == value, f"spam knob {knob!r} did not pass through"
+
+
+def test_spam_model_override_raises() -> None:
+    """Overriding spam.model is rejected (no resolver is wired)."""
+    eff = effective_stage_config({"spam": {}}, {"d": {"spam": {"model": "x"}}}, "d", "spam")
+    with pytest.raises(ValueError, match="model"):
+        _build_spam_config(eff)
+
+
+def test_convert_overrides_cover_every_knob_and_pass_through() -> None:
+    """Each convert knob, when overridden, reaches the ConvertParams."""
+    assert set(_CONVERT_OVERRIDES) == STAGE_KNOBS["convert"]
+    for knob, value in _CONVERT_OVERRIDES.items():
+        eff = effective_stage_config({"convert": {}}, {"d": {"convert": {knob: value}}}, "d", "convert")
+        cp = _build_convert_params(eff)
+        assert getattr(cp, knob) == value, f"convert knob {knob!r} did not pass through"
+
+
+def test_language_overrides_cover_every_knob_and_pass_through() -> None:
+    """Each language knob, when overridden, reaches the LanguageParams."""
+    assert set(_LANGUAGE_OVERRIDES) == STAGE_KNOBS["language"]
+    for knob, (value, field) in _LANGUAGE_OVERRIDES.items():
+        eff = effective_stage_config(
+            {"language": {}}, {"d": {"language": {knob: value}}}, "d", "language"
+        )
+        lp = _build_language_params(eff)
+        assert getattr(lp, field) == value, f"language knob {knob!r} did not pass through"
+
+
+def test_repetition_has_no_overridable_knobs() -> None:
+    """Repetition exposes no knobs today; documents the gap explicitly."""
+    assert STAGE_KNOBS["repetition"] == frozenset()
 
 
 def test_convert_input_fingerprint_changes_on_size(tmp_path: Path) -> None:
