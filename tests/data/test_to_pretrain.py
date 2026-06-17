@@ -127,6 +127,42 @@ def test_repetition_has_no_overridable_knobs() -> None:
     assert STAGE_KNOBS["repetition"] == frozenset()
 
 
+def test_curate_rejects_bad_override(tmp_path: Path) -> None:
+    """_curate fails fast (before any stage) on an invalid override block."""
+    import yaml
+
+    from scripts.data import to_pretrain
+    from slm4ie.data.curate.overrides import OverrideConfigError
+
+    cfgs = tmp_path / "configs" / "data"
+    cfgs.mkdir(parents=True)
+    (cfgs / "extract.yaml").write_text(
+        yaml.safe_dump({"datasets": {"news": {"extractor": "jsonl", "domain": "news"}}})
+    )
+    (cfgs / "pretrain.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "input_dir": str(tmp_path / "in"),
+                "output_dir": str(tmp_path / "out"),
+                "quality": {"min_doc_words": 20},
+                "overrides": {"news": {"quality": {"max_elipsis_lines_ratio": 0.9}}},
+            }
+        )
+    )
+    with pytest.raises(OverrideConfigError, match="unknown knob"):
+        to_pretrain._curate(
+            datasets=["news"],
+            run_all=False,
+            stage="all",
+            input_dir=None,
+            output_dir=None,
+            force=False,
+            workers=1,
+            pretrain_config=cfgs / "pretrain.yaml",
+            extract_config=cfgs / "extract.yaml",
+        )
+
+
 def test_convert_input_fingerprint_changes_on_size(tmp_path: Path) -> None:
     """Growing the source file changes its fingerprint."""
     _write_extracted(tmp_path, "news", "short")

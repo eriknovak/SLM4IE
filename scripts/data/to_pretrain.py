@@ -76,6 +76,7 @@ from slm4ie.data.curate import (
     write_sentinel,
 )
 from slm4ie.data.curate.stages import CORPUS_STAGES, SCOPED_STAGES, is_scoped
+from slm4ie.data.curate.overrides import validate_overrides
 from slm4ie.data.curate.sentinel import (
     SENTINEL_NAME,
     cascade_invalidate_scoped,
@@ -1073,6 +1074,10 @@ def _curate(
     pretrain_path = pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_path)
+    # Per-dataset config overrides: validate against the full roster up
+    # front so a typo or out-of-bounds section fails before any stage runs.
+    overrides = cfg.get("overrides") or {}
+    validate_overrides(overrides, _list_datasets(extract_path))
     input_dir, output_dir = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
     spam_assets = _load_spam_assets(cfg)
