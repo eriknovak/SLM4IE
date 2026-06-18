@@ -267,3 +267,18 @@ sentence_dedup:
 #     top_k_words   Size of the word-frequency table.
 stats:
   top_k_words: 200
+
+# overrides — optional per-dataset patches over the global scoped-stage
+#   config above. Keyed by dataset, then by scoped stage (convert,
+#   language, spam, quality, repetition); each block deep-merges over the
+#   matching global section (unspecified knobs inherit the default).
+#   Corpus stages and global keys cannot be overridden. Adding/editing an
+#   entry re-runs only that dataset's stage plus its downstream and the
+#   corpus dedup/stats; untouched datasets stay cached. See README.
+overrides:
+  slovenian_news:
+    quality:
+      # News prose (interviews/Q&A, tabloid style) uses "…" mid-article;
+      # the Gopher web-crawl default of 0.3 dropped ~928K real articles
+      # (86.5% of slovenian_news quality drops were too_many_end_ellipsis).
+      max_ellipsis_lines_ratio: 0.9
