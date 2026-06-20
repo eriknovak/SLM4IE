@@ -425,7 +425,8 @@ and the Sloleks lexicon (`tokenization/sloleks.jsonl.gz`, produced by
 run `to_tokenization.py sloleks` first.
 
 ```bash
-uv run python scripts/data/to_tokenization.py sloleks   # prerequisite: Sloleks gold
+uv run python scripts/data/to_tokenization.py sloleks    # prerequisite: Sloleks gold
+uv run python scripts/tokenizers/prepare_sample.py       # materialize the persistent sample + lexicon
 uv run python scripts/tokenizers/train.py     --all      # train the 6x3 sweep
 uv run python scripts/tokenizers/analyze.py   --all      # 6 metrics + report.md/json
 uv run python scripts/tokenizers/export.py    --all      # HuggingFace tokenizer dirs
@@ -434,6 +435,13 @@ uv run python scripts/tokenizers/export.py    --all      # HuggingFace tokenizer
 uv run python scripts/tokenizers/train.py --tokenizer bpe                   # all its vocab sizes
 uv run python scripts/tokenizers/train.py --tokenizer bpe --vocab-size 16000  # one run
 ```
+
+`prepare_sample.py` materializes the shared, seeded training sample (and the
+morpheme lexicon) once into `tokenizers/corpus_sample.txt.gz`, so every `train`
+run reuses the identical sample instead of re-drawing it. It is optional —
+`train.py` builds the sample on first use — but running it up front keeps the
+sample persistent and reproducible across reruns (and across a `--max-workers`
+change after a crash). Pass `--force` to rebuild it.
 
 `train`/`analyze`/`export` share a one-or-all selection: `--all`, or one
 `--tokenizer <name>` optionally narrowed by `--vocab-size <n>` (the two modes are
