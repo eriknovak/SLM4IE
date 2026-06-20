@@ -115,10 +115,12 @@ converters) or `--all`.
 
 ### Tokenizer-comparison stage (not a conversion route)
 
-`scripts/tokenizers/{train,analyze,export}.py` (library code in
+`scripts/tokenizers/{prepare_sample,train,analyze,export}.py` (library code in
 `slm4ie/tokenizers/`, config `configs/tokenizers/tokenizers.yaml`, deps behind the
 `tokenize` extra) train six tokenizers across a vocab sweep, score them with six
-metrics, and export each as a HuggingFace tokenizer for LM-pretraining. It is a
+metrics, and export each as a HuggingFace tokenizer for LM-pretraining.
+`prepare_sample.py` (optional) materializes the shared seeded training sample +
+morpheme lexicon up front so reruns reuse an identical persistent sample. It is a
 **consumer**, not a fourth conversion route: it reads the deduplicated corpus
 (`pretrain/05_2_dedup/`) for training and `tokenization/sloleks.jsonl.gz` for the
 morpheme-derived gold, and writes artifacts + a report under
