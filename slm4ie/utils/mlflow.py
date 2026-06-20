@@ -19,8 +19,11 @@ from typing import Any, Dict, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Fallback tracking URI when neither config nor environment specify one.
-DEFAULT_TRACKING_URI = "http://localhost:5555"
+#: Last-resort tracking URI when neither config nor `MLFLOW_TRACKING_URI`
+#: specifies one. A local SQLite store so tracking never assumes a running
+#: server; the actual deployment points at the service via the env var (or a
+#: config `tracking_uri`).
+DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
 
 #: Local artifact root used when creating new experiments, so artifact logging
 #: does not depend on a server-internal (container) default path.
@@ -49,7 +52,8 @@ def resolve_tracking_uri(configured: Optional[str]) -> str:
         configured (Optional[str]): URI from the YAML config, if any.
 
     Returns:
-        str: The configured URI, else `MLFLOW_TRACKING_URI`, else the default.
+        str: The configured URI, else `MLFLOW_TRACKING_URI`, else the local
+            SQLite fallback (`DEFAULT_TRACKING_URI`).
     """
     if configured:
         return configured

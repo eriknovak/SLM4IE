@@ -43,8 +43,9 @@ eval:
 
 # --- MLflow ----------------------------------------------------------------
 # Experiment follows the slm4ie/<task>/<dataset> convention. tracking_uri null
-# falls back to $MLFLOW_TRACKING_URI, then http://localhost:5555 (code default).
+# falls back to $MLFLOW_TRACKING_URI (the localhost:5555 service in this setup),
+# then to a local SQLite store if neither is set.
 mlflow:
   experiment: slm4ie/tokenization/slovenian
   enabled: true                                  # train + analyze both log to MLflow
-  tracking_uri: null                             # null -> $MLFLOW_TRACKING_URI -> localhost:5555
+  tracking_uri: null                             # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
