@@ -1,14 +1,23 @@
 """End-to-end tests for slm4ie/tokenizers/analysis.py."""
 
+import dataclasses
 import gzip
 import json
 from pathlib import Path
 
-from slm4ie.tokenizers.analysis import build_report, evaluate_artifact, write_report
+import pytest
+
+from slm4ie.tokenizers.analysis import (
+    _train_link_tags,
+    build_report,
+    evaluate_artifact,
+    log_results_to_mlflow,
+    write_report,
+)
 from slm4ie.tokenizers.corpus import SampleBudget
 from slm4ie.tokenizers.metrics import iter_words
 from slm4ie.tokenizers.morphology import build_morph_lexicon
-from slm4ie.tokenizers.train import prepare_inputs, train_one
+from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, log_training_to_mlflow, prepare_inputs, train_one
 from slm4ie.utils.config import TokenizerSweepConfig
 
 _CORPUS = [
@@ -168,3 +177,49 @@ def test_full_pipeline_train_then_evaluate(tmp_path: Path):
     # MorphBPE should respect morpheme boundaries at least as well as plain BPE.
     by_name = {r["tokenizer"]: r for r in records if r}
     assert by_name["morphbpe"]["morph_score_f1"] >= 0.0
+
+
+class TestTrainLinkTags:
+    """Tests for cross-linking eval runs back to their training run."""
+
+    def test_empty_without_sidecar(self, tmp_path: Path):
+        """No linkage sidecar yields no cross-link tags."""
+        assert _train_link_tags(tmp_path) == {}
+
+    def test_reads_sidecar(self, tmp_path: Path):
+        """A present sidecar surfaces the train run id as tags."""
+        (tmp_path / MLFLOW_LINK_FILENAME).write_text(
+            json.dumps({"run_id": "abc", "parent_run_id": "par", "run_name": "bpe-90"}),
+            encoding="utf-8",
+        )
+        tags = _train_link_tags(tmp_path)
+        assert tags["train_run_id"] == "abc"
+        assert tags["train_parent_run_id"] == "par"
+        assert tags["train_run_name"] == "bpe-90"
+
+
+def test_eval_run_links_to_training_run(tmp_path: Path, monkeypatch):
+    """An eval run is tagged with the run id of the training run it evaluates."""
+    mlflow = pytest.importorskip("mlflow")
+    monkeypatch.chdir(tmp_path)
+    base = _make_config(tmp_path)
+    cfg = dataclasses.replace(base, mlflow_enabled=True, mlflow_tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
+    sample_path, lexicon_path = prepare_inputs(cfg)
+    train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
+    log_training_to_mlflow(["bpe-90"], cfg)
+
+    lexicon = build_morph_lexicon(cfg.sloleks_path)
+    record = evaluate_artifact("bpe-90", output_root=cfg.output_root, lexicon=lexicon, eval_words=["hiša", "psa"])
+    assert record is not None
+    md_path, json_path = write_report([record], cfg.report_dir)
+    log_results_to_mlflow([record], cfg, (md_path, json_path))
+
+    link = json.loads((cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).read_text(encoding="utf-8"))
+    client = mlflow.MlflowClient(tracking_uri=cfg.mlflow_tracking_uri)
+    experiment = client.get_experiment_by_name(cfg.mlflow_experiment)
+    eval_runs = client.search_runs(
+        [experiment.experiment_id],
+        filter_string="tags.phase = 'eval' and tags.mlflow.runName = 'bpe-90'",
+    )
+    assert eval_runs, "expected an eval child run"
+    assert eval_runs[0].data.tags["train_run_id"] == link["run_id"]

@@ -3,20 +3,21 @@
 Thin CLI wrapper around `slm4ie.tokenizers.train`. It loads
 `configs/tokenizers/tokenizers.yaml`, prepares the shared training sample (and
 the derived morpheme lexicon when a morphological backend is requested), then
-trains each selected tokenizer x vocab-size run in parallel.
+trains one tokenizer (or the whole sweep) and logs the runs to MLflow. The
+selection is deliberately one-or-all: pass a single target or `--all`.
 
 Examples:
     Train the whole sweep:
 
         uv run python scripts/tokenizers/train.py --all
 
-    Train specific runs:
+    Train one tokenizer across all its vocab sizes:
 
-        uv run python scripts/tokenizers/train.py bpe-16000 morphbpe-32000
+        uv run python scripts/tokenizers/train.py bpe
 
-    Filter by tokenizer and/or vocab size:
+    Train one specific run:
 
-        uv run python scripts/tokenizers/train.py --tokenizer bpe --vocab 16000 32000
+        uv run python scripts/tokenizers/train.py bpe-16000
 """
 
 import argparse
@@ -33,7 +34,13 @@ from slm4ie.data.parallel import (
     resolve_workers,
     run_parallel,
 )
-from slm4ie.tokenizers.train import prepare_inputs, select_runs, train_one
+from slm4ie.tokenizers.train import (
+    log_training_to_mlflow,
+    parse_run_key,
+    prepare_inputs,
+    select_runs,
+    train_one,
+)
 from slm4ie.utils.config import load_tokenizer_config
 
 logger = logging.getLogger(__name__)
@@ -55,24 +62,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description=("Train the tokenizer comparison sweep declared in configs/tokenizers/tokenizers.yaml.")
     )
     parser.add_argument(
-        "run_keys",
-        nargs="*",
-        help="Run keys '<name>-<vocab>' (e.g. bpe-16000). Mutually exclusive with --all.",
+        "target",
+        nargs="?",
+        default=None,
+        help=(
+            "One tokenizer to train: a tokenizer name (e.g. 'bpe' -> all its "
+            "vocab sizes) or a single run key (e.g. 'bpe-16000'). Mutually "
+            "exclusive with --all."
+        ),
     )
     parser.add_argument("--all", action="store_true", help="Train every run in the sweep.")
-    parser.add_argument(
-        "--tokenizer",
-        nargs="+",
-        default=None,
-        help="Restrict to these tokenizer names (filters the sweep).",
-    )
-    parser.add_argument(
-        "--vocab",
-        nargs="+",
-        type=int,
-        default=None,
-        help="Restrict to these vocab sizes (filters the sweep).",
-    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -89,6 +88,29 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _resolve_target_keys(cfg, target: str) -> List[str]:
+    """Resolve a single train target into run keys.
+
+    A bare tokenizer name expands to every configured vocab size for that
+    tokenizer; a full `<name>-<vocab>` key selects exactly that run.
+
+    Args:
+        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        target (str): A configured tokenizer name or a run key.
+
+    Returns:
+        List[str]: The selected run key(s).
+
+    Raises:
+        ValueError: If `target` is neither a configured tokenizer name nor a
+            well-formed run key.
+    """
+    if target in cfg.tokenizers:
+        return select_runs(cfg, tokenizers=[target])
+    parse_run_key(target)  # validates the '<name>-<vocab>' shape, else ValueError
+    return select_runs(cfg, run_keys=[target])
+
+
 def main() -> None:
     """Run the tokenizer training sweep from CLI arguments."""
     args = parse_args()
@@ -96,19 +118,25 @@ def main() -> None:
     config_path = args.config if args.config else project_root / DEFAULT_CONFIG_RELPATH
     cfg = load_tokenizer_config(config_path)
 
-    if args.all and args.run_keys:
-        logger.error("Pass either positional run keys or --all, not both.")
+    if args.all and args.target:
+        logger.error("Pass either a single target or --all, not both.")
         sys.exit(2)
-    if not (args.all or args.run_keys or args.tokenizer or args.vocab):
-        logger.error("Specify run keys, --all, or --tokenizer/--vocab filters.")
+    if not (args.all or args.target):
+        logger.error("Specify a single tokenizer/run-key target, or --all.")
         sys.exit(2)
 
-    keys = select_runs(
-        cfg,
-        run_keys=args.run_keys or None,
-        tokenizers=args.tokenizer,
-        vocab_sizes=args.vocab,
-    )
+    if args.all:
+        keys = select_runs(cfg)
+    else:
+        try:
+            keys = _resolve_target_keys(cfg, args.target)
+        except ValueError:
+            logger.error(
+                "Unknown target %r. Use a configured tokenizer name (%s) or a '<name>-<vocab>' run key.",
+                args.target,
+                ", ".join(cfg.tokenizers),
+            )
+            sys.exit(2)
     if not keys:
         logger.warning("No runs selected; nothing to do.")
         return
@@ -149,13 +177,17 @@ def main() -> None:
     )
 
     skipped = [k for k, v in results.items() if v is None]
-    trained = len(results) - len(skipped)
+    trained_keys = [k for k, v in results.items() if v is not None]
     logger.info(
         "Done. Trained %d, skipped %d, failed %s.",
-        trained,
+        len(trained_keys),
         len(skipped),
         [k for k, _ in failures] or "none",
     )
+
+    if trained_keys:
+        log_training_to_mlflow(trained_keys, cfg)
+
     if failures:
         sys.exit(2)
 

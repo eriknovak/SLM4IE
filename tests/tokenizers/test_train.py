@@ -1,12 +1,18 @@
 """Tests for slm4ie/tokenizers/train.py orchestration."""
 
+import dataclasses
 import gzip
 import json
 from pathlib import Path
 
+import pytest
+
 from slm4ie.tokenizers.corpus import SampleBudget
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.tokenizers.train import (
+    MLFLOW_LINK_FILENAME,
+    TRAIN_STATS_FILENAME,
+    log_training_to_mlflow,
     parse_run_key,
     plan_runs,
     prepare_inputs,
@@ -106,3 +112,84 @@ class TestTrainOne:
 
         loaded = get_tokenizer("bpe").load(out)
         assert loaded.encode("hiša") != []
+
+    def test_writes_train_stats_sidecar(self, tmp_path: Path):
+        """train_one writes a train_stats.json sidecar with timing + sizes."""
+        cfg = _make_config(tmp_path, ["bpe"], [90])
+        sample_path, _ = prepare_inputs(cfg)
+        out = train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+        stats = json.loads((out / TRAIN_STATS_FILENAME).read_text(encoding="utf-8"))
+        assert stats["run_key"] == "bpe-90"
+        assert stats["tokenizer"] == "bpe"
+        assert stats["vocab_size"] == 90
+        assert stats["vocab_used"] > 0
+        assert stats["train_seconds"] >= 0.0
+        assert stats["seed"] == cfg.train_budget.seed
+
+
+def _enable_mlflow(cfg: TokenizerSweepConfig, tmp_path: Path) -> TokenizerSweepConfig:
+    """Return a copy of `cfg` with MLflow enabled against a local file store.
+
+    Args:
+        tmp_path (Path): Temp directory for the file-based tracking store.
+        cfg (TokenizerSweepConfig): The base config to copy.
+
+    Returns:
+        TokenizerSweepConfig: A config logging to a tmp `file://` MLflow store.
+    """
+    uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    return dataclasses.replace(cfg, mlflow_enabled=True, mlflow_tracking_uri=uri)
+
+
+class TestLogTrainingToMlflow:
+    """Tests for the training-side MLflow logger."""
+
+    def test_noop_when_disabled(self, tmp_path: Path):
+        """Disabled tracking writes no linkage sidecar and never raises."""
+        cfg = _make_config(tmp_path, ["bpe"], [90])
+        sample_path, _ = prepare_inputs(cfg)
+        train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+        log_training_to_mlflow(["bpe-90"], cfg)  # mlflow_enabled is False
+        assert not (cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).exists()
+
+    def test_writes_link_sidecar_when_enabled(self, tmp_path: Path, monkeypatch):
+        """Enabled logging records a run id in the linkage sidecar."""
+        pytest.importorskip("mlflow")
+        monkeypatch.chdir(tmp_path)  # keep relative artifact dirs inside tmp
+        cfg = _enable_mlflow(_make_config(tmp_path, ["bpe"], [90]), tmp_path)
+        sample_path, _ = prepare_inputs(cfg)
+        train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+        log_training_to_mlflow(["bpe-90"], cfg)
+        link = json.loads((cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).read_text(encoding="utf-8"))
+        assert link["run_name"] == "bpe-90"
+        assert link["run_id"]
+        assert link["experiment"] == cfg.mlflow_experiment
+
+
+class TestResolveTargetKeys:
+    """Tests for the CLI's one-or-all target resolution."""
+
+    def test_bare_name_expands_all_vocab(self, tmp_path: Path):
+        """A bare tokenizer name trains that tokenizer across all vocab sizes."""
+        from scripts.tokenizers.train import _resolve_target_keys
+
+        cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
+        assert _resolve_target_keys(cfg, "bpe") == ["bpe-16000", "bpe-32000"]
+
+    def test_full_run_key_selects_one(self, tmp_path: Path):
+        """A full run key selects exactly that single run."""
+        from scripts.tokenizers.train import _resolve_target_keys
+
+        cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
+        assert _resolve_target_keys(cfg, "bpe-32000") == ["bpe-32000"]
+
+    def test_unknown_target_raises(self, tmp_path: Path):
+        """A target that is neither a name nor a run key raises ValueError."""
+        from scripts.tokenizers.train import _resolve_target_keys
+
+        cfg = _make_config(tmp_path, ["bpe"], [16000])
+        with pytest.raises(ValueError):
+            _resolve_target_keys(cfg, "nonsense")

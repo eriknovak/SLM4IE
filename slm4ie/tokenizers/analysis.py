@@ -27,7 +27,7 @@ from slm4ie.tokenizers.metrics import (
 )
 from slm4ie.tokenizers.morphology import MorphLexicon
 from slm4ie.tokenizers.registry import get_tokenizer
-from slm4ie.tokenizers.train import parse_run_key
+from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, parse_run_key
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.config import TokenizerSweepConfig
 
@@ -189,6 +189,31 @@ def write_report(results: List[Dict[str, Any]], report_dir: Path) -> Tuple[Path,
     return md_path, json_path
 
 
+def _train_link_tags(artifact_dir: Path) -> Dict[str, str]:
+    """Build cross-link tags pointing an eval run at its training run.
+
+    Reads the `mlflow_train.json` sidecar written by the training logger and
+    returns tags that surface the linked training run in the MLflow UI. Returns
+    an empty mapping when no sidecar exists (training was not MLflow-logged).
+
+    Args:
+        artifact_dir (Path): The run's artifact directory.
+
+    Returns:
+        Dict[str, str]: Tags keyed `train_run_id` / `train_parent_run_id` /
+            `train_run_name`, or an empty mapping when no linkage is present.
+    """
+    link_path = artifact_dir / MLFLOW_LINK_FILENAME
+    if not link_path.exists():
+        return {}
+    link = json.loads(link_path.read_text(encoding="utf-8"))
+    return {
+        "train_run_id": link.get("run_id") or "unknown",
+        "train_parent_run_id": link.get("parent_run_id") or "unknown",
+        "train_run_name": link.get("run_name") or "unknown",
+    }
+
+
 def log_results_to_mlflow(
     results: List[Dict[str, Any]],
     cfg: TokenizerSweepConfig,
@@ -196,8 +221,11 @@ def log_results_to_mlflow(
 ) -> None:
     """Log the sweep to MLflow as a parent run with nested per-run children.
 
-    Each child logs its parameters and metrics; the parent records the best
-    MorphScore F1 and the report artifacts. A no-op when tracking is disabled.
+    Each child logs its parameters and metrics under the `phase=eval` tag, and
+    is cross-linked back to the training run that produced its artifact (via the
+    `mlflow_train.json` sidecar) through `train_run_id` tags. The parent records
+    the best MorphScore F1 and the report artifacts. A no-op when tracking is
+    disabled.
 
     Args:
         results (List[Dict[str, Any]]): Per-run metric records.
@@ -212,7 +240,7 @@ def log_results_to_mlflow(
 
     commit = ml.git_commit()
     metric_keys = [*_REPORT_COLUMNS, "morph_score_precision", "morph_score_recall", "vocab_used"]
-    with ml.mlflow_run("sweep-tokenizers", tags={"run_type": "sweep"}):
+    with ml.mlflow_run("sweep-eval", tags={"run_type": "sweep", "phase": "eval"}):
         for record in results:
             with ml.mlflow_run(
                 record["run_key"],
@@ -221,6 +249,7 @@ def log_results_to_mlflow(
                     "model_type": record["tokenizer"],
                     "model_version": str(record["vocab_size"]),
                     "run_type": "sweep",
+                    "phase": "eval",
                     "git_commit": commit or "unknown",
                 },
             ):
@@ -233,6 +262,7 @@ def log_results_to_mlflow(
                     }
                 )
                 ml.log_metrics({k: record[k] for k in metric_keys if k in record})
+                ml.set_tags(_train_link_tags(cfg.output_root / record["run_key"]))
 
         best = max(results, key=lambda r: r["morph_score_f1"], default=None)
         if best is not None:

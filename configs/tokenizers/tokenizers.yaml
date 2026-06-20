@@ -42,7 +42,9 @@ eval:
   renyi_alpha: 2.5
 
 # --- MLflow ----------------------------------------------------------------
+# Experiment follows the slm4ie/<task>/<dataset> convention. tracking_uri null
+# falls back to $MLFLOW_TRACKING_URI, then http://localhost:5555 (code default).
 mlflow:
-  experiment: tokenizer/slovenian
-  enabled: false                                 # set true (+ tracking_uri) in the overlay
-  tracking_uri: null                             # falls back to $MLFLOW_TRACKING_URI
+  experiment: slm4ie/tokenization/slovenian
+  enabled: true                                  # train + analyze both log to MLflow
+  tracking_uri: null                             # null -> $MLFLOW_TRACKING_URI -> localhost:5555

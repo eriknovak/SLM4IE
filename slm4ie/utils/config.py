@@ -172,7 +172,7 @@ def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
         report_dir=report_dir,
         eval_budget=_budget_from_dict(evaluation.get("corpus_budget") or {}),
         renyi_alpha=float(evaluation.get("renyi_alpha", 2.5)),
-        mlflow_experiment=mlflow_cfg.get("experiment", "tokenizer/slovenian"),
+        mlflow_experiment=mlflow_cfg.get("experiment", "slm4ie/tokenization/slovenian"),
         mlflow_enabled=bool(mlflow_cfg.get("enabled", False)),
         mlflow_tracking_uri=mlflow_cfg.get("tracking_uri"),
     )
