@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.data.to_pretrain import (
+pytest.importorskip("datatrove")
+
+from scripts.data.to_pretrain import (  # noqa: E402
     _build_convert_params,
     _build_language_params,
     _build_quality_config,

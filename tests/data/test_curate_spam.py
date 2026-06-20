@@ -3,9 +3,12 @@
 from typing import Optional
 
 import pytest
-from datatrove.data import Document
 
-from slm4ie.data.curate.spam import (
+pytest.importorskip("datatrove")
+
+from datatrove.data import Document  # noqa: E402
+
+from slm4ie.data.curate.spam import (  # noqa: E402
     SpamConfig,
     SpamFilter,
     load_spam_assets,
