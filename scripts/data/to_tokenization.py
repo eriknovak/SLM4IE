@@ -201,6 +201,10 @@ def convert_dataset(
             reader is registered for `key` or the raw directory is
             absent. Returns 0 when the output already exists and
             `force` is False.
+
+    Raises:
+        ValueError: If the conversion ran but produced zero records,
+            which signals a reader/format mismatch rather than success.
     """
     reader = _READERS.get(key)
     if reader is None:
@@ -232,6 +236,15 @@ def convert_dataset(
             count = write_records(progress, out_stream)
         finally:
             progress.close()
+
+    if count == 0:
+        # An empty output almost always means a reader/format mismatch;
+        # remove the bogus file and fail loudly instead of exiting 0.
+        out_path.unlink(missing_ok=True)
+        raise ValueError(
+            f"Conversion of {key!r} produced 0 records from {raw_dir}; "
+            "likely a reader/format mismatch. No output written."
+        )
 
     logger.info("Wrote %d records to %s", count, out_path)
     return count

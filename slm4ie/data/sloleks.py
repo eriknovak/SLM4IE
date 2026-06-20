@@ -1,18 +1,24 @@
-"""Parser for the Sloleks 3.x Slovenian inflectional lexicon (TEI XML).
+"""Parser for the Sloleks 3.x Slovenian inflectional lexicon XML.
 
-Sloleks 3.0/3.1 is distributed exclusively as TEI XML on CLARIN.SI;
-each zip contains ~100 split XML files plus XSDs and a mezzanine file.
-This module walks those files entry-by-entry and yields per-lemma
-records with `entry_id`, `lemma`, `lemma_msd`, and `forms` keys, where
-`forms` is a list of `{"form", "msd"}` pairs covering both the lemma
-form and every inflected form.
+Sloleks 3.0/3.1 is distributed on CLARIN.SI as a custom `<lexicon>` XML
+(not TEI); each zip contains ~100 split XML files plus XSDs and a
+mezzanine file. Every `<entry>` carries its headword lemma at
+`head/headword/lemma` and its inflected forms under
+`body/wordFormList/wordForm`, where each word form has a JOS `<msd>` and
+one or more orthographic surface forms at
+`formRepresentations/orthographyList/orthography/form`.
 
-The parser is intentionally namespace-agnostic and tolerates minor
-schema variations (lemma MSD on `<gramGrp>` outside of any `<form>`,
-MSD encoded via `<gram type="msd">`, `<msd>`, or a `feats` attribute,
-etc.).
+This module walks those files entry-by-entry with `iterparse` (bounded
+memory) and yields per-lemma records with `entry_id`, `lemma`,
+`lemma_msd`, and `forms` keys, where `forms` is a list of
+`{"form", "msd"}` pairs covering both the lemma form and every inflected
+form. Accentuation and pronunciation `<form>` siblings inside a word form
+are deliberately ignored — only orthographic forms are emitted.
 
-Used by `scripts/data/to_tokenizer_eval.py` to materialize a
+The parser is namespace-agnostic (it matches on local element names) so
+it tolerates either a namespaced or bare `<lexicon>` root.
+
+Used by `scripts/data/to_tokenization.py` to materialize a
 tokenizer/morphology evaluation JSONL. Sloleks is intentionally absent
 from `configs/data/extract.yaml`, so it never enters the
 extract/datatrove/curate pipelines.
@@ -21,9 +27,6 @@ extract/datatrove/curate pipelines.
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
-
-#: TEI default namespace used by Sloleks 3.x XML files.
-TEI_NS = "http://www.tei-c.org/ns/1.0"
 
 
 def _local_name(tag: str) -> str:
@@ -57,116 +60,153 @@ def _text_or_none(elem: Optional[ET.Element]) -> Optional[str]:
     return text or None
 
 
-def _find_msd(elem: ET.Element) -> Optional[str]:
-    """Locate an MSD value attached to *elem*.
-
-    Tries, in order: a child `<msd>` element, a child `<gram type="msd">`
-    element, and finally a `feats` attribute. Search is restricted to
-    direct descendants so we do not accidentally pick up the MSD of a
-    sibling form.
+def _iter_children(elem: ET.Element, name: str) -> Iterator[ET.Element]:
+    """Yield direct children of *elem* whose local name is *name*.
 
     Args:
-        elem: The element to inspect (typically `<form>` or
-            `<entry>`/`<gramGrp>`).
+        elem: The parent element.
+        name: The local (namespace-stripped) tag name to match.
+
+    Yields:
+        ET.Element: Matching direct child elements, in document order.
+    """
+    for child in elem:
+        if _local_name(child.tag) == name:
+            yield child
+
+
+def _first_descendant(elem: ET.Element, path: List[str]) -> Optional[ET.Element]:
+    """Return the first element reached by following *path* of local names.
+
+    Args:
+        elem: The element to search from.
+        path: Sequence of local names to descend through, each matched
+            against direct children of the previous level.
 
     Returns:
-        Optional[str]: The MSD string, or None when none is found.
+        Optional[ET.Element]: The element at the end of the first matching
+            chain, or None when any level is absent.
     """
-    for child in elem.iter():
-        local = _local_name(child.tag)
-        if local == "msd":
-            text = _text_or_none(child)
-            if text is not None:
-                return text
-        elif local == "gram":
-            attr_type = child.get("type") or ""
-            if attr_type.lower() == "msd":
-                text = _text_or_none(child)
+    current: Optional[ET.Element] = elem
+    for name in path:
+        if current is None:
+            return None
+        current = next(_iter_children(current, name), None)
+    return current
+
+
+def _entry_id(entry: ET.Element) -> Optional[str]:
+    """Return a stable identifier for a Sloleks `<entry>`.
+
+    Prefers the `sloleksId` of the `head/lexicalUnit` element, then its
+    `sloleksKey`.
+
+    Args:
+        entry: A Sloleks `<entry>` element.
+
+    Returns:
+        Optional[str]: The lexical-unit identifier, or None when absent.
+    """
+    head = next(_iter_children(entry, "head"), None)
+    if head is None:
+        return None
+    unit = next(_iter_children(head, "lexicalUnit"), None)
+    if unit is None:
+        return None
+    return unit.get("sloleksId") or unit.get("sloleksKey")
+
+
+def _entry_lemma(entry: ET.Element) -> Optional[str]:
+    """Return the headword lemma of a Sloleks `<entry>`.
+
+    Args:
+        entry: A Sloleks `<entry>` element.
+
+    Returns:
+        Optional[str]: The lemma text from `head/headword/lemma`, or None
+            when absent.
+    """
+    lemma = _first_descendant(entry, ["head", "headword", "lemma"])
+    return _text_or_none(lemma)
+
+
+def _wordform_msd(wordform: ET.Element) -> Optional[str]:
+    """Return the JOS MSD of a `<wordForm>` element.
+
+    Args:
+        wordform: A `<wordForm>` element.
+
+    Returns:
+        Optional[str]: The text of the direct `<msd>` child, or None when
+            absent.
+    """
+    msd = next(_iter_children(wordform, "msd"), None)
+    return _text_or_none(msd)
+
+
+def _wordform_orth_forms(wordform: ET.Element) -> List[str]:
+    """Return the orthographic surface forms of a `<wordForm>`.
+
+    Reads only `formRepresentations/orthographyList/orthography/form`,
+    deliberately ignoring the accentuation and pronunciation `<form>`
+    siblings that share the same parent.
+
+    Args:
+        wordform: A `<wordForm>` element.
+
+    Returns:
+        List[str]: Orthographic form strings, in document order (one per
+            `<orthography>` variant).
+    """
+    forms: List[str] = []
+    for reps in _iter_children(wordform, "formRepresentations"):
+        for orth_list in _iter_children(reps, "orthographyList"):
+            for orth in _iter_children(orth_list, "orthography"):
+                form = next(_iter_children(orth, "form"), None)
+                text = _text_or_none(form)
                 if text is not None:
-                    return text
-    feats = elem.get("feats")
-    if feats:
-        return feats.strip() or None
-    return None
-
-
-def _form_orth(form_elem: ET.Element) -> Optional[str]:
-    """Return the orthographic form text from a `<form>` element.
-
-    Args:
-        form_elem: A TEI `<form>` element.
-
-    Returns:
-        Optional[str]: The text inside the first descendant `<orth>`
-            element, or None when none is present.
-    """
-    for child in form_elem.iter():
-        if _local_name(child.tag) == "orth":
-            text = _text_or_none(child)
-            if text is not None:
-                return text
-    return None
-
-
-def _is_lemma_form(form_elem: ET.Element) -> bool:
-    """Return True if *form_elem* describes a lemma (headword) form.
-
-    Args:
-        form_elem: A TEI `<form>` element.
-
-    Returns:
-        bool: True when the element's `type` attribute is `"lemma"`
-            (case-insensitive), False otherwise.
-    """
-    return (form_elem.get("type") or "").lower() == "lemma"
+                    forms.append(text)
+    return forms
 
 
 def _entry_to_record(entry: ET.Element) -> Optional[Dict[str, Any]]:
-    """Convert a single TEI `<entry>` element into a JSONL-ready record.
+    """Convert a single Sloleks `<entry>` element into a JSONL-ready record.
 
     Args:
-        entry: A `<entry>` element from a Sloleks TEI file.
+        entry: An `<entry>` element from a Sloleks lexicon file.
 
     Returns:
         Optional[Dict[str, Any]]: A record with `entry_id`, `lemma`,
-            `lemma_msd`, and `forms` keys; or None when the entry has
-            no extractable lemma orthography.
+            `lemma_msd`, and `forms` keys; or None when the entry has no
+            lemma or no orthographic forms.
     """
-    entry_id = entry.get("{http://www.w3.org/XML/1998/namespace}id") or entry.get("id")
-
-    lemma: Optional[str] = None
-    lemma_msd: Optional[str] = None
-    forms: List[Dict[str, Optional[str]]] = []
-    lemma_form_idx: Optional[int] = None
-
-    for child in list(entry):
-        local = _local_name(child.tag)
-        if local == "form":
-            orth = _form_orth(child)
-            msd = _find_msd(child)
-            if _is_lemma_form(child):
-                if lemma is None and orth is not None:
-                    lemma = orth
-                if lemma_msd is None and msd is not None:
-                    lemma_msd = msd
-                if orth is not None:
-                    lemma_form_idx = len(forms)
-                    forms.append({"form": orth, "msd": msd})
-            elif orth is not None:
-                forms.append({"form": orth, "msd": msd})
-        elif local == "gramGrp" and lemma_msd is None:
-            lemma_msd = _find_msd(child)
-
+    lemma = _entry_lemma(entry)
     if lemma is None:
         return None
 
-    # Backfill the lemma form's msd if it was declared on a sibling
-    # <gramGrp> rather than inside the <form type="lemma"> itself.
-    if lemma_form_idx is not None and forms[lemma_form_idx]["msd"] is None:
-        forms[lemma_form_idx]["msd"] = lemma_msd
+    forms: List[Dict[str, Optional[str]]] = []
+    lemma_msd: Optional[str] = None
+
+    body = next(_iter_children(entry, "body"), None)
+    if body is not None:
+        for word_list in _iter_children(body, "wordFormList"):
+            for wordform in _iter_children(word_list, "wordForm"):
+                msd = _wordform_msd(wordform)
+                for orth in _wordform_orth_forms(wordform):
+                    forms.append({"form": orth, "msd": msd})
+                    if orth == lemma and lemma_msd is None:
+                        lemma_msd = msd
+
+    if not forms:
+        return None
+
+    # Fall back to the first form's MSD when no form orthographically
+    # matches the headword (e.g. suppletive or multi-word lemmas).
+    if lemma_msd is None:
+        lemma_msd = forms[0]["msd"]
 
     return {
-        "entry_id": entry_id,
+        "entry_id": _entry_id(entry),
         "lemma": lemma,
         "lemma_msd": lemma_msd,
         "forms": forms,
@@ -174,17 +214,18 @@ def _entry_to_record(entry: ET.Element) -> Optional[Dict[str, Any]]:
 
 
 def iter_sloleks_entries(xml_path: Path) -> Iterator[Dict[str, Any]]:
-    """Stream entries from a single Sloleks TEI XML file.
+    """Stream entries from a single Sloleks lexicon XML file.
 
     Uses `xml.etree.ElementTree.iterparse` so memory use stays bounded
     even on the multi-GB merged distribution.
 
     Args:
-        xml_path: Path to a Sloleks TEI XML file.
+        xml_path: Path to a Sloleks lexicon XML file.
 
     Yields:
-        Dict[str, Any]: One record per `<entry>` element, with
-            `entry_id`, `lemma`, `lemma_msd`, and `forms` keys.
+        Dict[str, Any]: One record per `<entry>` element with a lemma and
+            at least one orthographic form, with `entry_id`, `lemma`,
+            `lemma_msd`, and `forms` keys.
     """
     context = ET.iterparse(str(xml_path), events=("end",))
     for _, elem in context:

@@ -18,57 +18,104 @@ sys.path.insert(
 import to_tokenization as to_tokenizer_eval  # noqa: E402
 
 
-SAMPLE_TEI = dedent(
+#: A minimal sample mirroring the real Sloleks 3.1 `<lexicon>` schema: lemma at
+#: head/headword/lemma, forms under body/wordFormList/wordForm with the JOS
+#: `<msd>` and orthographic forms at formRepresentations/orthographyList/
+#: orthography/form. Accentuation and pronunciation `<form>` siblings are
+#: included deliberately so the parser is proven to ignore them.
+SAMPLE_LEXICON = dedent(
     """\
     <?xml version="1.0" encoding="UTF-8"?>
-    <TEI xmlns="http://www.tei-c.org/ns/1.0">
-      <text>
+    <lexicon>
+      <entry>
+        <head>
+          <headword><lemma>hiša</lemma></headword>
+          <lexicalUnit sloleksId="LE_hisa" sloleksKey="S_hiša" type="single">
+            <lexeme>hiša</lexeme>
+          </lexicalUnit>
+          <grammar><category>noun</category></grammar>
+        </head>
         <body>
-          <entry xml:id="hisa-001">
-            <form type="lemma">
-              <orth>hiša</orth>
-            </form>
-            <gramGrp>
-              <gram type="msd">Ncfsn</gram>
-            </gramGrp>
-            <form type="inflectedForm" xml:id="hisa-001-2">
-              <orth>hiše</orth>
-              <gramGrp>
-                <gram type="msd">Ncfsg</gram>
-              </gramGrp>
-            </form>
-            <form type="inflectedForm" xml:id="hisa-001-3">
-              <orth>hiši</orth>
-              <gramGrp>
-                <gram type="msd">Ncfsd</gram>
-              </gramGrp>
-            </form>
-          </entry>
-          <entry xml:id="biti-001">
-            <form type="lemma">
-              <orth>biti</orth>
-              <msd>Va-n</msd>
-            </form>
-            <form type="inflectedForm" xml:id="biti-001-2" feats="Va-r1s-n">
-              <orth>sem</orth>
-            </form>
-          </entry>
-          <entry xml:id="empty-001">
-            <gramGrp>
-              <gram type="msd">Xx</gram>
-            </gramGrp>
-          </entry>
+          <wordFormList>
+            <wordForm>
+              <msd language="sl" system="JOS">Ncfsn</msd>
+              <formRepresentations>
+                <orthographyList>
+                  <orthography morphologyPatterns="S1"><form>hiša</form></orthography>
+                </orthographyList>
+                <accentuationList type="dynamic">
+                  <accentuation><form>híša</form></accentuation>
+                </accentuationList>
+                <pronunciationList>
+                  <pronunciation><form script="IPA">ˈxiːʃa</form></pronunciation>
+                </pronunciationList>
+              </formRepresentations>
+            </wordForm>
+            <wordForm>
+              <msd language="sl" system="JOS">Ncfsg</msd>
+              <formRepresentations>
+                <orthographyList>
+                  <orthography morphologyPatterns="S1"><form>hiše</form></orthography>
+                </orthographyList>
+              </formRepresentations>
+            </wordForm>
+          </wordFormList>
         </body>
-      </text>
-    </TEI>
+      </entry>
+      <entry>
+        <head>
+          <headword><lemma>biti</lemma></headword>
+          <lexicalUnit sloleksId="LE_biti" sloleksKey="G_biti" type="single">
+            <lexeme>biti</lexeme>
+          </lexicalUnit>
+          <grammar><category>verb</category></grammar>
+        </head>
+        <body>
+          <wordFormList>
+            <wordForm>
+              <msd language="sl" system="JOS">Ggnn</msd>
+              <formRepresentations>
+                <orthographyList>
+                  <orthography><form>biti</form></orthography>
+                </orthographyList>
+              </formRepresentations>
+            </wordForm>
+            <wordForm>
+              <msd language="sl" system="JOS">Gp-spdm</msd>
+              <formRepresentations>
+                <orthographyList>
+                  <orthography><form>sem</form></orthography>
+                </orthographyList>
+              </formRepresentations>
+            </wordForm>
+          </wordFormList>
+        </body>
+      </entry>
+      <entry>
+        <head>
+          <headword><lemma>prazen</lemma></headword>
+          <grammar><category>adjective</category></grammar>
+        </head>
+        <body>
+          <wordFormList/>
+        </body>
+      </entry>
+    </lexicon>
     """
 )
 
 
 def _write_sample(path: Path) -> Path:
-    """Write SAMPLE_TEI to *path* and return it."""
+    """Write SAMPLE_LEXICON to *path* and return it.
+
+    Args:
+        path: Destination file path; parent directories are created.
+
+    Returns:
+        Path: The path that was written.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(SAMPLE_TEI, encoding="utf-8")
+    path.write_text(SAMPLE_LEXICON, encoding="utf-8")
     return path
 
 
@@ -84,34 +131,36 @@ class TestLocalName:
         assert sloleks._local_name("entry") == "entry"
 
 
-class TestFindMsd:
-    """Unit tests for sloleks._find_msd."""
+class TestWordFormMsd:
+    """Unit tests for sloleks._wordform_msd."""
 
-    def test_msd_via_gram_type(self):
-        """`<gram type="msd">` text is recognized."""
-        elem = ET.fromstring(
-            '<form xmlns="http://www.tei-c.org/ns/1.0">'
-            '<gram type="msd">Ncfsn</gram></form>'
+    def test_reads_direct_msd_child(self):
+        """The JOS `<msd>` directly under `<wordForm>` is returned."""
+        wf = ET.fromstring(
+            '<wordForm><msd language="sl" system="JOS">Ncfsn</msd>'
+            "<formRepresentations/></wordForm>"
         )
-        assert sloleks._find_msd(elem) == "Ncfsn"
+        assert sloleks._wordform_msd(wf) == "Ncfsn"
 
-    def test_msd_via_dedicated_element(self):
-        """A direct `<msd>` element is recognized."""
-        elem = ET.fromstring(
-            '<form xmlns="http://www.tei-c.org/ns/1.0">'
-            "<msd>Va-n</msd></form>"
+    def test_missing_msd_returns_none(self):
+        """A word form without an `<msd>` yields None."""
+        wf = ET.fromstring("<wordForm><formRepresentations/></wordForm>")
+        assert sloleks._wordform_msd(wf) is None
+
+
+class TestWordFormOrthForms:
+    """Unit tests for sloleks._wordform_orth_forms."""
+
+    def test_only_orthographic_forms(self):
+        """Accentuation and pronunciation forms are excluded."""
+        wf = ET.fromstring(
+            "<wordForm><formRepresentations>"
+            "<orthographyList><orthography><form>hiša</form></orthography></orthographyList>"
+            "<accentuationList><accentuation><form>híša</form></accentuation></accentuationList>"
+            '<pronunciationList><pronunciation><form script="IPA">x</form></pronunciation></pronunciationList>'
+            "</formRepresentations></wordForm>"
         )
-        assert sloleks._find_msd(elem) == "Va-n"
-
-    def test_msd_via_feats_attribute(self):
-        """`feats` attribute is used as a last resort."""
-        elem = ET.fromstring('<form feats="Ncfpn"></form>')
-        assert sloleks._find_msd(elem) == "Ncfpn"
-
-    def test_no_msd_returns_none(self):
-        """Missing MSD yields None."""
-        elem = ET.fromstring("<form><orth>x</orth></form>")
-        assert sloleks._find_msd(elem) is None
+        assert sloleks._wordform_orth_forms(wf) == ["hiša"]
 
 
 class TestEntryToRecord:
@@ -129,18 +178,14 @@ class TestEntryToRecord:
 
         assert len(records) == 2
         first = records[0]
-        assert first["entry_id"] == "hisa-001"
+        assert first["entry_id"] == "LE_hisa"
         assert first["lemma"] == "hiša"
         assert first["lemma_msd"] == "Ncfsn"
         forms = {f["form"]: f["msd"] for f in first["forms"]}
-        assert forms == {
-            "hiša": "Ncfsn",
-            "hiše": "Ncfsg",
-            "hiši": "Ncfsd",
-        }
+        assert forms == {"hiša": "Ncfsn", "hiše": "Ncfsg"}
 
-    def test_msd_inside_lemma_form(self):
-        """A lemma MSD declared inside the `<form type=lemma>` is picked up."""
+    def test_lemma_msd_from_matching_form(self):
+        """lemma_msd is taken from the word form whose orth equals the lemma."""
         path = Path("/tmp/_sloleks_unit_test.xml")
         try:
             _write_sample(path)
@@ -150,12 +195,12 @@ class TestEntryToRecord:
                 path.unlink()
 
         biti = next(r for r in records if r["lemma"] == "biti")
-        assert biti["lemma_msd"] == "Va-n"
+        assert biti["lemma_msd"] == "Ggnn"
         forms = {f["form"]: f["msd"] for f in biti["forms"]}
-        assert forms == {"biti": "Va-n", "sem": "Va-r1s-n"}
+        assert forms == {"biti": "Ggnn", "sem": "Gp-spdm"}
 
-    def test_entry_without_lemma_is_skipped(self):
-        """Entries that lack a lemma orthography produce no record."""
+    def test_entry_without_forms_is_skipped(self):
+        """Entries that yield no orthographic forms produce no record."""
         path = Path("/tmp/_sloleks_unit_test.xml")
         try:
             _write_sample(path)
@@ -163,7 +208,7 @@ class TestEntryToRecord:
         finally:
             if path.exists():
                 path.unlink()
-        assert all(r["entry_id"] != "empty-001" for r in records)
+        assert all(r["lemma"] != "prazen" for r in records)
 
 
 class TestIterSloleksDir:
@@ -175,7 +220,7 @@ class TestIterSloleksDir:
         _write_sample(tmp_path / "sloleks_3.1_002.xml")
         # Mezzanine should be skipped.
         (tmp_path / "sloleks_3.1_mezzanine.xml").write_text(
-            "<TEI xmlns='http://www.tei-c.org/ns/1.0'/>",
+            "<lexicon/>",
             encoding="utf-8",
         )
         records = list(sloleks.iter_sloleks_dir(tmp_path))
@@ -230,6 +275,19 @@ class TestToTokenizerEvalConverter:
             "sloleks", raw_dir, out_dir, force=True,
         )
         assert third == 2
+
+    def test_convert_zero_records_raises(self, tmp_path: Path):
+        """A conversion that yields no records fails loudly instead of exit 0."""
+        raw_dir = tmp_path / "raw" / "sloleks"
+        # Valid <lexicon> XML but with no usable entries.
+        (raw_dir).mkdir(parents=True, exist_ok=True)
+        (raw_dir / "sloleks_3.1_001.xml").write_text(
+            "<lexicon><entry><head><headword><lemma>x</lemma></headword></head>"
+            "<body><wordFormList/></body></entry></lexicon>",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError):
+            to_tokenizer_eval.convert_dataset("sloleks", raw_dir, tmp_path / "out")
 
     def test_unknown_dataset_returns_none(self, tmp_path: Path):
         """An unregistered dataset key yields None and skips silently."""
