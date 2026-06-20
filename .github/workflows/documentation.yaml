@@ -34,8 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0  # git-revision-date-localized needs full history
 
       - name: Set up uv (with Python 3.13)
         uses: astral-sh/setup-uv@v8
@@ -58,6 +56,10 @@ jobs:
         run: uv sync --extra docs
 
       - name: Build site (strict)
+        # Silence mkdocs-material's unconditional "MkDocs 2.0" advisory banner so
+        # CI logs stay clean; it is informational only and does not affect the build.
+        env:
+          NO_MKDOCS_2_WARNING: "true"
         run: uv run mkdocs build --strict --site-dir site
 
       - name: Upload Pages artifact

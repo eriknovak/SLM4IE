@@ -56,7 +56,6 @@ docs = [
     # imaging extras are intentionally not required here.
     "mkdocs-material>=9.5",                         # theme + blog/search plugins
     "mkdocs-autorefs>=1.0",                         # cross-page anchor references
-    "mkdocs-git-revision-date-localized-plugin>=1.2",  # per-page last-updated dates
     "mkdocs-minify-plugin>=0.8",                    # HTML minification
 ]
 

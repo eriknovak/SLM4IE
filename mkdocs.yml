@@ -61,10 +61,6 @@ plugins:
       blog_dir: blog
       post_url_format: "{slug}"
   - autorefs
-  - git-revision-date-localized:
-      enable_creation_date: true
-      enable_git_follow: false
-      type: date
   - minify:
       minify_html: true
 
