@@ -6,6 +6,21 @@ from pathlib import Path
 from slm4ie.utils import mlflow as mlflow_utils
 
 
+class TestIsRemoteStore:
+    """Tests for distinguishing remote tracking servers from local stores."""
+
+    def test_http_uris_are_remote(self):
+        """HTTP(S) tracking URIs are treated as remote servers."""
+        assert mlflow_utils._is_remote_store("http://localhost:5555")
+        assert mlflow_utils._is_remote_store("https://mlflow.example:443")
+
+    def test_local_uris_are_not_remote(self):
+        """File and database stores are treated as local."""
+        assert not mlflow_utils._is_remote_store("file:///tmp/mlruns")
+        assert not mlflow_utils._is_remote_store("sqlite:///mlflow.db")
+        assert not mlflow_utils._is_remote_store("./mlruns")
+
+
 class TestResolveTrackingUri:
     """Tests for tracking-URI resolution precedence."""
 

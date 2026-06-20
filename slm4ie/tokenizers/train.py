@@ -10,19 +10,29 @@ identical text and the corpus is never re-streamed per run.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from itertools import product
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sample_cache
 from slm4ie.tokenizers.morphology import build_morph_lexicon, load_lexicon, save_lexicon
 from slm4ie.tokenizers.registry import get_tokenizer
+from slm4ie.utils import mlflow as ml
 from slm4ie.utils.config import TokenizerSweepConfig
 
 logger = logging.getLogger(__name__)
+
+#: Sidecar carrying per-run training stats, read by the MLflow logger.
+TRAIN_STATS_FILENAME = "train_stats.json"
+
+#: Sidecar carrying the MLflow run linkage, read by the analysis logger to
+#: cross-link each eval run back to the training run that produced it.
+MLFLOW_LINK_FILENAME = "mlflow_train.json"
 
 
 def run_key(name: str, vocab_size: int) -> str:
@@ -145,10 +155,50 @@ def train_one(
     )
     tokenizer = get_tokenizer(name)()
     logger.info("Training %s (vocab=%d)", name, vocab_size)
+    start = time.perf_counter()
     tokenizer.train(iter_sample_cache(sample_path), vocab_size, config=context)
+    train_seconds = time.perf_counter() - start
     tokenizer.save(out_dir)
-    logger.info("Saved %s -> %s", key, out_dir)
+    _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg)
+    logger.info("Saved %s -> %s (%.1fs)", key, out_dir, train_seconds)
     return out_dir
+
+
+def _write_train_stats(
+    out_dir: Path,
+    key: str,
+    name: str,
+    vocab_size: int,
+    vocab_used: int,
+    train_seconds: float,
+    cfg: TokenizerSweepConfig,
+) -> None:
+    """Write the per-run training-stats sidecar for later MLflow logging.
+
+    Training runs in a process pool, so stats are persisted next to the
+    artifact and logged from the parent process after the pool drains.
+
+    Args:
+        out_dir (Path): The run's artifact directory.
+        key (str): Run key (`<name>-<vocab>`).
+        name (str): Tokenizer registry name.
+        vocab_size (int): Target vocabulary size.
+        vocab_used (int): Actual vocabulary size after training.
+        train_seconds (float): Wall-clock training time in seconds.
+        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+    """
+    stats = {
+        "run_key": key,
+        "tokenizer": name,
+        "vocab_size": vocab_size,
+        "vocab_used": vocab_used,
+        "train_seconds": train_seconds,
+        "seed": cfg.train_budget.seed,
+        "n_special_tokens": len(cfg.special_tokens),
+        "max_bytes": cfg.train_budget.max_bytes,
+        "max_docs": cfg.train_budget.max_docs,
+    }
+    (out_dir / TRAIN_STATS_FILENAME).write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def select_runs(
@@ -185,3 +235,90 @@ def select_runs(
         wanted_vocab = set(vocab_sizes)
         selected = [k for k in selected if parse_run_key(k)[1] in wanted_vocab]
     return selected
+
+
+def _write_mlflow_link(
+    out_dir: Path,
+    experiment: str,
+    parent_run_id: Optional[str],
+    run_id: Optional[str],
+    run_name: str,
+) -> None:
+    """Persist the MLflow training-run linkage next to the artifact.
+
+    The analysis logger reads this sidecar to cross-link each eval run back to
+    the training run that produced the artifact.
+
+    Args:
+        out_dir (Path): The run's artifact directory.
+        experiment (str): MLflow experiment name.
+        parent_run_id (Optional[str]): The training sweep parent run id.
+        run_id (Optional[str]): The per-run training child run id.
+        run_name (str): The training child run name (the run key).
+    """
+    link = {
+        "experiment": experiment,
+        "parent_run_id": parent_run_id,
+        "run_id": run_id,
+        "run_name": run_name,
+    }
+    (out_dir / MLFLOW_LINK_FILENAME).write_text(json.dumps(link, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def log_training_to_mlflow(keys: List[str], cfg: TokenizerSweepConfig) -> None:
+    """Log the training sweep to MLflow as a parent run with nested children.
+
+    Each child run records the run's training parameters and timing under the
+    `phase=train` tag, mirroring the analysis logger's structure so train and
+    eval runs share the experiment but stay separate. The per-run MLflow ids are
+    written back to a sidecar so the analysis logger can cross-link eval runs to
+    their training run. A no-op when tracking is disabled or MLflow is absent.
+
+    Args:
+        keys (List[str]): Run keys whose `train_stats.json` should be logged.
+        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+    """
+    if not cfg.mlflow_enabled:
+        return
+    if not ml.ensure_experiment(cfg.mlflow_experiment, tracking_uri=cfg.mlflow_tracking_uri):
+        logger.warning("MLflow unavailable; skipping training logging.")
+        return
+
+    commit = ml.git_commit()
+    with ml.mlflow_run("sweep-train", tags={"run_type": "sweep", "phase": "train"}) as parent:
+        parent_run_id = parent.info.run_id if parent is not None else None
+        for key in keys:
+            stats_path = cfg.output_root / key / TRAIN_STATS_FILENAME
+            if not stats_path.exists():
+                logger.warning("No %s for %s; skipping its training log.", TRAIN_STATS_FILENAME, key)
+                continue
+            stats: Dict[str, Any] = json.loads(stats_path.read_text(encoding="utf-8"))
+            with ml.mlflow_run(
+                key,
+                nested=True,
+                tags={
+                    "model_type": stats["tokenizer"],
+                    "model_version": str(stats["vocab_size"]),
+                    "run_type": "sweep",
+                    "phase": "train",
+                    "git_commit": commit or "unknown",
+                },
+            ) as child:
+                ml.log_params(
+                    {
+                        "tokenizer": stats["tokenizer"],
+                        "vocab_size": stats["vocab_size"],
+                        "seed": stats.get("seed"),
+                        "max_bytes": stats.get("max_bytes"),
+                        "max_docs": stats.get("max_docs"),
+                        "n_special_tokens": stats.get("n_special_tokens"),
+                    }
+                )
+                ml.log_metrics(
+                    {
+                        "train_seconds": stats["train_seconds"],
+                        "vocab_used": stats["vocab_used"],
+                    }
+                )
+                child_run_id = child.info.run_id if child is not None else None
+            _write_mlflow_link(cfg.output_root / key, cfg.mlflow_experiment, parent_run_id, child_run_id, key)

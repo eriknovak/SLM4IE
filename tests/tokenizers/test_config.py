@@ -65,6 +65,13 @@ class TestLoadTokenizerConfig:
         assert cfg.eval_budget.seed == 99
         assert cfg.mlflow_enabled is True
 
+    def test_default_experiment_name(self, tmp_path: Path):
+        """An omitted mlflow block defaults to the slm4ie/<task>/<dataset> name."""
+        no_mlflow = _BASE_CONFIG.split("mlflow:")[0]
+        cfg = load_tokenizer_config(_write(tmp_path / "tokenizers.yaml", no_mlflow))
+        assert cfg.mlflow_experiment == "slm4ie/tokenization/slovenian"
+        assert cfg.mlflow_enabled is False
+
     def test_needs_morphology(self, tmp_path: Path):
         """needs_morphology is True when a morph backend is requested."""
         cfg = load_tokenizer_config(_write(tmp_path / "tokenizers.yaml", _BASE_CONFIG))

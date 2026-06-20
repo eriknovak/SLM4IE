@@ -19,8 +19,11 @@ from typing import Any, Dict, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Fallback tracking URI when neither config nor environment specify one.
-DEFAULT_TRACKING_URI = "http://localhost:5555"
+#: Last-resort tracking URI when neither config nor `MLFLOW_TRACKING_URI`
+#: specifies one. A local SQLite store so tracking never assumes a running
+#: server; the actual deployment points at the service via the env var (or a
+#: config `tracking_uri`).
+DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
 
 #: Local artifact root used when creating new experiments, so artifact logging
 #: does not depend on a server-internal (container) default path.
@@ -49,7 +52,8 @@ def resolve_tracking_uri(configured: Optional[str]) -> str:
         configured (Optional[str]): URI from the YAML config, if any.
 
     Returns:
-        str: The configured URI, else `MLFLOW_TRACKING_URI`, else the default.
+        str: The configured URI, else `MLFLOW_TRACKING_URI`, else the local
+            SQLite fallback (`DEFAULT_TRACKING_URI`).
     """
     if configured:
         return configured
@@ -68,18 +72,38 @@ def git_commit() -> Optional[str]:
         return None
 
 
+def _is_remote_store(uri: str) -> bool:
+    """Return whether a tracking URI points at a remote HTTP(S) server.
+
+    Args:
+        uri (str): A resolved MLflow tracking URI.
+
+    Returns:
+        bool: True for `http://` / `https://` servers, else False (local file
+            or database stores).
+    """
+    return uri.startswith(("http://", "https://"))
+
+
 def ensure_experiment(
     name: str,
     *,
     tracking_uri: Optional[str] = None,
     artifact_location: str = DEFAULT_ARTIFACT_LOCATION,
 ) -> bool:
-    """Set the active experiment, creating it with a local artifact root.
+    """Set the active experiment, creating it when absent.
+
+    For a local file or database store the experiment is pinned to a local
+    `artifact_location` so logging does not depend on a server-internal default
+    path. For a remote HTTP(S) tracking server the artifact root is left unset
+    so the server decides it; a client-relative path would otherwise resolve on
+    the server and may be unwritable.
 
     Args:
-        name (str): Experiment name (e.g. `tokenizer/slovenian`).
+        name (str): Experiment name (e.g. `slm4ie/tokenization/slovenian`).
         tracking_uri (Optional[str]): URI override; resolved when None.
-        artifact_location (str): Local artifact root for a new experiment.
+        artifact_location (str): Local artifact root for a new experiment on a
+            local store; ignored for remote servers.
 
     Returns:
         bool: True when MLflow is available and the experiment is set, else
@@ -89,10 +113,12 @@ def ensure_experiment(
     if mlflow is None:
         return False
 
-    mlflow.set_tracking_uri(resolve_tracking_uri(tracking_uri))
+    uri = resolve_tracking_uri(tracking_uri)
+    mlflow.set_tracking_uri(uri)
     client = mlflow.MlflowClient()
     if client.get_experiment_by_name(name) is None:
-        client.create_experiment(name, artifact_location=artifact_location)
+        location = None if _is_remote_store(uri) else artifact_location
+        client.create_experiment(name, artifact_location=location)
     mlflow.set_experiment(name)
     return True
 
