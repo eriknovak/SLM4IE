@@ -474,6 +474,7 @@ Batch scripts for cluster execution live under [`slurm/`](slurm/):
 ```bash
 sbatch slurm/tokenizer_train.sbatch
 sbatch slurm/tokenizer_analyze.sbatch
+sbatch slurm/tokenizer_export.sbatch
 sbatch slurm/train.sbatch
 sbatch slurm/evaluate.sbatch
 sbatch slurm/generate.sbatch
