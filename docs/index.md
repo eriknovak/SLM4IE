@@ -6,7 +6,7 @@ hide:
 ---
 
 <p align="center">
-  <img src="assets/imgs/logo/slm4ie_logo_color.svg" alt="SLM4IE logo" style="width: 40%; max-width: 320px;">
+  <img src="assets/imgs/banner/slm4ie_banner_dark_bg.png" alt="SLM4IE logo" style="width: 100%;">
 </p>
 
 <p align="center">
