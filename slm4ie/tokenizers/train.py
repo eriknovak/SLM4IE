@@ -237,6 +237,47 @@ def select_runs(
     return selected
 
 
+def resolve_run_selection(
+    cfg: TokenizerSweepConfig,
+    *,
+    all_runs: bool,
+    tokenizer: Optional[str],
+    vocab_size: Optional[int],
+) -> List[str]:
+    """Resolve run keys from the shared one-or-all CLI selection.
+
+    The tokenizer scripts (`train`, `analyze`, `export`) select runs the same
+    way: either every run (`all_runs`) or a single `tokenizer`, optionally
+    narrowed to one `vocab_size`. The two modes are mutually exclusive.
+
+    Args:
+        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        all_runs (bool): Select the whole sweep (the `--all` flag).
+        tokenizer (Optional[str]): The one tokenizer to select, or None.
+        vocab_size (Optional[int]): A single vocab size narrowing `tokenizer`,
+            or None for all of its sizes.
+
+    Returns:
+        List[str]: The selected run keys, in sweep order.
+
+    Raises:
+        ValueError: If the selection is missing, combined illegally, or names a
+            tokenizer/vocab size that is not in the configured sweep.
+    """
+    if all_runs:
+        if tokenizer or vocab_size is not None:
+            raise ValueError("--all takes no other selector; drop --tokenizer/--vocab-size.")
+        return select_runs(cfg)
+    if not tokenizer:
+        raise ValueError("Specify --tokenizer NAME (optionally --vocab-size N), or --all.")
+    if tokenizer not in cfg.tokenizers:
+        raise ValueError(f"Unknown tokenizer {tokenizer!r}. Configured: {', '.join(cfg.tokenizers)}.")
+    if vocab_size is not None and vocab_size not in cfg.vocab_sizes:
+        raise ValueError(f"Unknown vocab size {vocab_size}. Configured: {cfg.vocab_sizes}.")
+    vocab_sizes = [vocab_size] if vocab_size is not None else None
+    return select_runs(cfg, tokenizers=[tokenizer], vocab_sizes=vocab_sizes)
+
+
 def _write_mlflow_link(
     out_dir: Path,
     experiment: str,
