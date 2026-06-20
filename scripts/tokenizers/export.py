@@ -11,9 +11,10 @@ Examples:
 
         uv run python scripts/tokenizers/export.py --all
 
-    Export specific runs:
+    Export one tokenizer (optionally one vocab size):
 
-        uv run python scripts/tokenizers/export.py bpe-32000 morphpiece-32000
+        uv run python scripts/tokenizers/export.py --tokenizer bpe
+        uv run python scripts/tokenizers/export.py --tokenizer bpe --vocab-size 32000
 """
 
 import argparse
@@ -25,7 +26,7 @@ from typing import List, Optional
 from slm4ie.data.io_utils import find_project_root
 from slm4ie.data.parallel import configure_script_logging
 from slm4ie.tokenizers.hf_export import save_pretrained_dir
-from slm4ie.tokenizers.train import select_runs
+from slm4ie.tokenizers.train import resolve_run_selection
 from slm4ie.utils.config import load_tokenizer_config
 
 logger = logging.getLogger(__name__)
@@ -45,13 +46,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="Export trained tokenizers as HuggingFace tokenizer directories.")
     parser.add_argument(
-        "run_keys",
-        nargs="*",
-        help="Run keys '<name>-<vocab>' to export. Mutually exclusive with --all.",
+        "--tokenizer",
+        default=None,
+        help="Export this one tokenizer (all its vocab sizes unless --vocab-size narrows it).",
+    )
+    parser.add_argument(
+        "--vocab-size",
+        type=int,
+        default=None,
+        help="Narrow --tokenizer to this single vocab size.",
     )
     parser.add_argument("--all", action="store_true", help="Export every trained run.")
-    parser.add_argument("--tokenizer", nargs="+", default=None, help="Restrict to these names.")
-    parser.add_argument("--vocab", nargs="+", type=int, default=None, help="Restrict to these sizes.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -69,12 +74,11 @@ def main() -> None:
     config_path = args.config if args.config else project_root / DEFAULT_CONFIG_RELPATH
     cfg = load_tokenizer_config(config_path)
 
-    candidates = select_runs(
-        cfg,
-        run_keys=args.run_keys or None,
-        tokenizers=args.tokenizer,
-        vocab_sizes=args.vocab,
-    )
+    try:
+        candidates = resolve_run_selection(cfg, all_runs=args.all, tokenizer=args.tokenizer, vocab_size=args.vocab_size)
+    except ValueError as exc:
+        logger.error("%s", exc)
+        sys.exit(2)
     keys = [k for k in candidates if (cfg.output_root / k / "metadata.json").exists()]
     if not keys:
         logger.error("No trained artifacts found under %s. Run train.py first.", cfg.output_root)

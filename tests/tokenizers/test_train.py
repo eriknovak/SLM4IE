@@ -16,6 +16,7 @@ from slm4ie.tokenizers.train import (
     parse_run_key,
     plan_runs,
     prepare_inputs,
+    resolve_run_selection,
     run_key,
     select_runs,
     train_one,
@@ -169,58 +170,65 @@ class TestLogTrainingToMlflow:
         assert link["experiment"] == cfg.mlflow_experiment
 
 
-class TestResolveSelection:
-    """Tests for the CLI's --tokenizer/--vocab-size/--all selection."""
-
-    def _select(self, cfg, argv):
-        """Parse `argv` and resolve it against `cfg`.
-
-        Args:
-            cfg (TokenizerSweepConfig): The sweep config.
-            argv (list): CLI tokens to parse.
-
-        Returns:
-            list: The resolved run keys.
-        """
-        from scripts.tokenizers.train import _resolve_selection, parse_args
-
-        return _resolve_selection(cfg, parse_args(argv))
+class TestResolveRunSelection:
+    """Tests for the shared one-or-all run selection used by all three CLIs."""
 
     def test_all_selects_whole_sweep(self, tmp_path: Path):
-        """--all trains every tokenizer x vocab-size run."""
+        """all_runs selects every tokenizer x vocab-size run."""
         cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
-        assert self._select(cfg, ["--all"]) == ["bpe-16000", "bpe-32000", "wordpiece-16000", "wordpiece-32000"]
+        keys = resolve_run_selection(cfg, all_runs=True, tokenizer=None, vocab_size=None)
+        assert keys == ["bpe-16000", "bpe-32000", "wordpiece-16000", "wordpiece-32000"]
 
     def test_tokenizer_expands_all_vocab(self, tmp_path: Path):
-        """--tokenizer alone trains that tokenizer across all vocab sizes."""
+        """A single tokenizer expands across all vocab sizes."""
         cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
-        assert self._select(cfg, ["--tokenizer", "bpe"]) == ["bpe-16000", "bpe-32000"]
+        assert resolve_run_selection(cfg, all_runs=False, tokenizer="bpe", vocab_size=None) == [
+            "bpe-16000",
+            "bpe-32000",
+        ]
 
     def test_tokenizer_and_vocab_selects_one(self, tmp_path: Path):
-        """--tokenizer with --vocab-size selects exactly one run."""
+        """A tokenizer narrowed by vocab size selects exactly one run."""
         cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
-        assert self._select(cfg, ["--tokenizer", "bpe", "--vocab-size", "32000"]) == ["bpe-32000"]
+        assert resolve_run_selection(cfg, all_runs=False, tokenizer="bpe", vocab_size=32000) == ["bpe-32000"]
 
     def test_all_with_tokenizer_raises(self, tmp_path: Path):
-        """Combining --all with a selector is rejected."""
+        """Combining all_runs with a selector is rejected."""
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
-            self._select(cfg, ["--all", "--tokenizer", "bpe"])
+            resolve_run_selection(cfg, all_runs=True, tokenizer="bpe", vocab_size=None)
 
     def test_no_selector_raises(self, tmp_path: Path):
-        """Neither --all nor --tokenizer is rejected."""
+        """Neither all_runs nor a tokenizer is rejected."""
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
-            self._select(cfg, [])
+            resolve_run_selection(cfg, all_runs=False, tokenizer=None, vocab_size=None)
 
     def test_unknown_tokenizer_raises(self, tmp_path: Path):
         """An unconfigured tokenizer name is rejected."""
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
-            self._select(cfg, ["--tokenizer", "nonsense"])
+            resolve_run_selection(cfg, all_runs=False, tokenizer="nonsense", vocab_size=None)
 
     def test_unknown_vocab_size_raises(self, tmp_path: Path):
         """An unconfigured vocab size is rejected."""
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
-            self._select(cfg, ["--tokenizer", "bpe", "--vocab-size", "99999"])
+            resolve_run_selection(cfg, all_runs=False, tokenizer="bpe", vocab_size=99999)
+
+
+class TestScriptFlagsAligned:
+    """All three tokenizer CLIs expose the same one-or-all selection flags."""
+
+    def test_parse_args_expose_selection_flags(self):
+        """train/analyze/export parse --tokenizer/--vocab-size/--all alike."""
+        from scripts.tokenizers.analyze import parse_args as analyze_args
+        from scripts.tokenizers.export import parse_args as export_args
+        from scripts.tokenizers.train import parse_args as train_args
+
+        for parse_args in (train_args, analyze_args, export_args):
+            ns = parse_args(["--tokenizer", "bpe", "--vocab-size", "16000"])
+            assert ns.tokenizer == "bpe"
+            assert ns.vocab_size == 16000
+            assert ns.all is False
+            assert parse_args(["--all"]).all is True

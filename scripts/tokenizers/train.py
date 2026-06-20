@@ -38,10 +38,10 @@ from slm4ie.data.parallel import (
 from slm4ie.tokenizers.train import (
     log_training_to_mlflow,
     prepare_inputs,
-    select_runs,
+    resolve_run_selection,
     train_one,
 )
-from slm4ie.utils.config import TokenizerSweepConfig, load_tokenizer_config
+from slm4ie.utils.config import load_tokenizer_config
 
 logger = logging.getLogger(__name__)
 
@@ -89,37 +89,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _resolve_selection(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> List[str]:
-    """Resolve the selected run keys from the one-or-all CLI flags.
-
-    Either `--all` (the whole sweep) or `--tokenizer` (one tokenizer, optionally
-    narrowed to a single `--vocab-size`). The two modes are mutually exclusive.
-
-    Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
-        args (argparse.Namespace): Parsed CLI arguments.
-
-    Returns:
-        List[str]: The selected run keys.
-
-    Raises:
-        ValueError: If the flags are missing, combined illegally, or name a
-            tokenizer/vocab size that is not in the configured sweep.
-    """
-    if args.all:
-        if args.tokenizer or args.vocab_size is not None:
-            raise ValueError("--all takes no other selector; drop --tokenizer/--vocab-size.")
-        return select_runs(cfg)
-    if not args.tokenizer:
-        raise ValueError("Specify --tokenizer NAME (optionally --vocab-size N), or --all.")
-    if args.tokenizer not in cfg.tokenizers:
-        raise ValueError(f"Unknown tokenizer {args.tokenizer!r}. Configured: {', '.join(cfg.tokenizers)}.")
-    if args.vocab_size is not None and args.vocab_size not in cfg.vocab_sizes:
-        raise ValueError(f"Unknown vocab size {args.vocab_size}. Configured: {cfg.vocab_sizes}.")
-    vocab_sizes = [args.vocab_size] if args.vocab_size is not None else None
-    return select_runs(cfg, tokenizers=[args.tokenizer], vocab_sizes=vocab_sizes)
-
-
 def main() -> None:
     """Run the tokenizer training sweep from CLI arguments."""
     args = parse_args()
@@ -128,7 +97,7 @@ def main() -> None:
     cfg = load_tokenizer_config(config_path)
 
     try:
-        keys = _resolve_selection(cfg, args)
+        keys = resolve_run_selection(cfg, all_runs=args.all, tokenizer=args.tokenizer, vocab_size=args.vocab_size)
     except ValueError as exc:
         logger.error("%s", exc)
         sys.exit(2)
