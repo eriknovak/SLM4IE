@@ -1,0 +1,16 @@
+/* Hide the auto-generated H1 on the landing page so the centred logo
+   acts as the visual title. The page title is still emitted in <title>
+   for SEO and browser tabs. */
+.md-typeset h1#slm4ie {
+  display: none;
+}
+
+/* Tighten spacing under the centred hero block. */
+.md-typeset p[align="center"] {
+  margin-bottom: 0.5rem;
+}
+
+/* Slightly larger CTA buttons on the landing. */
+.md-typeset .md-button {
+  margin: 0.25rem 0.25rem 0.25rem 0;
+}

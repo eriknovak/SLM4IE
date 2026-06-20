@@ -9,22 +9,31 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/documentation.yaml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/documentation.yaml"
   workflow_dispatch:
 
+# Least privilege by default; the deploy job needs Pages + OIDC.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: pages-deploy
-  cancel-in-progress: true
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Always strict-build the site. On pull requests this is the gate that
+  # catches broken links / nav before merge; on main it produces the artifact
+  # the deploy job publishes.
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0  # git-revision-date-localized needs full history
 
       - name: Set up uv (with Python 3.13)
         uses: astral-sh/setup-uv@v8
@@ -46,5 +55,32 @@ jobs:
       - name: Install docs dependencies
         run: uv sync --extra docs
 
+      - name: Build site (strict)
+        # Silence mkdocs-material's unconditional "MkDocs 2.0" advisory banner so
+        # CI logs stay clean; it is informational only and does not affect the build.
+        env:
+          NO_MKDOCS_2_WARNING: "true"
+        run: uv run mkdocs build --strict --site-dir site
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # Publish to GitHub Pages. Runs only off main (push / manual dispatch),
+  # never on pull requests.
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
-        run: uv run mkdocs gh-deploy --force
+        id: deployment
+        uses: actions/deploy-pages@v4

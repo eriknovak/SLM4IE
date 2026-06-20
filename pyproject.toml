@@ -49,6 +49,15 @@ tokenize = [
     "mlflow>=3.13.0",                 # experiment tracking for the sweep
     "transformers>=4.45",             # PreTrainedTokenizerFast export + offsets
 ]
+docs = [
+    # Documentation site (MkDocs Material). Build with `uv run mkdocs build`
+    # after `uv sync --extra docs`. Social cards are wired via a theme override
+    # (docs/overrides/main.html), so the Cairo-dependent `social` plugin and its
+    # imaging extras are intentionally not required here.
+    "mkdocs-material>=9.5",                         # theme + blog/search plugins
+    "mkdocs-autorefs>=1.0",                         # cross-page anchor references
+    "mkdocs-minify-plugin>=0.8",                    # HTML minification
+]
 
 [build-system]
 requires = ["hatchling"]
