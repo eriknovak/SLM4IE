@@ -99,7 +99,7 @@ SLM4IE/
 ├── scripts/                # CLI entry points (thin wrappers around slm4ie/)
 │   ├── data/                 # download.py, extract.py, to_pretrain.py, to_tokenization.py,
 │   │                         #   to_spans.py, to_sentiment.py, to_superglue.py, generate_synthetic.py
-│   ├── tokenizers/           # train.py, analyze.py
+│   ├── tokenizers/           # train.py, analyze.py, export.py
 │   ├── train.py              # model pretraining/fine-tuning
 │   └── evaluate.py           # benchmark evaluation
 ├── slurm/                  # SLURM batch scripts for HPC training
@@ -429,14 +429,21 @@ uv run python scripts/data/to_tokenization.py sloleks   # prerequisite: Sloleks 
 uv run python scripts/tokenizers/train.py     --all      # train the 6x3 sweep
 uv run python scripts/tokenizers/analyze.py   --all      # 6 metrics + report.md/json
 uv run python scripts/tokenizers/export.py    --all      # HuggingFace tokenizer dirs
+
+# Or one tokenizer (optionally one vocab size) instead of --all:
+uv run python scripts/tokenizers/train.py --tokenizer bpe                   # all its vocab sizes
+uv run python scripts/tokenizers/train.py --tokenizer bpe --vocab-size 16000  # one run
 ```
 
-`train`/`analyze`/`export` accept positional `<name>-<vocab>` run keys (e.g.
-`bpe-16000`), `--tokenizer`/`--vocab` filters, and `--force`; `train`/`analyze`
-also take `--max-workers`. Artifacts land under
-`/vault/data/SLM4IE/tokenizers/<name>-<vocab>/`; the comparison report is written
-to `tokenizers/_reports/report.md`. Set `mlflow.enabled: true` (and a tracking
-URI) in a `tokenizers.local.yaml` overlay to log the sweep to MLflow.
+`train`/`analyze`/`export` share a one-or-all selection: `--all`, or one
+`--tokenizer <name>` optionally narrowed by `--vocab-size <n>` (the two modes are
+mutually exclusive). `train`/`analyze` also take `--force` and `--max-workers`.
+Artifacts land under `/vault/data/SLM4IE/tokenizers/<name>-<vocab>/`; the
+comparison report is written to `tokenizers/_reports/report.md`. The sweep logs
+to MLflow by default under experiment `slm4ie/tokenization/slovenian`; the
+tracking URI is read from `MLFLOW_TRACKING_URI` (falling back to a local SQLite
+store), overridable via `mlflow.tracking_uri` in a `tokenizers.local.yaml`
+overlay. Disable with `mlflow.enabled: false`.
 
 **Using a tokenizer downstream.** `export.py` writes a HuggingFace tokenizer
 directory into each artifact. The five fast tokenizers load with
@@ -467,6 +474,7 @@ Batch scripts for cluster execution live under [`slurm/`](slurm/):
 ```bash
 sbatch slurm/tokenizer_train.sbatch
 sbatch slurm/tokenizer_analyze.sbatch
+sbatch slurm/tokenizer_export.sbatch
 sbatch slurm/train.sbatch
 sbatch slurm/evaluate.sbatch
 sbatch slurm/generate.sbatch
