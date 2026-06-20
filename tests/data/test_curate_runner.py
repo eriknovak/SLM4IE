@@ -11,8 +11,10 @@ from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
-import scripts.data.to_pretrain as curate_cli
-from slm4ie.data.curate import (
+pytest.importorskip("datatrove")
+
+import scripts.data.to_pretrain as curate_cli  # noqa: E402
+from slm4ie.data.curate import (  # noqa: E402
     STAGE_DIRS,
     STAGE_NAMES,
     read_sentinel,
