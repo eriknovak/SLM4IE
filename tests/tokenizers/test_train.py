@@ -169,27 +169,58 @@ class TestLogTrainingToMlflow:
         assert link["experiment"] == cfg.mlflow_experiment
 
 
-class TestResolveTargetKeys:
-    """Tests for the CLI's one-or-all target resolution."""
+class TestResolveSelection:
+    """Tests for the CLI's --tokenizer/--vocab-size/--all selection."""
 
-    def test_bare_name_expands_all_vocab(self, tmp_path: Path):
-        """A bare tokenizer name trains that tokenizer across all vocab sizes."""
-        from scripts.tokenizers.train import _resolve_target_keys
+    def _select(self, cfg, argv):
+        """Parse `argv` and resolve it against `cfg`.
 
+        Args:
+            cfg (TokenizerSweepConfig): The sweep config.
+            argv (list): CLI tokens to parse.
+
+        Returns:
+            list: The resolved run keys.
+        """
+        from scripts.tokenizers.train import _resolve_selection, parse_args
+
+        return _resolve_selection(cfg, parse_args(argv))
+
+    def test_all_selects_whole_sweep(self, tmp_path: Path):
+        """--all trains every tokenizer x vocab-size run."""
         cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
-        assert _resolve_target_keys(cfg, "bpe") == ["bpe-16000", "bpe-32000"]
+        assert self._select(cfg, ["--all"]) == ["bpe-16000", "bpe-32000", "wordpiece-16000", "wordpiece-32000"]
 
-    def test_full_run_key_selects_one(self, tmp_path: Path):
-        """A full run key selects exactly that single run."""
-        from scripts.tokenizers.train import _resolve_target_keys
-
+    def test_tokenizer_expands_all_vocab(self, tmp_path: Path):
+        """--tokenizer alone trains that tokenizer across all vocab sizes."""
         cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
-        assert _resolve_target_keys(cfg, "bpe-32000") == ["bpe-32000"]
+        assert self._select(cfg, ["--tokenizer", "bpe"]) == ["bpe-16000", "bpe-32000"]
 
-    def test_unknown_target_raises(self, tmp_path: Path):
-        """A target that is neither a name nor a run key raises ValueError."""
-        from scripts.tokenizers.train import _resolve_target_keys
+    def test_tokenizer_and_vocab_selects_one(self, tmp_path: Path):
+        """--tokenizer with --vocab-size selects exactly one run."""
+        cfg = _make_config(tmp_path, ["bpe", "wordpiece"], [16000, 32000])
+        assert self._select(cfg, ["--tokenizer", "bpe", "--vocab-size", "32000"]) == ["bpe-32000"]
 
+    def test_all_with_tokenizer_raises(self, tmp_path: Path):
+        """Combining --all with a selector is rejected."""
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
-            _resolve_target_keys(cfg, "nonsense")
+            self._select(cfg, ["--all", "--tokenizer", "bpe"])
+
+    def test_no_selector_raises(self, tmp_path: Path):
+        """Neither --all nor --tokenizer is rejected."""
+        cfg = _make_config(tmp_path, ["bpe"], [16000])
+        with pytest.raises(ValueError):
+            self._select(cfg, [])
+
+    def test_unknown_tokenizer_raises(self, tmp_path: Path):
+        """An unconfigured tokenizer name is rejected."""
+        cfg = _make_config(tmp_path, ["bpe"], [16000])
+        with pytest.raises(ValueError):
+            self._select(cfg, ["--tokenizer", "nonsense"])
+
+    def test_unknown_vocab_size_raises(self, tmp_path: Path):
+        """An unconfigured vocab size is rejected."""
+        cfg = _make_config(tmp_path, ["bpe"], [16000])
+        with pytest.raises(ValueError):
+            self._select(cfg, ["--tokenizer", "bpe", "--vocab-size", "99999"])
