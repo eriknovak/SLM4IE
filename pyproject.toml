@@ -49,6 +49,14 @@ tokenize = [
     "mlflow>=3.13.0",                 # experiment tracking for the sweep
     "transformers>=4.45",             # PreTrainedTokenizerFast export + offsets
 ]
+notebook = [
+    # Exploratory marimo notebooks under notebooks/ (e.g. the tokenizer
+    # comparison). Kept out of the base install; pull in with
+    # `uv sync --extra notebook`. The notebook also needs the `tokenize`
+    # extra at runtime to load the trained tokenizer artifacts.
+    "marimo>=0.9",                    # reactive notebook + UI widgets
+    "matplotlib>=3.10",               # segmentation + metric plots
+]
 docs = [
     # Documentation site (MkDocs Material). Build with `uv run mkdocs build`
     # after `uv sync --extra docs`. Social cards are wired via a theme override
@@ -77,6 +85,10 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["D104"]
+# Exploratory marimo notebooks: their reactive cells must be anonymous
+# `def _()` functions (the marimo UI strips any names/docstrings on save), so
+# Google-style docstring rules cannot apply. E/F rules still catch real errors.
+"notebooks/**" = ["D"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
