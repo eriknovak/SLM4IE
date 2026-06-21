@@ -396,13 +396,16 @@ def _grouped_pairs(
                 for j in range(i + 1, len(unique)):
                     pairs.add((unique[i], unique[j]))
         else:
-            drawn = 0
-            while drawn < max_pairs_per_group:
+            # Sample distinct pairs deduped against THIS group only. Bounding the
+            # loop by the group's own draws (not the cross-group accumulator)
+            # guarantees termination: `total > max_pairs_per_group` here, so
+            # `max_pairs_per_group` distinct pairs always exist within the group.
+            # Dedup across groups still happens via the final set union.
+            local: Set[Tuple[str, str]] = set()
+            while len(local) < max_pairs_per_group:
                 first, second = rng.sample(unique, 2)
-                pair = (first, second) if first < second else (second, first)
-                if pair not in pairs:
-                    pairs.add(pair)
-                    drawn += 1
+                local.add((first, second) if first < second else (second, first))
+            pairs |= local
     return pairs
 
 

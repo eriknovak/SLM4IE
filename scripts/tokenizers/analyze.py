@@ -26,14 +26,14 @@ from typing import Any, Dict, List, Optional
 from slm4ie.data.io_utils import find_project_root
 from slm4ie.data.parallel import (
     configure_script_logging,
-    io_default,
+    cpu_default,
     resolve_workers,
     run_parallel,
 )
 from slm4ie.tokenizers.analysis import evaluate_artifact, log_results_to_mlflow, write_report
 from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sample_cache
 from slm4ie.tokenizers.metrics import iter_words
-from slm4ie.tokenizers.morphology import build_morph_lexicon, load_lexicon, save_lexicon
+from slm4ie.tokenizers.morphology import MorphLexicon, build_morph_lexicon, load_lexicon, save_lexicon
 from slm4ie.tokenizers.train import resolve_run_selection
 from slm4ie.utils.config import TokenizerSweepConfig, load_tokenizer_config
 
@@ -41,6 +41,50 @@ logger = logging.getLogger(__name__)
 
 #: Default location of the tokenizer config relative to the project root.
 DEFAULT_CONFIG_RELPATH = Path("configs") / "tokenizers" / "tokenizers.yaml"
+
+#: Conservative upper bound on parallel eval workers so a large box is not
+#: saturated by default; raise it explicitly with --max-workers.
+DEFAULT_MAX_WORKERS = 8
+
+#: Heavy, read-only eval inputs shared with process-pool workers via fork
+#: inheritance (copy-on-write) instead of being pickled per task. Populated in
+#: `main` before the pool is created; read by `_evaluate_worker` in each child.
+_EVAL_WORDS: List[str] = []
+_LEXICON: Optional[MorphLexicon] = None
+
+
+def _evaluate_worker(
+    key: str,
+    *,
+    output_root: Path,
+    alpha: float,
+    max_forms: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    """Evaluate one run, reading the shared lexicon and eval words from globals.
+
+    The lexicon and eval words live in module globals so a forked process-pool
+    worker inherits them copy-on-write, rather than receiving them through
+    pickled keyword arguments (which would copy the multi-million-form lexicon
+    once per task).
+
+    Args:
+        key (str): Run key (`<name>-<vocab>`).
+        output_root (Path): Directory holding per-run artifact subdirs.
+        alpha (float): Renyi order.
+        max_forms (Optional[int]): Cap on lexicon forms for the morph metrics.
+
+    Returns:
+        Optional[Dict[str, Any]]: The metrics record, or None when skipped.
+    """
+    assert _LEXICON is not None, "eval inputs not initialized before worker dispatch"
+    return evaluate_artifact(
+        key,
+        output_root=output_root,
+        lexicon=_LEXICON,
+        eval_words=_EVAL_WORDS,
+        alpha=alpha,
+        max_forms=max_forms,
+    )
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -134,39 +178,46 @@ def main() -> None:
         logger.error("No trained artifacts found under %s. Run train.py first.", cfg.output_root)
         sys.exit(1)
 
-    workers = resolve_workers(args.max_workers, len(keys), io_default(len(keys)))
+    # CPU-bound metrics: cap the auto default conservatively so a many-core box
+    # is not saturated by default (override with --max-workers).
+    workers = resolve_workers(args.max_workers, len(keys), min(DEFAULT_MAX_WORKERS, cpu_default(len(keys))))
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
-    eval_words, lexicon = _prepare_eval_inputs(cfg, force=args.force)
+    # Publish the heavy eval inputs to module globals BEFORE the process pool
+    # forks, so workers inherit them copy-on-write rather than via pickling.
+    global _EVAL_WORDS, _LEXICON
+    _EVAL_WORDS, _LEXICON = _prepare_eval_inputs(cfg, force=args.force)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
 
     def kwargs_for(_key: str) -> Dict[str, Any]:
-        """Return per-run kwargs for `evaluate_artifact`.
+        """Return per-run kwargs for `_evaluate_worker`.
+
+        Only small, picklable values go here; the lexicon and eval words are
+        shared via module globals (see `_evaluate_worker`).
 
         Args:
-            _key (str): Run key (unused; kwargs are shared by reference).
+            _key (str): Run key (unused; kwargs are identical per run).
 
         Returns:
-            Dict[str, Any]: Keyword arguments for `evaluate_artifact`.
+            Dict[str, Any]: Keyword arguments for `_evaluate_worker`.
         """
         return {
             "output_root": cfg.output_root,
-            "lexicon": lexicon,
-            "eval_words": eval_words,
             "alpha": cfg.renyi_alpha,
             "max_forms": args.max_forms,
         }
 
-    # Thread pool so the lexicon and eval words are shared in-process rather
-    # than pickled to each worker.
+    # Process pool for real CPU parallelism (a thread pool would serialize on the
+    # GIL). The lexicon and eval words are not pickled per task; forked workers
+    # inherit them from the globals set above.
     results, failures = run_parallel(
-        evaluate_artifact,
+        _evaluate_worker,
         keys,
         max_workers=workers,
         desc="tokenizer-analyze",
-        pool="thread",
+        pool="process",
         kwargs_for=kwargs_for,
         log_dir=log_dir,
     )
