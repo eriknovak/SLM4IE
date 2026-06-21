@@ -12,13 +12,16 @@ def _(mo):
 
         Exploratory companion to the tokenizer sweep trained by
         `scripts/tokenizers/train.py` and scored by `scripts/tokenizers/analyze.py`.
+        Every plot is interactive (hover for details, drag to zoom, click legend
+        entries to toggle series).
 
         - **Part A — Segmentation.** Pick an example (a curated lexicon form, a
           sampled dataset sentence, or your own text) and see how each selected
           tokenizer splits it. Tokens render as colored, character-aligned blocks;
           the gold **morpheme** boundaries from the Sloleks-derived lexicon are
           overlaid as dashed lines, and a token whose span matches a morpheme
-          exactly is outlined in green.
+          exactly is outlined in green. Hover a block for its piece, span, and
+          morpheme match.
         - **Part B — Metrics.** How vocab size and algorithm move each of the six
           metrics, from the aggregated `report.json`.
 
@@ -44,9 +47,9 @@ def _():
     import re
     from pathlib import Path
 
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from matplotlib.patches import Rectangle
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
     import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
     from slm4ie.tokenizers.corpus import iter_sample_cache
@@ -56,15 +59,15 @@ def _():
 
     return (
         Path,
-        Rectangle,
         get_tokenizer,
+        go,
         iter_sample_cache,
         json,
         load_lexicon,
         load_tokenizer_config,
+        make_subplots,
         math,
-        np,
-        plt,
+        px,
         random,
         re,
     )
@@ -114,9 +117,9 @@ def _(CONFIG_PATH, OUTPUT_ROOT, TOKENIZERS, VOCAB_SIZES, mo):
 
 
 @app.cell
-def _(TOKENIZERS, plt):
-    _cmap = plt.get_cmap("tab10")
-    TOKENIZER_COLORS = {name: _cmap(i % 10) for i, name in enumerate(TOKENIZERS)}
+def _(TOKENIZERS, px):
+    _palette = px.colors.qualitative.Plotly
+    TOKENIZER_COLORS = {name: _palette[i % len(_palette)] for i, name in enumerate(TOKENIZERS)}
     return (TOKENIZER_COLORS,)
 
 
@@ -197,61 +200,101 @@ def _(LEXICON, re):
 
 
 @app.cell
-def _(Rectangle, TOKENIZER_COLORS, gold_segments, load_run, plt):
-    _GOLD_COLOR = (0.85, 0.75, 0.45)
+def _(TOKENIZER_COLORS, gold_segments, go, load_run):
+    _GOLD_HEX = "#D9BF73"
 
-    def _shade(rgba, alt):
-        # Two alternating alpha levels make adjacent token blocks distinguishable.
-        return (rgba[0], rgba[1], rgba[2], 0.85 if alt else 0.5)
+    def _rgba(hex_color, alpha):
+        raw = hex_color.lstrip("#")
+        red, green, blue = (int(raw[i : i + 2], 16) for i in (0, 2, 4))
+        return f"rgba({red},{green},{blue},{alpha})"
 
-    def _draw_row(ax, y, spans, text, base_rgba, gold_bnds, n_chars, row_h):
-        for idx, (_piece, start, end) in enumerate(spans):
-            if end <= start:
-                continue
-            on_morpheme = (start == 0 or start in gold_bnds) and (end == n_chars or end in gold_bnds)
-            ax.add_patch(
-                Rectangle(
-                    (start, y),
-                    end - start,
-                    row_h,
-                    facecolor=_shade(base_rgba, idx % 2 == 0),
-                    edgecolor="#2e8b2e" if on_morpheme else "white",
-                    linewidth=2.0 if on_morpheme else 0.8,
-                )
+    def _add_token_block(fig, label, base_hex, idx, piece, start, end, surface, on_morpheme, row_y, row_h):
+        fig.add_trace(
+            go.Scatter(
+                x=[start, end, end, start, start],
+                y=[row_y, row_y, row_y + row_h, row_y + row_h, row_y],
+                fill="toself",
+                mode="lines",
+                fillcolor=_rgba(base_hex, 0.85 if idx % 2 == 0 else 0.5),
+                line=dict(
+                    color="#2e8b2e" if on_morpheme else "rgba(255,255,255,0.9)", width=2.5 if on_morpheme else 1.0
+                ),
+                hoveron="fills",
+                hoverinfo="text",
+                hovertext=(
+                    f"<b>{label}</b><br>piece: {piece}<br>surface: '{surface}'"
+                    f"<br>span: {start}–{end} (len {end - start})"
+                    f"<br>morpheme match: {'✓' if on_morpheme else '✗'}"
+                ),
+                showlegend=False,
             )
-            ax.text((start + end) / 2, y + row_h / 2, text[start:end], ha="center", va="center", fontsize=10)
+        )
 
     def plot_segmentation(text, run_keys):
-        """Render a character-aligned segmentation grid for `text`."""
+        """Build an interactive character-aligned segmentation grid for `text`."""
         if not text or not run_keys:
             return None
         n_chars = len(text)
         gold_segs, gold_bnds = gold_segments(text)
 
-        rows = []  # (label, base_rgba, spans) bottom-to-top
+        rows = []  # (label, base_hex, spans) bottom-to-top
         for run_key in reversed(run_keys):
             name = run_key.rpartition("-")[0]
             spans = load_run(run_key).encode_offsets(text)
-            rows.append((run_key, TOKENIZER_COLORS.get(name, (0.4, 0.4, 0.4, 1.0)), spans))
+            rows.append((run_key, TOKENIZER_COLORS.get(name, "#888888"), spans))
         if gold_segs:
-            rows.append(("GOLD (morphemes)", _GOLD_COLOR, gold_segs))
+            rows.append(("GOLD (morphemes)", _GOLD_HEX, gold_segs))
 
-        row_h = 0.78
-        fig, ax = plt.subplots(figsize=(max(7.0, n_chars * 0.34), 0.55 * len(rows) + 0.7))
-        for row_idx, (label, base_rgba, spans) in enumerate(rows):
-            _draw_row(ax, row_idx, spans, text, base_rgba, gold_bnds, n_chars, row_h)
-        for boundary in gold_bnds:
-            ax.axvline(boundary, linestyle="--", color="0.35", linewidth=0.9, zorder=0)
+        row_h = 0.72
+        fig = go.Figure()
+        annotations = []
+        for row_idx, (label, base_hex, spans) in enumerate(rows):
+            for idx, (piece, start, end) in enumerate(spans):
+                if end <= start:
+                    continue
+                on_morpheme = (start == 0 or start in gold_bnds) and (end == n_chars or end in gold_bnds)
+                surface = text[start:end]
+                _add_token_block(fig, label, base_hex, idx, piece, start, end, surface, on_morpheme, row_idx, row_h)
+                annotations.append(
+                    dict(x=(start + end) / 2, y=row_idx + row_h / 2, text=surface, showarrow=False, font=dict(size=13))
+                )
 
-        ax.set_xlim(0, n_chars)
-        ax.set_ylim(0, len(rows))
-        ax.set_yticks([i + row_h / 2 for i in range(len(rows))])
-        ax.set_yticklabels([label for label, _, _ in rows])
-        ax.set_xticks([])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.set_title("green outline = token span matches a gold morpheme", fontsize=9, loc="left")
-        fig.tight_layout()
+        shapes = [
+            dict(
+                type="line",
+                x0=b,
+                x1=b,
+                y0=0,
+                y1=len(rows),
+                line=dict(color="rgba(60,60,60,0.55)", width=1, dash="dash"),
+            )
+            for b in gold_bnds
+        ]
+        annotations.append(
+            dict(
+                x=0,
+                y=len(rows) + 0.2,
+                text="green outline = token span matches a gold morpheme; dashed = morpheme boundary",
+                showarrow=False,
+                font=dict(size=11, color="#555"),
+                xanchor="left",
+            )
+        )
+        fig.update_layout(
+            shapes=shapes,
+            annotations=annotations,
+            xaxis=dict(range=[0, n_chars], visible=False),
+            yaxis=dict(
+                tickmode="array",
+                tickvals=[i + row_h / 2 for i in range(len(rows))],
+                ticktext=[label for label, _, _ in rows],
+                range=[-0.1, len(rows) + 0.6],
+            ),
+            height=46 * len(rows) + 130,
+            margin=dict(l=150, r=20, t=20, b=20),
+            plot_bgcolor="white",
+            hovermode="closest",
+        )
         return fig
 
     return (plot_segmentation,)
@@ -334,31 +377,43 @@ def _(REPORT_JSON, json):
 
 
 @app.cell
-def _(METRIC_COLUMNS, TOKENIZER_COLORS, math, metric_title, plt, series_by_tokenizer):
+def _(METRIC_COLUMNS, TOKENIZER_COLORS, go, make_subplots, math, metric_title, series_by_tokenizer):
     _ncols = 3
     _nrows = math.ceil(len(METRIC_COLUMNS) / _ncols)
-    _fig, _axes = plt.subplots(_nrows, _ncols, figsize=(13, 3.1 * _nrows))
-    _flat = _axes.flat
-    _handles, _labels = [], []
-    for _ax, _metric in zip(_flat, METRIC_COLUMNS):
-        _series = series_by_tokenizer(_metric)
-        _ticks = sorted({v for _points in _series.values() for v, _ in _points})
-        for _tname, _points in _series.items():
-            _xs = [v for v, _ in _points]
-            _ys = [y for _, y in _points]
-            (_line,) = _ax.plot(_xs, _ys, marker="o", color=TOKENIZER_COLORS.get(_tname), label=_tname)
-            if _tname not in _labels:
-                _handles.append(_line)
-                _labels.append(_tname)
-        _ax.set_title(metric_title(_metric), fontsize=10)
-        _ax.set_xlabel("vocab size")
-        _ax.set_xticks(_ticks)
-        _ax.grid(True, alpha=0.3)
-    for _ax in list(_flat):
-        _ax.set_visible(False)
-    _fig.legend(_handles, _labels, loc="lower center", ncol=len(_labels), bbox_to_anchor=(0.5, -0.02))
-    _fig.suptitle("All metrics vs vocab size", y=1.0)
-    _fig.tight_layout()
+    _vocabs = sorted({v for _pts in series_by_tokenizer(METRIC_COLUMNS[0]).values() for v, _ in _pts})
+    _fig = make_subplots(
+        rows=_nrows,
+        cols=_ncols,
+        subplot_titles=[metric_title(m) for m in METRIC_COLUMNS],
+        vertical_spacing=0.12,
+        horizontal_spacing=0.07,
+    )
+    for _idx, _metric in enumerate(METRIC_COLUMNS):
+        _row = _idx // _ncols + 1
+        _col = _idx % _ncols + 1
+        for _tname, _points in series_by_tokenizer(_metric).items():
+            _fig.add_trace(
+                go.Scatter(
+                    x=[v for v, _ in _points],
+                    y=[y for _, y in _points],
+                    mode="lines+markers",
+                    name=_tname,
+                    legendgroup=_tname,
+                    showlegend=_idx == 0,
+                    line=dict(color=TOKENIZER_COLORS.get(_tname)),
+                    marker=dict(color=TOKENIZER_COLORS.get(_tname)),
+                    hovertemplate=f"{_tname}<br>vocab=%{{x}}<br>{_metric}=%{{y:.4f}}<extra></extra>",
+                ),
+                row=_row,
+                col=_col,
+            )
+    _fig.update_xaxes(tickvals=_vocabs, title_text="vocab")
+    _fig.update_layout(
+        height=300 * _nrows,
+        hovermode="closest",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.07, xanchor="center", x=0.5),
+        margin=dict(t=40, l=40, r=20, b=60),
+    )
     _fig
     return
 
@@ -373,32 +428,39 @@ def _(METRIC_COLUMNS, TOKENIZERS, mo):
 
 
 @app.cell
-def _(TOKENIZER_COLORS, chart_kind, metric_pick, metric_title, np, plt, series_by_tokenizer, tok_pick):
+def _(TOKENIZER_COLORS, chart_kind, go, metric_pick, metric_title, series_by_tokenizer, tok_pick):
     _metric = metric_pick.value
     _data = series_by_tokenizer(_metric)
     _toks = [t for t in tok_pick.value if t in _data]
-    _fig, _ax = plt.subplots(figsize=(8.5, 5))
-    if chart_kind.value == "line":
-        for _t in _toks:
-            _xs = [v for v, _ in _data[_t]]
-            _ys = [y for _, y in _data[_t]]
-            _ax.plot(_xs, _ys, marker="o", color=TOKENIZER_COLORS.get(_t), label=_t)
-        _ax.set_xlabel("vocab size")
-    else:
-        _vocabs = sorted({v for _t in _toks for v, _ in _data[_t]})
-        _x = np.arange(len(_vocabs))
-        _width = 0.8 / max(1, len(_toks))
-        for _i, _t in enumerate(_toks):
-            _lookup = dict(_data[_t])
-            _ys = [_lookup.get(v, float("nan")) for v in _vocabs]
-            _ax.bar(_x + _i * _width, _ys, _width, color=TOKENIZER_COLORS.get(_t), label=_t)
-        _ax.set_xticks(_x + (len(_toks) - 1) * _width / 2)
-        _ax.set_xticklabels(_vocabs)
-        _ax.set_xlabel("vocab size")
-    _ax.set_title(metric_title(_metric))
-    _ax.grid(True, axis="y", alpha=0.3)
-    _ax.legend()
-    _fig.tight_layout()
+    _vocabs = sorted({v for _t in _toks for v, _ in _data[_t]})
+    _fig = go.Figure()
+    for _t in _toks:
+        _lookup = dict(_data[_t])
+        _ys = [_lookup.get(v) for v in _vocabs]
+        _hover = f"{_t}<br>vocab=%{{x}}<br>{_metric}=%{{y:.4f}}<extra></extra>"
+        if chart_kind.value == "line":
+            _fig.add_trace(
+                go.Scatter(
+                    x=_vocabs,
+                    y=_ys,
+                    mode="lines+markers",
+                    name=_t,
+                    line=dict(color=TOKENIZER_COLORS.get(_t)),
+                    marker=dict(color=TOKENIZER_COLORS.get(_t)),
+                    hovertemplate=_hover,
+                )
+            )
+        else:
+            _fig.add_trace(
+                go.Bar(x=_vocabs, y=_ys, name=_t, marker_color=TOKENIZER_COLORS.get(_t), hovertemplate=_hover)
+            )
+    _fig.update_layout(
+        title=metric_title(_metric),
+        xaxis=dict(title="vocab size", tickvals=_vocabs),
+        barmode="group",
+        height=480,
+        hovermode="closest",
+    )
     _fig
     return
 
@@ -426,7 +488,7 @@ def _(METRIC_COLUMNS, mo):
 
 
 @app.cell
-def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, metric_title, plt, x_metric, y_metric):
+def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, metric_title, x_metric, y_metric):
     _xm = x_metric.value
     _ym = y_metric.value
 
@@ -452,33 +514,48 @@ def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, metric_title, plt, x_metric, y_metr
                 frontier.append(p)
         return sorted(frontier)
 
-    _points = [(r[_xm], r[_ym], r["tokenizer"], r["vocab_size"]) for r in RESULTS]
-    _fig, _ax = plt.subplots(figsize=(8.5, 6))
-    _seen = set()
-    for _x, _y, _tname, _vocab in _points:
-        _ax.scatter(
-            _x,
-            _y,
-            color=TOKENIZER_COLORS.get(_tname),
-            s=70,
-            edgecolor="white",
-            linewidth=0.6,
-            label=_tname if _tname not in _seen else None,
-            zorder=3,
+    _by_tokenizer = {}
+    for _r in RESULTS:
+        _by_tokenizer.setdefault(_r["tokenizer"], []).append(_r)
+
+    _fig = go.Figure()
+    for _tname, _recs in _by_tokenizer.items():
+        _fig.add_trace(
+            go.Scatter(
+                x=[r[_xm] for r in _recs],
+                y=[r[_ym] for r in _recs],
+                mode="markers+text",
+                name=_tname,
+                marker=dict(color=TOKENIZER_COLORS.get(_tname), size=12, line=dict(color="white", width=1)),
+                text=[f"{r['vocab_size'] // 1000}k" for r in _recs],
+                textposition="top center",
+                textfont=dict(size=9),
+                customdata=[[r["tokenizer"], r["vocab_size"]] for r in _recs],
+                hovertemplate=(
+                    f"%{{customdata[0]}} @ %{{customdata[1]}}<br>{_xm}=%{{x:.4f}}<br>{_ym}=%{{y:.4f}}<extra></extra>"
+                ),
+            )
         )
-        _seen.add(_tname)
-        _ax.annotate(f"{_vocab // 1000}k", (_x, _y), fontsize=7, xytext=(4, 3), textcoords="offset points")
 
-    _front = _pareto([(p[0], p[1]) for p in _points])
+    _front = _pareto([(r[_xm], r[_ym]) for r in RESULTS])
     if len(_front) >= 2:
-        _ax.plot([p[0] for p in _front], [p[1] for p in _front], color="0.3", linestyle="--", linewidth=1.2, zorder=2)
-
-    _ax.set_xlabel(metric_title(_xm))
-    _ax.set_ylabel(metric_title(_ym))
-    _ax.set_title("Pareto frontier (dashed) across all runs")
-    _ax.grid(True, alpha=0.3)
-    _ax.legend(title="tokenizer", fontsize=8)
-    _fig.tight_layout()
+        _fig.add_trace(
+            go.Scatter(
+                x=[p[0] for p in _front],
+                y=[p[1] for p in _front],
+                mode="lines",
+                name="Pareto frontier",
+                line=dict(color="rgba(60,60,60,0.7)", dash="dash"),
+                hoverinfo="skip",
+            )
+        )
+    _fig.update_layout(
+        title="Cost ↔ quality (Pareto frontier dashed)",
+        xaxis_title=metric_title(_xm),
+        yaxis_title=metric_title(_ym),
+        height=560,
+        hovermode="closest",
+    )
     _fig
     return
 
