@@ -1,9 +1,40 @@
 """Tests for slm4ie/tokenizers/metrics.py with hand-checked values."""
 
-from typing import Dict, List, Tuple
+import random
+from typing import Any, Callable, Dict, List, Tuple
+
+import pytest
 
 from slm4ie.tokenizers import metrics
 from slm4ie.tokenizers.morphology import MorphemeSegmentation, MorphLexicon, _add_to_lexicon
+
+
+def _call_with_timeout(func: Callable[[], Any], timeout: float) -> Any:
+    """Run `func` in a thread and fail if it does not finish in `timeout`.
+
+    Used to turn a non-terminating call into a test failure rather than a hung
+    suite, so a regression that reintroduces an unbounded loop is caught.
+
+    Args:
+        func (Callable[[], Any]): Zero-argument callable to run.
+        timeout (float): Seconds to wait before declaring failure.
+
+    Returns:
+        Any: The callable's return value.
+    """
+    import threading
+
+    box: Dict[str, Any] = {}
+
+    def _run() -> None:
+        box["result"] = func()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        pytest.fail(f"call did not terminate within {timeout}s (unbounded loop?)")
+    return box["result"]
 
 
 class _FakeTokenizer:
@@ -152,3 +183,41 @@ class TestMorphConsistency:
         # 'hiše' splits the 'hiš' stem differently, so hiše/hiši share no token.
         tok = _FakeTokenizer({"hiše": ["hi", "še"], "hiši": ["hiš", "i"], "pesa": ["pes", "a"], "pesu": ["pes", "u"]})
         assert metrics.morph_consistency_score(tok, lex) < 1.0
+
+
+class TestGroupedPairs:
+    """Tests for the per-group pair sampler underpinning morph consistency."""
+
+    def test_terminates_when_later_group_is_starved(self):
+        """A starved oversized group must not spin forever.
+
+        Two identical 3-member groups with a cap of 2: the first contributes 2
+        of the 3 possible pairs, so under a global-dedup rejection loop the
+        second group can only ever find 1 fresh pair while needing 2, and loops
+        forever. Per-group sampling bounds each group independently, so the call
+        terminates.
+        """
+        index = {"k1": ["a", "b", "c"], "k2": ["a", "b", "c"]}
+        result = _call_with_timeout(lambda: metrics._grouped_pairs(index, 2, random.Random(0)), timeout=10.0)
+        all_pairs = {("a", "b"), ("a", "c"), ("b", "c")}
+        assert result, "expected at least one sampled pair"
+        assert result <= all_pairs
+
+    def test_small_group_enumerated_fully(self):
+        """A group whose total pairs fit the cap is enumerated exactly."""
+        result = metrics._grouped_pairs({"k": ["a", "b", "c"]}, 5, random.Random(0))
+        assert result == {("a", "b"), ("a", "c"), ("b", "c")}
+
+    def test_large_group_capped_per_group(self):
+        """An oversized group contributes exactly the cap of distinct pairs."""
+        members = [f"f{i}" for i in range(50)]  # 1225 possible pairs, cap below it
+        result = metrics._grouped_pairs({"k": members}, 10, random.Random(0))
+        assert len(result) == 10
+        assert len({tuple(sorted(p)) for p in result}) == 10
+
+    def test_deterministic_under_same_seed(self):
+        """The same seed yields the same sampled pair set."""
+        members = [f"f{i}" for i in range(40)]
+        a = metrics._grouped_pairs({"k": members}, 8, random.Random(7))
+        b = metrics._grouped_pairs({"k": members}, 8, random.Random(7))
+        assert a == b
