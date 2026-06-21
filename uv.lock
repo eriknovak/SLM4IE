@@ -2240,6 +2240,19 @@ wheels = [
 ]
 
 [[package]]
+name = "plotly"
+version = "6.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "narwhals" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/fd/d72c292d78aadb93d1a9bcd76bf3c678271040c7cf10abe5788b33040a39/plotly-6.8.0.tar.gz", hash = "sha256:e088e7ddc68d4f70e3d66659224727a45296d71d2b8284181862d3d8f1f0d88f", size = 6915161, upload-time = "2026-06-03T18:33:40.226Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/14/abe5ce876ab5b66ee3c691bf537fcd43d037aea55d447aacf74630a8f31e/plotly-6.8.0-py3-none-any.whl", hash = "sha256:13c5c4a0f70b74cab1913eda0de49b826df5931708eb6f9c3010040614700ec8", size = 9902055, upload-time = "2026-06-03T18:33:34.26Z" },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3115,7 +3128,7 @@ docs = [
 ]
 notebook = [
     { name = "marimo" },
-    { name = "matplotlib" },
+    { name = "plotly" },
 ]
 tokenize = [
     { name = "mlflow" },
@@ -3141,7 +3154,6 @@ requires-dist = [
     { name = "lingua-language-detector", marker = "extra == 'curate'", specifier = ">=2.0.0" },
     { name = "lxml", specifier = ">=6.1.1" },
     { name = "marimo", marker = "extra == 'notebook'", specifier = ">=0.9" },
-    { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.10" },
     { name = "mkdocs-autorefs", marker = "extra == 'docs'", specifier = ">=1.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "mkdocs-minify-plugin", marker = "extra == 'docs'", specifier = ">=0.8" },
@@ -3149,6 +3161,7 @@ requires-dist = [
     { name = "nltk", marker = "extra == 'curate'", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "orjson", marker = "extra == 'curate'", specifier = ">=3.9" },
+    { name = "plotly", marker = "extra == 'notebook'", specifier = ">=5.24" },
     { name = "pyahocorasick", marker = "extra == 'curate'", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },

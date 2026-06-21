@@ -55,7 +55,7 @@ notebook = [
     # `uv sync --extra notebook`. The notebook also needs the `tokenize`
     # extra at runtime to load the trained tokenizer artifacts.
     "marimo>=0.9",                    # reactive notebook + UI widgets
-    "matplotlib>=3.10",               # segmentation + metric plots
+    "plotly>=5.24",                   # interactive segmentation + metric plots
 ]
 docs = [
     # Documentation site (MkDocs Material). Build with `uv run mkdocs build`
