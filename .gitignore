@@ -162,3 +162,5 @@ slurm/logs/*.err
 # Defensive entry — classla normally caches under ~/.classla_resources/,
 # but a user could redirect the cache root inside the repo.
 .classla_resources/
+.devflow/
+/docs/superpowers/
