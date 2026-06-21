@@ -41,6 +41,18 @@ eval:
     seed: 99
   renyi_alpha: 2.5
 
+# --- Statistics ------------------------------------------------------------
+# Bootstrap CIs + paired significance for the decomposable metrics. Corpus
+# metrics resample documents (block bootstrap over the held-out eval docs);
+# morph metrics resample forms from a deterministic shared sample so forms align
+# by index for the paired tests. renyi_efficiency and morph_consistency are
+# global functionals that do not decompose and stay point estimates (no CI).
+stats:
+  n_resamples: 2000                              # bootstrap resamples (B)
+  ci_level: 0.95                                 # confidence level
+  seed: 12345                                    # shared-resample seed
+  morph_form_sample: 200000                      # forms for morph CIs/tests
+
 # --- MLflow ----------------------------------------------------------------
 # Experiment follows the slm4ie/<task>/<dataset> convention. tracking_uri null
 # falls back to $MLFLOW_TRACKING_URI (the localhost:5555 service in this setup),

@@ -17,10 +17,10 @@ import math
 import random
 from collections import Counter
 from typing import Counter as CounterType
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from slm4ie.tokenizers.base import TokenizerSpec, split_words
-from slm4ie.tokenizers.morphology import MorphLexicon
+from slm4ie.tokenizers.morphology import MorphemeSegmentation, MorphLexicon
 
 #: Whether a higher value is better for each reported metric.
 METRIC_DIRECTIONS: Dict[str, str] = {
@@ -76,6 +76,47 @@ def corpus_token_stats(tokenizer: TokenizerSpec, words: Iterable[str]) -> Dict[s
         "n_chars": n_chars,
         "n_bytes": n_bytes,
     }
+
+
+def corpus_doc_stats(tokenizer: TokenizerSpec, docs: Iterable[Sequence[str]]) -> Dict[str, object]:
+    """Encode each document once, emitting per-document sufficient statistics.
+
+    Keeps documents grouped (rather than flattening to one word list) so the
+    corpus metrics can be bootstrapped with documents as the resampling unit.
+    Each returned array holds one entry per document; `freqs` aggregates the
+    piece counts across the whole corpus for the Renyi point estimate.
+
+    Args:
+        tokenizer (TokenizerSpec): The tokenizer under evaluation.
+        docs (Iterable[List[str]]): One word-token list per document.
+
+    Returns:
+        Dict[str, object]: Keys `tokens`, `words`, `chars`, `bytes` (each a list
+            of per-document totals) and `freqs` (a Counter of pieces over all
+            documents).
+    """
+    freqs: CounterType[str] = Counter()
+    tokens: List[int] = []
+    words: List[int] = []
+    chars: List[int] = []
+    nbytes: List[int] = []
+    for doc in docs:
+        doc_tokens = 0
+        doc_words = 0
+        doc_chars = 0
+        doc_bytes = 0
+        for word in doc:
+            pieces = tokenizer.encode(word)
+            freqs.update(pieces)
+            doc_tokens += len(pieces)
+            doc_words += 1
+            doc_chars += len(word)
+            doc_bytes += len(word.encode("utf-8"))
+        tokens.append(doc_tokens)
+        words.append(doc_words)
+        chars.append(doc_chars)
+        nbytes.append(doc_bytes)
+    return {"tokens": tokens, "words": words, "chars": chars, "bytes": nbytes, "freqs": freqs}
 
 
 def fertility(n_tokens: int, n_words: int) -> float:
@@ -349,6 +390,54 @@ def morph_edit_distance(
     return total / count if count else 0.0
 
 
+def morph_form_stats(
+    tokenizer: TokenizerSpec,
+    segmentations: Sequence[MorphemeSegmentation],
+) -> Dict[str, List[int]]:
+    """Emit per-form sufficient statistics for the boundary morph metrics.
+
+    Encodes each gold form once and records, in form order, the counts that
+    MorphScore F1 and Morph-Edit-Distance decompose into. Forms whose token
+    spans do not tile the surface form are marked invalid (zeroed) so that all
+    tokenizers produce arrays of equal length, aligned by form index; the
+    aggregation restricts to forms valid across every compared tokenizer before
+    bootstrapping over forms.
+
+    Args:
+        tokenizer (TokenizerSpec): The tokenizer under evaluation.
+        segmentations (Sequence[MorphemeSegmentation]): The shared, deterministic
+            sample of gold segmentations.
+
+    Returns:
+        Dict[str, List[int]]: Keys `tp`, `predicted`, `gold` (boundary counts for
+            F1), `edit` (segment-edit distance to gold morphemes), and `valid`
+            (1 when the form tiled, else 0), each a list aligned by form index.
+    """
+    tp: List[int] = []
+    predicted: List[int] = []
+    gold: List[int] = []
+    edit: List[int] = []
+    valid: List[int] = []
+    for segmentation in segmentations:
+        spans = _token_spans(tokenizer, segmentation.form)
+        if spans is None:
+            tp.append(0)
+            predicted.append(0)
+            gold.append(0)
+            edit.append(0)
+            valid.append(0)
+            continue
+        form_len = len(segmentation.form)
+        gold_boundaries = set(segmentation.boundaries())
+        pred_boundaries = {p for p in _boundary_positions(spans, form_len) if 0 < p < form_len}
+        tp.append(len(pred_boundaries & gold_boundaries))
+        predicted.append(len(pred_boundaries))
+        gold.append(len(gold_boundaries))
+        edit.append(_levenshtein(_segments(spans, segmentation.form), segmentation.morphemes))
+        valid.append(1)
+    return {"tp": tp, "predicted": predicted, "gold": gold, "edit": edit, "valid": valid}
+
+
 #: Default cap on sampled word pairs per inverted-index group for consistency.
 _DEFAULT_MAX_PAIRS_PER_GROUP = 200
 
@@ -438,9 +527,41 @@ def morph_consistency_score(
     Returns:
         float: Consistency F1 in `[0, 1]`; higher is better.
     """
+    return morph_consistency_over(
+        tokenizer,
+        _reliable_forms(lexicon, max_forms),
+        max_pairs_per_group=max_pairs_per_group,
+        seed=seed,
+    )
+
+
+def morph_consistency_over(
+    tokenizer: TokenizerSpec,
+    segmentations: Iterable[MorphemeSegmentation],
+    *,
+    max_pairs_per_group: int = _DEFAULT_MAX_PAIRS_PER_GROUP,
+    seed: int = 0,
+) -> float:
+    """Return the morpheme/token consistency F1 over an explicit form list.
+
+    Same quantity as `morph_consistency_score` but computed over a caller-given
+    iterable of segmentations (e.g. the shared morph sample) instead of the
+    whole lexicon. It stays a global point estimate: the inverted-index pair
+    statistics do not decompose into per-form sufficient stats, so no CI is
+    attached to it.
+
+    Args:
+        tokenizer (TokenizerSpec): The tokenizer under evaluation.
+        segmentations (Iterable[MorphemeSegmentation]): The forms to score.
+        max_pairs_per_group (int): Cap on sampled pairs per index group.
+        seed (int): Seed for reproducible pair sampling.
+
+    Returns:
+        float: Consistency F1 in `[0, 1]`; higher is better.
+    """
     token_sets: Dict[str, Set[str]] = {}
     morph_sets: Dict[str, Set[str]] = {}
-    for segmentation in _reliable_forms(lexicon, max_forms):
+    for segmentation in segmentations:
         form = segmentation.form
         token_sets[form] = set(tokenizer.encode(form))
         morph_sets[form] = set(segmentation.morphemes)
