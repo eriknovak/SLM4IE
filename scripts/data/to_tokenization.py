@@ -54,6 +54,7 @@ import yaml
 from tqdm import tqdm
 
 from slm4ie.data.catalog import DatasetConfig, load_config
+from slm4ie.data.extract import unpack_archives
 from slm4ie.data.io_utils import find_project_root, open_output
 from slm4ie.data.parallel import (
     configure_script_logging,
@@ -83,8 +84,12 @@ DEFAULT_DOWNLOAD_CONFIG_RELPATH = Path("configs") / "data" / "download.yaml"
 def _read_sloleks(raw_dir: Path) -> Iterator[Dict[str, Any]]:
     """Yield Sloleks records, tagging them with dataset/task fields.
 
+    Any archive sitting in `raw_dir` (e.g. the downloaded Sloleks zip) is
+    unpacked in place when no XML is found yet, so the download need not be
+    unzipped by hand first.
+
     Args:
-        raw_dir: Directory holding the unzipped Sloleks XML files.
+        raw_dir: Directory holding the Sloleks XML files (or the zip to unpack).
 
     Yields:
         Dict[str, Any]: Records as produced by `iter_sloleks_dir`,
@@ -92,14 +97,12 @@ def _read_sloleks(raw_dir: Path) -> Iterator[Dict[str, Any]]:
 
     Raises:
         FileNotFoundError: If no Sloleks XML files are found under
-            `raw_dir`.
+            `raw_dir`, even after unpacking any archive present.
     """
     if not any(raw_dir.rglob("*.xml")):
-        raise FileNotFoundError(
-            f"No XML files found under {raw_dir}. "
-            "Run scripts/data/download.py --datasets sloleks first "
-            "and unzip Sloleks.3.1.zip."
-        )
+        unpack_archives(raw_dir)
+    if not any(raw_dir.rglob("*.xml")):
+        raise FileNotFoundError(f"No XML files found under {raw_dir}. Run scripts/data/download.py sloleks first.")
     for record in iter_sloleks_dir(raw_dir):
         record["dataset"] = "sloleks"
         record["task"] = TOKENIZER_TASK
@@ -111,10 +114,12 @@ def _read_sloleks_relations(raw_dir: Path) -> Iterator[Dict[str, Any]]:
 
     Each record carries one derived lemma's morpheme decomposition (read from
     the underscore column, not heuristically aligned), tagged with the dataset
-    and task fields and a `verified` flag for the manually-scored subset.
+    and task fields and a `verified` flag for the manually-scored subset. Any
+    archive in `raw_dir` (the downloaded zip) is unpacked in place when no TSV
+    is found yet, so the download need not be unzipped by hand first.
 
     Args:
-        raw_dir: Directory holding the unzipped word-relations download.
+        raw_dir: Directory holding the word-relations TSV (or the zip to unpack).
 
     Yields:
         Dict[str, Any]: Records as produced by
@@ -122,14 +127,16 @@ def _read_sloleks_relations(raw_dir: Path) -> Iterator[Dict[str, Any]]:
             `task` fields.
 
     Raises:
-        FileNotFoundError: If no word-relations TSV is found under `raw_dir`.
+        FileNotFoundError: If no word-relations TSV is found under `raw_dir`,
+            even after unpacking any archive present.
     """
     tsv_path = find_word_relations_tsv(raw_dir)
     if tsv_path is None:
+        unpack_archives(raw_dir)
+        tsv_path = find_word_relations_tsv(raw_dir)
+    if tsv_path is None:
         raise FileNotFoundError(
-            f"No word-relations TSV found under {raw_dir}. "
-            "Run scripts/data/download.py --datasets sloleks_relations first "
-            "and unzip the archive."
+            f"No word-relations TSV found under {raw_dir}. Run scripts/data/download.py sloleks_relations first."
         )
     for record in iter_word_relation_segmentations(tsv_path):
         record["dataset"] = "sloleks_relations"

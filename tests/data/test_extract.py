@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.data.extract import extract_archive
+from slm4ie.data.extract import extract_archive, unpack_archives
 
 
 class TestExtractArchive:
@@ -61,9 +61,7 @@ class TestExtractArchive:
 
         assert result == output_dir
         assert (output_dir / "source.txt").exists()
-        assert (output_dir / "source.txt").read_bytes() == (
-            b"tgz content\n"
-        )
+        assert (output_dir / "source.txt").read_bytes() == (b"tgz content\n")
 
     def test_extract_tar_gz_long_ext(self, tmp_path: Path):
         """Test that .tar.gz extension also works."""
@@ -81,9 +79,7 @@ class TestExtractArchive:
         assert result == output_dir
         assert (output_dir / "data.txt").exists()
 
-    def test_extract_skips_if_already_extracted(
-        self, tmp_path: Path
-    ):
+    def test_extract_skips_if_already_extracted(self, tmp_path: Path):
         """Gz skip when output exists — don't overwrite."""
         original_content = b"original data\n"
         new_content = b"new data\n"
@@ -106,9 +102,7 @@ class TestExtractArchive:
         # Content should remain unchanged
         assert expected_output.read_bytes() == original_content
 
-    def test_extract_unknown_format_raises(
-        self, tmp_path: Path
-    ):
+    def test_extract_unknown_format_raises(self, tmp_path: Path):
         """Unknown format .xyz raises ValueError."""
         unknown_path = tmp_path / "archive.xyz"
         unknown_path.write_bytes(b"not an archive")
@@ -118,3 +112,30 @@ class TestExtractArchive:
 
         with pytest.raises(ValueError, match="Unsupported archive format"):
             extract_archive(unknown_path, output_dir)
+
+
+class TestUnpackArchives:
+    """Tests for unpack_archives (in-place archive extraction)."""
+
+    def test_unzips_archive_in_place(self, tmp_path: Path):
+        """A zip directly in the dir is extracted there and returned."""
+        with zipfile.ZipFile(tmp_path / "data.zip", "w") as zf:
+            zf.writestr("inner/file.tsv", "a\tb\n")
+
+        extracted = unpack_archives(tmp_path)
+
+        assert extracted == [tmp_path / "data.zip"]
+        assert (tmp_path / "inner" / "file.tsv").read_text(encoding="utf-8") == "a\tb\n"
+
+    def test_no_archive_returns_empty(self, tmp_path: Path):
+        """A directory with no recognized archive yields an empty list."""
+        (tmp_path / "plain.tsv").write_text("x\n", encoding="utf-8")
+        assert unpack_archives(tmp_path) == []
+
+    def test_ignores_nested_archives(self, tmp_path: Path):
+        """Archives in subdirectories are not searched (top level only)."""
+        nested = tmp_path / "sub"
+        nested.mkdir()
+        with zipfile.ZipFile(nested / "deep.zip", "w") as zf:
+            zf.writestr("x.txt", "y")
+        assert unpack_archives(tmp_path) == []

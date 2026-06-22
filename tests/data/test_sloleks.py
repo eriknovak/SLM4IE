@@ -4,6 +4,7 @@ import gzip
 import json
 import sys
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from textwrap import dedent
 
@@ -136,10 +137,7 @@ class TestWordFormMsd:
 
     def test_reads_direct_msd_child(self):
         """The JOS `<msd>` directly under `<wordForm>` is returned."""
-        wf = ET.fromstring(
-            '<wordForm><msd language="sl" system="JOS">Ncfsn</msd>'
-            "<formRepresentations/></wordForm>"
-        )
+        wf = ET.fromstring('<wordForm><msd language="sl" system="JOS">Ncfsn</msd><formRepresentations/></wordForm>')
         assert sloleks._wordform_msd(wf) == "Ncfsn"
 
     def test_missing_msd_returns_none(self):
@@ -272,7 +270,10 @@ class TestToTokenizerEvalConverter:
         assert second == 0  # skipped
 
         third = to_tokenizer_eval.convert_dataset(
-            "sloleks", raw_dir, out_dir, force=True,
+            "sloleks",
+            raw_dir,
+            out_dir,
+            force=True,
         )
         assert third == 2
 
@@ -304,6 +305,37 @@ class TestToTokenizerEvalConverter:
         empty_dir.mkdir()
         with pytest.raises(FileNotFoundError):
             list(to_tokenizer_eval._read_sloleks(empty_dir))
+
+    def test_read_sloleks_auto_unzips(self, tmp_path: Path):
+        """The Sloleks reader unpacks a zip in raw_dir when no XML is present."""
+        raw_dir = tmp_path / "raw" / "sloleks"
+        raw_dir.mkdir(parents=True)
+        with zipfile.ZipFile(raw_dir / "Sloleks.zip", "w") as zf:
+            zf.writestr("sloleks_3.1_001.xml", SAMPLE_LEXICON)
+
+        records = list(to_tokenizer_eval._read_sloleks(raw_dir))
+
+        assert len(records) == 2
+        assert all(r["dataset"] == "sloleks" for r in records)
+
+    def test_read_sloleks_relations_auto_unzips(self, tmp_path: Path):
+        """The relations reader unpacks a zip in raw_dir when no TSV is present."""
+        raw_dir = tmp_path / "raw" / "sloleks_relations"
+        raw_dir.mkdir(parents=True)
+        rows = [
+            "original\trelated\torig_dec\trel_dec\tmte_o\tmte_r\toid\trid\tov\trule\tpat\tadq",
+            "pisati\tpisatelj\tpis_ati\tpis_at_elj\tG\tSom\t1\t2\tpis\tG.Som.5\tx\t2",
+        ]
+        with zipfile.ZipFile(raw_dir / "relations.zip", "w") as zf:
+            zf.writestr("nssss_sloleks_word_relations_1.1.tsv", "\n".join(rows) + "\n")
+
+        records = list(to_tokenizer_eval._read_sloleks_relations(raw_dir))
+
+        assert len(records) == 1
+        assert records[0]["lemma"] == "pisatelj"
+        assert records[0]["morphemes"] == ["pis", "at", "elj"]
+        assert records[0]["verified"] is True
+        assert records[0]["dataset"] == "sloleks_relations"
 
 
 class TestLoadTokenizationConfig:
