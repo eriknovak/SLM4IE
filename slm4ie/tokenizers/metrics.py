@@ -31,6 +31,9 @@ METRIC_DIRECTIONS: Dict[str, str] = {
     "morph_score_f1": "higher",
     "morph_edit_distance": "lower",
     "morph_consistency": "higher",
+    "morph_score_f1_deriv": "higher",
+    "morph_edit_distance_deriv": "lower",
+    "morph_consistency_deriv": "higher",
 }
 
 

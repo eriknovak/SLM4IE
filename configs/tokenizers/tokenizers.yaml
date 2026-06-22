@@ -25,8 +25,14 @@ vocab_sizes: [16000, 32000, 64000]
 special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
 
 # --- Morphology (Sloleks-derived silver gold) ------------------------------
+# sloleks_path        inflectional gold (form -> stem+suffix), heuristic.
+# sloleks_relations_path  derivational gold (lemma -> morphemes), from the
+#                     Sloleks 2.0 word relations (CLARIN 11356/1986). When set,
+#                     its morphemes also enrich the morphological backends'
+#                     table and the report gains derivational *_deriv columns.
 morphology:
   sloleks_path: /vault/data/SLM4IE/tokenization/sloleks.jsonl.gz
+  sloleks_relations_path: /vault/data/SLM4IE/tokenization/sloleks_relations.jsonl.gz
   min_stem_len: 2
 
 # --- Output ----------------------------------------------------------------

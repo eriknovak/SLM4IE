@@ -67,10 +67,14 @@ class MorphemeSegmentation:
         form (str): The surface inflected form.
         morphemes (List[str]): Ordered morpheme pieces; concatenating them
             reproduces `form`.
-        labels (List[str]): Per-morpheme role, one of `stem`, `suffix`, or
-            `whole` (the last marks an unreliable, unsegmented fallback).
+        labels (List[str]): Per-morpheme role, one of `stem`, `suffix`,
+            `whole` (the last marks an unreliable, unsegmented fallback), or
+            `morph` (a role-agnostic derivational piece).
         lemma (str): The lemma the form was aligned against.
         msd (Optional[str]): The form's morphosyntactic descriptor, if known.
+        verified (Optional[bool]): For derivational segmentations, whether the
+            split carries a manual linguist evaluation; None when not
+            applicable (e.g. inflectional segmentations).
     """
 
     form: str
@@ -78,6 +82,7 @@ class MorphemeSegmentation:
     labels: List[str]
     lemma: str
     msd: Optional[str] = None
+    verified: Optional[bool] = None
 
     @property
     def is_reliable(self) -> bool:
@@ -342,6 +347,97 @@ def build_morph_lexicon(sloleks_path: Path, *, min_stem_len: int = 2) -> MorphLe
     return lexicon
 
 
+def build_derivational_lexicon(path: Path) -> MorphLexicon:
+    """Build a derivational morpheme lexicon from a word-relations JSONL.
+
+    Reads the `sloleks_relations` JSONL produced by
+    `scripts/data/to_tokenization.py`, where each record carries a derived
+    `lemma` and its `morphemes` already split on the resource's underscore
+    decomposition. Unlike `build_morph_lexicon`, no heuristic alignment runs:
+    the boundaries are taken as given. The keyed form is the lemma itself, so
+    this lexicon scores derivational (not inflectional) segmentation. Pieces are
+    labelled `morph` because the resource gives boundaries, not per-morpheme
+    roles, and the `verified` flag is carried through for later verified-only
+    reporting.
+
+    Args:
+        path (Path): Path to the `sloleks_relations` JSONL(.gz).
+
+    Returns:
+        MorphLexicon: Lemma-keyed derivational segmentations plus the derived
+            morpheme inventory.
+
+    Raises:
+        FileNotFoundError: If `path` does not exist.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Derivational lexicon not found: {path}")
+
+    lexicon = MorphLexicon()
+    with open_text_stream(path) as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            lemma = record.get("lemma")
+            morphemes = record.get("morphemes")
+            if not lemma or not morphemes:
+                continue
+            segmentation = MorphemeSegmentation(
+                form=lemma,
+                morphemes=list(morphemes),
+                labels=["morph"] * len(morphemes),
+                lemma=lemma,
+                msd=record.get("msd"),
+                verified=record.get("verified"),
+            )
+            _add_to_lexicon(lexicon, segmentation)
+
+    logger.info(
+        "Built derivational lexicon: %d forms, %d morphemes (%d collisions).",
+        len(lexicon.by_form),
+        len(lexicon.inventory),
+        lexicon.collisions,
+    )
+    return lexicon
+
+
+def merge_lexicons(*lexicons: MorphLexicon) -> MorphLexicon:
+    """Union several lexicons into one morpheme table, preferring richer splits.
+
+    Intended for the backend morpheme table (`morph_bpe`, `morph_piece`), which
+    looks words up in `by_form`. When the same form appears in more than one
+    lexicon, the segmentation with more morpheme pieces wins, so a derivational
+    split of a lemma supersedes its trivial single-stem inflectional entry; ties
+    keep the first-seen entry. The inventory, stems, and suffixes are rebuilt
+    from the merged forms.
+
+    Args:
+        lexicons (MorphLexicon): Lexicons to union, in precedence order for
+            ties (earlier wins).
+
+    Returns:
+        MorphLexicon: The merged lexicon.
+    """
+    merged = MorphLexicon()
+    for lexicon in lexicons:
+        for segmentation in lexicon.by_form.values():
+            existing = merged.by_form.get(segmentation.form)
+            if existing is None or len(segmentation.morphemes) > len(existing.morphemes):
+                merged.by_form[segmentation.form] = segmentation
+
+    for segmentation in merged.by_form.values():
+        for morpheme, label in zip(segmentation.morphemes, segmentation.labels):
+            merged.inventory[morpheme] = merged.inventory.get(morpheme, 0) + 1
+            if label == "suffix":
+                merged.suffixes.add(morpheme)
+            else:
+                merged.stems.add(morpheme)
+    return merged
+
+
 def save_lexicon(lexicon: MorphLexicon, path: Path) -> Path:
     """Persist a lexicon's reliable segmentations to JSONL(.gz).
 
@@ -364,6 +460,7 @@ def save_lexicon(lexicon: MorphLexicon, path: Path) -> Path:
                 "labels": entry.labels,
                 "lemma": entry.lemma,
                 "msd": entry.msd,
+                "verified": entry.verified,
             }
             out.write(json.dumps(payload, ensure_ascii=False))
             out.write("\n")
@@ -399,6 +496,7 @@ def load_lexicon(path: Path) -> MorphLexicon:
                 labels=payload["labels"],
                 lemma=payload.get("lemma", ""),
                 msd=payload.get("msd"),
+                verified=payload.get("verified"),
             )
             _add_to_lexicon(lexicon, segmentation)
     return lexicon

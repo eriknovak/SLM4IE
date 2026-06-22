@@ -20,7 +20,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sample_cache
-from slm4ie.tokenizers.morphology import build_morph_lexicon, load_lexicon, save_lexicon
+from slm4ie.tokenizers.morphology import (
+    build_derivational_lexicon,
+    build_morph_lexicon,
+    load_lexicon,
+    merge_lexicons,
+    save_lexicon,
+)
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.config import TokenizerSweepConfig
@@ -104,8 +110,17 @@ def prepare_inputs(cfg: TokenizerSweepConfig, force: bool = False) -> Tuple[Path
         lexicon_path = cfg.lexicon_path
         if force or not lexicon_path.exists():
             logger.info("Deriving morpheme lexicon from %s", cfg.sloleks_path)
-            lexicon = build_morph_lexicon(cfg.sloleks_path, min_stem_len=cfg.min_stem_len)
-            save_lexicon(lexicon, lexicon_path)
+            infl = build_morph_lexicon(cfg.sloleks_path, min_stem_len=cfg.min_stem_len)
+            save_lexicon(infl, cfg.infl_lexicon_path)
+            if cfg.needs_derivational():
+                logger.info("Deriving derivational lexicon from %s", cfg.sloleks_relations_path)
+                deriv = build_derivational_lexicon(cfg.sloleks_relations_path)
+                save_lexicon(deriv, cfg.deriv_lexicon_path)
+                # Derivational splits win ties so a lemma's morpheme split beats
+                # its trivial single-stem inflectional entry in the table.
+                save_lexicon(merge_lexicons(deriv, infl), lexicon_path)
+            else:
+                save_lexicon(infl, lexicon_path)
         else:
             logger.info("Reusing cached morpheme lexicon: %s", lexicon_path)
     return sample_path, lexicon_path

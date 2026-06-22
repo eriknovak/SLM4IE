@@ -17,7 +17,7 @@ from slm4ie.tokenizers.analysis import (
 )
 from slm4ie.tokenizers.corpus import SampleBudget
 from slm4ie.tokenizers.metrics import iter_words
-from slm4ie.tokenizers.morphology import build_morph_lexicon
+from slm4ie.tokenizers.morphology import MorphemeSegmentation, build_morph_lexicon
 from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, log_training_to_mlflow, prepare_inputs, train_one
 from slm4ie.utils.config import TokenizerSweepConfig
 
@@ -231,6 +231,62 @@ def test_augment_with_statistics_adds_cis_and_significance(tmp_path: Path):
     assert len(block["fertility"]["pairs"]) == 1
     assert "p_adj" in block["fertility"]["pairs"][0]
     assert stats_config["units"] == {"corpus": "documents", "morph": "forms"}
+
+
+_DERIV_RECORD = {
+    "run_key": "bpe-90",
+    "tokenizer": "bpe",
+    "vocab_size": 90,
+    "fertility": 1.5,
+    "tokens_per_byte": 0.4,
+    "chars_per_token": 2.0,
+    "renyi_efficiency": 0.8,
+    "morph_score_f1": 0.5,
+    "morph_edit_distance": 0.6,
+    "morph_consistency": 0.7,
+    "morph_score_f1_deriv": 0.3,
+    "morph_edit_distance_deriv": 1.2,
+    "morph_consistency_deriv": 0.25,
+}
+
+
+def test_build_report_includes_deriv_columns_when_present():
+    """Derivational columns appear in the report when a run carries them."""
+    markdown, _ = build_report([_DERIV_RECORD])
+    assert "morph_score_f1_deriv ↑" in markdown
+    assert "morph_edit_distance_deriv ↓" in markdown
+    assert "morph_consistency_deriv ↑" in markdown
+
+
+def test_build_report_omits_deriv_columns_when_absent():
+    """No derivational column headers are shown when no run carries them."""
+    base = {k: v for k, v in _DERIV_RECORD.items() if not k.endswith("_deriv")}
+    markdown, _ = build_report([base])
+    # The explanatory note mentions *_deriv, but no column header should.
+    assert "morph_score_f1_deriv ↑" not in markdown
+    assert "morph_consistency_deriv ↑" not in markdown
+
+
+def test_evaluate_artifact_adds_deriv_point_estimates(tmp_path: Path):
+    """A non-empty deriv_sample adds derivational point-estimate columns."""
+    cfg = _make_config(tmp_path)
+    sample_path, lexicon_path = prepare_inputs(cfg)
+    train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
+
+    deriv_sample = [
+        MorphemeSegmentation("hišica", ["hiš", "ic", "a"], ["morph", "morph", "morph"], "hišica", "Sozei", False),
+        MorphemeSegmentation("pisatelj", ["pis", "at", "elj"], ["morph", "morph", "morph"], "pisatelj", "Som", True),
+    ]
+    record = evaluate_artifact(
+        "bpe-90",
+        output_root=cfg.output_root,
+        eval_docs=[["hiša", "hiše"]],
+        morph_sample=list(build_morph_lexicon(cfg.sloleks_path).by_form.values()),
+        deriv_sample=deriv_sample,
+    )
+    assert 0.0 <= record["morph_score_f1_deriv"] <= 1.0
+    assert record["morph_edit_distance_deriv"] >= 0.0
+    assert 0.0 <= record["morph_coverage_deriv"] <= 1.0
 
 
 class TestTrainLinkTags:

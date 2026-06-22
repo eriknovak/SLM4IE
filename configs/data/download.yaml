@@ -425,5 +425,26 @@ datasets:
       pretraining corpus. Distributed as a single 263 MB zip with ~100
       split TEI XML files. Intentionally absent from
       configs/data/extract.yaml so the extract -> datatrove -> curate
-      pipeline never sees it. Convert via scripts/data/to_tokenizer_eval.py.
+      pipeline never sees it. Convert via scripts/data/to_tokenization.py.
+      License: CC BY-SA 4.0.
+
+  sloleks_relations:
+    enabled: true
+    benchmark: true
+    source: http
+    provider: clarin.si
+    name: "Sloleks 2.0 word relations 1.1 (derivational decomposition)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1986/Sloleks.word.relations.1.1.zip?sequence=1&isAllowed=y"
+    output_dir: sloleks_relations
+    tasks:
+      - TOKENIZER
+    note: >
+      Derivational word-relation pairs from Sloleks 2.0 (CLARIN.SI 11356/1986,
+      DOI 10.34894/EBQJRF). Each derived lemma is decomposed into morphemes with
+      underscores (pis_at_elj); ~5k of the 66,347 pairs carry a manual linguist
+      score (0/1/2). Used as the *derivational* silver-gold for tokenizer /
+      morphology evaluation only -- NOT running text and must not enter the
+      pretraining corpus. Intentionally absent from configs/data/extract.yaml.
+      Convert via scripts/data/to_tokenization.py. MSDs are MULTEXT-East V6.
       License: CC BY-SA 4.0.

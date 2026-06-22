@@ -32,6 +32,9 @@ class TokenizerSweepConfig:
         special_tokens (List[str]): Reserved tokens for every tokenizer.
         sloleks_path (Path): Path to the converted Sloleks JSONL(.gz).
         min_stem_len (int): Minimum stem length for morpheme derivation.
+        sloleks_relations_path (Optional[Path]): Path to the converted Sloleks
+            word-relations JSONL(.gz) for the derivational gold, or None to skip
+            the derivational track.
         output_root (Path): Directory holding per-run artifact subdirs.
         report_dir (Path): Directory for the comparison report.
         eval_budget (SampleBudget): Sampling budget for the held-out eval set.
@@ -59,6 +62,7 @@ class TokenizerSweepConfig:
     renyi_alpha: float
     mlflow_experiment: str
     mlflow_enabled: bool
+    sloleks_relations_path: Optional[Path] = None
     mlflow_tracking_uri: Optional[str] = None
     stats_n_resamples: int = 2000
     stats_ci_level: float = 0.95
@@ -85,12 +89,33 @@ class TokenizerSweepConfig:
 
     @property
     def lexicon_path(self) -> Path:
-        """Path to the derived morpheme lexicon artifact.
+        """Path to the morpheme table consumed by the morphological backends.
+
+        Holds the inflectional lexicon, or its union with the derivational
+        lexicon when the derivational track is configured.
 
         Returns:
             Path: `<output_root>/morph_lexicon.jsonl.gz`.
         """
         return self.output_root / "morph_lexicon.jsonl.gz"
+
+    @property
+    def infl_lexicon_path(self) -> Path:
+        """Path to the inflectional-only gold lexicon for the morph metrics.
+
+        Returns:
+            Path: `<output_root>/morph_lexicon_infl.jsonl.gz`.
+        """
+        return self.output_root / "morph_lexicon_infl.jsonl.gz"
+
+    @property
+    def deriv_lexicon_path(self) -> Path:
+        """Path to the derivational gold lexicon for the derivational metrics.
+
+        Returns:
+            Path: `<output_root>/morph_lexicon_deriv.jsonl.gz`.
+        """
+        return self.output_root / "morph_lexicon_deriv.jsonl.gz"
 
     def needs_morphology(self) -> bool:
         """Return True when any selected tokenizer needs the morpheme lexicon.
@@ -99,6 +124,17 @@ class TokenizerSweepConfig:
             bool: True if a morphological backend is in the sweep.
         """
         return any(name.startswith("morph") for name in self.tokenizers)
+
+    def needs_derivational(self) -> bool:
+        """Return True when a derivational gold source is configured.
+
+        The derivational metrics apply to every tokenizer, so this is
+        independent of whether a morphological backend is in the sweep.
+
+        Returns:
+            bool: True if `sloleks_relations_path` is set.
+        """
+        return self.sloleks_relations_path is not None
 
 
 def _budget_from_dict(raw: Dict[str, Any]) -> SampleBudget:
@@ -177,6 +213,9 @@ def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
         special_tokens=list(raw.get("special_tokens") or []),
         sloleks_path=Path(morphology["sloleks_path"]),
         min_stem_len=int(morphology.get("min_stem_len", 2)),
+        sloleks_relations_path=(
+            Path(morphology["sloleks_relations_path"]) if morphology.get("sloleks_relations_path") else None
+        ),
         output_root=output_root,
         report_dir=report_dir,
         eval_budget=_budget_from_dict(evaluation.get("corpus_budget") or {}),

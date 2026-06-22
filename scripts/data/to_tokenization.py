@@ -63,6 +63,10 @@ from slm4ie.data.parallel import (
     workers_quiet,
 )
 from slm4ie.data.sloleks import iter_sloleks_dir
+from slm4ie.data.sloleks_relations import (
+    find_word_relations_tsv,
+    iter_word_relation_segmentations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,12 +106,44 @@ def _read_sloleks(raw_dir: Path) -> Iterator[Dict[str, Any]]:
         yield record
 
 
+def _read_sloleks_relations(raw_dir: Path) -> Iterator[Dict[str, Any]]:
+    """Yield Sloleks word-relation derivational segmentations.
+
+    Each record carries one derived lemma's morpheme decomposition (read from
+    the underscore column, not heuristically aligned), tagged with the dataset
+    and task fields and a `verified` flag for the manually-scored subset.
+
+    Args:
+        raw_dir: Directory holding the unzipped word-relations download.
+
+    Yields:
+        Dict[str, Any]: Records as produced by
+            `iter_word_relation_segmentations`, extended with `dataset` and
+            `task` fields.
+
+    Raises:
+        FileNotFoundError: If no word-relations TSV is found under `raw_dir`.
+    """
+    tsv_path = find_word_relations_tsv(raw_dir)
+    if tsv_path is None:
+        raise FileNotFoundError(
+            f"No word-relations TSV found under {raw_dir}. "
+            "Run scripts/data/download.py --datasets sloleks_relations first "
+            "and unzip the archive."
+        )
+    for record in iter_word_relation_segmentations(tsv_path):
+        record["dataset"] = "sloleks_relations"
+        record["task"] = TOKENIZER_TASK
+        yield record
+
+
 #: Registry mapping dataset key to a reader callable.
 _READERS: Dict[
     str,
     Callable[[Path], Iterator[Dict[str, Any]]],
 ] = {
     "sloleks": _read_sloleks,
+    "sloleks_relations": _read_sloleks_relations,
 }
 
 
@@ -140,18 +176,11 @@ def load_tokenization_config(config_path: Path) -> Dict[str, Any]:
     if not output_dir:
         missing.append("output_dir")
     if missing:
-        raise ValueError(
-            f"Tokenization config {config_path} is missing required fields: "
-            f"{', '.join(missing)}"
-        )
+        raise ValueError(f"Tokenization config {config_path} is missing required fields: {', '.join(missing)}")
     if not isinstance(input_dir, str) or not isinstance(output_dir, str):
-        raise ValueError(
-            f"Tokenization config {config_path}: `input_dir` and `output_dir` must be strings."
-        )
+        raise ValueError(f"Tokenization config {config_path}: `input_dir` and `output_dir` must be strings.")
     if not isinstance(datasets, list) or not all(isinstance(k, str) for k in datasets):
-        raise ValueError(
-            f"Tokenization config {config_path}: `datasets` must be a list of strings."
-        )
+        raise ValueError(f"Tokenization config {config_path}: `datasets` must be a list of strings.")
 
     return {
         "input_dir": Path(input_dir),
@@ -336,9 +365,7 @@ def main() -> None:
 
     config_path = args.config if args.config else project_root / DEFAULT_CONFIG_RELPATH
     download_config_path = (
-        args.download_config
-        if args.download_config
-        else project_root / DEFAULT_DOWNLOAD_CONFIG_RELPATH
+        args.download_config if args.download_config else project_root / DEFAULT_DOWNLOAD_CONFIG_RELPATH
     )
 
     config = load_tokenization_config(config_path)
@@ -354,7 +381,8 @@ def main() -> None:
         keys: List[str] = list(declared_keys)
         if not keys:
             logger.warning(
-                "No datasets declared in %s; nothing to do.", config_path,
+                "No datasets declared in %s; nothing to do.",
+                config_path,
             )
             return
     elif args.dataset_keys:
@@ -375,8 +403,7 @@ def main() -> None:
     # Resolve per-dataset raw dirs in the parent (avoids re-parsing
     # download.yaml inside every worker).
     dataset_dirs: Dict[str, Path] = {
-        key: input_dir / _resolve_dataset_subdir(download_config_path, key)
-        for key in keys
+        key: input_dir / _resolve_dataset_subdir(download_config_path, key) for key in keys
     }
 
     workers = resolve_workers(args.max_workers, len(keys), cpu_default(len(keys)))
