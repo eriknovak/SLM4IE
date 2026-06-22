@@ -15,9 +15,13 @@ WordPiece, SentencePiece Unigram, MorphBPE, and MorphPiece) across a
 16k/32k/64k vocab sweep, scores them with six metrics (Fertility, CTC
 compression, Rényi efficiency, MorphScore, Morph-Edit-Distance, and
 Morph-Consistency), and exports each as a HuggingFace tokenizer. It consumes the
-deduplicated corpus (`pretrain/05_2_dedup/`) for training and the Sloleks gold
-(`tokenization/sloleks.jsonl.gz`) for the morph metrics. Requires the `tokenize`
-extra (`uv sync --extra tokenize`).
+deduplicated corpus (`pretrain/05_2_dedup/`) for training and two Sloleks-derived
+golds for the morph metrics: the inflectional gold
+(`tokenization/sloleks.jsonl.gz`) and the derivational gold
+(`tokenization/sloleks_relations.jsonl.gz`, from the Sloleks 2.0 word relations).
+The derivational gold adds point-estimate `*_deriv` metric columns and enriches
+the morphological backends' morpheme table. Requires the `tokenize` extra
+(`uv sync --extra tokenize`).
 
 **Entry point:** [`scripts/tokenizers/train.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/train.py) (also [`scripts/tokenizers/analyze.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/analyze.py) and [`scripts/tokenizers/export.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/export.py))
 **Config:** [`configs/tokenizers/tokenizers.yaml`](https://github.com/eriknovak/SLM4IE/blob/main/configs/tokenizers/tokenizers.yaml)

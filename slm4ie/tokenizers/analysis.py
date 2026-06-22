@@ -47,6 +47,15 @@ _REPORT_COLUMNS = [
     "morph_consistency",
 ]
 
+#: Derivational morph columns, scored against the Sloleks word-relations gold.
+#: Point estimates only (no bootstrap CI / significance in this pass); shown
+#: after the base columns when any run carries them.
+_DERIV_COLUMNS = [
+    "morph_score_f1_deriv",
+    "morph_edit_distance_deriv",
+    "morph_consistency_deriv",
+]
+
 #: Decomposable metrics that get bootstrap CIs and paired significance tests.
 #: Each reduces to per-unit sufficient statistics that sum across the resampling
 #: unit (documents for corpus metrics, forms for morph metrics).
@@ -97,6 +106,40 @@ def _f1_combine(true_positive: Any, predicted: Any, gold: Any) -> np.ndarray:
     return _safe_div(2.0 * precision * recall, precision + recall)
 
 
+def _morph_point_estimates(stats: Dict[str, List[int]]) -> Dict[str, float]:
+    """Aggregate per-form morph statistics into point estimates.
+
+    Used for the derivational track, which reports point estimates only (no
+    bootstrap CIs), so it does not persist per-form arrays the way the
+    inflectional track does.
+
+    Args:
+        stats (Dict[str, List[int]]): Per-form arrays from `morph_form_stats`
+            (`tp`, `predicted`, `gold`, `edit`, `valid`).
+
+    Returns:
+        Dict[str, float]: `f1`, `precision`, `recall` (boundary scores),
+            `edit` (mean segment-edit distance), and `coverage` (fraction of
+            forms the tokenizer tiled).
+    """
+    valid = np.asarray(stats["valid"], dtype=bool)
+    n_valid = int(valid.sum())
+    tp = int(np.asarray(stats["tp"], dtype=np.int64)[valid].sum())
+    predicted = int(np.asarray(stats["predicted"], dtype=np.int64)[valid].sum())
+    gold = int(np.asarray(stats["gold"], dtype=np.int64)[valid].sum())
+    edit = int(np.asarray(stats["edit"], dtype=np.int64)[valid].sum())
+    precision = tp / predicted if predicted else 0.0
+    recall = tp / gold if gold else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+        "edit": edit / n_valid if n_valid else 0.0,
+        "coverage": n_valid / len(valid) if len(valid) else 0.0,
+    }
+
+
 def load_tokenizer_artifact(artifact_dir: Path):
     """Load a trained tokenizer from its artifact directory.
 
@@ -122,6 +165,7 @@ def evaluate_artifact(
     output_root: Path,
     eval_docs: Sequence[Sequence[str]],
     morph_sample: Sequence[MorphemeSegmentation],
+    deriv_sample: Sequence[MorphemeSegmentation] = (),
     alpha: float = 2.5,
 ) -> Optional[Dict[str, Any]]:
     """Run all six metrics for one trained tokenizer run.
@@ -140,6 +184,9 @@ def evaluate_artifact(
             kept grouped per document (the corpus resampling unit).
         morph_sample (Sequence[MorphemeSegmentation]): The shared, deterministic
             sample of gold segmentations (the morph resampling unit).
+        deriv_sample (Sequence[MorphemeSegmentation]): The derivational gold
+            sample; when non-empty, derivational point-estimate columns
+            (`morph_score_f1_deriv` etc.) are added. Empty skips the track.
         alpha (float): Renyi order.
 
     Returns:
@@ -193,6 +240,20 @@ def evaluate_artifact(
         "morph_edit_distance": float(form_edit[valid].sum()) / n_valid if n_valid else 0.0,
         "morph_consistency": morph_consistency_over(tokenizer, morph_sample),
     }
+
+    if deriv_sample:
+        deriv = _morph_point_estimates(morph_form_stats(tokenizer, deriv_sample))
+        record.update(
+            {
+                "morph_score_f1_deriv": deriv["f1"],
+                "morph_score_precision_deriv": deriv["precision"],
+                "morph_score_recall_deriv": deriv["recall"],
+                "morph_edit_distance_deriv": deriv["edit"],
+                "morph_coverage_deriv": deriv["coverage"],
+                "morph_consistency_deriv": morph_consistency_over(tokenizer, deriv_sample),
+            }
+        )
+
     (artifact_dir / "metrics.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     np.savez_compressed(
         artifact_dir / EVAL_UNITS_FILENAME,
@@ -470,26 +531,29 @@ def build_report(
             carrying the results, directions, significance, and stats config.
     """
     ordered = sorted(results, key=lambda r: (r["tokenizer"], r["vocab_size"]))
+    columns = _REPORT_COLUMNS + [col for col in _DERIV_COLUMNS if any(col in r for r in results)]
     headers = ["tokenizer", "vocab"] + [
-        f"{col} {_DIRECTION_ARROW.get(METRIC_DIRECTIONS.get(col, ''), '')}".strip() for col in _REPORT_COLUMNS
+        f"{col} {_DIRECTION_ARROW.get(METRIC_DIRECTIONS.get(col, ''), '')}".strip() for col in columns
     ]
     lines = [
         "# Tokenizer comparison (Slovenian)",
         "",
-        "Morphological metrics use a Sloleks-derived silver-gold segmentation "
-        "(inflectional only); treat them as relative comparators, not absolute "
-        "morphological accuracy.",
+        "Base morph metrics use a Sloleks-derived silver-gold segmentation "
+        "(inflectional only); `*_deriv` columns use the Sloleks word-relations "
+        "derivational silver-gold (lemmas). Treat both as relative comparators, "
+        "not absolute morphological accuracy.",
         "",
         "Decomposable metrics carry a 95% bootstrap CI in brackets (documents "
         "resampled for corpus metrics, forms for morph metrics). "
-        "`renyi_efficiency` and `morph_consistency` are point estimates only.",
+        "`renyi_efficiency`, `morph_consistency`, and all `*_deriv` columns are "
+        "point estimates only.",
         "",
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
     for record in ordered:
         row = [record["tokenizer"], str(record["vocab_size"])]
-        row += [_format_metric_cell(record, col) for col in _REPORT_COLUMNS]
+        row += [_format_metric_cell(record, col) for col in columns]
         lines.append("| " + " | ".join(row) + " |")
 
     payload = {
@@ -577,7 +641,16 @@ def log_results_to_mlflow(
         return
 
     commit = ml.git_commit()
-    metric_keys = [*_REPORT_COLUMNS, "morph_score_precision", "morph_score_recall", "vocab_used"]
+    metric_keys = [
+        *_REPORT_COLUMNS,
+        *_DERIV_COLUMNS,
+        "morph_score_precision",
+        "morph_score_recall",
+        "morph_score_precision_deriv",
+        "morph_score_recall_deriv",
+        "morph_coverage_deriv",
+        "vocab_used",
+    ]
     with ml.mlflow_run("sweep-eval", tags={"run_type": "sweep", "phase": "eval"}):
         for record in results:
             with ml.mlflow_run(

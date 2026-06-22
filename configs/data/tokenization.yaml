@@ -27,3 +27,4 @@ output_dir: /vault/data/SLM4IE/tokenization
 #   2. have a reader registered in scripts/data/to_tokenization.py.
 datasets:
   - sloleks
+  - sloleks_relations

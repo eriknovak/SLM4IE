@@ -359,7 +359,7 @@ The first run of the keyword stage downloads the Slovenian classla model (~200 M
 
 #### Tokenizer-quality data (`to_tokenization.py`)
 
-`to_tokenization.py` materializes lexicon-derived datasets used only for tokenizer / morphology evaluation — they never enter the pretraining corpus. Currently this covers Sloleks 3.1 (Slovenian inflectional lexicon). Configuration lives in [`configs/data/tokenization.yaml`](configs/data/tokenization.yaml); the script also reads [`configs/data/download.yaml`](configs/data/download.yaml) to resolve per-dataset raw subdirectories.
+`to_tokenization.py` materializes lexicon-derived datasets used only for tokenizer / morphology evaluation — they never enter the pretraining corpus. This covers Sloleks 3.1 (Slovenian inflectional lexicon → inflectional gold) and the Sloleks 2.0 word relations (CLARIN 11356/1986 → derivational silver gold; ~66k lemmas decomposed with underscores, ~5k linguist-verified). Both are CC BY-SA 4.0. Configuration lives in [`configs/data/tokenization.yaml`](configs/data/tokenization.yaml); the script also reads [`configs/data/download.yaml`](configs/data/download.yaml) to resolve per-dataset raw subdirectories.
 
 ```bash
 # Convert every dataset declared in tokenization.yaml
@@ -420,12 +420,15 @@ determine which segments Slovenian most morphologically. Driven by
 Requires the `tokenize` extra: `uv sync --extra tokenize`.
 
 The stage consumes the deduplicated corpus (`pretrain/05_2_dedup/`) for training
-and the Sloleks lexicon (`tokenization/sloleks.jsonl.gz`, produced by
-`to_tokenization.py`) for the morpheme-derived gold used by the morph metrics, so
-run `to_tokenization.py sloleks` first.
+and two Sloleks-derived golds produced by `to_tokenization.py`: the inflectional
+gold (`tokenization/sloleks.jsonl.gz`) and the derivational gold
+(`tokenization/sloleks_relations.jsonl.gz`). The morph metrics report against the
+inflectional gold (with bootstrap CIs); the derivational gold adds point-estimate
+`*_deriv` columns and also enriches the morphological backends' morpheme table.
+Run both converters first.
 
 ```bash
-uv run python scripts/data/to_tokenization.py sloleks    # prerequisite: Sloleks gold
+uv run python scripts/data/to_tokenization.py sloleks sloleks_relations  # prerequisite: morph golds
 uv run python scripts/tokenizers/prepare_sample.py       # materialize the persistent sample + lexicon
 uv run python scripts/tokenizers/train.py     --all      # train the 6x3 sweep
 uv run python scripts/tokenizers/analyze.py   --all      # 6 metrics + report.md/json

@@ -40,6 +40,7 @@ from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sam
 from slm4ie.tokenizers.metrics import iter_words
 from slm4ie.tokenizers.morphology import (
     MorphemeSegmentation,
+    build_derivational_lexicon,
     build_morph_lexicon,
     load_lexicon,
     sample_segmentations,
@@ -62,6 +63,7 @@ DEFAULT_MAX_WORKERS = 8
 #: `main` before the pool is created; read by `_evaluate_worker` in each child.
 _EVAL_DOCS: List[List[str]] = []
 _MORPH_SAMPLE: List[MorphemeSegmentation] = []
+_DERIV_SAMPLE: List[MorphemeSegmentation] = []
 
 
 def _evaluate_worker(
@@ -72,10 +74,10 @@ def _evaluate_worker(
 ) -> Optional[Dict[str, Any]]:
     """Evaluate one run, reading the shared eval docs and morph sample globals.
 
-    The grouped evaluation documents and the shared morph form sample live in
-    module globals so a forked process-pool worker inherits them copy-on-write,
-    rather than receiving them through pickled keyword arguments (which would
-    copy the multi-million-form inputs once per task).
+    The grouped evaluation documents and the shared morph and derivational form
+    samples live in module globals so a forked process-pool worker inherits them
+    copy-on-write, rather than receiving them through pickled keyword arguments
+    (which would copy the multi-million-form inputs once per task).
 
     Args:
         key (str): Run key (`<name>-<vocab>`).
@@ -90,6 +92,7 @@ def _evaluate_worker(
         output_root=output_root,
         eval_docs=_EVAL_DOCS,
         morph_sample=_MORPH_SAMPLE,
+        deriv_sample=_DERIV_SAMPLE,
         alpha=alpha,
     )
 
@@ -162,8 +165,10 @@ def _prepare_eval_inputs(cfg: TokenizerSweepConfig, force: bool, morph_form_samp
         morph_form_sample (int): Size of the shared morph form sample.
 
     Returns:
-        Tuple[List[List[str]], List[MorphemeSegmentation]]: The grouped eval
-            documents and the shared morph form sample.
+        Tuple[List[List[str]], List[MorphemeSegmentation], List[MorphemeSegmentation]]:
+            The grouped eval documents, the shared inflectional morph form
+            sample, and the derivational form sample (empty when no derivational
+            gold is configured).
     """
     eval_path = cfg.eval_sample_path
     if force or not eval_path.exists():
@@ -172,14 +177,27 @@ def _prepare_eval_inputs(cfg: TokenizerSweepConfig, force: bool, morph_form_samp
     eval_docs = [iter_words(line) for line in iter_sample_cache(eval_path)]
     logger.info("Evaluation sample: %d documents, %d word tokens", len(eval_docs), sum(len(d) for d in eval_docs))
 
-    lexicon_path = cfg.lexicon_path
-    if force or not lexicon_path.exists():
-        logger.info("Deriving morpheme lexicon from %s", cfg.sloleks_path)
-        save_lexicon(build_morph_lexicon(cfg.sloleks_path, min_stem_len=cfg.min_stem_len), lexicon_path)
-    lexicon = load_lexicon(lexicon_path)
+    infl_path = cfg.infl_lexicon_path
+    if force or not infl_path.exists():
+        logger.info("Deriving inflectional gold lexicon from %s", cfg.sloleks_path)
+        save_lexicon(build_morph_lexicon(cfg.sloleks_path, min_stem_len=cfg.min_stem_len), infl_path)
+    lexicon = load_lexicon(infl_path)
     morph_sample = sample_segmentations(lexicon, morph_form_sample, cfg.stats_seed)
-    logger.info("Gold lexicon: %d forms; morph sample: %d forms", len(lexicon.by_form), len(morph_sample))
-    return eval_docs, morph_sample
+    logger.info("Inflectional gold: %d forms; morph sample: %d forms", len(lexicon.by_form), len(morph_sample))
+
+    deriv_sample: List[MorphemeSegmentation] = []
+    if cfg.needs_derivational():
+        deriv_path = cfg.deriv_lexicon_path
+        if force or not deriv_path.exists():
+            logger.info("Deriving derivational gold lexicon from %s", cfg.sloleks_relations_path)
+            save_lexicon(build_derivational_lexicon(cfg.sloleks_relations_path), deriv_path)
+        deriv_lexicon = load_lexicon(deriv_path)
+        deriv_sample = sample_segmentations(deriv_lexicon, morph_form_sample, cfg.stats_seed)
+        logger.info(
+            "Derivational gold: %d forms; deriv sample: %d forms", len(deriv_lexicon.by_form), len(deriv_sample)
+        )
+
+    return eval_docs, morph_sample, deriv_sample
 
 
 def main() -> None:
@@ -209,8 +227,10 @@ def main() -> None:
 
     # Publish the heavy eval inputs to module globals BEFORE the process pool
     # forks, so workers inherit them copy-on-write rather than via pickling.
-    global _EVAL_DOCS, _MORPH_SAMPLE
-    _EVAL_DOCS, _MORPH_SAMPLE = _prepare_eval_inputs(cfg, force=args.force, morph_form_sample=morph_form_sample)
+    global _EVAL_DOCS, _MORPH_SAMPLE, _DERIV_SAMPLE
+    _EVAL_DOCS, _MORPH_SAMPLE, _DERIV_SAMPLE = _prepare_eval_inputs(
+        cfg, force=args.force, morph_form_sample=morph_form_sample
+    )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_dir = project_root / "logs" / Path(__file__).stem / stamp
