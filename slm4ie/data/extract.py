@@ -7,6 +7,7 @@ import shutil
 import tarfile
 import zipfile
 from pathlib import Path
+from typing import List
 
 import zstandard
 from tqdm import tqdm
@@ -37,9 +38,7 @@ def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
         )
         return output_path
 
-    logger.info(
-        "Extracting %s -> %s", archive_path, output_path
-    )
+    logger.info("Extracting %s -> %s", archive_path, output_path)
     total = archive_path.stat().st_size
     with open(archive_path, "rb") as raw_in:
         with tqdm.wrapattr(
@@ -79,9 +78,7 @@ def _extract_xz(archive_path: Path, output_dir: Path) -> Path:
         )
         return output_path
 
-    logger.info(
-        "Extracting %s -> %s", archive_path, output_path
-    )
+    logger.info("Extracting %s -> %s", archive_path, output_path)
     total = archive_path.stat().st_size
     with open(archive_path, "rb") as raw_in:
         with tqdm.wrapattr(
@@ -110,9 +107,7 @@ def _extract_zip(archive_path: Path, output_dir: Path) -> Path:
     Returns:
         Path: The output_dir path.
     """
-    logger.info(
-        "Extracting %s -> %s", archive_path, output_dir
-    )
+    logger.info("Extracting %s -> %s", archive_path, output_dir)
     with zipfile.ZipFile(archive_path, "r") as zf:
         members = zf.infolist()
         for member in tqdm(
@@ -137,9 +132,7 @@ def _extract_tar(archive_path: Path, output_dir: Path) -> Path:
     Returns:
         Path: The output_dir path.
     """
-    logger.info(
-        "Extracting %s -> %s", archive_path, output_dir
-    )
+    logger.info("Extracting %s -> %s", archive_path, output_dir)
     with tarfile.open(archive_path, "r:gz") as tf:
         members = tf.getmembers()
         for member in tqdm(
@@ -186,9 +179,7 @@ def _extract_tar_zst(archive_path: Path, output_dir: Path) -> Path:
     return output_dir
 
 
-def extract_archive(
-    archive_path: Path, output_dir: Path
-) -> Path:
+def extract_archive(archive_path: Path, output_dir: Path) -> Path:
     """Extract an archive file to the specified output directory.
 
     Detects format by filename extension. Supported formats:
@@ -225,6 +216,34 @@ def extract_archive(
     elif name.endswith(".zip"):
         return _extract_zip(archive_path, output_dir)
     else:
-        raise ValueError(
-            f"Unsupported archive format: {archive_path.suffix}"
-        )
+        raise ValueError(f"Unsupported archive format: {archive_path.suffix}")
+
+
+#: Archive suffixes recognized by `unpack_archives`, longest first so a
+#: multi-part suffix (e.g. `.tar.gz`) wins over its tail (`.gz`). Bare `.gz`
+#: and `.xz` are intentionally excluded: in the tokenizer-eval raw dirs those
+#: would be single-file payloads, not container archives to unpack in place.
+_UNPACK_SUFFIXES = (".tar.gz", ".tgz", ".tar.zst", ".tar.zstd", ".zip")
+
+
+def unpack_archives(raw_dir: Path) -> List[Path]:
+    """Extract any container archives sitting directly in a raw directory.
+
+    Convenience for readers whose raw downloads arrive as archives but which
+    consume the unzipped files directly (the `to_tokenization` route does not
+    run the `extract.py` pipeline). Each archive directly under `raw_dir` is
+    extracted into `raw_dir`; nested directories are not searched. Extraction
+    is unconditional, so callers should guard the call (e.g. only unpack when
+    the expected files are missing) to avoid redundant re-extraction.
+
+    Args:
+        raw_dir (Path): Directory holding the downloaded archive(s).
+
+    Returns:
+        List[Path]: The archive paths that were extracted, in sorted order
+            (empty when `raw_dir` holds no recognized archive).
+    """
+    archives = sorted(path for path in raw_dir.glob("*") if path.is_file() and path.name.endswith(_UNPACK_SUFFIXES))
+    for archive in archives:
+        extract_archive(archive, raw_dir)
+    return archives
