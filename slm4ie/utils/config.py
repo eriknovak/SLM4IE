@@ -39,6 +39,10 @@ class TokenizerSweepConfig:
         mlflow_experiment (str): MLflow experiment name.
         mlflow_enabled (bool): Whether to log to MLflow.
         mlflow_tracking_uri (Optional[str]): MLflow tracking URI override.
+        stats_n_resamples (int): Bootstrap resamples (B) for CIs and tests.
+        stats_ci_level (float): Confidence level for the bootstrap CIs.
+        stats_seed (int): Seed for the shared bootstrap resample indices.
+        stats_morph_form_sample (int): Forms drawn for the morph CIs and tests.
     """
 
     corpus_root: Path
@@ -56,6 +60,10 @@ class TokenizerSweepConfig:
     mlflow_experiment: str
     mlflow_enabled: bool
     mlflow_tracking_uri: Optional[str] = None
+    stats_n_resamples: int = 2000
+    stats_ci_level: float = 0.95
+    stats_seed: int = 12345
+    stats_morph_form_sample: int = 200000
 
     @property
     def corpus_sample_path(self) -> Path:
@@ -139,6 +147,7 @@ def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
     output = raw.get("output") or {}
     evaluation = raw.get("eval") or {}
     mlflow_cfg = raw.get("mlflow") or {}
+    stats_cfg = raw.get("stats") or {}
 
     tokenizers = raw.get("tokenizers") or []
     vocab_sizes = raw.get("vocab_sizes") or []
@@ -175,4 +184,8 @@ def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
         mlflow_experiment=mlflow_cfg.get("experiment", "slm4ie/tokenization/slovenian"),
         mlflow_enabled=bool(mlflow_cfg.get("enabled", False)),
         mlflow_tracking_uri=mlflow_cfg.get("tracking_uri"),
+        stats_n_resamples=int(stats_cfg.get("n_resamples", 2000)),
+        stats_ci_level=float(stats_cfg.get("ci_level", 0.95)),
+        stats_seed=int(stats_cfg.get("seed", 12345)),
+        stats_morph_form_sample=int(stats_cfg.get("morph_form_sample", 200000)),
     )

@@ -33,6 +33,74 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    mo.md(
+        r"""
+        ## What we are measuring, and why
+
+        ### A two-minute primer on morphology
+
+        A **morpheme** is the smallest unit of meaning in a word. Slovenian is
+        morphologically rich, so words pack several morphemes:
+
+        - **stem / root** — carries the core meaning: *hiš-* in **hiša** ("house").
+        - **inflectional suffix** — marks grammar (case, number, person, tense)
+          without changing the word's identity: **hiš-i**, **hiš-ami**,
+          **hiš-ah** are all the noun *hiša* in different cases.
+        - **derivational affixes** — build a *new* word: prefix **ne-** in
+          **ne-srečen** ("un-happy"), prefix **raz-** in **raz-staviti**,
+          derivational suffix **-ost** in **hitr-ost** ("speed" from "fast"),
+          **-nik / -ica** for agent/role nouns.
+        - **compounding** — joining stems, e.g. **vod-o-vod** ("water-conduit").
+
+        ### Two things we want from a tokenizer — in tension
+
+        - **Compression.** Fewer tokens per word and per byte means cheaper
+          training/inference and longer effective context. Pure compression
+          rewards merging frequent character runs regardless of meaning.
+        - **Linguistic structure.** Splitting on real morpheme boundaries
+          (**hiš-ami**, not **hi-šami**) gives the model reusable, meaning-bearing
+          units and tends to generalize better across the huge inflectional
+          paradigms of Slovenian.
+
+        These pull against each other: the most compressive split is rarely the
+        most morphologically faithful one. The plots below let you see where each
+        tokenizer sits on that trade-off (and the Pareto view makes it explicit).
+
+        ### The six metrics
+
+        | Metric | Family | Direction | What it says |
+        |---|---|---|---|
+        | `fertility` | compression | ↓ lower | mean subword tokens per word |
+        | `tokens_per_byte` | compression | ↓ lower | tokens emitted per UTF-8 byte |
+        | `chars_per_token` | compression | ↑ higher | mean characters carried per token |
+        | `renyi_efficiency` | compression | ↑ higher | how evenly token frequencies are used (Zouhar et al., 2023); **point estimate only** |
+        | `morph_score_f1` | morphology | ↑ higher | boundary-precision/recall F1 vs gold morphemes (MorphScore, Arnett et al.) |
+        | `morph_edit_distance` | morphology | ↓ lower | raw segment-edit distance to gold morphemes (MorphBPE, [arXiv 2502.00894](https://arxiv.org/abs/2502.00894)) |
+        | `morph_consistency` | morphology | ↑ higher | do words sharing a morpheme also share a token? F1 (MorphBPE); **point estimate only** |
+
+        The five decomposable metrics carry **95% bootstrap confidence intervals**
+        and **paired significance tests** (see Part C). The two global functionals
+        (`renyi_efficiency`, `morph_consistency`) do not decompose into per-unit
+        statistics and are reported as bare point estimates.
+
+        > **⚠️ Caveat — the morph gold is inflectional *silver* gold.** The gold
+        > segmentation is derived from **Sloleks**, an *inflectional* lexicon: each
+        > form is greedily aligned to its lemma to recover a single
+        > `stem | inflectional-suffix` cut. It therefore captures **inflection
+        > only** — it does **not** know about derivation (prefixes *pre-/raz-/ne-*,
+        > suffixes *-ost/-nik/-ica*) or compounding, and the alignment is
+        > heuristic. So treat the morph metrics as **relative comparators between
+        > tokenizers**, not as absolute morphological accuracy. A true upgrade path
+        > is the **eLex-2023 derivational dictionary** (New Slovene Grammar WP1,
+        > IJS), the only open Slovenian resource with genuine morpheme
+        > segmentation.
+        """
+    )
+    return
+
+
+@app.cell
 def _():
     import marimo as mo
 
@@ -351,6 +419,8 @@ def _(REPORT_JSON, json):
     _payload = json.loads(REPORT_JSON.read_text(encoding="utf-8"))
     RESULTS = _payload["results"]
     DIRECTIONS = _payload["directions"]
+    SIGNIFICANCE = _payload.get("significance", {})
+    STATS_CONFIG = _payload.get("stats_config", {})
     METRIC_COLUMNS = [
         "fertility",
         "tokens_per_byte",
@@ -360,10 +430,31 @@ def _(REPORT_JSON, json):
         "morph_edit_distance",
         "morph_consistency",
     ]
+    # Metrics that carry a bootstrap CI + paired significance test. The other two
+    # (renyi_efficiency, morph_consistency) are global functionals that do not
+    # decompose into per-unit stats, so they stay point estimates.
+    DECOMPOSABLE_METRICS = STATS_CONFIG.get("point_only") and [
+        m for m in METRIC_COLUMNS if m not in STATS_CONFIG.get("point_only", [])
+    ]
+    DECOMPOSABLE_METRICS = DECOMPOSABLE_METRICS or [
+        "fertility",
+        "tokens_per_byte",
+        "chars_per_token",
+        "morph_score_f1",
+        "morph_edit_distance",
+    ]
     _ARROW = {"higher": "↑", "lower": "↓"}
 
     def metric_title(metric):
         return f"{metric} {_ARROW.get(DIRECTIONS.get(metric, ''), '')}".strip()
+
+    def has_ci(metric):
+        return metric in DECOMPOSABLE_METRICS
+
+    def record_ci(record, metric):
+        """Return `(lo, hi)` CI for a metric on a record, or None if absent."""
+        ci = record.get(f"{metric}_ci")
+        return (ci[0], ci[1]) if ci else None
 
     def series_by_tokenizer(metric):
         series = {}
@@ -373,14 +464,51 @@ def _(REPORT_JSON, json):
             points.sort()
         return series
 
-    return DIRECTIONS, METRIC_COLUMNS, RESULTS, metric_title, series_by_tokenizer
+    def series_with_ci(metric):
+        """Tokenizer to sorted `(vocab, value, lo, hi)` points (lo/hi None w/o CI)."""
+        series = {}
+        for record in RESULTS:
+            ci = record_ci(record, metric)
+            lo, hi = ci if ci else (None, None)
+            series.setdefault(record["tokenizer"], []).append((record["vocab_size"], record[metric], lo, hi))
+        for points in series.values():
+            points.sort()
+        return series
+
+    return (
+        DECOMPOSABLE_METRICS,
+        DIRECTIONS,
+        METRIC_COLUMNS,
+        RESULTS,
+        SIGNIFICANCE,
+        STATS_CONFIG,
+        has_ci,
+        metric_title,
+        record_ci,
+        series_by_tokenizer,
+        series_with_ci,
+    )
 
 
 @app.cell
-def _(METRIC_COLUMNS, TOKENIZER_COLORS, go, make_subplots, math, metric_title, series_by_tokenizer):
+def _(mo):
+    mo.md(
+        r"""
+        Whiskers are **95% bootstrap confidence intervals** for the five
+        decomposable metrics (documents resampled for the compression metrics,
+        forms for the morph metrics). `renyi_efficiency` and `morph_consistency`
+        are drawn as bare points — they are global functionals that do not
+        decompose into per-unit statistics, so no CI is attached.
+        """
+    )
+    return
+
+
+@app.cell
+def _(METRIC_COLUMNS, TOKENIZER_COLORS, go, has_ci, make_subplots, math, metric_title, series_with_ci):
     _ncols = 3
     _nrows = math.ceil(len(METRIC_COLUMNS) / _ncols)
-    _vocabs = sorted({v for _pts in series_by_tokenizer(METRIC_COLUMNS[0]).values() for v, _ in _pts})
+    _vocabs = sorted({v for _pts in series_with_ci(METRIC_COLUMNS[0]).values() for v, *_rest in _pts})
     _fig = make_subplots(
         rows=_nrows,
         cols=_ncols,
@@ -391,11 +519,25 @@ def _(METRIC_COLUMNS, TOKENIZER_COLORS, go, make_subplots, math, metric_title, s
     for _idx, _metric in enumerate(METRIC_COLUMNS):
         _row = _idx // _ncols + 1
         _col = _idx % _ncols + 1
-        for _tname, _points in series_by_tokenizer(_metric).items():
+        _show_ci = has_ci(_metric)
+        for _tname, _points in series_with_ci(_metric).items():
+            _xs = [v for v, _y, _lo, _hi in _points]
+            _ys = [_y for _v, _y, _lo, _hi in _points]
+            _err = None
+            if _show_ci and all(_lo is not None for _v, _y, _lo, _hi in _points):
+                _err = dict(
+                    type="data",
+                    symmetric=False,
+                    array=[_hi - _y for _v, _y, _lo, _hi in _points],
+                    arrayminus=[_y - _lo for _v, _y, _lo, _hi in _points],
+                    thickness=1.2,
+                    width=4,
+                )
             _fig.add_trace(
                 go.Scatter(
-                    x=[v for v, _ in _points],
-                    y=[y for _, y in _points],
+                    x=_xs,
+                    y=_ys,
+                    error_y=_err,
                     mode="lines+markers",
                     name=_tname,
                     legendgroup=_tname,
@@ -428,21 +570,33 @@ def _(METRIC_COLUMNS, TOKENIZERS, mo):
 
 
 @app.cell
-def _(TOKENIZER_COLORS, chart_kind, go, metric_pick, metric_title, series_by_tokenizer, tok_pick):
+def _(TOKENIZER_COLORS, chart_kind, go, has_ci, metric_pick, metric_title, series_with_ci, tok_pick):
     _metric = metric_pick.value
-    _data = series_by_tokenizer(_metric)
+    _data = series_with_ci(_metric)
     _toks = [t for t in tok_pick.value if t in _data]
-    _vocabs = sorted({v for _t in _toks for v, _ in _data[_t]})
+    _vocabs = sorted({v for _t in _toks for v, *_rest in _data[_t]})
+    _show_ci = has_ci(_metric)
     _fig = go.Figure()
     for _t in _toks:
-        _lookup = dict(_data[_t])
-        _ys = [_lookup.get(v) for v in _vocabs]
+        _lookup = {v: (y, lo, hi) for v, y, lo, hi in _data[_t]}
+        _ys = [_lookup.get(v, (None, None, None))[0] for v in _vocabs]
+        _err = None
+        if _show_ci and all(_lookup.get(v, (None, None, None))[1] is not None for v in _vocabs):
+            _err = dict(
+                type="data",
+                symmetric=False,
+                array=[_lookup[v][2] - _lookup[v][0] for v in _vocabs],
+                arrayminus=[_lookup[v][0] - _lookup[v][1] for v in _vocabs],
+                thickness=1.4,
+                width=6,
+            )
         _hover = f"{_t}<br>vocab=%{{x}}<br>{_metric}=%{{y:.4f}}<extra></extra>"
         if chart_kind.value == "line":
             _fig.add_trace(
                 go.Scatter(
                     x=_vocabs,
                     y=_ys,
+                    error_y=_err,
                     mode="lines+markers",
                     name=_t,
                     line=dict(color=TOKENIZER_COLORS.get(_t)),
@@ -452,10 +606,18 @@ def _(TOKENIZER_COLORS, chart_kind, go, metric_pick, metric_title, series_by_tok
             )
         else:
             _fig.add_trace(
-                go.Bar(x=_vocabs, y=_ys, name=_t, marker_color=TOKENIZER_COLORS.get(_t), hovertemplate=_hover)
+                go.Bar(
+                    x=_vocabs,
+                    y=_ys,
+                    error_y=_err,
+                    name=_t,
+                    marker_color=TOKENIZER_COLORS.get(_t),
+                    hovertemplate=_hover,
+                )
             )
+    _ci_note = "" if _show_ci else "  ·  point estimate (no CI)"
     _fig.update_layout(
-        title=metric_title(_metric),
+        title=metric_title(_metric) + _ci_note,
         xaxis=dict(title="vocab size", tickvals=_vocabs),
         barmode="group",
         height=480,
@@ -488,9 +650,26 @@ def _(METRIC_COLUMNS, mo):
 
 
 @app.cell
-def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, metric_title, x_metric, y_metric):
+def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, record_ci, x_metric, y_metric):
     _xm = x_metric.value
     _ym = y_metric.value
+
+    def _err_for(recs, metric):
+        """Asymmetric error dict for `metric` over `recs`, or None when no CI."""
+        if not has_ci(metric):
+            return None
+        cis = [record_ci(r, metric) for r in recs]
+        if any(c is None for c in cis):
+            return None
+        return dict(
+            type="data",
+            symmetric=False,
+            array=[hi - r[metric] for r, (lo, hi) in zip(recs, cis)],
+            arrayminus=[r[metric] - lo for r, (lo, hi) in zip(recs, cis)],
+            thickness=1.0,
+            width=3,
+            color="rgba(120,120,120,0.6)",
+        )
 
     def _better(a, b, direction):
         return a < b if direction == "lower" else a > b
@@ -524,6 +703,8 @@ def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, metric_title, x_metric, y_metri
             go.Scatter(
                 x=[r[_xm] for r in _recs],
                 y=[r[_ym] for r in _recs],
+                error_x=_err_for(_recs, _xm),
+                error_y=_err_for(_recs, _ym),
                 mode="markers+text",
                 name=_tname,
                 marker=dict(color=TOKENIZER_COLORS.get(_tname), size=12, line=dict(color="white", width=1)),
@@ -557,6 +738,158 @@ def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, metric_title, x_metric, y_metri
         hovermode="closest",
     )
     _fig
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+        ## Part C — Statistical significance
+
+        Differences between tokenizers are only meaningful if they survive
+        resampling noise. For each `(metric, vocab)` we run a **paired bootstrap**:
+        all six tokenizers share one set of resample draws (documents for the
+        compression metrics, forms for the morph metrics), and for every pair we
+        build the distribution of the difference. A pair is **significant** when
+        its Holm–Bonferroni-corrected p-value is below 0.05 (the family is the 15
+        pairs within each metric × vocab). Only the five decomposable metrics are
+        testable; `renyi_efficiency` and `morph_consistency` are point estimates.
+
+        **Ranking with compact letters.** Tokenizers are sorted best→worst.
+        Tokenizers **sharing a letter are *not* significantly different** from each
+        other; a tokenizer with a unique letter is significantly better (or worse)
+        than those it shares no letter with.
+        """
+    )
+    return
+
+
+@app.cell
+def _(DECOMPOSABLE_METRICS, SIGNIFICANCE, VOCAB_SIZES, mo):
+    _vocab_options = sorted(SIGNIFICANCE.keys(), key=int) if SIGNIFICANCE else [str(v) for v in VOCAB_SIZES]
+    sig_metric = mo.ui.dropdown(
+        options=DECOMPOSABLE_METRICS,
+        value=DECOMPOSABLE_METRICS[0] if DECOMPOSABLE_METRICS else None,
+        label="Metric",
+    )
+    sig_vocab = mo.ui.dropdown(
+        options=_vocab_options,
+        value=(_vocab_options[len(_vocab_options) // 2] if _vocab_options else None),
+        label="Vocab",
+    )
+    mo.hstack([sig_metric, sig_vocab], justify="start", gap=2)
+    return sig_metric, sig_vocab
+
+
+@app.cell
+def _(SIGNIFICANCE, DIRECTIONS, metric_title, mo, sig_metric, sig_vocab):
+    def _ranking_table():
+        block = SIGNIFICANCE.get(sig_vocab.value, {}).get(sig_metric.value)
+        if not block:
+            return mo.md("*No significance data in `report.json` — re-run `analyze.py` to generate it.*")
+        rows = [
+            "| rank | tokenizer | value | group |",
+            "| --- | --- | --- | --- |",
+        ]
+        for i, entry in enumerate(block["ranking"], start=1):
+            rows.append(f"| {i} | {entry['tokenizer']} | {entry['value']:.4f} | `{entry['letters']}` |")
+        better = "higher is better" if DIRECTIONS.get(sig_metric.value) == "higher" else "lower is better"
+        caption = (
+            f"**{metric_title(sig_metric.value)}** @ vocab {sig_vocab.value} ({better}). "
+            "Tokenizers sharing a letter in **group** are not significantly different "
+            "(paired bootstrap, Holm-corrected, 95%)."
+        )
+        return mo.md(caption + "\n\n" + "\n".join(rows))
+
+    _ranking_table()
+    return
+
+
+@app.cell
+def _(SIGNIFICANCE, DIRECTIONS, go, mo, sig_metric, sig_vocab):
+    def _matrix_fig():
+        block = SIGNIFICANCE.get(sig_vocab.value, {}).get(sig_metric.value)
+        if not block:
+            return mo.md("*No significance data — re-run `analyze.py`.*")
+        order = [entry["tokenizer"] for entry in block["ranking"]]
+        index = {name: i for i, name in enumerate(order)}
+        n = len(order)
+        higher_better = DIRECTIONS.get(sig_metric.value) == "higher"
+
+        # Per ordered (row, col): signed difference row-col and significance.
+        diff = [[None] * n for _ in range(n)]
+        sig = [[False] * n for _ in range(n)]
+        padj = [[None] * n for _ in range(n)]
+        for pair in block["pairs"]:
+            a, b = pair["a"], pair["b"]
+            if a not in index or b not in index:
+                continue
+            ia, ib = index[a], index[b]
+            diff[ia][ib] = pair["diff_median"]
+            diff[ib][ia] = -pair["diff_median"]
+            sig[ia][ib] = sig[ib][ia] = pair["significant"]
+            padj[ia][ib] = padj[ib][ia] = pair["p_adj"]
+
+        # z: +1 row beats col (sig), -1 row loses (sig), 0 ns, None on diagonal.
+        z = [[None] * n for _ in range(n)]
+        text = [[""] * n for _ in range(n)]
+        for r in range(n):
+            for c in range(n):
+                if r == c or diff[r][c] is None:
+                    text[r][c] = "—"
+                    continue
+                d = diff[r][c]
+                row_better = (d > 0) if higher_better else (d < 0)
+                if sig[r][c]:
+                    z[r][c] = 1 if row_better else -1
+                    text[r][c] = "▲" if row_better else "▼"
+                else:
+                    z[r][c] = 0
+                    text[r][c] = "·"
+
+        hover = [
+            [
+                (
+                    f"row <b>{order[r]}</b> vs col <b>{order[c]}</b><br>"
+                    f"Δ(row−col)={diff[r][c]:+.4f}<br>p_adj={padj[r][c]:.4g}<br>"
+                    f"{'significant' if sig[r][c] else 'not significant'}"
+                    if r != c and diff[r][c] is not None
+                    else "—"
+                )
+                for c in range(n)
+            ]
+            for r in range(n)
+        ]
+
+        fig = go.Figure(
+            go.Heatmap(
+                z=z,
+                x=order,
+                y=order,
+                text=text,
+                texttemplate="%{text}",
+                customdata=hover,
+                hovertemplate="%{customdata}<extra></extra>",
+                colorscale=[[0.0, "#d9534f"], [0.5, "#eeeeee"], [1.0, "#5cb85c"]],
+                zmid=0,
+                zmin=-1,
+                zmax=1,
+                showscale=False,
+                xgap=2,
+                ygap=2,
+            )
+        )
+        fig.update_layout(
+            title=f"Does row beat column?  ▲ row better · ▼ row worse · · ns  ({sig_metric.value} @ {sig_vocab.value})",
+            xaxis=dict(title="column tokenizer", side="top"),
+            yaxis=dict(title="row tokenizer", autorange="reversed"),
+            height=520,
+            margin=dict(l=110, r=20, t=90, b=40),
+        )
+        return fig
+
+    _matrix_fig()
     return
 
 

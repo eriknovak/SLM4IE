@@ -9,6 +9,7 @@ import pytest
 
 from slm4ie.tokenizers.analysis import (
     _train_link_tags,
+    augment_with_statistics,
     build_report,
     evaluate_artifact,
     log_results_to_mlflow,
@@ -95,8 +96,11 @@ class TestEvaluateArtifact:
         train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
 
         lexicon = build_morph_lexicon(cfg.sloleks_path)
-        eval_words = ["hiša", "hiše", "psa", "mesto"]
-        record = evaluate_artifact("bpe-90", output_root=cfg.output_root, lexicon=lexicon, eval_words=eval_words)
+        morph_sample = list(lexicon.by_form.values())
+        eval_docs = [["hiša", "hiše"], ["psa", "mesto"]]
+        record = evaluate_artifact(
+            "bpe-90", output_root=cfg.output_root, eval_docs=eval_docs, morph_sample=morph_sample
+        )
 
         assert record["tokenizer"] == "bpe"
         assert record["vocab_size"] == 90
@@ -104,12 +108,21 @@ class TestEvaluateArtifact:
         assert 0.0 <= record["renyi_efficiency"] <= 1.0
         assert 0.0 <= record["morph_score_f1"] <= 1.0
         assert (cfg.output_root / "bpe-90" / "metrics.json").exists()
+        assert (cfg.output_root / "bpe-90" / "eval_units.npz").exists()
 
     def test_missing_artifact_returns_none(self, tmp_path: Path):
         """A missing artifact yields None (skipped)."""
         cfg = _make_config(tmp_path)
         lexicon = build_morph_lexicon(cfg.sloleks_path)
-        assert evaluate_artifact("bpe-90", output_root=cfg.output_root, lexicon=lexicon, eval_words=["hiša"]) is None
+        assert (
+            evaluate_artifact(
+                "bpe-90",
+                output_root=cfg.output_root,
+                eval_docs=[["hiša"]],
+                morph_sample=list(lexicon.by_form.values()),
+            )
+            is None
+        )
 
 
 class TestReport:
@@ -167,9 +180,10 @@ def test_full_pipeline_train_then_evaluate(tmp_path: Path):
         train_one(key, cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
 
     lexicon = build_morph_lexicon(cfg.sloleks_path)
-    eval_words = [w for line in _CORPUS[:20] for w in iter_words(line)]
+    morph_sample = list(lexicon.by_form.values())
+    eval_docs = [iter_words(line) for line in _CORPUS[:20]]
     records = [
-        evaluate_artifact(key, output_root=cfg.output_root, lexicon=lexicon, eval_words=eval_words)
+        evaluate_artifact(key, output_root=cfg.output_root, eval_docs=eval_docs, morph_sample=morph_sample)
         for key in ["bpe-90", "morphbpe-90"]
     ]
     md_path, _ = write_report([r for r in records if r], cfg.report_dir)
@@ -177,6 +191,46 @@ def test_full_pipeline_train_then_evaluate(tmp_path: Path):
     # MorphBPE should respect morpheme boundaries at least as well as plain BPE.
     by_name = {r["tokenizer"]: r for r in records if r}
     assert by_name["morphbpe"]["morph_score_f1"] >= 0.0
+
+
+def test_augment_with_statistics_adds_cis_and_significance(tmp_path: Path):
+    """Aggregation adds CI/std fields and a per-vocab significance block."""
+    cfg = _make_config(tmp_path)
+    sample_path, lexicon_path = prepare_inputs(cfg)
+    for key in ["bpe-90", "morphbpe-90"]:
+        train_one(key, cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
+
+    lexicon = build_morph_lexicon(cfg.sloleks_path)
+    morph_sample = list(lexicon.by_form.values())
+    eval_docs = [iter_words(line) for line in _CORPUS[:20]]
+    records = [
+        evaluate_artifact(key, output_root=cfg.output_root, eval_docs=eval_docs, morph_sample=morph_sample)
+        for key in ["bpe-90", "morphbpe-90"]
+    ]
+    records = [r for r in records if r]
+
+    significance, stats_config = augment_with_statistics(
+        records, cfg.output_root, n_resamples=200, ci_level=0.95, seed=12345, morph_form_sample=len(morph_sample)
+    )
+
+    for record in records:
+        for metric in ["fertility", "tokens_per_byte", "chars_per_token", "morph_score_f1", "morph_edit_distance"]:
+            low, high = record[f"{metric}_ci"]
+            assert low <= record[metric] <= high or low == high
+            assert record[f"{metric}_std"] >= 0.0
+        # Point-only metrics carry no CI.
+        assert "renyi_efficiency_ci" not in record
+        assert "morph_consistency_ci" not in record
+
+    block = significance["90"]
+    assert set(block) == {"fertility", "tokens_per_byte", "chars_per_token", "morph_score_f1", "morph_edit_distance"}
+    ranking = block["fertility"]["ranking"]
+    assert {row["tokenizer"] for row in ranking} == {"bpe", "morphbpe"}
+    assert all("letters" in row for row in ranking)
+    # One pair for two tokenizers; it carries an adjusted p-value.
+    assert len(block["fertility"]["pairs"]) == 1
+    assert "p_adj" in block["fertility"]["pairs"][0]
+    assert stats_config["units"] == {"corpus": "documents", "morph": "forms"}
 
 
 class TestTrainLinkTags:
@@ -209,7 +263,12 @@ def test_eval_run_links_to_training_run(tmp_path: Path, monkeypatch):
     log_training_to_mlflow(["bpe-90"], cfg)
 
     lexicon = build_morph_lexicon(cfg.sloleks_path)
-    record = evaluate_artifact("bpe-90", output_root=cfg.output_root, lexicon=lexicon, eval_words=["hiša", "psa"])
+    record = evaluate_artifact(
+        "bpe-90",
+        output_root=cfg.output_root,
+        eval_docs=[["hiša", "psa"]],
+        morph_sample=list(lexicon.by_form.values()),
+    )
     assert record is not None
     md_path, json_path = write_report([record], cfg.report_dir)
     log_results_to_mlflow([record], cfg, (md_path, json_path))

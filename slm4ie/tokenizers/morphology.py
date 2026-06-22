@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
@@ -413,3 +414,29 @@ def iter_lexicon_forms(lexicon: MorphLexicon) -> Iterator[MorphemeSegmentation]:
         MorphemeSegmentation: Each stored per-form segmentation.
     """
     yield from lexicon.by_form.values()
+
+
+def sample_segmentations(lexicon: MorphLexicon, n: Optional[int], seed: int) -> List[MorphemeSegmentation]:
+    """Draw a deterministic sample of gold segmentations for the morph metrics.
+
+    The sample is fixed by `seed` and the lexicon's (stable) form order, so every
+    tokenizer scores the identical forms in the identical order. That alignment
+    is what lets the per-form morph statistics be paired across tokenizers when
+    bootstrapping. Forms are returned in lexicon order (the sampled indices are
+    sorted), not in draw order.
+
+    Args:
+        lexicon (MorphLexicon): The gold lexicon.
+        n (Optional[int]): Target sample size; the whole lexicon is returned
+            when `n` is None or not smaller than the lexicon.
+        seed (int): Seed for the deterministic draw.
+
+    Returns:
+        List[MorphemeSegmentation]: The sampled segmentations in lexicon order.
+    """
+    forms = list(lexicon.by_form.values())
+    if n is None or n >= len(forms):
+        return forms
+    rng = random.Random(seed)
+    indices = sorted(rng.sample(range(len(forms)), n))
+    return [forms[i] for i in indices]
