@@ -435,7 +435,7 @@ datasets:
     provider: clarin.si
     name: "Sloleks 2.0 word relations 1.1 (derivational decomposition)"
     urls:
-      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1986/Sloleks.word.relations.1.1.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1986/nssss_sloleks_word_relations_1.1.zip?sequence=1&isAllowed=y"
     output_dir: sloleks_relations
     tasks:
       - TOKENIZER
