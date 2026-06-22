@@ -115,7 +115,6 @@ def _():
     import re
     from pathlib import Path
 
-    import plotly.express as px
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
@@ -124,9 +123,23 @@ def _():
     from slm4ie.tokenizers.morphology import load_lexicon
     from slm4ie.tokenizers.registry import get_tokenizer
     from slm4ie.utils.config import load_tokenizer_config
+    from slm4ie.viz import (
+        ACCENT,
+        DIVERGING,
+        categorical_colors,
+        enable_interactive_download,
+        register_theme,
+        save_figure,
+    )
+
+    register_theme()  # apply the SLM4IE plotly look to every figure below
+    enable_interactive_download("svg")  # modebar camera button downloads crisp SVG
 
     return (
+        ACCENT,
+        DIVERGING,
         Path,
+        categorical_colors,
         get_tokenizer,
         go,
         iter_sample_cache,
@@ -135,9 +148,9 @@ def _():
         load_tokenizer_config,
         make_subplots,
         math,
-        px,
         random,
         re,
+        save_figure,
     )
 
 
@@ -185,9 +198,24 @@ def _(CONFIG_PATH, OUTPUT_ROOT, TOKENIZERS, VOCAB_SIZES, mo):
 
 
 @app.cell
-def _(TOKENIZERS, px):
-    _palette = px.colors.qualitative.Plotly
-    TOKENIZER_COLORS = {name: _palette[i % len(_palette)] for i, name in enumerate(TOKENIZERS)}
+def _(mo):
+    mo.md(
+        r"""
+        ### Exporting charts
+
+        Every chart has a toolbar (top-right on hover): click the **camera icon**
+        to download it as **SVG**. For scripted, fixed-size exports call
+        `save_figure(fig, "figure.svg")` (also works with `.png` / `.pdf`).
+        """
+    )
+    return
+
+
+@app.cell
+def _(TOKENIZERS, categorical_colors):
+    # Pin each tokenizer to one color from the shared categorical palette, built
+    # once from the full tokenizer list so identities stay stable across charts.
+    TOKENIZER_COLORS = categorical_colors(TOKENIZERS)
     return (TOKENIZER_COLORS,)
 
 
@@ -268,7 +296,7 @@ def _(LEXICON, re):
 
 
 @app.cell
-def _(TOKENIZER_COLORS, gold_segments, go, load_run):
+def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
     _GOLD_HEX = "#D9BF73"
 
     def _rgba(hex_color, alpha):
@@ -285,7 +313,8 @@ def _(TOKENIZER_COLORS, gold_segments, go, load_run):
                 mode="lines",
                 fillcolor=_rgba(base_hex, 0.85 if idx % 2 == 0 else 0.5),
                 line=dict(
-                    color="#2e8b2e" if on_morpheme else "rgba(255,255,255,0.9)", width=2.5 if on_morpheme else 1.0
+                    color=ACCENT["emphasis"] if on_morpheme else "rgba(255,255,255,0.9)",
+                    width=2.5 if on_morpheme else 1.0,
                 ),
                 hoveron="fills",
                 hoverinfo="text",
@@ -342,7 +371,7 @@ def _(TOKENIZER_COLORS, gold_segments, go, load_run):
             dict(
                 x=0,
                 y=len(rows) + 0.2,
-                text="green outline = token span matches a gold morpheme; dashed = morpheme boundary",
+                text="dark outline = token span matches a gold morpheme; dashed = morpheme boundary",
                 showarrow=False,
                 font=dict(size=11, color="#555"),
                 xanchor="left",
@@ -650,7 +679,7 @@ def _(METRIC_COLUMNS, mo):
 
 
 @app.cell
-def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, record_ci, x_metric, y_metric):
+def _(ACCENT, DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, record_ci, x_metric, y_metric):
     _xm = x_metric.value
     _ym = y_metric.value
 
@@ -668,7 +697,7 @@ def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, record_ci
             arrayminus=[r[metric] - lo for r, (lo, hi) in zip(recs, cis)],
             thickness=1.0,
             width=3,
-            color="rgba(120,120,120,0.6)",
+            color=ACCENT["neutral"],
         )
 
     def _better(a, b, direction):
@@ -726,7 +755,7 @@ def _(DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, record_ci
                 y=[p[1] for p in _front],
                 mode="lines",
                 name="Pareto frontier",
-                line=dict(color="rgba(60,60,60,0.7)", dash="dash"),
+                line=dict(color=ACCENT["neutral"], dash="dash"),
                 hoverinfo="skip",
             )
         )
@@ -807,7 +836,7 @@ def _(SIGNIFICANCE, DIRECTIONS, metric_title, mo, sig_metric, sig_vocab):
 
 
 @app.cell
-def _(SIGNIFICANCE, DIRECTIONS, go, mo, sig_metric, sig_vocab):
+def _(DIVERGING, SIGNIFICANCE, DIRECTIONS, go, mo, sig_metric, sig_vocab):
     def _matrix_fig():
         block = SIGNIFICANCE.get(sig_vocab.value, {}).get(sig_metric.value)
         if not block:
@@ -871,7 +900,7 @@ def _(SIGNIFICANCE, DIRECTIONS, go, mo, sig_metric, sig_vocab):
                 texttemplate="%{text}",
                 customdata=hover,
                 hovertemplate="%{customdata}<extra></extra>",
-                colorscale=[[0.0, "#d9534f"], [0.5, "#eeeeee"], [1.0, "#5cb85c"]],
+                colorscale=DIVERGING,
                 zmid=0,
                 zmin=-1,
                 zmax=1,
@@ -882,8 +911,9 @@ def _(SIGNIFICANCE, DIRECTIONS, go, mo, sig_metric, sig_vocab):
         )
         fig.update_layout(
             title=f"Does row beat column?  ▲ row better · ▼ row worse · · ns  ({sig_metric.value} @ {sig_vocab.value})",
-            xaxis=dict(title="column tokenizer", side="top"),
-            yaxis=dict(title="row tokenizer", autorange="reversed"),
+            # Categorical axes: drop the template grid/zero line, it only adds noise.
+            xaxis=dict(title="column tokenizer", side="top", showgrid=False, zeroline=False),
+            yaxis=dict(title="row tokenizer", autorange="reversed", showgrid=False, zeroline=False),
             height=520,
             margin=dict(l=110, r=20, t=90, b=40),
         )
