@@ -48,23 +48,32 @@ _REPORT_COLUMNS = [
 ]
 
 #: Derivational morph columns, scored against the Sloleks word-relations gold.
-#: Point estimates only (no bootstrap CI / significance in this pass); shown
-#: after the base columns when any run carries them.
+#: Shown after the base columns when any run carries them. The two boundary
+#: metrics get bootstrap CIs + paired significance (like the inflectional track);
+#: `morph_consistency_deriv` stays a point estimate.
 _DERIV_COLUMNS = [
     "morph_score_f1_deriv",
     "morph_edit_distance_deriv",
     "morph_consistency_deriv",
 ]
 
-#: Decomposable metrics that get bootstrap CIs and paired significance tests.
-#: Each reduces to per-unit sufficient statistics that sum across the resampling
-#: unit (documents for corpus metrics, forms for morph metrics).
+#: Decomposable inflectional/corpus metrics that get bootstrap CIs and paired
+#: significance tests. Each reduces to per-unit sufficient statistics that sum
+#: across the resampling unit (documents for corpus metrics, forms for morph).
 _DECOMPOSABLE_METRICS = [
     "fertility",
     "tokens_per_byte",
     "chars_per_token",
     "morph_score_f1",
     "morph_edit_distance",
+]
+
+#: Decomposable derivational morph metrics; resampled over the derivational
+#: gold forms. Only processed when a run carries the derivational per-form
+#: arrays (i.e. a derivational gold was configured at evaluation time).
+_DERIV_DECOMPOSABLE_METRICS = [
+    "morph_score_f1_deriv",
+    "morph_edit_distance_deriv",
 ]
 
 #: Filename of the per-run sufficient-statistics sidecar consumed by the
@@ -241,8 +250,21 @@ def evaluate_artifact(
         "morph_consistency": morph_consistency_over(tokenizer, morph_sample),
     }
 
+    arrays: Dict[str, np.ndarray] = {
+        "doc_tokens": doc_tokens,
+        "doc_words": doc_words,
+        "doc_chars": doc_chars,
+        "doc_bytes": doc_bytes,
+        "form_tp": form_tp,
+        "form_predicted": form_pred,
+        "form_gold": form_gold,
+        "form_edit": form_edit,
+        "form_valid": form_valid,
+    }
+
     if deriv_sample:
-        deriv = _morph_point_estimates(morph_form_stats(tokenizer, deriv_sample))
+        deriv_stats = morph_form_stats(tokenizer, deriv_sample)
+        deriv = _morph_point_estimates(deriv_stats)
         record.update(
             {
                 "morph_score_f1_deriv": deriv["f1"],
@@ -253,20 +275,20 @@ def evaluate_artifact(
                 "morph_consistency_deriv": morph_consistency_over(tokenizer, deriv_sample),
             }
         )
+        # Persist the derivational per-form arrays so the aggregation can attach
+        # bootstrap CIs + paired significance to the derivational boundary metrics.
+        arrays.update(
+            {
+                "form_tp_deriv": np.asarray(deriv_stats["tp"], dtype=np.int32),
+                "form_predicted_deriv": np.asarray(deriv_stats["predicted"], dtype=np.int32),
+                "form_gold_deriv": np.asarray(deriv_stats["gold"], dtype=np.int32),
+                "form_edit_deriv": np.asarray(deriv_stats["edit"], dtype=np.int32),
+                "form_valid_deriv": np.asarray(deriv_stats["valid"], dtype=np.uint8),
+            }
+        )
 
     (artifact_dir / "metrics.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    np.savez_compressed(
-        artifact_dir / EVAL_UNITS_FILENAME,
-        doc_tokens=doc_tokens,
-        doc_words=doc_words,
-        doc_chars=doc_chars,
-        doc_bytes=doc_bytes,
-        form_tp=form_tp,
-        form_predicted=form_pred,
-        form_gold=form_gold,
-        form_edit=form_edit,
-        form_valid=form_valid,
-    )
+    np.savez_compressed(artifact_dir / EVAL_UNITS_FILENAME, **arrays)
     return record
 
 
@@ -293,18 +315,20 @@ def _load_units(output_root: Path, run_key: str) -> Dict[str, np.ndarray]:
 def _components_for(
     metric: str,
     units: Dict[str, np.ndarray],
-    valid_pos: np.ndarray,
-    corpus_idx: np.ndarray,
-    morph_idx: np.ndarray,
+    contexts: Dict[str, Any],
 ) -> Tuple[Tuple[np.ndarray, ...], st.CombineFn, np.ndarray]:
     """Return the per-unit components, combine, and resample indices for a metric.
+
+    Morph metrics carry a `_deriv` suffix when they score the derivational gold;
+    they read the `*_deriv` per-form arrays and resample over the derivational
+    track's own valid-form mask. Both morph tracks share the dispatch below.
 
     Args:
         metric (str): A decomposable metric name.
         units (Dict[str, np.ndarray]): The run's per-unit arrays.
-        valid_pos (np.ndarray): Form positions valid across every compared run.
-        corpus_idx (np.ndarray): Shared document-resample indices.
-        morph_idx (np.ndarray): Shared form-resample indices over `valid_pos`.
+        contexts (Dict[str, Any]): Resample contexts: `corpus` maps to the
+            document-resample indices; `infl` and `deriv` each map to a
+            `(valid_pos, morph_idx)` tuple for that morph track.
 
     Returns:
         Tuple[Tuple[np.ndarray, ...], st.CombineFn, np.ndarray]: The components,
@@ -314,18 +338,22 @@ def _components_for(
         ValueError: If `metric` is not decomposable.
     """
     if metric == "fertility":
-        return (units["doc_tokens"], units["doc_words"]), _safe_div, corpus_idx
+        return (units["doc_tokens"], units["doc_words"]), _safe_div, contexts["corpus"]
     if metric == "tokens_per_byte":
-        return (units["doc_tokens"], units["doc_bytes"]), _safe_div, corpus_idx
+        return (units["doc_tokens"], units["doc_bytes"]), _safe_div, contexts["corpus"]
     if metric == "chars_per_token":
-        return (units["doc_chars"], units["doc_tokens"]), _safe_div, corpus_idx
-    if metric == "morph_score_f1":
-        tp = units["form_tp"][valid_pos]
-        predicted = units["form_predicted"][valid_pos]
-        gold = units["form_gold"][valid_pos]
+        return (units["doc_chars"], units["doc_tokens"]), _safe_div, contexts["corpus"]
+    if metric in ("morph_score_f1", "morph_score_f1_deriv"):
+        suffix = "_deriv" if metric.endswith("_deriv") else ""
+        valid_pos, morph_idx = contexts["deriv" if suffix else "infl"]
+        tp = units[f"form_tp{suffix}"][valid_pos]
+        predicted = units[f"form_predicted{suffix}"][valid_pos]
+        gold = units[f"form_gold{suffix}"][valid_pos]
         return (tp, predicted, gold), _f1_combine, morph_idx
-    if metric == "morph_edit_distance":
-        edit = units["form_edit"][valid_pos]
+    if metric in ("morph_edit_distance", "morph_edit_distance_deriv"):
+        suffix = "_deriv" if metric.endswith("_deriv") else ""
+        valid_pos, morph_idx = contexts["deriv" if suffix else "infl"]
+        edit = units[f"form_edit{suffix}"][valid_pos]
         return (edit, np.ones_like(edit)), _safe_div, morph_idx
     raise ValueError(f"Not a decomposable metric: {metric}")
 
@@ -400,6 +428,33 @@ def _vocab_significance(
     return {"ranking": ranking, "pairs": pairs}
 
 
+def _morph_context(
+    units: Dict[str, Dict[str, np.ndarray]],
+    keys: List[str],
+    valid_key: str,
+    n_resamples: int,
+    seed: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Build a morph track's cross-run valid mask and shared resample indices.
+
+    Args:
+        units (Dict[str, Dict[str, np.ndarray]]): Per-run unit arrays by run key.
+        keys (List[str]): Run keys compared in this vocab.
+        valid_key (str): Per-form validity array name (`form_valid` or
+            `form_valid_deriv`).
+        n_resamples (int): Bootstrap resamples (B).
+        seed (int): Seed for this track's resample indices.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: The form positions valid across every
+            compared run, and the resample-index matrix over those positions.
+    """
+    valid_stack = np.vstack([units[key][valid_key].astype(bool) for key in keys])
+    valid_pos = np.nonzero(valid_stack.all(axis=0))[0]
+    idx = st.make_resample_indices(len(valid_pos), n_resamples, seed)
+    return valid_pos, idx
+
+
 def augment_with_statistics(
     records: List[Dict[str, Any]],
     output_root: Path,
@@ -411,14 +466,15 @@ def augment_with_statistics(
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Add bootstrap CIs to records and compute paired significance per vocab.
 
-    For each vocab size, all tokenizers share one set of resample indices
-    (documents for corpus metrics, forms for morph metrics) so that paired
-    differences are computed on the same resamples. The morph metrics are
-    bootstrapped over the forms valid across every compared tokenizer. Each
-    record gains `<metric>_ci` and `<metric>_std` for the five decomposable
-    metrics (whose point estimate is also recomputed from the per-unit arrays so
-    it matches the CI), while `renyi_efficiency` and `morph_consistency` are left
-    as bare point estimates.
+    For each vocab size, all tokenizers share one set of resample indices per
+    track (documents for corpus metrics, inflectional forms, and derivational
+    forms) so that paired differences are computed on the same resamples. Each
+    morph track is bootstrapped over the forms valid across every compared
+    tokenizer. Each record gains `<metric>_ci` and `<metric>_std` for every
+    decomposable metric present (corpus + inflectional morph, plus derivational
+    morph when the `*_deriv` per-form arrays exist), whose point estimate is also
+    recomputed from the per-unit arrays so it matches the CI; `renyi_efficiency`,
+    `morph_consistency`, and `morph_consistency_deriv` stay bare point estimates.
 
     Args:
         records (List[Dict[str, Any]]): Per-run metric records (mutated in place).
@@ -443,19 +499,25 @@ def augment_with_statistics(
         rec_by_key = {r["run_key"]: r for r in recs}
         units = {key: _load_units(output_root, key) for key in keys}
 
-        n_docs = len(units[keys[0]]["doc_tokens"])
-        corpus_idx = st.make_resample_indices(n_docs, n_resamples, seed * 1_000_003 + vocab * 2)
-
-        valid_stack = np.vstack([units[key]["form_valid"].astype(bool) for key in keys])
-        valid_pos = np.nonzero(valid_stack.all(axis=0))[0]
-        morph_idx = st.make_resample_indices(len(valid_pos), n_resamples, seed * 1_000_003 + vocab * 2 + 1)
+        # Per-track resample contexts. corpus uses base; inflectional uses base+1;
+        # derivational uses base+500_000 so its seed stays disjoint from both for
+        # every vocab size (vocab*2 stays well under 500_000).
+        base = seed * 1_000_003 + vocab * 2
+        contexts: Dict[str, Any] = {
+            "corpus": st.make_resample_indices(len(units[keys[0]]["doc_tokens"]), n_resamples, base),
+            "infl": _morph_context(units, keys, "form_valid", n_resamples, base + 1),
+        }
+        metrics = list(_DECOMPOSABLE_METRICS)
+        if all("form_valid_deriv" in units[key] for key in keys):
+            contexts["deriv"] = _morph_context(units, keys, "form_valid_deriv", n_resamples, base + 500_000)
+            metrics += _DERIV_DECOMPOSABLE_METRICS
 
         vocab_block: Dict[str, Any] = {}
-        for metric in _DECOMPOSABLE_METRICS:
+        for metric in metrics:
             points: Dict[str, float] = {}
             dists: Dict[str, np.ndarray] = {}
             for key in keys:
-                components, combine, idx = _components_for(metric, units[key], valid_pos, corpus_idx, morph_idx)
+                components, combine, idx = _components_for(metric, units[key], contexts)
                 dist = st.bootstrap_distribution(idx, components, combine)
                 point = st.point_estimate(components, combine)
                 low, high = st.percentile_ci(dist, ci_level)
@@ -474,8 +536,8 @@ def augment_with_statistics(
         "ci_level": ci_level,
         "seed": seed,
         "morph_form_sample": morph_form_sample,
-        "units": {"corpus": "documents", "morph": "forms"},
-        "point_only": ["renyi_efficiency", "morph_consistency"],
+        "units": {"corpus": "documents", "morph": "forms", "morph_deriv": "forms"},
+        "point_only": ["renyi_efficiency", "morph_consistency", "morph_consistency_deriv"],
     }
     return significance, stats_config
 
@@ -544,9 +606,10 @@ def build_report(
         "not absolute morphological accuracy.",
         "",
         "Decomposable metrics carry a 95% bootstrap CI in brackets (documents "
-        "resampled for corpus metrics, forms for morph metrics). "
-        "`renyi_efficiency`, `morph_consistency`, and all `*_deriv` columns are "
-        "point estimates only.",
+        "resampled for corpus metrics, forms for the morph metrics, including "
+        "the `morph_score_f1_deriv` / `morph_edit_distance_deriv` derivational "
+        "metrics). `renyi_efficiency`, `morph_consistency`, and "
+        "`morph_consistency_deriv` are point estimates only.",
         "",
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
@@ -674,7 +737,7 @@ def log_results_to_mlflow(
                 )
                 ml.log_metrics({k: record[k] for k in metric_keys if k in record})
                 ci_metrics: Dict[str, float] = {}
-                for metric in _DECOMPOSABLE_METRICS:
+                for metric in (*_DECOMPOSABLE_METRICS, *_DERIV_DECOMPOSABLE_METRICS):
                     bounds = record.get(f"{metric}_ci")
                     if bounds is not None:
                         ci_metrics[f"{metric}_ci_low"] = bounds[0]

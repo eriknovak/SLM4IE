@@ -230,7 +230,7 @@ def test_augment_with_statistics_adds_cis_and_significance(tmp_path: Path):
     # One pair for two tokenizers; it carries an adjusted p-value.
     assert len(block["fertility"]["pairs"]) == 1
     assert "p_adj" in block["fertility"]["pairs"][0]
-    assert stats_config["units"] == {"corpus": "documents", "morph": "forms"}
+    assert stats_config["units"] == {"corpus": "documents", "morph": "forms", "morph_deriv": "forms"}
 
 
 _DERIV_RECORD = {
@@ -338,3 +338,74 @@ def test_eval_run_links_to_training_run(tmp_path: Path, monkeypatch):
     )
     assert eval_runs, "expected an eval child run"
     assert eval_runs[0].data.tags["train_run_id"] == link["run_id"]
+
+
+def test_augment_adds_deriv_cis_and_significance(tmp_path: Path):
+    """With deriv per-form arrays present, deriv boundary metrics get CIs + tests."""
+    cfg = _make_config(tmp_path)
+    sample_path, lexicon_path = prepare_inputs(cfg)
+    for key in ["bpe-90", "morphbpe-90"]:
+        train_one(key, cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
+
+    morph_sample = list(build_morph_lexicon(cfg.sloleks_path).by_form.values())
+    deriv_sample = [
+        MorphemeSegmentation(f, list(m), ["morph"] * len(m), f, None, False)
+        for f, m in [
+            ("hišica", ["hiš", "ic", "a"]),
+            ("hišar", ["hiš", "ar"]),
+            ("pisatelj", ["pis", "at", "elj"]),
+            ("pisanje", ["pis", "a", "nje"]),
+            ("mestece", ["mest", "ec", "e"]),
+            ("psiček", ["ps", "ič", "ek"]),
+        ]
+    ]
+    eval_docs = [iter_words(line) for line in _CORPUS[:20]]
+    records = [
+        evaluate_artifact(
+            key,
+            output_root=cfg.output_root,
+            eval_docs=eval_docs,
+            morph_sample=morph_sample,
+            deriv_sample=deriv_sample,
+        )
+        for key in ["bpe-90", "morphbpe-90"]
+    ]
+    records = [r for r in records if r]
+
+    significance, stats_config = augment_with_statistics(
+        records, cfg.output_root, n_resamples=200, ci_level=0.95, seed=12345, morph_form_sample=len(morph_sample)
+    )
+
+    for record in records:
+        low, high = record["morph_score_f1_deriv_ci"]
+        assert low <= record["morph_score_f1_deriv"] <= high or low == high
+        assert record["morph_edit_distance_deriv_std"] >= 0.0
+        # consistency_deriv stays a point estimate (no CI).
+        assert "morph_consistency_deriv_ci" not in record
+
+    block = significance["90"]
+    assert "morph_score_f1_deriv" in block and "morph_edit_distance_deriv" in block
+    assert {row["tokenizer"] for row in block["morph_score_f1_deriv"]["ranking"]} == {"bpe", "morphbpe"}
+    assert stats_config["point_only"] == ["renyi_efficiency", "morph_consistency", "morph_consistency_deriv"]
+
+
+def test_augment_without_deriv_arrays_skips_deriv_metrics(tmp_path: Path):
+    """Old-style npz (no deriv arrays) augments cleanly with no deriv blocks."""
+    cfg = _make_config(tmp_path)
+    sample_path, lexicon_path = prepare_inputs(cfg)
+    for key in ["bpe-90", "morphbpe-90"]:
+        train_one(key, cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
+
+    morph_sample = list(build_morph_lexicon(cfg.sloleks_path).by_form.values())
+    eval_docs = [iter_words(line) for line in _CORPUS[:20]]
+    records = [
+        evaluate_artifact(key, output_root=cfg.output_root, eval_docs=eval_docs, morph_sample=morph_sample)
+        for key in ["bpe-90", "morphbpe-90"]
+    ]
+    records = [r for r in records if r]
+
+    significance, _ = augment_with_statistics(
+        records, cfg.output_root, n_resamples=100, ci_level=0.95, seed=1, morph_form_sample=len(morph_sample)
+    )
+    assert "morph_score_f1_deriv" not in significance["90"]
+    assert all("morph_score_f1_deriv_ci" not in r for r in records)
