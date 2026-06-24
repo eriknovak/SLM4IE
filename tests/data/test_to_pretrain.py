@@ -440,3 +440,31 @@ def test_force_all_stage_all_nukes_output(tmp_path: Path) -> None:
     (out / "00_convert" / "alfa" / "000.jsonl.gz").write_bytes(b"x")
     _apply_force(out, stage="all", run_all=True, dataset_keys=["alfa"])
     assert list(out.iterdir()) == []
+
+
+def test_parse_args_recount_runs_standalone() -> None:
+    """--recount needs neither positional datasets nor --all."""
+    from scripts.data.to_pretrain import parse_args
+
+    args = parse_args(["--recount"])
+    assert args.recount is True
+    assert args.all is False
+    assert args.datasets == []
+
+
+def test_parse_args_recount_rejects_targets() -> None:
+    """--recount is a standalone mode; mixing it with a target errors."""
+    from scripts.data.to_pretrain import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--recount", "--all"])
+    with pytest.raises(SystemExit):
+        parse_args(["--recount", "alfa"])
+
+
+def test_parse_args_still_requires_a_target_without_recount() -> None:
+    """Without --recount, one of datasets/--all is still required."""
+    from scripts.data.to_pretrain import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args([])

@@ -17,6 +17,7 @@ not by datatrove's built-in completion tracking. Builders are pure
 factories — they do not check, write, or honor sentinels.
 """
 
+import gzip
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +43,7 @@ from datatrove.utils.typeshelper import Languages
 from slm4ie.data.curate.dedup import default_exact_config
 from slm4ie.data.curate.language import LinguaLanguageFilter
 from slm4ie.data.curate.spam import SpamConfig, SpamFilter
-from slm4ie.data.curate.stages import STAGE_DIRS
+from slm4ie.data.curate.stages import STAGE_DIRS, upstream_stage
 from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce
 
 logger = logging.getLogger(__name__)
@@ -192,6 +193,98 @@ def pipeline_io_counts(stats: PipelineStats) -> Tuple[int, int]:
     records_in = int(stats.stats[0]["documents"].total)
     records_out = int(stats.stats[-1]["total"].total)
     return records_in, records_out
+
+
+def _count_jsonl_rows(path: Path) -> int:
+    """Count newline-delimited records in a `.jsonl` or `.jsonl.gz` file.
+
+    Counts newline bytes over the raw (decompressed) stream in megabyte
+    chunks, skipping per-line UTF-8 decoding — far faster at corpus scale,
+    where a full backfill reads tens of millions of rows. Every JSONL
+    record is newline-terminated, so a trailing newline is added when the
+    final byte is not one (a file with no trailing newline still counts
+    its last record).
+
+    Args:
+        path: Path to a plain or gzipped JSONL file.
+
+    Returns:
+        The number of rows (documents) in the file.
+    """
+    opener = gzip.open if path.suffix == ".gz" else open
+    count = 0
+    last = b"\n"
+    with opener(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            count += chunk.count(b"\n")
+            last = chunk[-1:]
+    if last not in (b"\n", b""):
+        count += 1
+    return count
+
+
+def count_docs_per_key(stage_dir: Path, keys: Sequence[str]) -> Dict[str, int]:
+    """Count documents written per dataset key from on-disk shards.
+
+    Each scoped stage writes its surviving documents to
+    `<stage_dir>/<key>/<rank>.jsonl.gz`, so the true per-source output
+    count is the number of JSONL rows across a key's shards. This reads
+    those shards directly, giving a per-source figure even when several
+    datasets ran in one config-hash bucket (whose aggregate
+    `PipelineStats` cannot be attributed back to a single source).
+
+    Args:
+        stage_dir: Stage output directory, e.g. `<output_dir>/03_quality`.
+        keys: Dataset keys to count. A key with no output directory
+            counts as zero rather than raising.
+
+    Returns:
+        Mapping from each requested key to its document count.
+    """
+    counts: Dict[str, int] = {}
+    for key in keys:
+        key_dir = stage_dir / key
+        total = 0
+        if key_dir.is_dir():
+            for shard in sorted(key_dir.glob("**/*.jsonl.gz")):
+                total += _count_jsonl_rows(shard)
+        counts[key] = total
+    return counts
+
+
+def per_key_stage_counts(
+    stage_name: str, paths: CuratePaths, keys: Sequence[str]
+) -> Dict[str, Tuple[int, int]]:
+    """Compute true per-source `(records_in, records_out)` for a scoped stage.
+
+    A scoped stage runs every dataset in a config-hash bucket through one
+    executor, whose aggregate `PipelineStats` cannot be split back into
+    per-source counts. The on-disk shards can: a source's `records_out`
+    is the rows in this stage's `<key>/` output, and its `records_in`
+    is the rows it fed in — the upstream stage's `<key>/` output, or the
+    flat `<key>.jsonl` extraction file for the `convert` stage (which has
+    no upstream stage).
+
+    Args:
+        stage_name: Scoped stage name (`convert` … `repetition`).
+        paths: Resolved curate paths for input and stage directories.
+        keys: Dataset keys in the bucket to count.
+
+    Returns:
+        Mapping from each key to its `(records_in, records_out)` pair.
+    """
+    out_counts = count_docs_per_key(paths.stage_dir(stage_name), keys)
+    upstream = upstream_stage(stage_name)
+    if upstream is None:
+        in_counts = {
+            key: _count_jsonl_rows(paths.input_folder / f"{key}.jsonl")
+            if (paths.input_folder / f"{key}.jsonl").is_file()
+            else 0
+            for key in keys
+        }
+    else:
+        in_counts = count_docs_per_key(paths.stage_dir(upstream), keys)
+    return {key: (in_counts[key], out_counts[key]) for key in keys}
 
 
 def build_language_executors(
