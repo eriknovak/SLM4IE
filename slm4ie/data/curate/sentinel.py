@@ -234,6 +234,51 @@ def write_dataset_sentinel(
     )
 
 
+def update_dataset_sentinel_counts(
+    stage_folder: Path,
+    dataset: str,
+    *,
+    records_in: int,
+    records_out: int,
+) -> Optional[Path]:
+    """Rewrite only the record counts in an existing dataset sentinel.
+
+    Used to backfill per-source counts onto sentinels written before the
+    per-source fix (which stamped a shared bucket total into every
+    bucket-mate). Every other field — `completed_at`, `config_hash`,
+    `config_slice`, `input_fingerprint` — is preserved verbatim, so the
+    sentinel stays current against its config and is not treated as a
+    fresh run. A dataset with no existing sentinel is left untouched
+    rather than fabricated.
+
+    Args:
+        stage_folder: The scoped stage's output folder.
+        dataset: Dataset key whose sentinel is updated.
+        records_in: True per-source records read for this dataset.
+        records_out: True per-source records written for this dataset.
+
+    Returns:
+        Path to the rewritten sentinel, or `None` when no sentinel
+        exists for *dataset*.
+    """
+    sentinel_path = dataset_sentinel_path(stage_folder, dataset)
+    if not sentinel_path.exists():
+        return None
+    try:
+        payload = json.loads(sentinel_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    payload["records_in"] = records_in
+    payload["records_out"] = records_out
+    tmp_path = sentinel_path.with_suffix(sentinel_path.suffix + ".tmp")
+    tmp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp_path, sentinel_path)
+    return sentinel_path
+
+
 def dataset_sentinel_is_current(
     stage_folder: Path, dataset: str, expected_hash: str
 ) -> bool:

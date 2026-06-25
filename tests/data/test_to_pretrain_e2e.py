@@ -368,3 +368,117 @@ def test_all_skips_roster_dataset_with_no_input(tmp_path: Path) -> None:
     # Corpus stages completed across the real datasets.
     assert (out_dir / "05_1_dedup" / ".complete").exists()
     assert (out_dir / "06_statistics" / ".complete").exists()
+
+
+def _rows(key_dir: Path) -> int:
+    """Count JSONL rows across all gzipped shards under *key_dir*."""
+    import gzip
+
+    total = 0
+    for shard in key_dir.glob("*.jsonl.gz"):
+        with gzip.open(shard, "rt", encoding="utf-8") as fh:
+            total += sum(1 for _ in fh)
+    return total
+
+
+@pytest.mark.slow
+def test_bucketmates_get_distinct_per_source_counts(tmp_path: Path) -> None:
+    """Datasets sharing one config bucket each get their own per-source counts.
+
+    alfa and beta run defaults, so they share a config-hash bucket and one
+    executor. The executor's aggregate stats must not be stamped into both
+    sentinels; each must carry its own row counts. Different doc counts
+    (3 vs 2) make a shared bucket total impossible to mistake for correct.
+    """
+    from slm4ie.data.curate.sentinel import read_sentinel
+
+    in_dir = tmp_path / "extracted"
+    out_dir = tmp_path / "pretrain"
+    extract_cfg = tmp_path / "extract.yaml"
+    pretrain_cfg = tmp_path / "pretrain.yaml"
+    _write_extract_config(extract_cfg)
+    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)  # 3 docs
+    _write_extracted(in_dir, "beta", BETA_DOCS[:2])  # 2 docs
+
+    _curate(
+        datasets=["alfa", "beta"],
+        run_all=False,
+        stage="all",
+        input_dir=in_dir,
+        output_dir=out_dir,
+        force=False,
+        workers=1,
+        pretrain_config=pretrain_cfg,
+        extract_config=extract_cfg,
+    )
+
+    alfa_q = read_sentinel(out_dir / "03_quality" / "alfa")
+    beta_q = read_sentinel(out_dir / "03_quality" / "beta")
+    assert alfa_q is not None and beta_q is not None
+    # records_in is each source's own upstream survivor count, never a shared
+    # bucket total — the bug stamped the same number into both.
+    assert alfa_q.records_in == 3
+    assert beta_q.records_in == 2
+    # records_out matches the per-source shards actually written this stage.
+    assert alfa_q.records_out == _rows(out_dir / "03_quality" / "alfa")
+    assert beta_q.records_out == _rows(out_dir / "03_quality" / "beta")
+
+
+def _write_stage_shards(stage_dir: Path, key: str, n_rows: int) -> None:
+    """Write one gzipped shard of *n_rows* docs for *key* under *stage_dir*."""
+    import gzip
+
+    key_dir = stage_dir / key
+    key_dir.mkdir(parents=True, exist_ok=True)
+    with gzip.open(key_dir / "00000.jsonl.gz", "wt", encoding="utf-8") as fh:
+        for i in range(n_rows):
+            fh.write(json.dumps({"text": f"{key}-{i}"}) + "\n")
+
+
+def test_recount_backfills_per_source_counts(tmp_path: Path) -> None:
+    """--recount rewrites bucket-total sentinels with true per-source counts."""
+    from scripts.data.to_pretrain import _recount
+    from slm4ie.data.curate.sentinel import read_sentinel, write_dataset_sentinel
+
+    in_dir = tmp_path / "extracted"
+    out_dir = tmp_path / "pretrain"
+    extract_cfg = tmp_path / "extract.yaml"
+    pretrain_cfg = tmp_path / "pretrain.yaml"
+    _write_extract_config(extract_cfg)
+    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+
+    # Extracted tier feeds convert's records_in: alfa=3, beta=2.
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS[:2])
+    # On-disk stage outputs (the ground truth). beta loses one doc at language.
+    _write_stage_shards(out_dir / "00_convert", "alfa", 3)
+    _write_stage_shards(out_dir / "00_convert", "beta", 2)
+    _write_stage_shards(out_dir / "01_language", "alfa", 3)
+    _write_stage_shards(out_dir / "01_language", "beta", 1)
+    # Sentinels carry the WRONG shared bucket totals the old code wrote.
+    for stage in ("00_convert", "01_language"):
+        for key in ("alfa", "beta"):
+            write_dataset_sentinel(
+                out_dir / stage, key, config_slice={}, config_hash_value="h",
+                records_in=5, records_out=4,
+            )
+
+    _recount(
+        output_dir=out_dir,
+        input_dir=in_dir,
+        pretrain_config=pretrain_cfg,
+        extract_config=extract_cfg,
+    )
+
+    conv_alfa = read_sentinel(out_dir / "00_convert" / "alfa")
+    conv_beta = read_sentinel(out_dir / "00_convert" / "beta")
+    lang_alfa = read_sentinel(out_dir / "01_language" / "alfa")
+    lang_beta = read_sentinel(out_dir / "01_language" / "beta")
+    assert (conv_alfa.records_in, conv_alfa.records_out) == (3, 3)
+    assert (conv_beta.records_in, conv_beta.records_out) == (2, 2)
+    # language records_in is the upstream (convert) per-source output.
+    assert (lang_alfa.records_in, lang_alfa.records_out) == (3, 3)
+    assert (lang_beta.records_in, lang_beta.records_out) == (2, 1)
+    # config_hash preserved, so the sentinels stay current (not re-run).
+    assert conv_alfa.config_hash == "h"

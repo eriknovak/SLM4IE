@@ -287,3 +287,45 @@ def test_cascade_invalidate_scoped_mixes_per_dataset_and_corpus(tmp_path: Path) 
     assert dataset_sentinel_is_current(q, "b", "h") is True
     # Downstream corpus stage dropped wholesale (roster/inputs changed).
     assert sentinel_is_current(d, "h") is False
+
+
+def test_update_dataset_sentinel_counts_rewrites_only_counts(tmp_path: Path) -> None:
+    """Backfill replaces records_in/out but preserves all other fields."""
+    from slm4ie.data.curate.sentinel import (
+        read_sentinel,
+        update_dataset_sentinel_counts,
+        write_dataset_sentinel,
+    )
+
+    q = tmp_path / "03_quality"
+    write_dataset_sentinel(
+        q, "alfa", config_slice={"min_doc_words": 20}, config_hash_value="sha256:abc",
+        records_in=99, records_out=99, input_fingerprint="fp-1",
+    )
+    before = read_sentinel(q / "alfa")
+    assert before is not None
+
+    path = update_dataset_sentinel_counts(q, "alfa", records_in=3, records_out=2)
+    assert path is not None
+
+    after = read_sentinel(q / "alfa")
+    assert after is not None
+    assert (after.records_in, after.records_out) == (3, 2)
+    # Everything else is preserved, including the original completion time.
+    assert after.config_hash == "sha256:abc"
+    assert after.config_slice == {"min_doc_words": 20}
+    assert after.input_fingerprint == "fp-1"
+    assert after.completed_at == before.completed_at
+
+
+def test_update_dataset_sentinel_counts_noop_when_missing(tmp_path: Path) -> None:
+    """Backfill never fabricates a sentinel for a dataset that has none."""
+    from slm4ie.data.curate.sentinel import (
+        read_sentinel,
+        update_dataset_sentinel_counts,
+    )
+
+    q = tmp_path / "03_quality"
+    result = update_dataset_sentinel_counts(q, "ghost", records_in=1, records_out=1)
+    assert result is None
+    assert read_sentinel(q / "ghost") is None

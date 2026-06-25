@@ -47,6 +47,10 @@ Examples:
 
     # Use cpu_count // 2 workers (default is serial: 1 worker).
     uv run python scripts/data/to_pretrain.py --all --max-workers 0
+
+    # Backfill true per-source counts onto existing scoped sentinels
+    # (rewrites sentinel counts only; reprocesses no data).
+    uv run python scripts/data/to_pretrain.py --recount
 """
 
 import argparse
@@ -81,7 +85,9 @@ from slm4ie.data.curate.sentinel import (
     SENTINEL_NAME,
     cascade_invalidate_scoped,
     dataset_sentinel_is_current,
+    dataset_sentinel_path,
     invalidate_dataset_sentinels,
+    update_dataset_sentinel_counts,
     write_dataset_sentinel,
 )
 from slm4ie.data.curate.convert import (
@@ -101,6 +107,7 @@ from slm4ie.data.curate.pipeline import (
     build_exact_dedup_executors,
     build_sentence_dedup_executors,
     build_stats_executors,
+    per_key_stage_counts,
     pipeline_io_counts,
 )
 from slm4ie.data.curate.spam import SpamAssets, SpamConfig, load_spam_assets
@@ -126,9 +133,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             ".complete sentinel; on rerun, stale stages auto-invalidate."
         )
     )
-    target = parser.add_mutually_exclusive_group(required=True)
+    target = parser.add_mutually_exclusive_group(required=False)
     target.add_argument("datasets", nargs="*", default=[], help="Dataset keys.")
     target.add_argument("--all", action="store_true", help="Process every dataset.")
+    parser.add_argument(
+        "--recount",
+        action="store_true",
+        help=(
+            "Backfill true per-source record counts onto existing scoped "
+            "sentinels from on-disk shards, then exit. Runs standalone (no "
+            "datasets/--all); rewrites no data, only sentinel counts."
+        ),
+    )
     parser.add_argument(
         "--stage",
         choices=ALL_STAGE_NAMES,
@@ -165,6 +181,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Parallel workers. 1=serial (default), 0=cpu_count//2, N=N.",
     )
     args = parser.parse_args(argv)
+    if args.recount:
+        if args.all or args.datasets:
+            parser.error("argument --recount: cannot be combined with datasets or --all")
+        return args
     if args.all and args.datasets:
         parser.error("argument --all: not allowed with positional datasets")
     if not args.all and not args.datasets:
@@ -1073,6 +1093,58 @@ def _apply_force(
     )
 
 
+def _recount(
+    *,
+    input_dir: Optional[Path],
+    output_dir: Optional[Path],
+    pretrain_config: Optional[Path] = None,
+    extract_config: Optional[Path] = None,
+) -> None:
+    """Backfill true per-source record counts onto existing scoped sentinels.
+
+    Runs that pre-date the per-source fix stamped a shared bucket total into
+    every bucket-mate's sentinel, so `records_in`/`records_out` were identical
+    across all datasets that ran under one config. This recomputes each
+    surviving sentinel's counts from the on-disk per-key shards (via
+    `per_key_stage_counts`) and rewrites only the count fields, leaving the
+    config hash and completion time untouched so nothing is treated as a fresh
+    run. Stages and datasets without a sentinel are skipped, not fabricated.
+
+    Args:
+        input_dir: Override for pretrain.yaml input_dir, or None.
+        output_dir: Override for pretrain.yaml output_dir, or None.
+        pretrain_config: Path to pretrain.yaml, or None for the default.
+        extract_config: Path to extract.yaml, or None for the default.
+    """
+    project_root = _find_project_root()
+    pretrain_path = pretrain_config or (project_root / "configs" / "data" / "pretrain.yaml")
+    extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
+    cfg = _load_yaml(pretrain_path)
+    input_dir, output_dir = _resolve_dirs(input_dir, output_dir, cfg)
+    paths = CuratePaths(input_folder=input_dir, output_dir=output_dir)
+    dataset_keys = _list_datasets(extract_path)
+
+    for stage_name in SCOPED_STAGES:
+        stage_folder = paths.stage_dir(stage_name)
+        keys = [
+            key
+            for key in dataset_keys
+            if dataset_sentinel_path(stage_folder, key).exists()
+        ]
+        if not keys:
+            continue
+        per_key = per_key_stage_counts(stage_name, paths, keys)
+        for key in keys:
+            key_in, key_out = per_key[key]
+            update_dataset_sentinel_counts(
+                stage_folder, key, records_in=key_in, records_out=key_out
+            )
+            logger.info(
+                "[recount] %s/%s records_in=%d records_out=%d",
+                stage_name, key, key_in, key_out,
+            )
+
+
 def _curate(
     *,
     datasets: List[str],
@@ -1282,6 +1354,11 @@ def _curate(
                     if view is not None:
                         shutil.rmtree(view, ignore_errors=True)
 
+                # The runner returns the bucket's aggregate (records_in,
+                # records_out); stamping those into every member sentinel
+                # would make all bucket-mates report identical counts. Read
+                # the true per-source counts off the on-disk shards instead.
+                per_key = per_key_stage_counts(stage_name, paths, bucket_keys)
                 for key in bucket_keys:
                     # Only convert records an input fingerprint: it is the
                     # sole stage reading the extracted tier, so it is the
@@ -1295,17 +1372,18 @@ def _curate(
                         if stage_name == "convert"
                         else None
                     )
+                    key_in, key_out = per_key[key]
                     write_dataset_sentinel(
                         stage_folder,
                         key,
                         config_slice=effective,
                         config_hash_value=bucket_hash,
-                        records_in=records_in,
-                        records_out=records_out,
+                        records_in=key_in,
+                        records_out=key_out,
                         input_fingerprint=fingerprint,
                     )
                 logger.info(
-                    "[%s] done for %d dataset(s) (records_in=%d, records_out=%d)",
+                    "[%s] done for %d dataset(s) (bucket records_in=%d, records_out=%d)",
                     stage_name, len(bucket_keys), records_in, records_out,
                 )
         else:
@@ -1351,6 +1429,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = parse_args()
+    if args.recount:
+        _recount(
+            input_dir=args.input_dir,
+            output_dir=args.output_dir,
+            pretrain_config=args.pretrain_config,
+            extract_config=args.extract_config,
+        )
+        return
     _curate(
         datasets=args.datasets,
         run_all=args.all,
