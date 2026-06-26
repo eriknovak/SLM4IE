@@ -1,102 +1,98 @@
 import marimo
 
-__generated_with = "0.9.0"
+__generated_with = "0.23.10"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        # Tokenizer comparison (Slovenian)
+    mo.md(r"""
+    # Tokenizer comparison (Slovenian)
 
-        Exploratory companion to the tokenizer sweep trained by
-        `scripts/tokenizers/train.py` and scored by `scripts/tokenizers/analyze.py`.
-        Every plot is interactive (hover for details, drag to zoom, click legend
-        entries to toggle series).
+    Exploratory companion to the tokenizer sweep trained by
+    `scripts/tokenizers/train.py` and scored by `scripts/tokenizers/analyze.py`.
+    Every plot is interactive (hover for details, drag to zoom, click legend
+    entries to toggle series).
 
-        - **Part A — Segmentation.** Pick an example (a curated lexicon form, a
-          sampled dataset sentence, or your own text) and see how each selected
-          tokenizer splits it. Tokens render as colored, character-aligned blocks;
-          the gold **morpheme** boundaries from the Sloleks-derived lexicon are
-          overlaid as dashed lines, and a token whose span matches a morpheme
-          exactly is outlined in green. Hover a block for its piece, span, and
-          morpheme match.
-        - **Part B — Metrics.** How vocab size and algorithm move each of the six
-          metrics, from the aggregated `report.json`.
+    - **Part A — Segmentation.** Pick an example (a curated lexicon form, a
+      sampled dataset sentence, or your own text) and see how each selected
+      tokenizer splits it. Tokens render as colored, character-aligned blocks;
+      the gold **morpheme** boundaries from the Sloleks-derived lexicon are
+      overlaid as dashed lines, and a token whose span matches a morpheme
+      exactly is outlined in green. Hover a block for its piece, span, and
+      morpheme match.
+    - **Part B — Metrics.** How vocab size and algorithm move each of the six
+      metrics, from the aggregated `report.json`.
 
-        Morphological gold is *inflectional silver gold* — read the morph metrics
-        as relative comparators, not absolute morphology.
-        """
-    )
+    Morphological gold is *inflectional silver gold* — read the morph metrics
+    as relative comparators, not absolute morphology.
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ## What we are measuring, and why
+    mo.md(r"""
+    ## What we are measuring, and why
 
-        ### A two-minute primer on morphology
+    ### A two-minute primer on morphology
 
-        A **morpheme** is the smallest unit of meaning in a word. Slovenian is
-        morphologically rich, so words pack several morphemes:
+    A **morpheme** is the smallest unit of meaning in a word. Slovenian is
+    morphologically rich, so words pack several morphemes:
 
-        - **stem / root** — carries the core meaning: *hiš-* in **hiša** ("house").
-        - **inflectional suffix** — marks grammar (case, number, person, tense)
-          without changing the word's identity: **hiš-i**, **hiš-ami**,
-          **hiš-ah** are all the noun *hiša* in different cases.
-        - **derivational affixes** — build a *new* word: prefix **ne-** in
-          **ne-srečen** ("un-happy"), prefix **raz-** in **raz-staviti**,
-          derivational suffix **-ost** in **hitr-ost** ("speed" from "fast"),
-          **-nik / -ica** for agent/role nouns.
-        - **compounding** — joining stems, e.g. **vod-o-vod** ("water-conduit").
+    - **stem / root** — carries the core meaning: *hiš-* in **hiša** ("house").
+    - **inflectional suffix** — marks grammar (case, number, person, tense)
+      without changing the word's identity: **hiš-i**, **hiš-ami**,
+      **hiš-ah** are all the noun *hiša* in different cases.
+    - **derivational affixes** — build a *new* word: prefix **ne-** in
+      **ne-srečen** ("un-happy"), prefix **raz-** in **raz-staviti**,
+      derivational suffix **-ost** in **hitr-ost** ("speed" from "fast"),
+      **-nik / -ica** for agent/role nouns.
+    - **compounding** — joining stems, e.g. **vod-o-vod** ("water-conduit").
 
-        ### Two things we want from a tokenizer — in tension
+    ### Two things we want from a tokenizer — in tension
 
-        - **Compression.** Fewer tokens per word and per byte means cheaper
-          training/inference and longer effective context. Pure compression
-          rewards merging frequent character runs regardless of meaning.
-        - **Linguistic structure.** Splitting on real morpheme boundaries
-          (**hiš-ami**, not **hi-šami**) gives the model reusable, meaning-bearing
-          units and tends to generalize better across the huge inflectional
-          paradigms of Slovenian.
+    - **Compression.** Fewer tokens per word and per byte means cheaper
+      training/inference and longer effective context. Pure compression
+      rewards merging frequent character runs regardless of meaning.
+    - **Linguistic structure.** Splitting on real morpheme boundaries
+      (**hiš-ami**, not **hi-šami**) gives the model reusable, meaning-bearing
+      units and tends to generalize better across the huge inflectional
+      paradigms of Slovenian.
 
-        These pull against each other: the most compressive split is rarely the
-        most morphologically faithful one. The plots below let you see where each
-        tokenizer sits on that trade-off (and the Pareto view makes it explicit).
+    These pull against each other: the most compressive split is rarely the
+    most morphologically faithful one. The plots below let you see where each
+    tokenizer sits on that trade-off (and the Pareto view makes it explicit).
 
-        ### The six metrics
+    ### The six metrics
 
-        | Metric | Family | Direction | What it says |
-        |---|---|---|---|
-        | `fertility` | compression | ↓ lower | mean subword tokens per word |
-        | `tokens_per_byte` | compression | ↓ lower | tokens emitted per UTF-8 byte |
-        | `chars_per_token` | compression | ↑ higher | mean characters carried per token |
-        | `renyi_efficiency` | compression | ↑ higher | how evenly token frequencies are used (Zouhar et al., 2023); **point estimate only** |
-        | `morph_score_f1` | morphology | ↑ higher | boundary-precision/recall F1 vs gold morphemes (MorphScore, Arnett et al.) |
-        | `morph_edit_distance` | morphology | ↓ lower | raw segment-edit distance to gold morphemes (MorphBPE, [arXiv 2502.00894](https://arxiv.org/abs/2502.00894)) |
-        | `morph_consistency` | morphology | ↑ higher | do words sharing a morpheme also share a token? F1 (MorphBPE); **point estimate only** |
+    | Metric | Family | Direction | What it says |
+    |---|---|---|---|
+    | `fertility` | compression | ↓ lower | mean subword tokens per word |
+    | `tokens_per_byte` | compression | ↓ lower | tokens emitted per UTF-8 byte |
+    | `chars_per_token` | compression | ↑ higher | mean characters carried per token |
+    | `renyi_efficiency` | compression | ↑ higher | how evenly token frequencies are used (Zouhar et al., 2023); **point estimate only** |
+    | `morph_score_f1` | morphology | ↑ higher | boundary-precision/recall F1 vs gold morphemes (MorphScore, Arnett et al.) |
+    | `morph_edit_distance` | morphology | ↓ lower | raw segment-edit distance to gold morphemes (MorphBPE, [arXiv 2502.00894](https://arxiv.org/abs/2502.00894)) |
+    | `morph_consistency` | morphology | ↑ higher | do words sharing a morpheme also share a token? F1 (MorphBPE); **point estimate only** |
 
-        The five decomposable metrics carry **95% bootstrap confidence intervals**
-        and **paired significance tests** (see Part C). The two global functionals
-        (`renyi_efficiency`, `morph_consistency`) do not decompose into per-unit
-        statistics and are reported as bare point estimates.
+    The five decomposable metrics carry **95% bootstrap confidence intervals**
+    and **paired significance tests** (see Part C). The two global functionals
+    (`renyi_efficiency`, `morph_consistency`) do not decompose into per-unit
+    statistics and are reported as bare point estimates.
 
-        > **⚠️ Caveat — the morph gold is inflectional *silver* gold.** The gold
-        > segmentation is derived from **Sloleks**, an *inflectional* lexicon: each
-        > form is greedily aligned to its lemma to recover a single
-        > `stem | inflectional-suffix` cut. It therefore captures **inflection
-        > only** — it does **not** know about derivation (prefixes *pre-/raz-/ne-*,
-        > suffixes *-ost/-nik/-ica*) or compounding, and the alignment is
-        > heuristic. So treat the morph metrics as **relative comparators between
-        > tokenizers**, not as absolute morphological accuracy. A true upgrade path
-        > is the **eLex-2023 derivational dictionary** (New Slovene Grammar WP1,
-        > IJS), the only open Slovenian resource with genuine morpheme
-        > segmentation.
-        """
-    )
+    > **⚠️ Caveat — the morph gold is inflectional *silver* gold.** The gold
+    > segmentation is derived from **Sloleks**, an *inflectional* lexicon: each
+    > form is greedily aligned to its lemma to recover a single
+    > `stem | inflectional-suffix` cut. It therefore captures **inflection
+    > only** — it does **not** know about derivation (prefixes *pre-/raz-/ne-*,
+    > suffixes *-ost/-nik/-ica*) or compounding, and the alignment is
+    > heuristic. So treat the morph metrics as **relative comparators between
+    > tokenizers**, not as absolute morphological accuracy. A true upgrade path
+    > is the **eLex-2023 derivational dictionary** (New Slovene Grammar WP1,
+    > IJS), the only open Slovenian resource with genuine morpheme
+    > segmentation.
+    """)
     return
 
 
@@ -134,7 +130,6 @@ def _():
 
     register_theme()  # apply the SLM4IE plotly look to every figure below
     enable_interactive_download("svg")  # modebar camera button downloads crisp SVG
-
     return (
         ACCENT,
         DIVERGING,
@@ -150,7 +145,6 @@ def _():
         math,
         random,
         re,
-        save_figure,
     )
 
 
@@ -199,15 +193,13 @@ def _(CONFIG_PATH, OUTPUT_ROOT, TOKENIZERS, VOCAB_SIZES, mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ### Exporting charts
+    mo.md(r"""
+    ### Exporting charts
 
-        Every chart has a toolbar (top-right on hover): click the **camera icon**
-        to download it as **SVG**. For scripted, fixed-size exports call
-        `save_figure(fig, "figure.svg")` (also works with `.png` / `.pdf`).
-        """
-    )
+    Every chart has a toolbar (top-right on hover): click the **camera icon**
+    to download it as **SVG**. For scripted, fixed-size exports call
+    `save_figure(fig, "figure.svg")` (also works with `.png` / `.pdf`).
+    """)
     return
 
 
@@ -296,7 +288,7 @@ def _(LEXICON, re):
 
 
 @app.cell
-def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
+def _(ACCENT, TOKENIZER_COLORS, go, gold_segments, load_run):
     _GOLD_HEX = "#D9BF73"
 
     def _rgba(hex_color, alpha):
@@ -304,17 +296,17 @@ def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
         red, green, blue = (int(raw[i : i + 2], 16) for i in (0, 2, 4))
         return f"rgba({red},{green},{blue},{alpha})"
 
-    def _add_token_block(fig, label, base_hex, idx, piece, start, end, surface, on_morpheme, row_y, row_h):
+    def _add_token_block(fig, label, base_hex, idx, piece, start, end, surface, on_morpheme, row_y, row_h, x_start):
         fig.add_trace(
             go.Scatter(
-                x=[start, end, end, start, start],
+                x=[x_start, end, end, x_start, x_start],
                 y=[row_y, row_y, row_y + row_h, row_y + row_h, row_y],
                 fill="toself",
                 mode="lines",
                 fillcolor=_rgba(base_hex, 0.85 if idx % 2 == 0 else 0.5),
                 line=dict(
-                    color=ACCENT["emphasis"] if on_morpheme else "rgba(255,255,255,0.9)",
-                    width=2.5 if on_morpheme else 1.0,
+                    color=ACCENT["emphasis"] if on_morpheme else "rgba(26,26,26,0.28)",
+                    width=2.0 if on_morpheme else 1.0,
                 ),
                 hoveron="fills",
                 hoverinfo="text",
@@ -327,8 +319,22 @@ def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
             )
         )
 
-    def plot_segmentation(text, run_keys):
-        """Build an interactive character-aligned segmentation grid for `text`."""
+    def plot_segmentation(text, run_keys, uniform_word_gaps=False):
+        """Build an interactive character-aligned segmentation grid for `text`.
+
+        Args:
+            text: The string to segment and draw.
+            run_keys: Tokenizer run keys (`<name>-<vocab>`) to render as rows.
+            uniform_word_gaps: Trim leading whitespace from each rendered block so
+                every row shows a gap at word boundaries. Byte-level BPE backends
+                (bpe, morphpiece) fold the leading space into the token, so without
+                this they tile the string with no inter-word gap. Trimming is
+                visual only; morpheme matching and hover spans use the true
+                character offsets.
+
+        Returns:
+            A plotly figure, or None when `text` or `run_keys` is empty.
+        """
         if not text or not run_keys:
             return None
         n_chars = len(text)
@@ -351,9 +357,16 @@ def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
                     continue
                 on_morpheme = (start == 0 or start in gold_bnds) and (end == n_chars or end in gold_bnds)
                 surface = text[start:end]
-                _add_token_block(fig, label, base_hex, idx, piece, start, end, surface, on_morpheme, row_idx, row_h)
+                x_start = start
+                if uniform_word_gaps:
+                    x_start = start + (len(surface) - len(surface.lstrip()))
+                    if x_start >= end:
+                        continue
+                _add_token_block(
+                    fig, label, base_hex, idx, piece, start, end, surface, on_morpheme, row_idx, row_h, x_start
+                )
                 annotations.append(
-                    dict(x=(start + end) / 2, y=row_idx + row_h / 2, text=surface, showarrow=False, font=dict(size=13))
+                    dict(x=(x_start + end) / 2, y=row_idx + row_h / 2, text=surface, showarrow=False, font=dict(size=13))
                 )
 
         shapes = [
@@ -380,12 +393,14 @@ def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
         fig.update_layout(
             shapes=shapes,
             annotations=annotations,
-            xaxis=dict(range=[0, n_chars], visible=False),
+            xaxis=dict(range=[0, n_chars], visible=False, showgrid=False, zeroline=False),
             yaxis=dict(
                 tickmode="array",
                 tickvals=[i + row_h / 2 for i in range(len(rows))],
                 ticktext=[label for label, _, _ in rows],
                 range=[-0.1, len(rows) + 0.6],
+                showgrid=False,
+                zeroline=False,
             ),
             height=46 * len(rows) + 130,
             margin=dict(l=150, r=20, t=20, b=20),
@@ -399,7 +414,9 @@ def _(ACCENT, TOKENIZER_COLORS, gold_segments, go, load_run):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## Part A — Segmentation""")
+    mo.md(r"""
+    ## Part A — Segmentation
+    """)
     return
 
 
@@ -413,8 +430,9 @@ def _(AVAILABLE_RUN_KEYS, CURATED, DATASET_EXAMPLES, VOCAB_SIZES, mo):
     preset_select = mo.ui.dropdown(options=_options or [_first], value=_first, label="Preset")
     free_text = mo.ui.text(value="", placeholder="type any Slovenian text…", label="Free text", full_width=True)
     run_select = mo.ui.multiselect(options=AVAILABLE_RUN_KEYS, value=_default_runs, label="Tokenizers (name-vocab)")
-    mo.vstack([preset_select, free_text, run_select])
-    return free_text, preset_select, run_select
+    gap_select = mo.ui.checkbox(value=False, label="Uniform word gaps (trim leading space on byte-level rows)")
+    mo.vstack([preset_select, free_text, run_select, gap_select])
+    return free_text, gap_select, preset_select, run_select
 
 
 @app.cell
@@ -424,22 +442,20 @@ def _(free_text, preset_select):
 
 
 @app.cell
-def _(example_text, mo, plot_segmentation, run_select):
-    _fig = plot_segmentation(example_text, run_select.value)
+def _(example_text, gap_select, mo, plot_segmentation, run_select):
+    _fig = plot_segmentation(example_text, run_select.value, uniform_word_gaps=gap_select.value)
     _fig if _fig is not None else mo.md("*Pick an example and at least one tokenizer.*")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ## Part B — Metrics vs vocab size & algorithm
+    mo.md(r"""
+    ## Part B — Metrics vs vocab size & algorithm
 
-        Read from the aggregated `report.json`. Arrows in titles mark the better
-        direction (↑ higher-is-better, ↓ lower-is-better).
-        """
-    )
+    Read from the aggregated `report.json`. Arrows in titles mark the better
+    direction (↑ higher-is-better, ↓ lower-is-better).
+    """)
     return
 
 
@@ -510,31 +526,36 @@ def _(REPORT_JSON, json):
         METRIC_COLUMNS,
         RESULTS,
         SIGNIFICANCE,
-        STATS_CONFIG,
         has_ci,
         metric_title,
         record_ci,
-        series_by_tokenizer,
         series_with_ci,
     )
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        Whiskers are **95% bootstrap confidence intervals** for the five
-        decomposable metrics (documents resampled for the compression metrics,
-        forms for the morph metrics). `renyi_efficiency` and `morph_consistency`
-        are drawn as bare points — they are global functionals that do not
-        decompose into per-unit statistics, so no CI is attached.
-        """
-    )
+    mo.md(r"""
+    Whiskers are **95% bootstrap confidence intervals** for the five
+    decomposable metrics (documents resampled for the compression metrics,
+    forms for the morph metrics). `renyi_efficiency` and `morph_consistency`
+    are drawn as bare points — they are global functionals that do not
+    decompose into per-unit statistics, so no CI is attached.
+    """)
     return
 
 
 @app.cell
-def _(METRIC_COLUMNS, TOKENIZER_COLORS, go, has_ci, make_subplots, math, metric_title, series_with_ci):
+def _(
+    METRIC_COLUMNS,
+    TOKENIZER_COLORS,
+    go,
+    has_ci,
+    make_subplots,
+    math,
+    metric_title,
+    series_with_ci,
+):
     _ncols = 3
     _nrows = math.ceil(len(METRIC_COLUMNS) / _ncols)
     _vocabs = sorted({v for _pts in series_with_ci(METRIC_COLUMNS[0]).values() for v, *_rest in _pts})
@@ -599,7 +620,16 @@ def _(METRIC_COLUMNS, TOKENIZERS, mo):
 
 
 @app.cell
-def _(TOKENIZER_COLORS, chart_kind, go, has_ci, metric_pick, metric_title, series_with_ci, tok_pick):
+def _(
+    TOKENIZER_COLORS,
+    chart_kind,
+    go,
+    has_ci,
+    metric_pick,
+    metric_title,
+    series_with_ci,
+    tok_pick,
+):
     _metric = metric_pick.value
     _data = series_with_ci(_metric)
     _toks = [t for t in tok_pick.value if t in _data]
@@ -658,15 +688,13 @@ def _(TOKENIZER_COLORS, chart_kind, go, has_ci, metric_pick, metric_title, serie
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ### Cost ↔ quality tradeoff
+    mo.md(r"""
+    ### Cost ↔ quality tradeoff
 
-        Each point is one run. Pick a compression/cost metric for x and a
-        morphology/quality metric for y; the Pareto-optimal runs (best achievable
-        given both metrics' directions) are connected.
-        """
-    )
+    Each point is one run. Pick a compression/cost metric for x and a
+    morphology/quality metric for y; the Pareto-optimal runs (best achievable
+    given both metrics' directions) are connected.
+    """)
     return
 
 
@@ -679,7 +707,18 @@ def _(METRIC_COLUMNS, mo):
 
 
 @app.cell
-def _(ACCENT, DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, record_ci, x_metric, y_metric):
+def _(
+    ACCENT,
+    DIRECTIONS,
+    RESULTS,
+    TOKENIZER_COLORS,
+    go,
+    has_ci,
+    metric_title,
+    record_ci,
+    x_metric,
+    y_metric,
+):
     _xm = x_metric.value
     _ym = y_metric.value
 
@@ -772,25 +811,23 @@ def _(ACCENT, DIRECTIONS, RESULTS, TOKENIZER_COLORS, go, has_ci, metric_title, r
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ## Part C — Statistical significance
+    mo.md(r"""
+    ## Part C — Statistical significance
 
-        Differences between tokenizers are only meaningful if they survive
-        resampling noise. For each `(metric, vocab)` we run a **paired bootstrap**:
-        all six tokenizers share one set of resample draws (documents for the
-        compression metrics, forms for the morph metrics), and for every pair we
-        build the distribution of the difference. A pair is **significant** when
-        its Holm–Bonferroni-corrected p-value is below 0.05 (the family is the 15
-        pairs within each metric × vocab). Only the five decomposable metrics are
-        testable; `renyi_efficiency` and `morph_consistency` are point estimates.
+    Differences between tokenizers are only meaningful if they survive
+    resampling noise. For each `(metric, vocab)` we run a **paired bootstrap**:
+    all six tokenizers share one set of resample draws (documents for the
+    compression metrics, forms for the morph metrics), and for every pair we
+    build the distribution of the difference. A pair is **significant** when
+    its Holm–Bonferroni-corrected p-value is below 0.05 (the family is the 15
+    pairs within each metric × vocab). Only the five decomposable metrics are
+    testable; `renyi_efficiency` and `morph_consistency` are point estimates.
 
-        **Ranking with compact letters.** Tokenizers are sorted best→worst.
-        Tokenizers **sharing a letter are *not* significantly different** from each
-        other; a tokenizer with a unique letter is significantly better (or worse)
-        than those it shares no letter with.
-        """
-    )
+    **Ranking with compact letters.** Tokenizers are sorted best→worst.
+    Tokenizers **sharing a letter are *not* significantly different** from each
+    other; a tokenizer with a unique letter is significantly better (or worse)
+    than those it shares no letter with.
+    """)
     return
 
 
@@ -812,7 +849,7 @@ def _(DECOMPOSABLE_METRICS, SIGNIFICANCE, VOCAB_SIZES, mo):
 
 
 @app.cell
-def _(SIGNIFICANCE, DIRECTIONS, metric_title, mo, sig_metric, sig_vocab):
+def _(DIRECTIONS, SIGNIFICANCE, metric_title, mo, sig_metric, sig_vocab):
     def _ranking_table():
         block = SIGNIFICANCE.get(sig_vocab.value, {}).get(sig_metric.value)
         if not block:
@@ -836,7 +873,7 @@ def _(SIGNIFICANCE, DIRECTIONS, metric_title, mo, sig_metric, sig_vocab):
 
 
 @app.cell
-def _(DIVERGING, SIGNIFICANCE, DIRECTIONS, go, mo, sig_metric, sig_vocab):
+def _(DIRECTIONS, DIVERGING, SIGNIFICANCE, go, mo, sig_metric, sig_vocab):
     def _matrix_fig():
         block = SIGNIFICANCE.get(sig_vocab.value, {}).get(sig_metric.value)
         if not block:
