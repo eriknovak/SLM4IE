@@ -50,8 +50,15 @@ from slm4ie.data.curate.overrides import (
     effective_stage_config,
     validate_overrides,
 )
+from slm4ie.data.curate.manifest import (
+    DEFAULT_SHARD_GLOBS,
+    ROWS_NOT_COUNTED,
+    corpus_digest,
+    shard_manifest,
+)
 
 __all__ = [
+    # stages
     "ALL_STAGE_NAMES",
     "STAGE_DIRS",
     "STAGE_NAMES",
@@ -60,9 +67,7 @@ __all__ = [
     "final_corpus_dir",
     "stats_dir",
     "upstream_stage",
-]
-
-__all__ += [
+    # sentinel
     "Sentinel",
     "SENTINEL_NAME",
     "cascade_invalidate",
@@ -70,11 +75,14 @@ __all__ += [
     "read_sentinel",
     "sentinel_is_current",
     "write_sentinel",
-]
-
-__all__ += [
+    # overrides
     "STAGE_KNOBS",
     "OverrideConfigError",
     "effective_stage_config",
     "validate_overrides",
+    # manifest
+    "DEFAULT_SHARD_GLOBS",
+    "ROWS_NOT_COUNTED",
+    "corpus_digest",
+    "shard_manifest",
 ]
