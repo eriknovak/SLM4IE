@@ -58,6 +58,17 @@
 input_dir: /vault/data/SLM4IE/raw
 output_dir: /vault/data/SLM4IE/extracted
 
+# MLflow tracking for extraction builds. When enabled, a single run per build
+# is upserted to `experiment` (keyed by a content digest of the extracted
+# tree): per-source row counts + empty-text rates as metrics, a per-source
+# quality profile as the `profile.json` artifact, and the extracted tree as a
+# `produced` dataset input. Disabled by default; toggle with --mlflow /
+# --no-mlflow. tracking_uri null -> $MLFLOW_TRACKING_URI -> sqlite fallback.
+mlflow:
+  enabled: false
+  experiment: slm4ie/data/extract
+  tracking_uri: null
+
 datasets:
   classla_web_sl:
     extractor: jsonl

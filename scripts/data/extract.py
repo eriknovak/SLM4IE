@@ -75,6 +75,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Re-extract datasets even if their output already exists.",
     )
     parser.add_argument(
+        "--mlflow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable/disable MLflow extraction-build tracking, overriding "
+            "the config's mlflow.enabled. Default: defer to config."
+        ),
+    )
+    parser.add_argument(
         "--max-workers",
         type=int,
         default=0,
@@ -127,6 +136,7 @@ def main() -> None:
             log_dir=log_dir,
             input_dir_override=args.input_dir,
             output_dir_override=args.output_dir,
+            mlflow_enabled=args.mlflow,
         )
     except ValueError as e:
         logging.getLogger(__name__).error(str(e))
