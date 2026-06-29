@@ -33,6 +33,17 @@ roots:
   raw:       /vault/data/SLM4IE/raw
   tasks:     /vault/data/SLM4IE/tasks
 
+# MLflow tracking for task conversion. When enabled, the converters upsert one
+# run per <task>/<dataset> to `experiment` (keyed by a content digest of the
+# dataset's split files): per-split row counts + label distribution as metrics,
+# a label_distribution.json artifact, and the dataset as a `produced` dataset
+# input. Disabled by default; toggle with --mlflow / --no-mlflow. tracking_uri
+# null -> $MLFLOW_TRACKING_URI -> sqlite fallback.
+mlflow:
+  enabled: false
+  experiment: slm4ie/data/tasks
+  tracking_uri: null
+
 # Default converter per task family. Override per entry with `converter:`.
 converters:
   ner: to_spans
