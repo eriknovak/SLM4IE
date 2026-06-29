@@ -205,6 +205,20 @@ def log_artifact(path: Path, *, enabled: bool = True) -> None:
         mlflow.log_artifact(str(path))
 
 
+def log_artifacts(directory: Path, *, artifact_path: Optional[str] = None, enabled: bool = True) -> None:
+    """Log a local directory tree as run artifacts when a run is active.
+
+    Args:
+        directory (Path): Directory whose contents are uploaded.
+        artifact_path (Optional[str]): Destination subpath within the run's
+            artifact root; the artifact root itself when None.
+        enabled (bool): When False, does nothing.
+    """
+    mlflow = _import_mlflow() if enabled else None
+    if mlflow is not None and mlflow.active_run() is not None and directory.exists():
+        mlflow.log_artifacts(str(directory), artifact_path=artifact_path)
+
+
 def set_tags(tags: Dict[str, Any], *, enabled: bool = True) -> None:
     """Set tags on the active run when one exists.
 
