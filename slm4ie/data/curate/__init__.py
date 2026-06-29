@@ -50,6 +50,12 @@ from slm4ie.data.curate.overrides import (
     effective_stage_config,
     validate_overrides,
 )
+from slm4ie.data.curate.manifest import (
+    DEFAULT_SHARD_GLOBS,
+    ROWS_NOT_COUNTED,
+    corpus_digest,
+    shard_manifest,
+)
 
 __all__ = [
     "ALL_STAGE_NAMES",
@@ -77,4 +83,11 @@ __all__ += [
     "OverrideConfigError",
     "effective_stage_config",
     "validate_overrides",
+]
+
+__all__ += [
+    "DEFAULT_SHARD_GLOBS",
+    "ROWS_NOT_COUNTED",
+    "corpus_digest",
+    "shard_manifest",
 ]

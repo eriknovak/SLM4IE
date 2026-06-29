@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from slm4ie.utils import mlflow as mlflow_utils
 
 
@@ -67,3 +69,63 @@ class TestDisabledIsNoOp:
 def test_default_artifact_location_is_local():
     """The default artifact location is a local relative path."""
     assert not os.path.isabs(mlflow_utils.DEFAULT_ARTIFACT_LOCATION)
+
+
+class TestUpsertAndLineage:
+    """Enabled-path tests against a temporary local SQLite store."""
+
+    @pytest.fixture
+    def store(self, tmp_path: Path, monkeypatch):
+        """Point tracking at a throwaway SQLite store for the test."""
+        pytest.importorskip("mlflow")
+        uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+        return uri
+
+    def test_find_run_by_tag_absent_experiment(self, store):
+        """A missing experiment yields no match rather than raising."""
+        assert mlflow_utils.find_run_by_tag("nope/x", "corpus_digest", "abc") is None
+
+    def test_find_and_delete_round_trip(self, store):
+        """A tagged run is findable by tag, then gone after deletion."""
+        experiment = "slm4ie/data/test"
+        mlflow_utils.ensure_experiment(experiment)
+        with mlflow_utils.mlflow_run("build"):
+            mlflow_utils.set_tags({"corpus_digest": "sha256:abc"})
+
+        run_id = mlflow_utils.find_run_by_tag(experiment, "corpus_digest", "sha256:abc")
+        assert run_id is not None
+        assert mlflow_utils.find_run_by_tag(experiment, "corpus_digest", "other") is None
+
+        mlflow_utils.delete_run(run_id)
+        assert mlflow_utils.find_run_by_tag(experiment, "corpus_digest", "sha256:abc") is None
+
+    def test_log_dataset_input_records_lineage(self, store, tmp_path: Path):
+        """A logged dataset input round-trips with its name and digest."""
+        import mlflow
+
+        mlflow_utils.ensure_experiment("slm4ie/data/test")
+        with mlflow_utils.mlflow_run("build") as run:
+            mlflow_utils.log_dataset_input(
+                "pretrain/05_2_dedup",
+                "sha256:abc",
+                str(tmp_path),
+                context="produced",
+            )
+            run_id = run.info.run_id
+
+        logged = mlflow.get_run(run_id).inputs.dataset_inputs
+        assert [(d.dataset.name, d.dataset.digest) for d in logged] == [("pretrain/05_2_dedup", "sha256:abc")]
+
+    def test_log_metrics_step_series(self, store):
+        """Step-indexed metrics accumulate a multi-point series."""
+        import mlflow
+
+        mlflow_utils.ensure_experiment("slm4ie/data/test")
+        with mlflow_utils.mlflow_run("build") as run:
+            for step in range(3):
+                mlflow_utils.log_metrics({"docs_remaining": 100 - step}, step=step)
+            run_id = run.info.run_id
+
+        history = mlflow.MlflowClient().get_metric_history(run_id, "docs_remaining")
+        assert [point.step for point in history] == [0, 1, 2]
