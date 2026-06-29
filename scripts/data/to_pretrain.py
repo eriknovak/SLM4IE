@@ -180,6 +180,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         dest="workers", type=int, default=1,
         help="Parallel workers. 1=serial (default), 0=cpu_count//2, N=N.",
     )
+    parser.add_argument(
+        "--mlflow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable/disable MLflow pretrain-build tracking (only on --all "
+            "builds), overriding pretrain.yaml::mlflow.enabled. Default: "
+            "defer to config."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.recount:
         if args.all or args.datasets:
@@ -1156,6 +1166,7 @@ def _curate(
     workers: int,
     pretrain_config: Optional[Path] = None,
     extract_config: Optional[Path] = None,
+    mlflow_enabled: Optional[bool] = None,
 ) -> None:
     """Run the curation pipeline (argv-free entry point).
 
@@ -1169,6 +1180,9 @@ def _curate(
         workers: Worker count (0 = auto).
         pretrain_config: Path to pretrain.yaml, or None for the default.
         extract_config: Path to extract.yaml, or None for the default.
+        mlflow_enabled: Tri-state override for MLflow pretrain tracking. None
+            defers to `pretrain.yaml::mlflow.enabled`; True/False force it
+            on/off. Tracking only runs after a full `--all` build.
 
     Raises:
         ValueError: If `datasets` is non-empty while `run_all` is True.
@@ -1421,6 +1435,23 @@ def _curate(
                 stage_name, records_in, records_out,
             )
 
+    # Post-hoc MLflow tracking: only after a full build, reflecting the corpus
+    # as it now exists on disk (decoupled from which stages ran this time).
+    if run_all:
+        mlflow_cfg = cfg.get("mlflow") or {}
+        enabled = bool(mlflow_cfg.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled
+        if enabled:
+            from slm4ie.data.curate.tracking import DEFAULT_EXPERIMENT, log_pretrain_run
+
+            log_pretrain_run(
+                output_dir,
+                cfg,
+                enabled=True,
+                experiment=mlflow_cfg.get("experiment", DEFAULT_EXPERIMENT),
+                tracking_uri=mlflow_cfg.get("tracking_uri"),
+                force=force,
+            )
+
 
 def main() -> None:
     """Entry point for the to_pretrain CLI."""
@@ -1447,6 +1478,7 @@ def main() -> None:
         workers=args.workers,
         pretrain_config=args.pretrain_config,
         extract_config=args.extract_config,
+        mlflow_enabled=args.mlflow,
     )
 
 

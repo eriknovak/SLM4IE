@@ -25,6 +25,18 @@
 input_dir: /vault/data/SLM4IE/extracted
 output_dir: /vault/data/SLM4IE/pretrain
 
+# MLflow tracking for full (--all) corpus builds. When enabled, a single run
+# per build is upserted to `experiment` (keyed by a content digest of the final
+# 05_2_dedup corpus): a step-indexed per-stage survival funnel + per-source
+# variants as metrics, final per-dataset word shares from aggregate.json, the
+# flattened config as params, stats/_logs as artifacts, and the final corpus as
+# a `produced` dataset input. Disabled by default; toggle with --mlflow /
+# --no-mlflow. tracking_uri null -> $MLFLOW_TRACKING_URI -> sqlite fallback.
+mlflow:
+  enabled: false
+  experiment: slm4ie/data/pretrain
+  tracking_uri: null
+
 # Language code selecting the bundled stopword list at
 # slm4ie/data/stopwords/<code>.txt. Used by both the quality stage
 # (Gopher's min_stop_words) and the stats stage (word/n-gram/keyword
