@@ -49,11 +49,14 @@ class ExtractionConfig:
         input_dir: Base directory for raw datasets.
         output_dir: Base directory for processed output.
         datasets: Dict mapping dataset key to config dict with 'extractor' and 'domain' keys.
+        mlflow: MLflow tracking settings (`enabled`, `experiment`,
+            `tracking_uri`) for post-hoc extraction-build logging.
     """
 
     input_dir: str
     output_dir: str
     datasets: Dict[str, Dict] = field(default_factory=dict)
+    mlflow: Dict[str, Any] = field(default_factory=dict)
 
 
 def load_extraction_config(config_path: Path) -> ExtractionConfig:
@@ -78,6 +81,7 @@ def load_extraction_config(config_path: Path) -> ExtractionConfig:
         input_dir=raw.get("input_dir", "data/raw"),
         output_dir=raw.get("output_dir", "data/processed"),
         datasets=raw.get("datasets", {}),
+        mlflow=raw.get("mlflow") or {},
     )
 
 
@@ -548,6 +552,7 @@ def extract_datasets(
     log_dir: Optional[Path] = None,
     input_dir_override: Optional[str] = None,
     output_dir_override: Optional[str] = None,
+    mlflow_enabled: Optional[bool] = None,
 ) -> None:
     """Extract and convert datasets to unified JSONL.
 
@@ -556,6 +561,7 @@ def extract_datasets(
         dataset_keys: Specific dataset keys to extract. If None, extracts all configured datasets.
         force: When True, re-extract datasets whose output already
             exists. Defaults to False (skip already-extracted datasets).
+            Also re-logs the MLflow extraction build for the same digest.
         max_workers: Shard-worker count used *within* each dataset for
             intra-dataset parallelism. Datasets themselves are always
             processed sequentially. `0` (default) means auto (all
@@ -573,6 +579,9 @@ def extract_datasets(
         output_dir_override: Override the `output_dir` from the YAML
             config. When truthy, processed outputs are written here
             instead of the configured location.
+        mlflow_enabled: Tri-state override for MLflow extraction tracking.
+            None defers to the config's `mlflow.enabled`; True/False force it
+            on/off regardless of config.
 
     Raises:
         ValueError: If any requested key is unknown.
@@ -628,4 +637,18 @@ def extract_datasets(
         failed_keys = ", ".join(k for k, _ in failures)
         raise RuntimeError(
             f"Extraction failed for {len(failures)} dataset(s): {failed_keys}"
+        )
+
+    enabled = bool(cfg.mlflow.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled
+    if enabled:
+        from slm4ie.data.extract_tracking import DEFAULT_EXPERIMENT, log_extraction_run
+
+        log_extraction_run(
+            output_base,
+            cfg.datasets,
+            enabled=True,
+            experiment=cfg.mlflow.get("experiment", DEFAULT_EXPERIMENT),
+            tracking_uri=cfg.mlflow.get("tracking_uri"),
+            force=force,
+            artifact_dir=log_dir,
         )

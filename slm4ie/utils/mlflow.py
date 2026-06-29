@@ -36,6 +36,10 @@ DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
 #: does not depend on a server-internal (container) default path.
 DEFAULT_ARTIFACT_LOCATION = "./mlruns/artifacts"
 
+#: MLflow's hard cap on the dataset digest field. Project corpus digests
+#: (`sha256:` + 64 hex) exceed this, so `log_dataset_input` truncates to it.
+MAX_DATASET_DIGEST_LEN = 36
+
 
 def _import_mlflow() -> Optional[Any]:
     """Import `mlflow` lazily, returning None when unavailable.
@@ -311,5 +315,9 @@ def log_dataset_input(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         dataset_source = resolve_dataset_source(source)
-    dataset = MetaDataset(dataset_source, name=name, digest=digest)
+    # MLflow caps the dataset digest field at MAX_DATASET_DIGEST_LEN chars; our
+    # corpus digests are longer (`sha256:` + 64 hex). Truncate deterministically
+    # so a producer and a consumer logging the same digest still resolve to the
+    # same dataset entity.
+    dataset = MetaDataset(dataset_source, name=name, digest=digest[:MAX_DATASET_DIGEST_LEN])
     mlflow.log_input(dataset, context=context)

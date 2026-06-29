@@ -117,6 +117,20 @@ class TestUpsertAndLineage:
         logged = mlflow.get_run(run_id).inputs.dataset_inputs
         assert [(d.dataset.name, d.dataset.digest) for d in logged] == [("pretrain/05_2_dedup", "sha256:abc")]
 
+    def test_log_dataset_input_truncates_long_digest(self, store, tmp_path: Path):
+        """A full sha256 digest is truncated to MLflow's 36-char cap."""
+        import mlflow
+
+        long_digest = "sha256:" + "a" * 64
+        mlflow_utils.ensure_experiment("slm4ie/data/test")
+        with mlflow_utils.mlflow_run("build") as run:
+            mlflow_utils.log_dataset_input("corpus", long_digest, str(tmp_path))
+            run_id = run.info.run_id
+
+        logged = mlflow.get_run(run_id).inputs.dataset_inputs[0].dataset
+        assert logged.digest == long_digest[: mlflow_utils.MAX_DATASET_DIGEST_LEN]
+        assert len(logged.digest) <= mlflow_utils.MAX_DATASET_DIGEST_LEN
+
     def test_log_metrics_step_series(self, store):
         """Step-indexed metrics accumulate a multi-point series."""
         import mlflow
