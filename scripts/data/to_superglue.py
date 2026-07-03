@@ -51,6 +51,7 @@ from slm4ie.data.tasks import (
     load_tasks,
     resolve_output_dir,
 )
+from slm4ie.data.task_tracking import log_task_runs
 from slm4ie.data.task_writer import (
     all_outputs_exist,
     find_first_existing,
@@ -658,6 +659,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Re-derive outputs even when every split already exists.",
     )
     parser.add_argument(
+        "--mlflow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable/disable MLflow per-dataset tracking, overriding "
+            "tasks.yaml::mlflow.enabled. Default: defer to config."
+        ),
+    )
+    parser.add_argument(
         "--max-workers",
         type=int,
         default=0,
@@ -734,6 +744,8 @@ def main() -> None:
         total,
         [k for k, _ in failures] or "none",
     )
+    processed = [k for k in keys if k not in {f for f, _ in failures}]
+    log_task_runs(tasks_config, by_key, processed, mlflow_enabled=args.mlflow, force=args.force)
     if failures:
         sys.exit(2)
 

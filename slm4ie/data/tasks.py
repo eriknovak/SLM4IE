@@ -92,11 +92,14 @@ class TasksConfig:
         roots: Filesystem roots.
         converter_defaults: Default converter name per task family.
         entries: All task entries in declaration order.
+        mlflow: MLflow tracking settings (`enabled`, `experiment`,
+            `tracking_uri`) for post-hoc per-dataset tracking.
     """
 
     roots: TasksRoots
     converter_defaults: Dict[str, str]
     entries: List[TaskEntry]
+    mlflow: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def load_tasks(yaml_path: Path) -> TasksConfig:
@@ -142,6 +145,7 @@ def load_tasks(yaml_path: Path) -> TasksConfig:
         roots=roots,
         converter_defaults=converter_defaults,
         entries=entries,
+        mlflow=raw.get("mlflow") or {},
     )
 
 
