@@ -119,6 +119,7 @@ def _():
     from slm4ie.tokenizers.morphology import load_lexicon
     from slm4ie.tokenizers.registry import get_tokenizer
     from slm4ie.utils.config import load_tokenizer_config
+    from slm4ie.utils.mlflow_report import latest_report_json
     from slm4ie.viz import (
         ACCENT,
         DIVERGING,
@@ -139,6 +140,7 @@ def _():
         go,
         iter_sample_cache,
         json,
+        latest_report_json,
         load_lexicon,
         load_tokenizer_config,
         make_subplots,
@@ -161,7 +163,8 @@ def _(Path, load_tokenizer_config):
 
     cfg = load_tokenizer_config(CONFIG_PATH)
     OUTPUT_ROOT = cfg.output_root
-    REPORT_JSON = cfg.report_dir / "report.json"
+    MLFLOW_EXPERIMENT = cfg.mlflow_experiment
+    MLFLOW_TRACKING_URI = cfg.mlflow_tracking_uri
     LEXICON_PATH = cfg.lexicon_path
     EVAL_SAMPLE_PATH = cfg.eval_sample_path
     TOKENIZERS = list(cfg.tokenizers)
@@ -170,8 +173,9 @@ def _(Path, load_tokenizer_config):
         CONFIG_PATH,
         EVAL_SAMPLE_PATH,
         LEXICON_PATH,
+        MLFLOW_EXPERIMENT,
+        MLFLOW_TRACKING_URI,
         OUTPUT_ROOT,
-        REPORT_JSON,
         TOKENIZERS,
         VOCAB_SIZES,
     )
@@ -460,8 +464,15 @@ def _(mo):
 
 
 @app.cell
-def _(REPORT_JSON, json):
-    _payload = json.loads(REPORT_JSON.read_text(encoding="utf-8"))
+def _(MLFLOW_EXPERIMENT, MLFLOW_TRACKING_URI, latest_report_json, mo):
+    _payload = latest_report_json(MLFLOW_EXPERIMENT, tracking_uri=MLFLOW_TRACKING_URI)
+    mo.stop(
+        _payload is None,
+        mo.md(
+            f"*No `sweep-eval` run with a `report.json` artifact in MLflow "
+            f"experiment `{MLFLOW_EXPERIMENT}` — run `analyze.py` to log one.*"
+        ),
+    )
     RESULTS = _payload["results"]
     DIRECTIONS = _payload["directions"]
     SIGNIFICANCE = _payload.get("significance", {})
