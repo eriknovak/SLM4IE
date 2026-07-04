@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
+from slm4ie.data.curate import corpus_digest
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sample_cache
 from slm4ie.tokenizers.morphology import (
@@ -35,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 #: Sidecar carrying per-run training stats, read by the MLflow logger.
 TRAIN_STATS_FILENAME = "train_stats.json"
+
+#: Glob patterns identifying a trained tokenizer's defining artifacts under its
+#: export dir -- the vocab/merges file (`tokenizer.json` for HuggingFace
+#: backends, `spm.model` for SentencePiece) plus its `metadata.json`. Volatile
+#: sidecars (timing, eval cache, MLflow link) are excluded so the digest is a
+#: stable tokenizer identity across reruns.
+TOKENIZER_ARTIFACT_GLOBS: Tuple[str, ...] = ("tokenizer.json", "spm.model", "metadata.json")
 
 #: Sidecar carrying the MLflow run linkage, read by the analysis logger to
 #: cross-link each eval run back to the training run that produced it.
@@ -375,6 +383,16 @@ def log_training_to_mlflow(keys: List[str], cfg: TokenizerSweepConfig) -> None:
                         "train_seconds": stats["train_seconds"],
                         "vocab_used": stats["vocab_used"],
                     }
+                )
+                # Emit the trained tokenizer as a `produced` dataset input so a
+                # downstream pretraining run can declare which tokenizer it
+                # consumed (corpus -> tokenizer -> model -> eval lineage).
+                tokenizer_dir = cfg.output_root / key
+                ml.log_dataset_input(
+                    f"tokenizer/{key}",
+                    corpus_digest(tokenizer_dir, globs=TOKENIZER_ARTIFACT_GLOBS),
+                    str(tokenizer_dir),
+                    context="produced",
                 )
                 child_run_id = child.info.run_id if child is not None else None
             _write_mlflow_link(cfg.output_root / key, cfg.mlflow_experiment, parent_run_id, child_run_id, key)
