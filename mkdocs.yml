@@ -108,6 +108,7 @@ nav:
       - Tokenizers: user-guide/tokenizers.md
       - Training: user-guide/training.md
       - Evaluation: user-guide/evaluation.md
+      - Experiment Tracking: user-guide/experiment-tracking.md
       - SLURM / HPC: user-guide/slurm.md
       - Tests: user-guide/tests.md
   - Datasets:

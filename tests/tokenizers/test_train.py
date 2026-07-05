@@ -169,6 +169,33 @@ class TestLogTrainingToMlflow:
         assert link["run_id"]
         assert link["experiment"] == cfg.mlflow_experiment
 
+    def test_logs_tokenizer_as_produced_input(self, tmp_path: Path, monkeypatch):
+        """Each train child run declares its tokenizer as a produced dataset input."""
+        pytest.importorskip("mlflow")
+        import mlflow
+
+        monkeypatch.chdir(tmp_path)
+        cfg = _enable_mlflow(_make_config(tmp_path, ["bpe"], [90, 120]), tmp_path)
+        sample_path, _ = prepare_inputs(cfg)
+        for key in ("bpe-90", "bpe-120"):
+            train_one(key, cfg=cfg, sample_path=sample_path, lexicon_path=None)
+        log_training_to_mlflow(["bpe-90", "bpe-120"], cfg)
+
+        mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
+        client = mlflow.MlflowClient()
+        experiment = client.get_experiment_by_name(cfg.mlflow_experiment)
+        children = {
+            run.data.tags.get("mlflow.runName"): run
+            for run in client.search_runs([experiment.experiment_id])
+            if run.data.tags.get("mlflow.parentRunId")
+        }
+        input_90 = children["bpe-90"].inputs.dataset_inputs
+        assert [d.dataset.name for d in input_90] == ["tokenizer/bpe-90"]
+        # Distinct tokenizers hash to distinct digests (identity for lineage).
+        digest_90 = input_90[0].dataset.digest
+        digest_120 = children["bpe-120"].inputs.dataset_inputs[0].dataset.digest
+        assert digest_90 and digest_120 and digest_90 != digest_120
+
 
 class TestResolveRunSelection:
     """Tests for the shared one-or-all run selection used by all three CLIs."""
