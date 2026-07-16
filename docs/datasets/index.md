@@ -13,6 +13,9 @@ groups:
   for downstream IE tasks.
 - **[Corpus Statistics](corpus-statistics.md)** — size and composition of
   the curated pretraining corpus actually produced by the pipeline.
+- **[Extraction Formats](extraction-formats.md)** — the raw input formats
+  each dataset ships in, and how the extractors map them onto the unified
+  schema.
 
 Both groups are declared in
 [`configs/data/download.yaml`](https://github.com/eriknovak/SLM4IE/blob/main/configs/data/download.yaml).

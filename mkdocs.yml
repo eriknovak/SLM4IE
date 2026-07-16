@@ -116,6 +116,7 @@ nav:
       - Pretraining Corpora: datasets/pretraining-corpora.md
       - Benchmarks: datasets/benchmarks.md
       - Corpus Statistics: datasets/corpus-statistics.md
+      - Extraction Formats: datasets/extraction-formats.md
   - Blog:
       - blog/index.md
   - Development: development.md
