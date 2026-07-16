@@ -521,11 +521,13 @@ extractor should assign its own id rather than lean on the fallback.
     `to_sentiment`. A content hash was considered and rejected: exact-duplicate
     text is common in web corpora and would collide.
 
-### `json` ignores the `metadata:` block
+### `json` and `jsonl` share field-mapping
 
-Unlike `jsonl`, it hardcodes `text` and `doc_id`. A `metadata:` block on a
-`json` entry would be silently inert — use the `jsonl` extractor if you need
-configurable field names.
+Both honour the same `metadata:` knobs — `text_field`, `id_field`, and the
+`metadata_fields` whitelist — so field names are configurable on either. They
+differ only in container shape (`json` reads a top-level array or single object,
+`jsonl` reads one object per line) and in that `jsonl` alone parses nested
+`paragraphs` into annotations. Pick by input layout, not by config capability.
 
 ### Sharding is narrower than it looks
 
