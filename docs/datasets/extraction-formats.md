@@ -326,6 +326,12 @@ detected per record by field presence.
    `dodatne_informacije`) joined in reading order — personal-injury summaries
    have no unified text body.
 
+The precedence assumes the four subcorpora expose mutually exclusive text
+fields. If a record presents **more than one** of these sources, the earliest
+still wins, but the extractor logs a warning naming the record's `doc_id`,
+subcorpus, all present sources, and the chosen one — a shadowed field is never
+silent.
+
 `doc_id` is **`doc_id`** if present, else **`id`** coerced to a string.
 `metadata` is `{"subcorpus": <parent directory name>}` — `PISRS`,
 `UradniList`, `SodnaPraksa`, `USRS` — plus every remaining non-null field that
