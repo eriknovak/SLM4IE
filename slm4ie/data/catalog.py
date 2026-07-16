@@ -39,7 +39,7 @@ class DatasetConfig:
         key: Config key identifier (e.g., 'classla_web_sl').
         name: Human-readable dataset name.
         enabled: Whether to include in default download.
-        source: Source type ('clarin' or 'huggingface').
+        source: Source backend ('http' or 'huggingface').
         urls: Download URLs (CLARIN datasets).
         output_dir: Subdirectory name under base output dir.
         manual: Whether this requires manual download.
