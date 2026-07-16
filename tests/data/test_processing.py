@@ -861,3 +861,44 @@ def test_sharded_matches_serial(tmp_path: Path) -> None:
     shard_ann = _read_gz_lines(out_shard / "tei_ds.annotations.jsonl.gz")
     assert serial_ann == shard_ann
     assert len(serial_ann) == n_files
+
+
+def test_text_doc_ids_are_worker_count_independent(tmp_path: Path) -> None:
+    """The `text` extractor's ids do not depend on the worker count.
+
+    `text` derives its ids per file, so it must survive the transition
+    from the serial writer to the sharded one unchanged — this is the
+    property the orchestrator's positional fallback did not have.
+    """
+    n_files = 12
+    assert n_files >= 8  # _SHARD_MIN_FILES
+    src = tmp_path / "raw" / "cc100"
+    src.mkdir(parents=True)
+    for i in range(n_files):
+        (src / f"part{i:03d}.txt").write_text(
+            f"Prvi blok datoteke {i}.\n\nDrugi blok datoteke {i}.\n",
+            encoding="utf-8",
+        )
+
+    ds_cfg = {"extractor": "text", "domain": "web"}
+    outputs = {}
+    for label, workers in (("serial", 1), ("shard", 4)):
+        out_dir = tmp_path / label
+        out_dir.mkdir()
+        _extract_one(
+            "cc100", ds_cfg, tmp_path / "raw", out_dir, force=True,
+            requested_workers=workers,
+        )
+        outputs[label] = (out_dir / "cc100.jsonl").read_bytes()
+
+    assert outputs["serial"] == outputs["shard"]
+
+    records = [
+        json.loads(line)
+        for line in outputs["serial"].decode("utf-8").splitlines()
+    ]
+    ids = [r["doc_id"] for r in records]
+    assert len(ids) == n_files * 2
+    assert len(set(ids)) == len(ids)
+    assert ids[:2] == ["part000:000000", "part000:000001"]
+    assert records[0]["uid"] == "cc100:part000:000000"

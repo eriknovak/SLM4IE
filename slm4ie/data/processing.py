@@ -206,10 +206,9 @@ def _extract_shard(
         ):
             if doc.doc_id is None:
                 # Shard-namespaced fallback id (vs. the serial writer's
-                # global `idx-{index:014d}`). Only differs for extractors
-                # that yield null doc_ids; the converted file-based
-                # extractors assign real ids except `text`, whose only
-                # dataset (cc100) is a single file and never shards.
+                # global `idx-{index:014d}`), so the two schemes disagree
+                # for any extractor that yields null doc_ids. No shipped
+                # extractor does: this only guards a future one.
                 doc.doc_id = f"idx-{index:05d}-{local:010d}"
             tf.write(doc.to_jsonl_line())
             tf.write("\n")
@@ -276,7 +275,9 @@ def _extract_serial(
             )):
                 if doc.doc_id is None:
                     # Global fallback id. The sharded path uses a
-                    # shard-namespaced scheme; see _extract_shard.
+                    # shard-namespaced scheme; see _extract_shard. Every
+                    # shipped extractor assigns its own doc_id, so this
+                    # is unreachable today and kept only as a guard.
                     doc.doc_id = f"idx-{index:014d}"
 
                 tf.write(doc.to_jsonl_line())
