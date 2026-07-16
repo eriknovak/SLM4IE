@@ -16,11 +16,14 @@ groups:
 
 Both groups are declared in
 [`configs/data/download.yaml`](https://github.com/eriknovak/SLM4IE/blob/main/configs/data/download.yaml).
-Benchmarks are flagged with `benchmark: true` and a `tasks:` list, so
-they share the same download pipeline as pretraining corpora.
+Each entry carries a `role` field: `pretrain` (the default) for
+pretraining corpora, `benchmark` for evaluation datasets, and `lexicon`
+for tokenizer/morphology lexicons. Non-pretrain entries also carry a
+`tasks:` list, and all roles share the same download pipeline.
 
 Use `--only-benchmarks` on the [download script](../user-guide/data-pipeline/download.md)
-to fetch just the evaluation datasets.
+to fetch just the non-pretraining datasets (`role: benchmark` or
+`role: lexicon`).
 
 ## Task abbreviations
 

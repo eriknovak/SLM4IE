@@ -726,7 +726,7 @@ class TestDownloadDatasets:
     def test_only_benchmarks_filters_default_selection(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
-        """`only_benchmarks=True` keeps benchmark datasets only."""
+        """`only_benchmarks=True` keeps every non-pretrain dataset."""
         mock_dl.return_value = DownloaderResult(completed=[], failed=[])
         config_file = self._make_config_file(
             tmp_path,
@@ -740,24 +740,34 @@ class TestDownloadDatasets:
                 },
                 "bench_ds": {
                     "enabled": True,
-                    "benchmark": True,
+                    "role": "benchmark",
                     "source": "http",
                     "name": "Bench",
                     "urls": ["https://example.com/b.gz"],
                     "output_dir": "bench_ds",
                     "tasks": ["NER"],
                 },
+                "lexicon_ds": {
+                    "enabled": True,
+                    "role": "lexicon",
+                    "source": "http",
+                    "name": "Lexicon",
+                    "urls": ["https://example.com/l.gz"],
+                    "output_dir": "lexicon_ds",
+                    "tasks": ["TOKENIZER"],
+                },
             },
         )
         download_datasets(config_file, only_benchmarks=True)
-        mock_dl.assert_called_once()
-        assert mock_dl.call_args[0][0].key == "bench_ds"
+        assert mock_dl.call_count == 2
+        keys = {call[0][0].key for call in mock_dl.call_args_list}
+        assert keys == {"bench_ds", "lexicon_ds"}
 
     @patch("slm4ie.data.sources.http.download")
     def test_exclude_benchmarks_filters_default_selection(
         self, mock_dl: MagicMock, tmp_path: Path
     ):
-        """`exclude_benchmarks=True` drops benchmark datasets from the run."""
+        """`exclude_benchmarks=True` keeps only `role: pretrain` datasets."""
         mock_dl.return_value = DownloaderResult(completed=[], failed=[])
         config_file = self._make_config_file(
             tmp_path,
@@ -771,11 +781,19 @@ class TestDownloadDatasets:
                 },
                 "bench_ds": {
                     "enabled": True,
-                    "benchmark": True,
+                    "role": "benchmark",
                     "source": "http",
                     "name": "Bench",
                     "urls": ["https://example.com/b.gz"],
                     "output_dir": "bench_ds",
+                },
+                "lexicon_ds": {
+                    "enabled": True,
+                    "role": "lexicon",
+                    "source": "http",
+                    "name": "Lexicon",
+                    "urls": ["https://example.com/l.gz"],
+                    "output_dir": "lexicon_ds",
                 },
             },
         )

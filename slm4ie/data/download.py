@@ -263,11 +263,12 @@ def download_datasets(
         force: Re-download even if output exists.
         output_dir_override: Override base output directory.
         only_benchmarks: When True, restrict the default selection to
-            datasets with `benchmark: true`. Ignored when
-            `dataset_keys` is provided.
-        exclude_benchmarks: When True, drop benchmark datasets from the
-            default selection. Ignored when `dataset_keys` is
-            provided. Mutually exclusive with `only_benchmarks`.
+            non-pretraining datasets (`role` is `benchmark` or
+            `lexicon`). Ignored when `dataset_keys` is provided.
+        exclude_benchmarks: When True, keep only pretraining datasets
+            (`role` is `pretrain`) in the default selection. Ignored
+            when `dataset_keys` is provided. Mutually exclusive with
+            `only_benchmarks`.
         max_workers: Number of datasets to download in parallel.
             `0` (default) picks `min(4, n_datasets)` to stay polite
             to remote servers; `1` runs serially; `N > 1` uses that
@@ -303,9 +304,13 @@ def download_datasets(
     else:
         selected = {k: v for k, v in datasets.items() if v.enabled}
         if only_benchmarks:
-            selected = {k: v for k, v in selected.items() if v.benchmark}
+            selected = {
+                k: v for k, v in selected.items() if v.role != "pretrain"
+            }
         elif exclude_benchmarks:
-            selected = {k: v for k, v in selected.items() if not v.benchmark}
+            selected = {
+                k: v for k, v in selected.items() if v.role == "pretrain"
+            }
 
     _validate_selection(
         selected, base_output_dir, explicit=bool(dataset_keys)

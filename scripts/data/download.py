@@ -74,16 +74,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--only-benchmarks",
         action="store_true",
         help=(
-            "Restrict default selection to datasets marked "
-            "`benchmark: true` in the config."
+            "Restrict default selection to non-pretraining datasets "
+            "(`role: benchmark` or `role: lexicon` in the config)."
         ),
     )
     benchmark_group.add_argument(
         "--exclude-benchmarks",
         action="store_true",
         help=(
-            "Drop benchmark datasets from the default selection "
-            "(pretraining-only)."
+            "Keep only pretraining datasets (`role: pretrain`) "
+            "in the default selection."
         ),
     )
     parser.add_argument(

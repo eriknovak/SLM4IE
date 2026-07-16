@@ -24,10 +24,10 @@ uv run python scripts/data/download.py fineweb2 cc100
 # Force re-download into a custom output directory
 uv run python scripts/data/download.py --all --output-dir /path/to/data --force
 
-# Only evaluation benchmarks (datasets marked `benchmark: true`)
+# Only non-pretraining datasets (`role: benchmark` or `role: lexicon`)
 uv run python scripts/data/download.py --all --only-benchmarks
 
-# Only pretraining corpora (skip benchmarks)
+# Only pretraining corpora (`role: pretrain`, the default role)
 uv run python scripts/data/download.py --all --exclude-benchmarks
 
 # Read a different YAML in configs/data/ (without the .yaml suffix)
