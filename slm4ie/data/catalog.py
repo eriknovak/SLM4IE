@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+#: Allowed `role` values in the download catalog. Unrelated to the `role`
+#: field in configs/data/tasks.yaml (`finetune_and_eval` | `held_out`).
+DATASET_ROLES = frozenset({"pretrain", "benchmark", "lexicon"})
+
 
 class ConfigError(Exception):
     """Raised when dataset registry configuration is invalid.
@@ -46,9 +50,13 @@ class DatasetConfig:
         repo_id: HuggingFace repository ID.
         configs: HuggingFace dataset config names.
         note: Informational note.
-        benchmark: True for evaluation benchmark datasets, False for
-            pretraining corpora. Used by downstream scripts to filter
-            which datasets to materialize.
+        role: What the dataset is for. One of `pretrain` (pretraining
+            corpus, the default), `benchmark` (evaluation benchmark),
+            or `lexicon` (tokenizer/morphology lexicon; never enters
+            the pretraining corpus). Used by downstream scripts to
+            filter which datasets to materialize. Distinct from the
+            `role` field in configs/data/tasks.yaml, which governs
+            task-split isolation.
         tasks: Supported NLP tasks (e.g., POS, NER, SA, NLI). Empty
             list for pretraining corpora.
         provider: Optional source/host provider name for attribution
@@ -66,7 +74,7 @@ class DatasetConfig:
     repo_id: Optional[str] = None
     configs: Optional[List[str]] = None
     note: Optional[str] = None
-    benchmark: bool = False
+    role: str = "pretrain"
     tasks: List[str] = field(default_factory=list)
     provider: Optional[str] = None
 
@@ -83,13 +91,23 @@ class DatasetConfig:
 
         Raises:
             ConfigError: If the entry is enabled and not manual but is
-                missing or has an empty `output_dir`.
+                missing or has an empty `output_dir`, or if `role` is
+                not one of the allowed values.
         """
         enabled = data.get("enabled", True)
         manual = data.get("manual", False)
         output_dir = data.get("output_dir", "")
         if enabled and not manual and not output_dir:
             raise ConfigError([f"{key}: missing or empty 'output_dir'"])
+
+        role = data.get("role", "pretrain")
+        if role not in DATASET_ROLES:
+            raise ConfigError(
+                [
+                    f"{key}: unknown role '{role}' "
+                    f"(expected one of: {', '.join(sorted(DATASET_ROLES))})"
+                ]
+            )
 
         return cls(
             key=key,
@@ -102,7 +120,7 @@ class DatasetConfig:
             repo_id=data.get("repo_id"),
             configs=data.get("configs"),
             note=data.get("note"),
-            benchmark=data.get("benchmark", False),
+            role=role,
             tasks=data.get("tasks", []),
             provider=data.get("provider"),
         )

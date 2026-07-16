@@ -18,8 +18,12 @@
 #   configs      [huggingface] Subset/config names to pull.
 #   manual       If true, needs a manual download step (see the entry's note).
 #   note         Free-text caveats, stats, licensing.
-#   benchmark    If true, an eval dataset, not pretraining corpus.
-#   tasks        [benchmark] Downstream tasks supported.
+#   role         pretrain | benchmark | lexicon. Defaults to `pretrain`
+#                (pretraining corpus) when omitted — corpus entries below rely
+#                on the default. `benchmark` marks evaluation datasets;
+#                `lexicon` marks tokenizer/morphology lexicons. Neither enters
+#                the pretraining corpus. Unrelated to tasks.yaml's `role`.
+#   tasks        [non-pretrain] Downstream tasks supported.
 #
 # Selection: pass dataset keys positionally, or --all for enabled entries.
 
@@ -312,12 +316,13 @@ datasets:
       Not available for download due to copyright restrictions.
       Contact: iztok.kosem@ijs.si.
 
-  # --- Evaluation benchmarks (benchmark: true) --------------------------
-  # Downstream evaluation, not pretraining. The download script and converters
-  # filter on the `benchmark` field; per-task converters dispatch on `tasks`.
+  # --- Non-pretraining datasets (role: benchmark | lexicon) --------------
+  # Downstream evaluation benchmarks and tokenizer lexicons, not pretraining.
+  # The download script's --only-benchmarks / --exclude-benchmarks filter on
+  # the `role` field; per-task converters dispatch on `tasks`.
   suk:
     enabled: true
-    benchmark: true
+    role: benchmark
     source: http
     provider: clarin.si
     name: "SUK 1.1 (Slovene Training Corpus)"
@@ -342,7 +347,7 @@ datasets:
 
   ssj500k:
     enabled: true
-    benchmark: true
+    role: benchmark
     source: http
     provider: clarin.si
     name: "ssj500k 2.3 (Slovene Training Corpus)"
@@ -364,7 +369,7 @@ datasets:
 
   superglue_sl:
     enabled: true
-    benchmark: true
+    role: benchmark
     source: http
     provider: clarin.si
     name: "Slovene SuperGLUE"
@@ -387,7 +392,7 @@ datasets:
 
   sentinews:
     enabled: true
-    benchmark: true
+    role: benchmark
     source: http
     provider: clarin.si
     name: "SentiNews 1.0 (Slovene News Sentiment)"
@@ -407,7 +412,7 @@ datasets:
 
   sloleks:
     enabled: true
-    benchmark: true
+    role: lexicon
     source: http
     provider: clarin.si
     name: "Sloleks 3.1 (Slovenian Inflectional Lexicon)"
@@ -428,7 +433,7 @@ datasets:
 
   sloleks_relations:
     enabled: true
-    benchmark: true
+    role: lexicon
     source: http
     provider: clarin.si
     name: "Sloleks 2.0 word relations 1.1 (derivational decomposition)"

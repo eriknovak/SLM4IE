@@ -186,10 +186,10 @@ uv run python scripts/data/download.py fineweb2 cc100
 # Force re-download with custom output directory
 uv run python scripts/data/download.py --all --output-dir /path/to/data --force
 
-# Download only evaluation benchmarks (datasets marked `benchmark: true`)
+# Download only non-pretraining datasets (`role: benchmark` or `role: lexicon`)
 uv run python scripts/data/download.py --all --only-benchmarks
 
-# Download only pretraining corpora (skip benchmarks)
+# Download only pretraining corpora (`role: pretrain`, the default role)
 uv run python scripts/data/download.py --all --exclude-benchmarks
 
 # Use a different YAML in configs/data/ — `--config-name benchmarks` reads
@@ -539,7 +539,7 @@ Optional sources requiring extra access (gated datasets, manual login, copyright
 
 ## Benchmarks
 
-Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are declared in [`configs/data/download.yaml`](configs/data/download.yaml) with `benchmark: true` and a `tasks:` list, so they share the download pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just the evaluation datasets.
+Slovenian evaluation datasets used for downstream IE tasks. Benchmarks are declared in [`configs/data/download.yaml`](configs/data/download.yaml) with `role: benchmark` (tokenizer lexicons such as Sloleks use `role: lexicon`) and a `tasks:` list, so they share the download pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just the non-pretraining datasets.
 
 | Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                                                                                                                      |
 | ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

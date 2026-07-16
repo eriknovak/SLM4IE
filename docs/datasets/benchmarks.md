@@ -7,9 +7,10 @@ title: Benchmarks
 Slovenian evaluation datasets used for downstream IE tasks. Benchmarks
 are declared in
 [`configs/data/download.yaml`](https://github.com/eriknovak/SLM4IE/blob/main/configs/data/download.yaml)
-with `benchmark: true` and a `tasks:` list, so they share the download
-pipeline with pretraining corpora. Use `--only-benchmarks` to fetch just
-the evaluation datasets.
+with `role: benchmark` (or `role: lexicon` for tokenizer lexicons such
+as Sloleks) and a `tasks:` list, so they share the download pipeline
+with pretraining corpora. Use `--only-benchmarks` to fetch just the
+non-pretraining datasets.
 
 | Dataset                                                                       | Source    | Tasks                                     | Description                                                                                                                                                                                                               |
 | ----------------------------------------------------------------------------- | --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

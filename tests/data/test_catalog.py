@@ -75,8 +75,8 @@ class TestDatasetConfig:
         assert config.source == ""
         assert config.output_dir == ""
 
-    def test_pretraining_dataset_defaults_benchmark_false(self):
-        """Pretraining datasets default `benchmark` to False with empty tasks."""
+    def test_pretraining_dataset_defaults_role_pretrain(self):
+        """Datasets default `role` to `pretrain` with empty tasks."""
         data = {
             "enabled": True,
             "source": "clarin",
@@ -85,14 +85,14 @@ class TestDatasetConfig:
             "output_dir": "ds",
         }
         config = DatasetConfig.from_dict("ds", data)
-        assert config.benchmark is False
+        assert config.role == "pretrain"
         assert config.tasks == []
 
     def test_benchmark_dataset_from_dict(self):
-        """`benchmark: true` and tasks list survive into the config."""
+        """`role: benchmark` and tasks list survive into the config."""
         data = {
             "enabled": True,
-            "benchmark": True,
+            "role": "benchmark",
             "source": "clarin",
             "name": "SUK",
             "urls": ["https://example.com/suk.zip"],
@@ -100,8 +100,38 @@ class TestDatasetConfig:
             "tasks": ["POS", "NER", "DEP"],
         }
         config = DatasetConfig.from_dict("suk", data)
-        assert config.benchmark is True
+        assert config.role == "benchmark"
         assert config.tasks == ["POS", "NER", "DEP"]
+
+    def test_lexicon_dataset_from_dict(self):
+        """`role: lexicon` round-trips into the config."""
+        data = {
+            "enabled": True,
+            "role": "lexicon",
+            "source": "http",
+            "name": "Sloleks",
+            "urls": ["https://example.com/sloleks.zip"],
+            "output_dir": "sloleks",
+            "tasks": ["TOKENIZER"],
+        }
+        config = DatasetConfig.from_dict("sloleks", data)
+        assert config.role == "lexicon"
+
+    def test_unknown_role_raises_config_error(self):
+        """An unknown `role` value is rejected with a ConfigError."""
+        data = {
+            "enabled": True,
+            "role": "bogus",
+            "source": "http",
+            "name": "DS",
+            "urls": ["https://example.com/x.gz"],
+            "output_dir": "ds",
+        }
+        with pytest.raises(ConfigError) as excinfo:
+            DatasetConfig.from_dict("ds", data)
+        msg = str(excinfo.value)
+        assert "bogus" in msg
+        assert "role" in msg
 
     def test_provider_field_round_trips(self):
         """The optional `provider` field round-trips through from_dict."""
