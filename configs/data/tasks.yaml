@@ -1,29 +1,32 @@
-# tasks.yaml — Registry of <task>/<dataset> targets for downstream
-# evaluation and fine-tuning.
+# tasks.yaml — Registry of <task>/<dataset> fine-tuning + evaluation targets.
 #
-# Consumed by: scripts/data/to_spans.py, to_sentiment.py, to_superglue.py.
-#   The converter per entry defaults from the `converters:` map and may be
-#   overridden with a per-entry `converter:` field.
-# Reads:  roots.extracted/<key>.jsonl (source.kind: extracted) or
-#         roots.raw/<key>/ (source.kind: raw — task-native bundles).
-# Writes: roots.tasks/<task>/<dataset>/<split>.jsonl.gz, using the
-#         task-family schemas in slm4ie/data/schema.py.
+# Pipeline: to_spans.py / to_sentiment.py / to_superglue.py
+#           extracted/<key>.jsonl | raw/<key>/ -> tasks/<task>/<dataset>/<split>.jsonl.gz
+#           Output schemas are the task-family TypedDicts in slm4ie/data/schema.py.
 #
 # Top-level keys:
 #   roots        extracted / raw / tasks — path roots for I/O.
+#   mlflow       Tracking for task conversion (see Notes: mlflow).
 #   converters   Default converter script per task family.
-#   entries      Map of <task>/<dataset> -> entry spec. The key IS the
-#                output directory under roots.tasks.
+#   entries      Map of <task>/<dataset> -> entry spec. The key IS the output dir.
 #
-# Entry spec fields:
-#   role         finetune_and_eval | held_out — enforces train/test
-#                isolation regardless of directory placement.
+# Entry fields:
+#   role         finetune_and_eval | held_out — enforces train/test isolation
+#                regardless of directory placement.
 #   source       kind (extracted | raw) + keys (source dataset keys).
 #   splits       Split name -> output filename.
 #   labels       Label set for the task.
 #   suite        Parent benchmark suite, or null.
 #   language     ISO language code.
 #   license      Dataset license identifier.
+#
+# Notes:
+#   converter    Per entry defaults from the `converters` map by task family;
+#     override with a per-entry `converter:` field.
+#   mlflow       When enabled, one run per <task>/<dataset> is upserted to
+#     `experiment` (keyed by a content digest of the dataset's split files):
+#     per-split row counts + label distribution as metrics, a
+#     label_distribution.json artifact, and the dataset as a `produced` input.
 #
 # Selection: pass <task>/<dataset> entry keys positionally, or --all.
 
@@ -33,18 +36,13 @@ roots:
   tasks: ./data/tasks
   raw: ./data/raw
 
-# MLflow tracking for task conversion. When enabled, the converters upsert one
-# run per <task>/<dataset> to `experiment` (keyed by a content digest of the
-# dataset's split files): per-split row counts + label distribution as metrics,
-# a label_distribution.json artifact, and the dataset as a `produced` dataset
-# input. Disabled by default; toggle with --mlflow / --no-mlflow. tracking_uri
-# null -> $MLFLOW_TRACKING_URI -> sqlite fallback.
-mlflow:
-  enabled: false
+# --- MLflow -------------------------------------------------------------
+mlflow:                           # see Notes: mlflow
+  enabled: false                  # opt in per run; toggle --mlflow / --no-mlflow
   experiment: slm4ie/data/tasks
-  tracking_uri: null
+  tracking_uri: null              # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
 
-# Default converter per task family. Override per entry with `converter:`.
+# Default converter per task family; override per entry with `converter:`.
 converters:
   ner: to_spans
   sentiment: to_sentiment
@@ -56,6 +54,7 @@ converters:
 
 # Per <task>/<dataset> entries. The key IS the directory under tasks/.
 entries:
+  # --- Sequence labeling & classification -------------------------------
   ner/ssj500k:
     role: finetune_and_eval
     source: { kind: extracted, keys: [ssj500k] }
@@ -92,6 +91,7 @@ entries:
     language: sl
     license: cc-by-4.0
 
+  # --- SuperGLUE-SL subtasks --------------------------------------------
   nli/cb:
     role: held_out
     source: { kind: raw, keys: [superglue_sl] }

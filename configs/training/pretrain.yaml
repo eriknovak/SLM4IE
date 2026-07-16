@@ -1,1 +1,8 @@
-# Pretraining hyperparameters
+# pretrain.yaml — Model pretraining hyperparameters.
+#
+# Status: not yet implemented.
+# Pipeline: (planned) scripts/train.py — currently a stub that raises
+#           NotImplementedError.
+#
+# Reserved for model / optimizer / schedule / data-loader config for the
+# SLURM-friendly, MLflow-tracked pretraining run. The schema is not final.

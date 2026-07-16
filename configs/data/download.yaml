@@ -1,14 +1,13 @@
 # download.yaml — Raw corpus & benchmark download catalog.
 #
-# Consumed by: scripts/data/download.py (also read by to_tokenization.py
-#   to resolve per-dataset raw subdirectories).
-# Writes:      <output_dir>/<dataset.output_dir>/ — raw, untouched files.
+# Pipeline: download.py  <urls|repo_id> -> data/<output_dir>/ (raw, untouched)
+#           Also read by to_tokenization.py to resolve per-dataset raw subdirs.
 #
 # Top-level keys:
 #   output_dir   Root for all raw downloads.
 #   datasets     Map of <dataset key> -> dataset spec.
 #
-# Dataset spec fields:
+# Entry fields:
 #   enabled      If false, --all skips it (still fetchable by key).
 #   source       http | huggingface — selects the download backend.
 #   name         Human-readable title.
@@ -17,7 +16,7 @@
 #   urls         [http] Files to fetch.
 #   repo_id      [huggingface] Hub repo id.
 #   configs      [huggingface] Subset/config names to pull.
-#   manual       If true, needs a manual download step (see note).
+#   manual       If true, needs a manual download step (see the entry's note).
 #   note         Free-text caveats, stats, licensing.
 #   benchmark    If true, an eval dataset, not pretraining corpus.
 #   tasks        [benchmark] Downstream tasks supported.
@@ -27,6 +26,7 @@
 output_dir: ./data/raw
 
 datasets:
+  # --- CLARIN.SI corpora ------------------------------------------------
   classla_web_sl:
     enabled: true
     source: http
@@ -186,6 +186,7 @@ datasets:
     note: >
       1.6 million words from 5,485 student essays.
 
+  # --- Web-scale corpora (HuggingFace + direct) -------------------------
   finepdf:
     enabled: true
     source: huggingface
@@ -267,6 +268,7 @@ datasets:
       Downloaded directly from statmt.org (the HuggingFace mirror was script-based
       and is no longer supported by the datasets library).
 
+  # --- Unavailable / manual-access stubs --------------------------------
   gigafida:
     enabled: false
     name: "Gigafida 2.2"
@@ -310,13 +312,9 @@ datasets:
       Not available for download due to copyright restrictions.
       Contact: iztok.kosem@ijs.si.
 
-  # ---------------------------------------------------------------------------
-  # Evaluation benchmarks (benchmark: true)
-  # These datasets are used for downstream evaluation rather than pretraining.
-  # The download script and converters can filter them via the `benchmark`
-  # field; per-task converters dispatch on the `tasks` field.
-  # ---------------------------------------------------------------------------
-
+  # --- Evaluation benchmarks (benchmark: true) --------------------------
+  # Downstream evaluation, not pretraining. The download script and converters
+  # filter on the `benchmark` field; per-task converters dispatch on `tasks`.
   suk:
     enabled: true
     benchmark: true

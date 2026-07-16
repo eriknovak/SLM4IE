@@ -1,1 +1,8 @@
-# Fine-tuning hyperparameters for NER task
+# finetune_ner.yaml — Fine-tuning hyperparameters for the NER task.
+#
+# Status: not yet implemented.
+# Pipeline: (planned) scripts/train.py — currently a stub that raises
+#           NotImplementedError.
+#
+# Reserved for optimizer / schedule / data config to fine-tune a pretrained
+# model on the ner/* task entries (see configs/data/tasks.yaml). Schema not final.

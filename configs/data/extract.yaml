@@ -1,74 +1,51 @@
-# extract.yaml — Sources to normalize into the canonical `extracted/` tier.
+# extract.yaml — Normalize raw sources into the canonical extracted/ tier.
 #
-# Consumed by: scripts/data/extract.py. The dataset key list here is also
-#   the key list to_pretrain.py iterates when building the pretrain corpus.
-# Reads:  <input_dir>/<key>/ — raw downloads from download.py.
-# Writes: <output_dir>/<key>.jsonl (+ <key>.annotations.jsonl.gz when the
-#   extractor emits annotations).
+# Pipeline: extract.py  raw/<key>/ -> extracted/<key>.jsonl (+ .annotations.jsonl.gz)
+#           The dataset key list here is also what to_pretrain.py iterates.
 #
 # Top-level keys:
 #   input_dir    Root of raw downloads (download.py's output_dir).
 #   output_dir   Root for the extracted/ tier.
+#   mlflow       Tracking for extraction builds (see Notes: mlflow).
 #   datasets     Map of <dataset key> -> extraction spec.
 #
-# Extraction spec fields:
-#   extractor    Registered reader to use. One of:
-#                  jsonl       — line-delimited JSON
-#                  json        — single JSON document/array
-#                  text        — plain text
-#                  conllu      — CoNLL-U annotated columns
-#                  tei         — TEI XML (parliamentary/academic corpora)
-#                  macocu      — MaCoCu monolingual XML
-#                  coleslaw    — COLESLAW legal-text format
-#                  huggingface — a locally cached HuggingFace dataset
-#                The registry lives in slm4ie/data/extractors/.
-#   domain       Free-text provenance tag (web, wiki, parliamentary,
-#                academic, legal, medical, scientific, forum, blog, news,
-#                student, mixed). Flows into Document.metadata and drives
-#                source-weighted sampling downstream.
-#   metadata     Optional. Two unrelated uses share this block:
-#                (a) For the conllu/tei extractors: per-document metadata
-#                    loaded from an external TSV (keys below).
-#                (b) For the jsonl extractor: field-mapping knobs for
-#                    feeds that don't use the default field names —
-#                      text_field       Record field copied into `text`
-#                                        (default "text").
-#                      id_field         Record field kept as `doc_id`
-#                                        (default "doc_id").
-#                      metadata_fields  Whitelist of record fields kept
-#                                        as metadata (default: every
-#                                        non-structural field).
-#                TSV keys, joined per source file
-#                (kas/kzb: filename stem; oss: numeric ID extracted via
-#                key_pattern). Recognized keys:
-#                  path         TSV path relative to input_dir/<key>/.
-#                  key_column   Column in the TSV used for lookups.
-#                  key_from     Strategy for deriving the lookup key
-#                               from a source file. "filename_stem" only.
-#                  key_pattern  Optional regex; group 1 becomes the key.
-#                  fields       {tsv_column: metadata_field} renames.
-#                  splits       Optional {tsv_column: separator} to turn
-#                               list-typed columns (e.g. pipe-separated
-#                               keywords) into JSON arrays.
-#                Currently honored by the conllu and tei extractors.
+# Entry fields:
+#   extractor    Registered reader (see Notes: extractors).
+#   domain       Free-text provenance tag flowing into Document.metadata (web,
+#                wiki, parliamentary, academic, legal, medical, scientific, forum,
+#                blog, news, student, mixed); drives source-weighted sampling.
+#   metadata     Optional; two unrelated uses (see Notes: metadata).
 #
-# Selection: pass dataset keys positionally, or --all for every entry.
+# Notes:
+#   extractors   jsonl (line-delimited JSON), json (single doc/array), text
+#     (plain text), conllu (CoNLL-U columns), tei (TEI XML, parliamentary/academic),
+#     macocu (MaCoCu monolingual XML), coleslaw (COLESLAW legal), huggingface
+#     (locally cached HF dataset). Registry lives in slm4ie/data/extractors/.
+#   metadata     (a) conllu/tei extractors: per-document metadata loaded from an
+#     external TSV — keys path, key_column, key_from ("filename_stem" only),
+#     key_pattern (regex, group 1 = key), fields ({tsv_column: metadata_field}),
+#     splits ({tsv_column: separator} to explode list columns into JSON arrays).
+#     (b) jsonl extractor: field-mapping knobs — text_field (default "text"),
+#     id_field (default "doc_id"), metadata_fields (whitelist; default every
+#     non-structural field).
+#   mlflow       When enabled, one run per build is upserted to `experiment`
+#     (keyed by a content digest of the extracted tree): per-source row counts +
+#     empty-text rates as metrics, a per-source quality profile as profile.json,
+#     and the extracted tree as a `produced` dataset input.
+#
+# Selection: pass dataset keys positionally, or --all.
 #   --force re-extracts existing outputs; --max-workers sets parallelism.
 
 input_dir: ./data/raw
 output_dir: ./data/extracted
 
-# MLflow tracking for extraction builds. When enabled, a single run per build
-# is upserted to `experiment` (keyed by a content digest of the extracted
-# tree): per-source row counts + empty-text rates as metrics, a per-source
-# quality profile as the `profile.json` artifact, and the extracted tree as a
-# `produced` dataset input. Disabled by default; toggle with --mlflow /
-# --no-mlflow. tracking_uri null -> $MLFLOW_TRACKING_URI -> sqlite fallback.
+# --- MLflow -------------------------------------------------------------
 mlflow:
-  enabled: false
+  enabled: false                  # opt in per run; toggle --mlflow / --no-mlflow
   experiment: slm4ie/data/extract
-  tracking_uri: null
+  tracking_uri: null              # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
 
+# --- Datasets -----------------------------------------------------------
 datasets:
   classla_web_sl:
     extractor: jsonl
