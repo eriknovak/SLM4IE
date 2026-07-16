@@ -145,12 +145,15 @@ treated as a one-record array; anything else is skipped with a warning.
 
 | Raw | → | `Document` |
 | --- | --- | --- |
-| **`text`** | → | `text` — empty/missing skipped |
-| **`doc_id`** | → | `doc_id` |
+| **`text`** (configurable) | → | `text` — empty/missing skipped |
+| **`doc_id`** (configurable) | → | `doc_id` |
 | every other non-null field | → | `metadata` |
 
-Text-only; no annotations. The field names are **not** configurable — this
-extractor ignores the `metadata:` config block entirely.
+Text-only; no annotations. The field names are configurable through the
+`metadata:` block with the same knobs as `jsonl` — `text_field` (default
+`text`), `id_field` (default `doc_id`), and `metadata_fields` (whitelist of
+record fields to keep; when omitted, every other field is kept). Fields with a
+null value are always dropped from metadata.
 
 ## text
 
