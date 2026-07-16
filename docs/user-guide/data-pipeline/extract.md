@@ -24,7 +24,8 @@ uv run python scripts/data/extract.py macocu_sl
 # Re-extract a dataset whose output already exists
 uv run python scripts/data/extract.py macocu_sl --force
 
-# Several datasets in parallel (process pool)
+# Shard each dataset's files across 3 worker processes.
+# Datasets themselves always run sequentially; --max-workers is intra-dataset.
 uv run python scripts/data/extract.py macocu_sl classla_web_sl kzb --max-workers 3
 
 # Override the configured input/output directories
@@ -35,7 +36,7 @@ uv run python scripts/data/extract.py --all \
 
 ## Output: text + annotations split
 
-For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW),
+For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL),
 extraction writes **two files per dataset** under `extracted/`:
 
 - `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `metadata`. Consumed
@@ -43,6 +44,11 @@ extraction writes **two files per dataset** under `extracted/`:
 - `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel
   arrays (`forms`, `lemmas`, `upos`, `feats`, `sentences`), plus `spans` when
   present. Kept separate to avoid loading them during text-only training.
+
+Text-only sources (`json`, `text`, `macocu`, `coleslaw`, `huggingface`) get no
+annotations sidecar at all. For the raw input format each dataset ships in and
+the per-extractor field mapping, see
+[Extraction Formats](../../datasets/extraction-formats.md).
 
 The task converters ([Spans](spans.md), [Sentiment](sentiment.md),
 [SuperGLUE](superglue.md)) join these two files on the fly via
