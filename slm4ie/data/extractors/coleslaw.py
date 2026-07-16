@@ -9,7 +9,10 @@ their relevant prose fields are concatenated in a fixed reading
 order.
 
 This extractor walks the directory recursively and selects the
-appropriate text-building strategy per record.
+appropriate text-building strategy per record. Records that expose
+more than one candidate text source (e.g. both `text` and
+`fullText`) are logged with a warning naming the shadowed sources
+and the chosen one; the first source in precedence order still wins.
 
 Example:
     PISRS / UradniList (one JSON object per line):
@@ -48,7 +51,7 @@ Example:
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
 from slm4ie.data.schema import Document
@@ -91,31 +94,40 @@ def _join_string_fields(record: Dict[str, Any], keys: tuple) -> str:
     return "\n\n".join(parts)
 
 
-def _record_text(record: Dict[str, Any]) -> str:
-    """Build a document text for one COLESLAW record.
+def _candidate_texts(record: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """List every present text source of a COLESLAW record.
 
-    Selection order: text -> fullText -> sp_courts fields ->
-    sp_claims fields.
+    Precedence order: `text` -> `fullText` -> sp_courts fields ->
+    sp_claims fields. The first entry is the one selection uses, so
+    any further entries are shadowed sources worth warning about.
 
     Args:
         record (Dict[str, Any]): A parsed JSONL record.
 
     Returns:
-        str: Document text, or "" if no usable text was found.
+        List[Tuple[str, str]]: `(source_name, text)` pairs for every
+            non-empty source, in precedence order. Empty if the
+            record has no usable text.
     """
+    candidates: List[Tuple[str, str]] = []
+
     text = record.get("text")
     if isinstance(text, str) and text.strip():
-        return text
+        candidates.append(("text", text))
 
     full_text = record.get("fullText")
     if isinstance(full_text, str) and full_text.strip():
-        return full_text
+        candidates.append(("fullText", full_text))
 
     courts_text = _join_string_fields(record, _SP_COURTS_FIELDS)
     if courts_text:
-        return courts_text
+        candidates.append(("sp_courts", courts_text))
 
-    return _join_string_fields(record, _SP_CLAIMS_FIELDS)
+    claims_text = _join_string_fields(record, _SP_CLAIMS_FIELDS)
+    if claims_text:
+        candidates.append(("sp_claims", claims_text))
+
+    return candidates
 
 
 def _record_doc_id(record: Dict[str, Any]) -> Optional[str]:
@@ -211,9 +223,18 @@ class ColeslawExtractor(BaseExtractor):
                 if not isinstance(record, dict):
                     continue
 
-                text = _record_text(record)
-                if not text:
+                candidates = _candidate_texts(record)
+                if not candidates:
                     continue
+                chosen_source, text = candidates[0]
+                if len(candidates) > 1:
+                    logger.warning(
+                        "Record %s in subcorpus %s has multiple text sources %s; using %s",
+                        _record_doc_id(record),
+                        subcorpus,
+                        [name for name, _ in candidates],
+                        chosen_source,
+                    )
 
                 metadata: Dict[str, Any] = {"subcorpus": subcorpus}
                 for k, v in record.items():

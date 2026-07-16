@@ -1,6 +1,7 @@
 """Tests for the COLESLAW extractor."""
 
 import json
+import logging
 from pathlib import Path
 from typing import List
 
@@ -116,6 +117,95 @@ class TestColeslawExtractor:
         )
         docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
         assert docs == []
+
+    @pytest.mark.parametrize(
+        ("record", "expected_text"),
+        [
+            ({"id": 1, "text": "Samo besedilo."}, "Samo besedilo."),
+            ({"id": 2, "fullText": "Samo fullText."}, "Samo fullText."),
+            (
+                {"id": 3, "jedro": "Bistvo.", "izrek": "Izrek."},
+                "Bistvo.\n\nIzrek.",
+            ),
+            (
+                {"id": 4, "skodni_dogodek": "Nesreča.", "poskodba": "Zvin."},
+                "Nesreča.\n\nZvin.",
+            ),
+        ],
+        ids=["text", "fullText", "sp_courts", "sp_claims"],
+    )
+    def test_single_source_emits_no_warning(
+        self,
+        extractor: ColeslawExtractor,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        record: dict,
+        expected_text: str,
+    ) -> None:
+        """Records with exactly one text source extract silently."""
+        _write_jsonl(tmp_path / "PISRS" / "f.jsonl", [record])
+        with caplog.at_level(logging.WARNING, logger="slm4ie.data.extractors.coleslaw"):
+            docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
+        assert len(docs) == 1
+        assert docs[0].text == expected_text
+        assert caplog.records == []
+
+    def test_text_and_full_text_warns_and_uses_text(
+        self,
+        extractor: ColeslawExtractor,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A record with both 'text' and 'fullText' keeps 'text' and warns."""
+        _write_jsonl(
+            tmp_path / "PISRS" / "f.jsonl",
+            [{"id": 1, "text": "Izbrano.", "fullText": "Zasenčeno."}],
+        )
+        with caplog.at_level(logging.WARNING, logger="slm4ie.data.extractors.coleslaw"):
+            docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
+        assert docs[0].text == "Izbrano."
+        assert len(caplog.records) == 1
+        message = caplog.records[0].getMessage()
+        assert "'text'" in message
+        assert "'fullText'" in message
+        assert "using text" in message
+        assert "PISRS" in message
+
+    def test_full_text_and_sp_courts_warns_and_uses_full_text(
+        self,
+        extractor: ColeslawExtractor,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A record with 'fullText' and sp_courts fields keeps 'fullText' and warns."""
+        _write_jsonl(
+            tmp_path / "SodnaPraksa" / "f.jsonl",
+            [{"id": "c9", "fullText": "Izbrano.", "jedro": "Zasenčeno."}],
+        )
+        with caplog.at_level(logging.WARNING, logger="slm4ie.data.extractors.coleslaw"):
+            docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
+        assert docs[0].text == "Izbrano."
+        assert len(caplog.records) == 1
+        message = caplog.records[0].getMessage()
+        assert "'fullText'" in message
+        assert "'sp_courts'" in message
+        assert "using fullText" in message
+
+    def test_no_text_sources_skips_without_warning(
+        self,
+        extractor: ColeslawExtractor,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Records with no text source at all are skipped silently."""
+        _write_jsonl(
+            tmp_path / "PISRS" / "f.jsonl",
+            [{"id": 1, "title": "Brez besedila"}],
+        )
+        with caplog.at_level(logging.WARNING, logger="slm4ie.data.extractors.coleslaw"):
+            docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
+        assert docs == []
+        assert caplog.records == []
 
     def test_invalid_lines_logged_and_skipped(
         self, extractor: ColeslawExtractor, tmp_path: Path
