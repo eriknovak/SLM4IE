@@ -19,6 +19,6 @@ releases will be added here as the project matures.
 - **Tokenizers:** six-backend training/analysis/export sweep across a vocab
   range with morphology-aware metrics — implemented, not yet run.
 - **Training & evaluation:** scaffolding with MLflow tracking and SLURM batch
-  scripts — implemented, not yet run.
+  scripts — entry points stubbed, not yet implemented.
 - **Documentation:** this MkDocs Material site, with verified workflows
   documented in full and in-progress workflows flagged.

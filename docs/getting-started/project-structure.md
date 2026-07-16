@@ -23,11 +23,12 @@ SLM4IE/
 ├── scripts/                # CLI entry points (thin wrappers around slm4ie/)
 │   ├── data/                 # download.py, extract.py, to_pretrain.py, to_tokenization.py,
 │   │                         #   to_spans.py, to_sentiment.py, to_superglue.py, generate_synthetic.py
-│   ├── tokenizers/           # train.py, analyze.py, export.py
+│   ├── tokenizers/           # prepare_sample.py, train.py, analyze.py, export.py
+│   ├── analysis/             # diagnose_language_leakage.py
 │   ├── train.py              # model pretraining/fine-tuning
 │   └── evaluate.py           # benchmark evaluation
 ├── slurm/                  # SLURM batch scripts for HPC training
-├── notebooks/              # exploratory Jupyter notebooks
+├── notebooks/              # exploratory marimo notebooks
 ├── tests/                  # pytest test suite
 ├── docs/                   # documentation source (this site)
 ├── pyproject.toml          # project metadata and dependencies

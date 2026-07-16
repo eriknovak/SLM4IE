@@ -23,5 +23,9 @@ The derivational gold adds point-estimate `*_deriv` metric columns and enriches
 the morphological backends' morpheme table. Requires the `tokenize` extra
 (`uv sync --extra tokenize`).
 
-**Entry point:** [`scripts/tokenizers/train.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/train.py) (also [`scripts/tokenizers/analyze.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/analyze.py) and [`scripts/tokenizers/export.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/export.py))
+An optional `scripts/tokenizers/prepare_sample.py` step materializes the shared
+seeded training sample and morpheme lexicon up front, so reruns of the sweep
+reuse an identical persistent sample.
+
+**Entry point:** [`scripts/tokenizers/train.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/train.py) (also [`scripts/tokenizers/prepare_sample.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/prepare_sample.py), [`scripts/tokenizers/analyze.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/analyze.py), and [`scripts/tokenizers/export.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/tokenizers/export.py))
 **Config:** [`configs/tokenizers/tokenizers.yaml`](https://github.com/eriknovak/SLM4IE/blob/main/configs/tokenizers/tokenizers.yaml)

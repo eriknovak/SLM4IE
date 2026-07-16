@@ -11,10 +11,10 @@ title: SLURM / HPC
     the source of truth.
 
 The `slurm/` directory holds SLURM batch scripts for running the heavy stages
-(tokenizer training and analysis, model training, evaluation, synthetic
+(tokenizer training, analysis, and export, model training, evaluation, synthetic
 generation) on an HPC cluster via `sbatch`: `slurm/tokenizer_train.sbatch`,
-`slurm/tokenizer_analyze.sbatch`, `slurm/train.sbatch`, `slurm/evaluate.sbatch`,
-and `slurm/generate.sbatch`.
+`slurm/tokenizer_analyze.sbatch`, `slurm/tokenizer_export.sbatch`,
+`slurm/train.sbatch`, `slurm/evaluate.sbatch`, and `slurm/generate.sbatch`.
 
 **Entry point:** [`slurm/`](https://github.com/eriknovak/SLM4IE/tree/main/slurm)
 Each script wraps the corresponding `uv run` command.

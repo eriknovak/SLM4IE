@@ -4,13 +4,13 @@ title: Training
 
 # Training
 
-!!! warning "🚧 In progress"
-    This workflow is implemented but has **not yet been run end-to-end**, so
-    this page is a stub. Detailed usage and results will land here once the
-    pipeline is verified. Until then, treat the entry point and config below as
-    the source of truth.
+!!! warning "🚧 Not yet implemented"
+    This workflow is **scaffolded but not yet implemented** — the entry point
+    (`scripts/train.py`) is a stub that raises `NotImplementedError`. This page
+    will fill in once training lands. Until then, treat the configs below as the
+    intended shape.
 
-`scripts/train.py` pretrains or fine-tunes small language models from YAML
+`scripts/train.py` will pretrain or fine-tune small language models from YAML
 configs under `configs/training/`, with MLflow experiment tracking.
 
 **Entry point:** [`scripts/train.py`](https://github.com/eriknovak/SLM4IE/blob/main/scripts/train.py)

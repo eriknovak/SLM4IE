@@ -53,7 +53,7 @@ end-to-end** carry a 🚧 *In progress* banner.
 | Download → Extract → Pretraining corpus | **Verified** — run end-to-end; see [Corpus Statistics](datasets/corpus-statistics.md) |
 | Task converters (NER, sentiment, SuperGLUE) | Implemented, not yet run |
 | Tokenizer comparison sweep | Implemented, not yet run |
-| Model training & evaluation | Implemented, not yet run |
+| Model training & evaluation | Scaffolded — entry points stubbed, not yet implemented |
 
 ## Workstreams
 

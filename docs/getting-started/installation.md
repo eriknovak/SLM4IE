@@ -45,6 +45,7 @@ The base `uv sync` only pulls runtime essentials. Install extras as needed:
 | `curate`   | `uv sync --extra curate`   | datatrove pipeline for the [pretraining corpus](../user-guide/data-pipeline/pretrain.md) |
 | `tokenize` | `uv sync --extra tokenize` | Tokenizer training + morphological evaluation (see [Tokenizers](../user-guide/tokenizers.md)) |
 | `docs`     | `uv sync --extra docs`     | MkDocs Material toolchain for building this documentation site |
+| `notebook` | `uv sync --extra notebook` | marimo notebooks + plotly/kaleido for experiment reporting and visualization |
 
 Multiple extras can be combined:
 
