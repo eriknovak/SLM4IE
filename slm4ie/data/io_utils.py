@@ -313,7 +313,12 @@ def iter_joined_records(
 
     Yields:
         Dict[str, Any]: A text record with, when available, an
-            `annotations` field carrying the parallel-array payload.
+            `annotations` field carrying the parallel-array payload
+            (`forms`, `lemmas`, `upos`, `feats`, `space_after`,
+            `sentences`). Sidecars written before the `space_after`
+            array existed simply lack that key — consumers must treat
+            a missing array as all-True. Stub lines (no parallel
+            arrays) yield records without an `annotations` field.
 
     Raises:
         ValueError: If a `doc_id`/`uid` mismatch is detected or

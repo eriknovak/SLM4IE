@@ -50,9 +50,11 @@ Example:
     1]]`, and a single-sentence `text`.
 
     Schema mapping (annotated):
-        text:        per-sentence token forms joined with a single
-                     space, then sentence strings joined with newlines
-                     so datatrove's sentence splitter retains the cue.
+        text:        per-sentence token forms joined with single
+                     spaces, honouring the TEI `join` attribute
+                     (see `_extract_tokens_from_sentence`), then
+                     sentence strings joined with newlines so
+                     datatrove's sentence splitter retains the cue.
         source:      provided by caller.
         domain:      provided by caller.
         doc_id:      `<u>`'s `xml:id` (utterance path) or the
@@ -78,7 +80,7 @@ from lxml import etree
 
 from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.metadata_sidecar import MetadataSidecar
-from slm4ie.data.schema import Annotations, Document, Token
+from slm4ie.data.schema import Annotations, Document, Token, render_sentence
 
 _TEI_NS = "http://www.tei-c.org/ns/1.0"
 _XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -240,39 +242,48 @@ def _extract_tokens_from_sentence(
     """Extract Token objects from a <s> element.
 
     Iterates direct and <name>-wrapped children to find all <w> and
-    <pc> token elements.
+    <pc> token elements. Each token's `space_after` is derived from
+    the TEI/CLARIN.SI `join` attribute, which marks the *absence* of
+    whitespace: `right` means no space to the token's right (KAS and
+    ParlaMint place it on the token preceding punctuation), `left`
+    means no space to its left, and `both` means neither side. For
+    consecutive tokens A, B the space between them is dropped when A
+    is right-joined or B is left-joined.
 
     Args:
         s_elem (etree._Element): The <s> XML element.
 
     Returns:
-        List[Token]: Extracted tokens in document order.
+        List[Token]: Extracted tokens in document order, with
+            `space_after` set from the `join` attributes.
     """
     tokens: List[Token] = []
+    joins: List[Optional[str]] = []
+
+    def _append(elem: "etree._Element") -> None:
+        upos, feats = _parse_morph(elem)
+        tokens.append(
+            Token(
+                form=elem.text or "",
+                lemma=elem.get("lemma"),
+                upos=upos,
+                feats=feats,
+            )
+        )
+        joins.append(elem.get("join"))
 
     for child in s_elem:
         if child.tag in (_W_TAG, _PC_TAG):
-            upos, feats = _parse_morph(child)
-            tokens.append(
-                Token(
-                    form=child.text or "",
-                    lemma=child.get("lemma"),
-                    upos=upos,
-                    feats=feats,
-                )
-            )
+            _append(child)
         elif child.tag == _NAME_TAG:
             for wc in child:
                 if wc.tag in (_W_TAG, _PC_TAG):
-                    upos, feats = _parse_morph(wc)
-                    tokens.append(
-                        Token(
-                            form=wc.text or "",
-                            lemma=wc.get("lemma"),
-                            upos=upos,
-                            feats=feats,
-                        )
-                    )
+                    _append(wc)
+
+    for i, join in enumerate(joins):
+        next_join = joins[i + 1] if i + 1 < len(joins) else None
+        if join in ("right", "both") or next_join in ("left", "both"):
+            tokens[i].space_after = False
 
     return tokens
 
@@ -286,8 +297,9 @@ def _build_document(
 ) -> Optional[Document]:
     """Combine `<s>` siblings into one document-level Document.
 
-    Sentence texts are formed by space-joining each sentence's token
-    forms; the sentence strings are then joined with newlines.
+    Sentence texts are reconstructed from each sentence's tokens,
+    honouring `Token.space_after` (derived from the TEI `join`
+    attribute); the sentence strings are then joined with newlines.
     Annotations carry the flat token sequence and inclusive
     `[start, end]` token-index spans for every contained sentence.
 
@@ -315,7 +327,7 @@ def _build_document(
         tokens = _extract_tokens_from_sentence(s_elem)
         if not tokens:
             continue
-        sentence_texts.append(" ".join(t.form for t in tokens))
+        sentence_texts.append(render_sentence(tokens))
         start = cursor
         flat_tokens.extend(tokens)
         cursor += len(tokens)
@@ -390,7 +402,7 @@ def _stream_per_file_document(
 
         tokens = _extract_tokens_from_sentence(s_elem)
         if tokens:
-            sentence_texts.append(" ".join(t.form for t in tokens))
+            sentence_texts.append(render_sentence(tokens))
             start = cursor
             flat_tokens.extend(tokens)
             cursor += len(tokens)

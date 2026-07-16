@@ -1,5 +1,6 @@
 """Tests for the TEI XML extractor."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -51,7 +52,8 @@ _UTTERANCE_TEI = """\
 
 # kas style — annotated TEI with no <u> elements (scientific monographs,
 # not parliamentary). One Document per file should fall out of the
-# fallback path.
+# fallback path. As in the real corpus, `join="right"` sits on the token
+# *preceding* the whitespace-free boundary (the word before punctuation).
 _KAS_TEI = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -63,16 +65,44 @@ _KAS_TEI = """\
             <w lemma="gospodarstvo" ana="mte:Ncnsn">Gospodarstvo</w>
             <w lemma="in" ana="mte:Cc">in</w>
             <w lemma="javen" ana="mte:Agpfsn">javna</w>
-            <w lemma="uprava" ana="mte:Ncfsn">uprava</w>
-            <pc ana="mte:Z" join="right">.</pc>
+            <w lemma="uprava" ana="mte:Ncfsn" join="right">uprava</w>
+            <pc ana="mte:Z">.</pc>
           </s>
           <s xml:id="kas.s2">
             <w lemma="razvoj" ana="mte:Ncmsn">Razvoj</w>
-            <w lemma="sektor" ana="mte:Ncmsg">sektorja</w>
-            <pc ana="mte:Z" join="right">.</pc>
+            <w lemma="sektor" ana="mte:Ncmsg" join="right">sektorja</w>
+            <pc ana="mte:Z">.</pc>
           </s>
         </p>
       </div>
+    </body>
+  </text>
+</TEI>
+"""
+
+# join-attribute coverage — one sentence exercising every @join value.
+# Expected text: `Res "prav"-res (sic)!` — `right` and `both` drop the
+# space after the carrying token, `left` and `both` drop the space
+# before it.
+_JOIN_TEI = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <text>
+    <body>
+      <p xml:id="p1">
+        <s xml:id="j.s1">
+          <w lemma="res" ana="mte:Rgp">Res</w>
+          <pc ana="mte:Z" join="right">"</pc>
+          <w lemma="prav" ana="mte:Rgp">prav</w>
+          <pc ana="mte:Z" join="left">"</pc>
+          <pc ana="mte:Z" join="both">-</pc>
+          <w lemma="res" ana="mte:Rgp">res</w>
+          <pc ana="mte:Z" join="right">(</pc>
+          <w lemma="sic" ana="mte:Rgp" join="right">sic</w>
+          <pc ana="mte:Z" join="right">)</pc>
+          <pc ana="mte:Z">!</pc>
+        </s>
+      </p>
     </body>
   </text>
 </TEI>
@@ -349,7 +379,7 @@ class TestTeiPerFileFallback:
     ) -> None:
         """All <s> tokens land in one Document with multi-sentence spans."""
         docs = list(extractor.extract(tmp_kas, "kas", "academic"))
-        assert docs[0].text == "Gospodarstvo in javna uprava .\nRazvoj sektorja ."
+        assert docs[0].text == "Gospodarstvo in javna uprava.\nRazvoj sektorja."
         ann = docs[0].annotations
         assert ann is not None
         assert [t.form for t in ann.tokens] == [
@@ -361,6 +391,81 @@ class TestTeiPerFileFallback:
             "NOUN", "NOUN", "PUNCT",
         ]
         assert ann.sentences == [[0, 4], [5, 7]]
+
+
+class TestTeiJoinSpacing:
+    """The TEI `join` attribute drives `space_after` and text fidelity."""
+
+    def test_kas_period_attached(
+        self, extractor: TeiExtractor, tmp_kas: Path
+    ) -> None:
+        """`join="right"` on the word before a period attaches the period."""
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
+        assert docs[0].text == "Gospodarstvo in javna uprava.\nRazvoj sektorja."
+        ann = docs[0].annotations
+        assert ann is not None
+        assert [t.space_after for t in ann.tokens] == [
+            True, True, True, False, True,
+            True, False, True,
+        ]
+
+    def test_all_join_values(
+        self, extractor: TeiExtractor, tmp_path: Path
+    ) -> None:
+        """`right`, `left`, and `both` each drop the correct space."""
+        (tmp_path / "join.xml").write_text(_JOIN_TEI, encoding="utf-8")
+        docs = list(extractor.extract(tmp_path, "kas", "academic"))
+        assert len(docs) == 1
+        assert docs[0].text == 'Res "prav"-res (sic)!'
+        ann = docs[0].annotations
+        assert ann is not None
+        # Res ["] [prav] ["] [-] [res] [(] [sic] [)] [!]
+        assert [t.space_after for t in ann.tokens] == [
+            True, False, False, False, False, True, False, False, False, True,
+        ]
+
+    def test_space_after_persisted_in_annotation_line(
+        self, extractor: TeiExtractor, tmp_kas: Path
+    ) -> None:
+        """The `space_after` parallel array lands in the sidecar line."""
+        docs = list(extractor.extract(tmp_kas, "kas", "academic"))
+        line = docs[0].to_annotation_line()
+        assert line is not None
+        data = json.loads(line)
+        assert data["space_after"] == [
+            True, True, True, False, True,
+            True, False, True,
+        ]
+        assert len(data["space_after"]) == len(data["forms"])
+
+    def test_join_inside_name_wrapper(
+        self, extractor: TeiExtractor, tmp_path: Path
+    ) -> None:
+        """`join` on a <name>-wrapped token is honoured like any other."""
+        xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <text>
+    <body>
+      <p xml:id="p1">
+        <s xml:id="n.s1">
+          <w lemma="videti" ana="mte:Vmpr3s">vidi</w>
+          <name type="per">
+            <w lemma="Oblak" ana="mte:Npmsn" join="right">Oblaka</w>
+          </name>
+          <pc ana="mte:Z">.</pc>
+        </s>
+      </p>
+    </body>
+  </text>
+</TEI>
+"""
+        (tmp_path / "name.xml").write_text(xml, encoding="utf-8")
+        docs = list(extractor.extract(tmp_path, "kas", "academic"))
+        assert docs[0].text == "vidi Oblaka."
+        ann = docs[0].annotations
+        assert ann is not None
+        assert [t.space_after for t in ann.tokens] == [True, False, True]
 
 
 class TestTeiPlainParagraphs:

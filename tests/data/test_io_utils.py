@@ -126,6 +126,54 @@ class TestIterJoinedRecords:
         assert "annotations" not in records[0]
         assert records[1]["annotations"]["forms"] == ["annotated"]
 
+    def test_sidecar_without_space_after_still_loads(
+        self, tmp_path: Path
+    ) -> None:
+        """Old sidecars lacking the space_after array remain readable.
+
+        The reader passes the payload through as-is; a missing array is
+        the consumer's cue to treat every token as space-followed.
+        """
+        text = tmp_path / "k.jsonl"
+        ann = tmp_path / "k.annotations.jsonl.gz"
+        _write_jsonl(text, [
+            {"text": "Lepa beseda .", "source": "k", "domain": "x",
+             "doc_id": "s1"},
+        ])
+        _write_gz_jsonl(ann, [
+            {"doc_id": "s1", "forms": ["Lepa", "beseda", "."],
+             "lemmas": ["lep", "beseda", "."],
+             "upos": ["ADJ", "NOUN", "PUNCT"], "feats": [None, None, None],
+             "sentences": [[0, 2]]},
+        ])
+
+        records = list(iter_joined_records(text, ann))
+        assert len(records) == 1
+        payload = records[0]["annotations"]
+        assert payload["forms"] == ["Lepa", "beseda", "."]
+        assert "space_after" not in payload
+
+    def test_sidecar_with_space_after_round_trips(
+        self, tmp_path: Path
+    ) -> None:
+        """The space_after array survives the join untouched."""
+        text = tmp_path / "k.jsonl"
+        ann = tmp_path / "k.annotations.jsonl.gz"
+        _write_jsonl(text, [
+            {"text": "Lepa beseda.", "source": "k", "domain": "x",
+             "doc_id": "s1"},
+        ])
+        _write_gz_jsonl(ann, [
+            {"doc_id": "s1", "forms": ["Lepa", "beseda", "."],
+             "lemmas": ["lep", "beseda", "."],
+             "upos": ["ADJ", "NOUN", "PUNCT"], "feats": [None, None, None],
+             "space_after": [True, False, True],
+             "sentences": [[0, 2]]},
+        ])
+
+        records = list(iter_joined_records(text, ann))
+        assert records[0]["annotations"]["space_after"] == [True, False, True]
+
     def test_doc_id_mismatch_raises(self, tmp_path: Path) -> None:
         """A doc_id mismatch is treated as a hard error."""
         text = tmp_path / "k.jsonl"

@@ -92,6 +92,9 @@ def _parse_tokens_from_paragraphs(
 
     Flattens all paragraphs, sentences, and tokens into a single
     list, tracking sentence boundaries as [start, end] index pairs.
+    A token record's explicit `space_after` boolean is honoured when
+    present; no spacing signal is invented otherwise (defaults to
+    True).
 
     Args:
         paragraphs (List[Dict]): List of paragraph dicts, each
@@ -118,6 +121,7 @@ def _parse_tokens_from_paragraphs(
                         lemma=tok.get("lemma"),
                         upos=tok.get("upos"),
                         feats=tok.get("feats"),
+                        space_after=bool(tok.get("space_after", True)),
                     )
                 )
             end = len(tokens) - 1

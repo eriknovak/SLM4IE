@@ -322,6 +322,40 @@ class TestConlluExtractor:
         # only one sentence to join.
         assert docs[0].text == "Lepa beseda."
 
+    def test_space_after_no_sets_token_flag(self, tmp_path: Path) -> None:
+        """SpaceAfter=No in MISC → space_after=False on that token only."""
+        content = textwrap.dedent("""\
+            # sent_id = x.s1
+            1\tLepa\tlep\tADJ\t_\t_\t2\tamod\t_\t_
+            2\tbeseda\tbeseda\tNOUN\t_\t_\t0\troot\t_\tSpaceAfter=No
+            3\t.\t.\tPUNCT\t_\t_\t2\tpunct\t_\t_
+        """)
+        docs = _extract(tmp_path, content)
+        tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
+        assert [t.space_after for t in tokens] == [True, False, True]
+        # Text and space_after derive from the same MISC signal.
+        assert docs[0].text == "Lepa beseda."
+
+    def test_space_after_true_when_misc_absent(self, tmp_path: Path) -> None:
+        """No SpaceAfter=No anywhere → all tokens keep space_after=True."""
+        docs = _extract(tmp_path, SENTENCE_1)
+        tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
+        assert all(t.space_after for t in tokens)
+
+    def test_space_after_detected_among_other_misc(
+        self, tmp_path: Path
+    ) -> None:
+        """SpaceAfter=No is found inside a multi-valued MISC field."""
+        content = textwrap.dedent("""\
+            # sent_id = x.s1
+            1\tLepa\tlep\tADJ\t_\t_\t2\tamod\t_\tNER=O|SpaceAfter=No
+            2\tbeseda\tbeseda\tNOUN\t_\t_\t0\troot\t_\tNER=O
+        """)
+        docs = _extract(tmp_path, content)
+        tokens = docs[0].annotations.tokens  # type: ignore[union-attr]
+        assert [t.space_after for t in tokens] == [False, True]
+        assert docs[0].text == "Lepabeseda"
+
     def test_directory_named_like_conll_is_skipped(
         self, tmp_path: Path
     ) -> None:
