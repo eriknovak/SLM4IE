@@ -211,7 +211,7 @@ Of the ten columns, only four become `Token` fields:
 | 3 | **LEMMA** | → | `lemma` |
 | 4 | **UPOS** | → | `upos` |
 | 6 | **FEATS** | → | `feats` |
-| 10 | **MISC** | → | read only for `SpaceAfter=No` |
+| 10 | **MISC** | → | `SpaceAfter=No` → `space_after: false`; nothing else is read |
 
 ID, XPOS, HEAD, DEPREL, and DEPS are not carried into the schema. Rows whose ID
 marks a multiword token (`1-2`) or an empty node (`1.1`) are skipped.
@@ -227,9 +227,17 @@ marks a multiword token (`1-2`) or an empty node (`1.1`) are skipped.
 3. One document per file, `doc_id` = filename stem.
 
 **Text** prefers each sentence's `# text = ` comment; when absent it is
-reconstructed from the FORM column, honouring `SpaceAfter=No`. Sentence strings
+reconstructed from the tokens, honouring `SpaceAfter=No`. Sentence strings
 are then joined with newlines. `oss`, `kzb`, and `kas` pull extra per-document
 fields from a [metadata sidecar](#external-tsv-metadata).
+
+**Spacing is persisted**, not just used for reconstruction: each token's
+`Token.space_after` is False when its MISC field contains `SpaceAfter=No`, and
+the annotations sidecar carries a `space_after` bool array parallel to `forms`.
+Both the reconstructed text and the array derive from the same MISC signal, so
+they cannot diverge. Sidecars written before this field existed lack the array
+— consumers treat a missing array as all-True. Re-extract with `--force` to
+gain it.
 
 ## tei
 
@@ -262,6 +270,7 @@ paths are **auto-detected** from the tree itself:
 | **`<w>` / `<pc>`** element text | → | `Token.form` |
 | **`lemma`** attribute | → | `Token.lemma` |
 | **`msd`** or **`ana`** attribute | → | `Token.upos` + `Token.feats` |
+| **`join`** attribute | → | `Token.space_after` (see below) |
 | **`xml:id`** on `<u>` (or `<p>`) | → | `doc_id`; falls back to the filename stem on the per-file path |
 | **`who`** / **`ana`** on `<u>` | → | `metadata`, layered over any sidecar fields |
 
@@ -277,12 +286,20 @@ On the **plain** path, `<p>` scanning is scoped to `<body>` so that `<p>`
 elements in the `<teiHeader>` (copyright notices, catalog codes) are never
 emitted as documents; text comes from `.itertext()`.
 
-!!! warning "TEI text loses original spacing"
-    Reconstructed text on the annotated paths space-joins token forms
-    unconditionally — TEI carries no `SpaceAfter` equivalent that this extractor
-    reads. Punctuation therefore renders as `Dober dan .`, not `Dober dan.`. The
-    `conllu` extractor *does* honour `SpaceAfter=No`, so reconstructed-text
-    fidelity is not uniform across the two annotated routes.
+**Spacing** comes from the TEI/CLARIN.SI `join` attribute on `<w>`/`<pc>`,
+which marks the *absence* of whitespace: `right` = no space to the token's
+right, `left` = no space to its left, `both` = neither side. KAS and
+ParlaMint-SI place `join="right"` on the token *preceding* punctuation
+(`<w join="right">uprava</w><pc>.</pc>`). Between consecutive tokens A, B the
+space is dropped when A is right-joined or B is left-joined; the result is
+stored as `Token.space_after` on A and persisted in the sidecar's
+`space_after` array, and reconstructed text honours it — `javna uprava.`,
+not `javna uprava .`. This matches the `conllu` extractor's `SpaceAfter=No`
+handling, so reconstructed-text fidelity is uniform across the annotated
+routes. Sentence strings are still joined with newlines regardless of the
+final token's flag. Sidecars extracted before this field existed lack the
+array (consumers treat missing as all-True) and carry space-joined text —
+re-extract with `--force` to refresh both.
 
 Files larger than 64 MB are parsed with `iterparse(huge_tree=True)` instead of a
 full DOM — GigaFida ships segments whose DOM would be 10–15× the file size and

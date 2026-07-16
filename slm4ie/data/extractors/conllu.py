@@ -66,7 +66,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.metadata_sidecar import MetadataSidecar
-from slm4ie.data.schema import Annotations, Document, Token
+from slm4ie.data.schema import Annotations, Document, Token, render_sentence
 
 
 def _blank_to_none(value: str) -> Optional[str]:
@@ -86,8 +86,12 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token]]]:
     """Parse a single CoNLL-U sentence block into (text, tokens).
 
     Skips multiword and empty-node lines (ID contains `-` or `.`).
+    Each token's `space_after` is derived from the MISC field
+    (column 10): False when it contains `SpaceAfter=No`, else True.
     Text is taken from a `# text = ...` comment when present, else
-    reconstructed from token forms honouring `SpaceAfter=No`.
+    reconstructed from the tokens honouring `space_after` — both the
+    text and the persisted `space_after` array come from the same
+    MISC signal, so they can never diverge.
 
     Args:
         lines (List[str]): Non-empty lines of the sentence block.
@@ -121,6 +125,7 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token]]]:
                 lemma=_blank_to_none(parts[2]),
                 upos=_blank_to_none(parts[3]),
                 feats=_blank_to_none(parts[5]),
+                space_after="SpaceAfter=No" not in parts[9],
             )
         )
 
@@ -128,39 +133,9 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token]]]:
         return None
 
     if not text:
-        text = _reconstruct_text(lines)
+        text = render_sentence(tokens)
 
     return text, tokens
-
-
-def _reconstruct_text(lines: List[str]) -> str:
-    """Reconstruct sentence text from CoNLL-U token rows.
-
-    Joins token forms with spaces unless the token's MISC field
-    (column 10) contains SpaceAfter=No.
-
-    Args:
-        lines (List[str]): Non-empty lines of the sentence block.
-
-    Returns:
-        str: The reconstructed sentence text.
-    """
-    parts: List[str] = []
-    for line in lines:
-        if line.startswith("#"):
-            continue
-        cols = line.split("\t")
-        if len(cols) < 10:
-            continue
-        token_id = cols[0]
-        if "-" in token_id or "." in token_id:
-            continue
-        form = cols[1]
-        misc = cols[9]
-        parts.append(form)
-        if "SpaceAfter=No" not in misc:
-            parts.append(" ")
-    return "".join(parts).rstrip()
 
 
 def _newdoc_id(lines: List[str]) -> Optional[str]:

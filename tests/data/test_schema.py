@@ -3,7 +3,33 @@
 import json
 
 
-from slm4ie.data.schema import Annotations, Document, Token
+from slm4ie.data.schema import Annotations, Document, Token, render_sentence
+
+
+class TestRenderSentence:
+    """Tests for the render_sentence text-reconstruction helper."""
+
+    def test_default_spacing(self):
+        """All-default tokens are joined with single spaces."""
+        tokens = [Token(form="Dober"), Token(form="dan")]
+        assert render_sentence(tokens) == "Dober dan"
+
+    def test_space_after_false_drops_space(self):
+        """space_after=False glues the next token on."""
+        tokens = [
+            Token(form="uprava", space_after=False),
+            Token(form="."),
+        ]
+        assert render_sentence(tokens) == "uprava."
+
+    def test_no_trailing_space(self):
+        """The final token never emits a trailing space."""
+        tokens = [Token(form="Hvala"), Token(form=".")]
+        assert render_sentence(tokens) == "Hvala ."
+
+    def test_empty(self):
+        """No tokens yields an empty string."""
+        assert render_sentence([]) == ""
 
 
 class TestToken:
@@ -16,6 +42,7 @@ class TestToken:
         assert token.lemma is None
         assert token.upos is None
         assert token.feats is None
+        assert token.space_after is True
 
     def test_full_token(self):
         """Token with all fields populated."""
@@ -34,7 +61,7 @@ class TestToken:
         """to_dict should not include keys with None values."""
         token = Token(form="hello", upos="NOUN")
         result = token.to_dict()
-        assert result == {"form": "hello", "upos": "NOUN"}
+        assert result == {"form": "hello", "upos": "NOUN", "space_after": True}
         assert "lemma" not in result
 
     def test_to_dict_full_token(self):
@@ -44,6 +71,7 @@ class TestToken:
             lemma="run",
             upos="VERB",
             feats="Aspect=Prog",
+            space_after=False,
         )
         result = token.to_dict()
         assert result == {
@@ -51,13 +79,14 @@ class TestToken:
             "lemma": "run",
             "upos": "VERB",
             "feats": "Aspect=Prog",
+            "space_after": False,
         }
 
     def test_to_dict_minimal_token(self):
-        """to_dict with only form returns only form."""
+        """to_dict with only form still carries the space_after bool."""
         token = Token(form="test")
         result = token.to_dict()
-        assert result == {"form": "test"}
+        assert result == {"form": "test", "space_after": True}
 
 
 class TestAnnotations:
@@ -82,8 +111,8 @@ class TestAnnotations:
         result = ann.to_dict()
         assert result == {
             "tokens": [
-                {"form": "Hello", "upos": "INTJ"},
-                {"form": "world", "upos": "NOUN"},
+                {"form": "Hello", "upos": "INTJ", "space_after": True},
+                {"form": "world", "upos": "NOUN", "space_after": True},
             ],
             "sentences": [[0, 1]],
         }
@@ -292,7 +321,27 @@ class TestDocument:
         assert data["lemmas"] == ["zdrav", "svet"]
         assert data["upos"] == ["INTJ", "NOUN"]
         assert data["feats"] == [None, "Case=Nom"]
+        assert data["space_after"] == [True, True]
         assert data["sentences"] == [[0, 1]]
+
+    def test_to_annotation_line_space_after_array(self):
+        """space_after is a bool array parallel to forms."""
+        tokens = [
+            Token(form="uprava", space_after=False),
+            Token(form="."),
+        ]
+        ann = Annotations(tokens=tokens, sentences=[[0, 1]])
+        doc = Document(
+            text="uprava.",
+            source="kas",
+            domain="academic",
+            doc_id="d1",
+            annotations=ann,
+        )
+        data = json.loads(doc.to_annotation_line())
+        assert data["space_after"] == [False, True]
+        assert len(data["space_after"]) == len(data["forms"])
+        assert all(isinstance(v, bool) for v in data["space_after"])
 
     def test_to_annotation_line_none_when_no_annotations(self):
         """to_annotation_line returns None when no annotations."""

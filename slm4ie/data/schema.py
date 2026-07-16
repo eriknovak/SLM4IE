@@ -14,12 +14,16 @@ class Token:
         lemma (Optional[str]): Lemma of the token.
         upos (Optional[str]): Universal POS tag.
         feats (Optional[str]): Morphological features.
+        space_after (bool): Whether a space follows this token in the
+            original text. False for e.g. a token directly followed by
+            punctuation. Defaults to True.
     """
 
     form: str
     lemma: Optional[str] = None
     upos: Optional[str] = None
     feats: Optional[str] = None
+    space_after: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a dict representation, excluding None fields.
@@ -32,6 +36,28 @@ class Token:
             for k, v in dataclasses.asdict(self).items()
             if v is not None
         }
+
+
+def render_sentence(tokens: List["Token"]) -> str:
+    """Reconstruct sentence text from tokens honoring `space_after`.
+
+    Consecutive tokens are separated by a single space unless the left
+    token's `space_after` is False. No trailing space is emitted after
+    the final token regardless of its `space_after` value.
+
+    Args:
+        tokens (List[Token]): Sentence tokens in reading order.
+
+    Returns:
+        str: The reconstructed sentence text.
+    """
+    parts: List[str] = []
+    last = len(tokens) - 1
+    for i, token in enumerate(tokens):
+        parts.append(token.form)
+        if token.space_after and i < last:
+            parts.append(" ")
+    return "".join(parts)
 
 
 @dataclasses.dataclass
@@ -129,8 +155,9 @@ class Document:
         """Serializes annotations as compact parallel arrays.
 
         Returns None if the document has no annotations. Output
-        format uses parallel arrays (forms, lemmas, upos, feats)
-        instead of one dict per token to reduce storage size.
+        format uses parallel arrays (forms, lemmas, upos, feats,
+        space_after) instead of one dict per token to reduce
+        storage size.
 
         Returns:
             Optional[str]: A single JSON line, or None.
@@ -147,6 +174,7 @@ class Document:
         data["lemmas"] = [t.lemma for t in tokens]
         data["upos"] = [t.upos for t in tokens]
         data["feats"] = [t.feats for t in tokens]
+        data["space_after"] = [t.space_after for t in tokens]
         data["sentences"] = self.annotations.sentences
         return json.dumps(data, ensure_ascii=False)
 
