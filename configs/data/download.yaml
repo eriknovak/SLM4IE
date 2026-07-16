@@ -24,7 +24,7 @@
 #
 # Selection: pass dataset keys positionally, or --all for enabled entries.
 
-output_dir: /vault/data/SLM4IE/raw
+output_dir: ./data/raw
 
 datasets:
   classla_web_sl:

@@ -18,8 +18,8 @@
 #
 # Selection: pass dataset keys positionally, or --all.
 
-input_dir: /vault/data/SLM4IE/raw
-output_dir: /vault/data/SLM4IE/tokenization
+input_dir: ./data/raw
+output_dir: ./data/tokenization
 
 # Dataset keys to convert. Each must:
 #   1. be declared in configs/data/download.yaml (so the raw download

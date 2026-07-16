@@ -9,8 +9,10 @@ import pytest
 
 from slm4ie.data.io_utils import (
     find_dataset_files,
+    find_project_root,
     iter_joined_records,
     open_output,
+    resolve_project_path,
 )
 
 
@@ -154,6 +156,33 @@ class TestIterJoinedRecords:
 
         with pytest.raises(ValueError, match="Line counts differ"):
             list(iter_joined_records(text, ann))
+
+
+class TestResolveProjectPath:
+    """Tests for resolve_project_path."""
+
+    def test_absolute_passes_through(self, tmp_path: Path) -> None:
+        """An absolute value is returned unchanged, ignoring root."""
+        abs_path = tmp_path / "vault" / "raw"
+        assert resolve_project_path(abs_path, root=Path("/repo")) == abs_path
+
+    def test_relative_anchored_to_root(self) -> None:
+        """A relative value is joined onto the provided root."""
+        result = resolve_project_path("./data/raw", root=Path("/repo"))
+        assert result == Path("/repo/data/raw")
+        assert result.is_absolute()
+
+    def test_relative_string_accepts_plain_form(self) -> None:
+        """A leading `./` is optional and collapses the same way."""
+        assert resolve_project_path("data/raw", root=Path("/repo")) == Path(
+            "/repo/data/raw"
+        )
+
+    def test_default_root_is_project_root(self) -> None:
+        """Without an explicit root, values anchor to the project root."""
+        result = resolve_project_path("data/raw")
+        assert result == find_project_root() / "data" / "raw"
+        assert result.is_absolute()
 
 
 class TestOpenOutput:

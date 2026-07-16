@@ -29,9 +29,9 @@
 
 # Roots for resolving source paths and writing output.
 roots:
-  extracted: /vault/data/SLM4IE/extracted
-  raw:       /vault/data/SLM4IE/raw
-  tasks:     /vault/data/SLM4IE/tasks
+  extracted: ./data/extracted
+  tasks: ./data/tasks
+  raw: ./data/raw
 
 # MLflow tracking for task conversion. When enabled, the converters upsert one
 # run per <task>/<dataset> to `experiment` (keyed by a content digest of the
@@ -58,8 +58,8 @@ converters:
 entries:
   ner/ssj500k:
     role: finetune_and_eval
-    source: {kind: extracted, keys: [ssj500k]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: extracted, keys: [ssj500k] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC]
     suite: null
     language: sl
@@ -67,8 +67,8 @@ entries:
 
   ner/suk:
     role: held_out
-    source: {kind: extracted, keys: [suk]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: extracted, keys: [suk] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
     language: sl
@@ -76,8 +76,8 @@ entries:
 
   sentiment/sentinews:
     role: finetune_and_eval
-    source: {kind: extracted, keys: [sentinews]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: extracted, keys: [sentinews] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [negative, neutral, positive]
     suite: null
     language: sl
@@ -85,8 +85,8 @@ entries:
 
   sentiment/twitter_15eu_sl:
     role: held_out
-    source: {kind: raw, keys: [twitter_sentiment_15eu]}
-    splits: {test: test.jsonl.gz}
+    source: { kind: raw, keys: [twitter_sentiment_15eu] }
+    splits: { test: test.jsonl.gz }
     labels: [negative, neutral, positive]
     suite: null
     language: sl
@@ -94,8 +94,8 @@ entries:
 
   nli/cb:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [entailment, neutral, contradiction]
     suite: superglue_sl
     language: sl
@@ -103,8 +103,8 @@ entries:
 
   nli/rte:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [entailment, not_entailment]
     suite: superglue_sl
     language: sl
@@ -112,8 +112,8 @@ entries:
 
   qa/boolq:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
@@ -121,8 +121,8 @@ entries:
 
   qa/multirc:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
@@ -130,8 +130,8 @@ entries:
 
   coref/wsc:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
@@ -139,8 +139,8 @@ entries:
 
   wsd/wic:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
@@ -148,8 +148,8 @@ entries:
 
   commonsense/copa:
     role: held_out
-    source: {kind: raw, keys: [superglue_sl]}
-    splits: {train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz}
+    source: { kind: raw, keys: [superglue_sl] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [0, 1]
     suite: superglue_sl
     language: sl

@@ -111,7 +111,11 @@ from slm4ie.data.curate.pipeline import (
     pipeline_io_counts,
 )
 from slm4ie.data.curate.spam import SpamAssets, SpamConfig, load_spam_assets
-from slm4ie.data.io_utils import DEFAULT_MAX_SHARD_BYTES, find_project_root as _find_project_root
+from slm4ie.data.io_utils import (
+    DEFAULT_MAX_SHARD_BYTES,
+    find_project_root as _find_project_root,
+    resolve_project_path,
+)
 from slm4ie.data.stopwords import load_stopwords
 
 logger = logging.getLogger(__name__)
@@ -259,7 +263,9 @@ def _resolve_dirs(
             "Curation paths not set. Provide --input-dir/--output-dir or set "
             "pretrain.yaml::input_dir / output_dir."
         )
-    return Path(raw_input), Path(raw_output)
+    resolved_input = Path(raw_input) if input_dir is not None else resolve_project_path(raw_input)
+    resolved_output = Path(raw_output) if output_dir is not None else resolve_project_path(raw_output)
+    return resolved_input, resolved_output
 
 
 def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:

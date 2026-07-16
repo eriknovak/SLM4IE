@@ -24,6 +24,7 @@ import slm4ie.data.extractors.tei  # noqa: F401
 import slm4ie.data.extractors.text  # noqa: F401
 from slm4ie.data.extract import extract_archive
 from slm4ie.data.extractors import BaseExtractor, FileBasedExtractor, get_extractor
+from slm4ie.data.io_utils import resolve_project_path
 from slm4ie.data.parallel import (
     resolve_workers,
     run_parallel,
@@ -597,8 +598,8 @@ def extract_datasets(
     else:
         selected = cfg.datasets
 
-    input_base = Path(input_dir_override) if input_dir_override else Path(cfg.input_dir)
-    output_base = Path(output_dir_override) if output_dir_override else Path(cfg.output_dir)
+    input_base = Path(input_dir_override) if input_dir_override else resolve_project_path(cfg.input_dir)
+    output_base = Path(output_dir_override) if output_dir_override else resolve_project_path(cfg.output_dir)
     output_base.mkdir(parents=True, exist_ok=True)
 
     keys = list(selected.keys())

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from slm4ie.data.catalog import ConfigError, DatasetConfig, load_config
+from slm4ie.data.io_utils import resolve_project_path
 from slm4ie.data.parallel import io_default, resolve_workers, run_parallel
 
 logger = logging.getLogger(__name__)
@@ -291,6 +292,8 @@ def download_datasets(
     base_output_dir, datasets = load_config(config_path)
     if output_dir_override:
         base_output_dir = output_dir_override
+    else:
+        base_output_dir = str(resolve_project_path(base_output_dir))
 
     if dataset_keys:
         unknown = set(dataset_keys) - set(datasets.keys())

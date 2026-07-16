@@ -12,7 +12,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Any, Dict, Iterator, Optional, Tuple, Type
+from typing import IO, Any, Dict, Iterator, Optional, Tuple, Type, Union
 
 import yaml
 
@@ -49,6 +49,31 @@ def find_project_root() -> Path:
     raise FileNotFoundError(
         "Could not find project root (no pyproject.toml)"
     )
+
+
+def resolve_project_path(
+    value: Union[str, Path],
+    root: Optional[Path] = None,
+) -> Path:
+    """Anchor a config path against the project root.
+
+    Absolute paths pass through unchanged; relative paths are joined onto
+    the project root so resolution no longer depends on the current working
+    directory. Use this when turning a relative path read from a config file
+    into a filesystem path.
+
+    Args:
+        value: Path string or Path, typically read from a YAML config.
+        root: Project root to anchor relative values against. Defaults to
+            the result of `find_project_root`.
+
+    Returns:
+        An absolute Path.
+    """
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (root or find_project_root()) / path
 
 
 def resolve_processed_dir(

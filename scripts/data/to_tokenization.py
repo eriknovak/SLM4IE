@@ -55,7 +55,7 @@ from tqdm import tqdm
 
 from slm4ie.data.catalog import DatasetConfig, load_config
 from slm4ie.data.extract import unpack_archives
-from slm4ie.data.io_utils import find_project_root, open_output
+from slm4ie.data.io_utils import find_project_root, open_output, resolve_project_path
 from slm4ie.data.parallel import (
     configure_script_logging,
     cpu_default,
@@ -190,8 +190,8 @@ def load_tokenization_config(config_path: Path) -> Dict[str, Any]:
         raise ValueError(f"Tokenization config {config_path}: `datasets` must be a list of strings.")
 
     return {
-        "input_dir": Path(input_dir),
-        "output_dir": Path(output_dir),
+        "input_dir": resolve_project_path(input_dir),
+        "output_dir": resolve_project_path(output_dir),
         "datasets": list(datasets),
     }
 

@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 
+from slm4ie.data.io_utils import resolve_project_path
+
 _KEY_PATTERN = re.compile(r"^[a-z]+/[a-z0-9_]+$")
 _VALID_ROLES = {"finetune_and_eval", "held_out"}
 _VALID_KINDS = {"extracted", "raw"}
@@ -226,9 +228,9 @@ def _parse_roots(raw: Any) -> TasksRoots:
                 f"Task registry `roots.{required}` must be a non-empty string."
             )
     return TasksRoots(
-        extracted=Path(raw["extracted"]),
-        raw=Path(raw["raw"]),
-        tasks=Path(raw["tasks"]),
+        extracted=resolve_project_path(raw["extracted"]),
+        raw=resolve_project_path(raw["raw"]),
+        tasks=resolve_project_path(raw["tasks"]),
     )
 
 
