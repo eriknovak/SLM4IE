@@ -142,7 +142,9 @@ dmypy.json
 # Additional ignores
 # ===================================
 
-data
+# Anchored: the root-level symlink to /vault/data/SLM4IE. Unanchored,
+# this would also swallow tests/data/ and any other nested `data` dir.
+/data
 outputs/
 mlruns/
 
