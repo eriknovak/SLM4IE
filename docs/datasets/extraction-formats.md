@@ -167,10 +167,21 @@ Drugi dokument, ena sama vrstica.
 Tretji dokument.
 ```
 
-`text` is the block's non-empty lines joined with newlines and stripped. That is
-the only field produced: no `doc_id`, no `metadata`, no annotations. See
-[Documents without an id](#documents-without-an-id) for what the orchestrator
-does about the missing id.
+`text` is the block's non-empty lines joined with newlines and stripped.
+
+| Raw | → | `Document` |
+| --- | --- | --- |
+| block's non-empty lines | → | `text`, joined with newlines and stripped |
+| file path + block position | → | `doc_id` — `<rel>:<block index>` |
+
+`rel` is the file's path relative to `raw/<key>/` with its suffix dropped and
+separators normalized to `/`; the block index is 0-based and **restarts at zero
+for each file**, zero-padded to six digits. So `raw/cc100/sl.txt` yields
+`sl:000000`, `sl:000001`, … and `uid` becomes `cc100:sl:000000`. Blocks that
+strip to nothing are skipped without consuming an index, so ids stay contiguous.
+See [Deterministic ids](#deterministic-ids) for why the id is derived this way.
+
+No `metadata` and no annotations.
 
 ## conllu
 
@@ -361,11 +372,26 @@ A row, e.g. for AllenAI C4:
 | Raw | → | `Document` |
 | --- | --- | --- |
 | **`text`** column | → | `text` — empty/missing rows skipped |
+| first of **`id`**, **`_id`**, **`docid`**, **`doc_id`**, **`uid`**, **`url`** | → | `doc_id`, coerced to a string |
 | every other non-null column | → | `metadata` |
 
 `datetime` and `date` **values** (matched by Python type, not column name) are
-converted to ISO-8601 strings so the row stays JSON-serializable. No `doc_id`
-and no annotations — see [Documents without an id](#documents-without-an-id).
+converted to ISO-8601 strings so the row stays JSON-serializable. No
+annotations.
+
+The key column is probed per row in the priority order above (the
+`NATURAL_ID_KEYS` constant), taking the first present, non-empty value. It is
+**also kept in `metadata`** — using a column as the id never removes it. Rows
+with no such column fall back to a positional
+`<config>:<split>:<row index>` — the config subdirectory name, the split name
+(**omitted for a bare `Dataset`**), and the 0-based row index within the split,
+zero-padded to eight digits. So a keyless `raw/c4/sl/` yields `sl:00000000`, and
+a `DatasetDict` yields `sl:train:00000000`.
+
+The row index counts **every** row, including those skipped for empty text, so
+an id stays pinned to its offset in the source split. Note that natural-key
+uniqueness is the source's to guarantee: a corpus with duplicate `url` values
+would produce duplicate `uid`s.
 
 ## External-TSV metadata
 
@@ -429,16 +455,45 @@ carries `paragraphs`). The other five — `json`, `text`, `macocu`, `coleslaw`,
 `huggingface` — are text-only, and their datasets get no
 `.annotations.jsonl.gz` at all.
 
-### Documents without an id
+### Deterministic ids
 
-`text` and `huggingface` never set a `doc_id`, so the orchestrator assigns a
-positional fallback — `idx-{index:014d}` on the serial path, or a
-shard-namespaced `idx-{shard:05d}-{local:010d}` when sharded. The fallback is
-assigned *before* serialization, so `uid` in the output is never null; it is
-simply derived from a positional id (`cc100:idx-00000000000042`) rather than a
-source-stable one. Such ids are **not stable across re-extraction** if input
-ordering changes. In practice only the serial fallback is reachable: `cc100` is
-a single file and never shards, and `huggingface` is not a `FileBasedExtractor`.
+**Every extractor assigns its own `doc_id`**, and `uid` (`"{source}:{doc_id}"`)
+is load-bearing downstream: the curation stage
+([`slm4ie/data/curate/convert.py`](https://github.com/eriknovak/SLM4IE/blob/main/slm4ie/data/curate/convert.py))
+requires a non-empty `uid` and uses it as the datatrove document id, raising
+`KeyError` if it is missing. So an id must be unique and reproducible for a
+given snapshot.
+
+Most extractors carry an id straight out of the source (`<doc id=...>` for
+`macocu`, `# newdoc id` for `conllu`, `xml:id` for `tei`, a named field for
+`jsonl` / `json` / `coleslaw`). The two that have no source id — `text` and
+`huggingface` — **derive** one instead:
+
+- `text` keys off the file path plus the block's position in that file
+  (`sl:000123`).
+- `huggingface` prefers a natural key column and otherwise keys off the config,
+  split, and row index (`sl:train:00000042`).
+
+Both derivations depend only on the input, not on how the work was scheduled —
+in particular, `text` produces identical ids under the serial and sharded
+writers, because sharding splits the file list on whole-file boundaries and
+preserves per-file block order.
+
+The orchestrator still holds a positional fallback for a document that arrives
+with `doc_id` unset — `idx-{index:014d}` on the serial path, or a
+shard-namespaced `idx-{shard:05d}-{local:010d}` when sharded. **No shipped
+extractor reaches it.** It is worth knowing that the two schemes disagree: a
+future id-less extractor would get worker-count-dependent ids, so a new
+extractor should assign its own id rather than lean on the fallback.
+
+!!! note "Ids are snapshot-stable, not content-stable"
+    A derived id points at a *position* in a specific snapshot of the source. If
+    upstream re-releases a corpus with rows inserted or files renamed,
+    re-extraction assigns different ids to the same text. This is fine for the
+    six web corpora that rely on derivation — all are `role: pretrain` and never
+    feed the `uid`-hashed train/val/test split logic in `to_spans` /
+    `to_sentiment`. A content hash was considered and rejected: exact-duplicate
+    text is common in web corpora and would collide.
 
 ### `json` ignores the `metadata:` block
 
