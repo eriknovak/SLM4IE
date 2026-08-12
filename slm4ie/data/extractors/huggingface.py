@@ -60,6 +60,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from datasets import load_from_disk
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -76,27 +77,6 @@ NATURAL_ID_KEYS: Tuple[str, ...] = (
     "uid",
     "url",
 )
-
-
-def _natural_doc_id(row: Dict[str, Any]) -> Optional[str]:
-    """Return the row's natural document id, if it has one.
-
-    Args:
-        row (Dict[str, Any]): A HuggingFace dataset row.
-
-    Returns:
-        Optional[str]: The first present, non-empty value among
-            `NATURAL_ID_KEYS`, coerced to `str`; None when the row
-            carries no usable key column.
-    """
-    for key in NATURAL_ID_KEYS:
-        value = row.get(key)
-        if value is None:
-            continue
-        text = str(value)
-        if text:
-            return text
-    return None
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -233,13 +213,11 @@ class HuggingFaceExtractor(BaseExtractor):
             if not text:
                 continue
 
-            metadata: Dict[str, Any] = {
-                k: _to_jsonable(v)
-                for k, v in row.items()
-                if k != "text" and v is not None
-            }
+            metadata = project_metadata(
+                row, exclude={"text"}, value_transform=_to_jsonable
+            )
 
-            doc_id = _natural_doc_id(row)
+            doc_id = probe_doc_id(row, NATURAL_ID_KEYS)
             if doc_id is None:
                 doc_id = f"{prefix}:{row_idx:08d}"
 

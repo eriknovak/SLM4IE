@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from slm4ie.data.extractors.json import JsonExtractor
 from slm4ie.data.extractors.jsonl import JsonlExtractor
 from slm4ie.data.schema import Document
 
@@ -210,9 +211,51 @@ class TestJsonlExtractor:
         assert len(docs) == 1
         assert docs[0].text == "Veljavno."
 
+    def test_none_valued_fields_dropped_from_metadata(self, tmp_path: Path) -> None:
+        """Fields with a null value never land in metadata (matches json)."""
+        records = [{"text": "hi", "doc_id": "d1", "kept": 1, "dropped": None}]
+        docs = _extract(tmp_path, records)
+        assert docs[0].metadata == {"kept": 1}
+
+    def test_doc_id_str_coerced(self, tmp_path: Path) -> None:
+        """A non-string id_field value is coerced to str (matches json)."""
+        records = [{"text": "hi", "doc_id": 42}]
+        docs = _extract(tmp_path, records)
+        assert docs[0].doc_id == "42"
+
     def test_registered_as_jsonl(self) -> None:
         """JsonlExtractor is registered under the 'jsonl' key."""
         from slm4ie.data.extractors import get_extractor
 
         extractor = get_extractor("jsonl")
         assert isinstance(extractor, JsonlExtractor)
+
+
+def test_json_and_jsonl_produce_identical_metadata(tmp_path: Path) -> None:
+    """The same record yields identical metadata through both extractors.
+
+    Guards the convergence: a divergence in the None-drop or field
+    projection between the json and jsonl extractors would fail here.
+    """
+    record = {
+        "doc_id": "shared-1",
+        "text": "Identical body.",
+        "title": "T",
+        "url": "https://example.com",
+        "score": 7,
+        "dropped": None,
+    }
+
+    json_dir = tmp_path / "json"
+    json_dir.mkdir()
+    (json_dir / "data.json").write_text(json.dumps([record]), encoding="utf-8")
+    json_docs = list(JsonExtractor().extract(json_dir, "src", "med"))
+
+    jsonl_dir = tmp_path / "jsonl"
+    jsonl_dir.mkdir()
+    _write_jsonl(jsonl_dir / "data.jsonl", [record])
+    jsonl_docs = list(JsonlExtractor().extract(jsonl_dir, "src", "med"))
+
+    assert len(json_docs) == len(jsonl_docs) == 1
+    assert json_docs[0].metadata == jsonl_docs[0].metadata
+    assert json_docs[0].doc_id == jsonl_docs[0].doc_id

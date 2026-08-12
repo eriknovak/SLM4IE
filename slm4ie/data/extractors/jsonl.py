@@ -21,7 +21,8 @@ be read without a bespoke extractor:
 When `metadata_fields` is omitted, every record field except the
 text field, the id field, `paragraphs`, and `conll` is kept under
 `Document.metadata` (the original CLASSLA-web behavior). When given,
-only those listed keys present on the record are kept.
+only those listed keys present on the record are kept. In both cases
+fields whose value is None are dropped.
 
 Example:
     One line of a .jsonl file (formatted for readability):
@@ -53,10 +54,10 @@ Example:
                      text are skipped).
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      record[id_field] if present.
+        doc_id:      record[id_field] if present (str-coerced).
         metadata:    the configured metadata_fields, or every other
                      field except the text field, the id field,
-                     paragraphs, and conll.
+                     paragraphs, and conll; None values are dropped.
         annotations:
             tokens:    flattened across all paragraphs/sentences,
                        reading form, lemma, upos, feats from each
@@ -73,6 +74,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Annotations, Document, Token
 
 logger = logging.getLogger(__name__)
@@ -231,7 +233,7 @@ class JsonlExtractor(BaseExtractor):
                 if not text:
                     continue
 
-                doc_id: Optional[str] = record.get(id_field)
+                doc_id = probe_doc_id(record, [id_field])
 
                 paragraphs = record.get("paragraphs")
                 annotations: Optional[Annotations] = None
@@ -239,13 +241,9 @@ class JsonlExtractor(BaseExtractor):
                     annotations = _parse_tokens_from_paragraphs(paragraphs)
 
                 if metadata_fields is not None:
-                    doc_metadata = {
-                        k: record[k] for k in metadata_fields if k in record
-                    }
+                    doc_metadata = project_metadata(record, whitelist=metadata_fields)
                 else:
-                    doc_metadata = {
-                        k: v for k, v in record.items() if k not in excluded
-                    }
+                    doc_metadata = project_metadata(record, exclude=excluded)
 
                 yield Document(
                     text=text,
