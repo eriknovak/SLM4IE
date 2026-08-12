@@ -2,9 +2,9 @@
 
 This script materializes datasets tagged for tokenizer / morphology
 evaluation. It bypasses the extract -> datatrove -> curate pipeline used
-by pretraining corpora and reads the raw download directly, mirroring
-the structure of `scripts/data/to_sentiment.py` and
-`scripts/data/to_superglue.py`.
+by pretraining corpora and reads the raw download directly, like the
+`raw`-source path of the task converters (`to_sentiment` /
+`to_superglue`).
 
 Configuration is read from `configs/data/tokenization.yaml`, which
 declares `input_dir`, `output_dir`, and the dataset keys to convert.

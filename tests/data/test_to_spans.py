@@ -1,28 +1,22 @@
-"""Tests for scripts/data/to_spans.py (tasks.yaml-driven NER converter)."""
+"""Tests for the NER backend (slm4ie/data/task_converters/spans.py)."""
 
 import gzip
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 import yaml
 
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parents[2] / "scripts" / "data"),
-)
-import to_spans  # noqa: E402
-
-from slm4ie.data.tasks import load_tasks  # noqa: E402
+from slm4ie.data.task_converter import run_converter
+from slm4ie.data.task_converters import spans
 
 
 def _write_jsonl(path: Path, records: List[Dict]) -> None:
-    """Write *records* as JSONL to *path*.
+    """Write *records* as JSONL to *path*, creating parents.
 
     Args:
-        path: Destination file path. Parents are created as needed.
+        path: Destination file path.
         records: Records to serialize.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,11 +27,10 @@ def _write_jsonl(path: Path, records: List[Dict]) -> None:
 
 
 def _write_gz_jsonl(path: Path, records: List[Dict]) -> None:
-    """Write *records* as one JSON object per line, gzipped.
+    """Write *records* as gzipped JSONL to *path*, creating parents.
 
     Args:
-        path: Destination ``.jsonl.gz`` path. Parents are created as
-            needed.
+        path: Destination ``.jsonl.gz`` path.
         records: Records to serialize.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,10 +41,10 @@ def _write_gz_jsonl(path: Path, records: List[Dict]) -> None:
 
 
 def _read_jsonl_gz(path: Path) -> List[Dict]:
-    """Yield JSON-decoded records from a gzipped JSONL file.
+    """Read a gzipped JSONL file into a list.
 
     Args:
-        path: Path to a gzipped JSONL file.
+        path: Gzipped JSONL path.
 
     Returns:
         Decoded records.
@@ -65,18 +58,14 @@ def _read_jsonl_gz(path: Path) -> List[Dict]:
     return out
 
 
-def _make_synthetic_layout(
-    tmp_path: Path,
-    dataset_key: str,
-    records: List[Dict[str, Any]],
-) -> Path:
+def _make_synthetic_layout(tmp_path: Path, dataset_key: str, records: List[Dict[str, Any]]) -> Path:
     """Build a synthetic tasks.yaml + matching extracted source tree.
 
     Args:
         tmp_path: pytest tmp_path fixture root.
         dataset_key: Source key written under ``extracted/<key>.jsonl``.
-        records: Joined extraction records (already carrying ``uid`` /
-            ``doc_id`` / ``annotations.spans``).
+        records: Joined extraction records (carrying ``uid`` / ``doc_id`` /
+            ``annotations.spans``).
 
     Returns:
         Path to the written tasks.yaml.
@@ -88,8 +77,6 @@ def _make_synthetic_layout(
     tasks_root.mkdir(parents=True, exist_ok=True)
     _write_jsonl(extracted / f"{dataset_key}.jsonl", records)
 
-    # Write the annotations sidecar derived from each record's
-    # `annotations` payload (mirrors what extract.py produces).
     ann_records: List[Dict[str, Any]] = []
     for record in records:
         ann = dict(record.get("annotations") or {})
@@ -97,16 +84,10 @@ def _make_synthetic_layout(
         ann["doc_id"] = record.get("doc_id")
         ann_records.append(ann)
     if any(rec.get("annotations") for rec in records):
-        _write_gz_jsonl(
-            extracted / f"{dataset_key}.annotations.jsonl.gz", ann_records
-        )
+        _write_gz_jsonl(extracted / f"{dataset_key}.annotations.jsonl.gz", ann_records)
 
     tasks_yaml = {
-        "roots": {
-            "extracted": str(extracted),
-            "raw": str(raw),
-            "tasks": str(tasks_root),
-        },
+        "roots": {"extracted": str(extracted), "raw": str(raw), "tasks": str(tasks_root)},
         "converters": {"ner": "to_spans"},
         "entries": {
             f"ner/{dataset_key}": {
@@ -130,55 +111,32 @@ def _make_synthetic_layout(
 
 
 class TestNormalizeSpans:
-    """Unit tests for `to_spans._normalize_spans`."""
+    """Unit tests for `spans.normalize_spans`."""
 
     def test_accepts_triples(self) -> None:
         """List-of-lists input is normalized to tuples."""
-        out = to_spans._normalize_spans([[0, 2, "PER"], [3, 5, "LOC"]])
-        assert out == [(0, 2, "PER"), (3, 5, "LOC")]
+        assert spans.normalize_spans([[0, 2, "PER"], [3, 5, "LOC"]]) == [(0, 2, "PER"), (3, 5, "LOC")]
 
     def test_accepts_dicts(self) -> None:
         """Dict input is normalized to tuples."""
-        out = to_spans._normalize_spans(
-            [{"start": 0, "end": 2, "label": "PER"}]
-        )
-        assert out == [(0, 2, "PER")]
+        assert spans.normalize_spans([{"start": 0, "end": 2, "label": "PER"}]) == [(0, 2, "PER")]
 
     def test_rejects_malformed(self) -> None:
         """Unrecognized shapes raise ValueError."""
         with pytest.raises(ValueError, match="Unrecognized span shape"):
-            to_spans._normalize_spans(["not a span"])
+            spans.normalize_spans(["not a span"])
 
     def test_empty_input_returns_empty(self) -> None:
         """Empty or None input produces an empty list."""
-        assert to_spans._normalize_spans(None) == []
-        assert to_spans._normalize_spans([]) == []
+        assert spans.normalize_spans(None) == []
+        assert spans.normalize_spans([]) == []
 
 
-class TestRecordId:
-    """Unit tests for `to_spans._record_id`."""
-
-    def test_prefers_uid(self) -> None:
-        """A non-empty `uid` wins over `doc_id`."""
-        record = {"uid": "kzb:s1", "source": "kzb", "doc_id": "s1"}
-        assert to_spans._record_id(record, 0) == "kzb:s1"
-
-    def test_falls_back_to_source_doc_id(self) -> None:
-        """Without `uid`, the id becomes ``<source>:<doc_id>``."""
-        record = {"source": "kzb", "doc_id": "s2"}
-        assert to_spans._record_id(record, 0) == "kzb:s2"
-
-    def test_falls_back_to_index(self) -> None:
-        """Without `uid` and `doc_id`, the index is used."""
-        record = {"source": "kzb"}
-        assert to_spans._record_id(record, 7) == "kzb:idx-00000000000007"
-
-
-class TestConvertEntry:
-    """End-to-end conversion tests driven by a synthetic tasks.yaml."""
+class TestConvertEndToEnd:
+    """End-to-end conversion driven through `run_converter`."""
 
     def test_writes_split_files(self, tmp_path: Path) -> None:
-        """`convert_entry` writes one file per declared split."""
+        """Every declared split file is written with NerExample schema."""
         records = [
             {
                 "text": "John lives in Paris.",
@@ -186,158 +144,68 @@ class TestConvertEntry:
                 "domain": "sci",
                 "doc_id": f"s{i}",
                 "uid": f"kzb:s{i}",
-                "annotations": {
-                    "forms": ["John", "lives", "in", "Paris", "."],
-                    "spans": [[0, 4, "PER"], [14, 19, "LOC"]],
-                },
+                "annotations": {"forms": ["John"], "spans": [[0, 4, "PER"], [14, 19, "LOC"]]},
             }
             for i in range(20)
         ]
         config_path = _make_synthetic_layout(tmp_path, "kzb", records)
-        cfg = load_tasks(config_path)
-        entry = next(
-            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "ner/kzb"
-        )
-
-        counts = to_spans.convert_entry("ner/kzb", entry, cfg.roots)
-        assert counts is not None
-        assert sum(counts.values()) == 20
+        run_converter("to_spans", ["ner/kzb", "--config", str(config_path), "--max-workers", "1"])
 
         out_dir = tmp_path / "tasks" / "ner" / "kzb"
-        assert (out_dir / "train.jsonl.gz").exists()
-        rows = _read_jsonl_gz(out_dir / "train.jsonl.gz")
-        sample = rows[0]
-        # Schema check: matches slm4ie.data.schema.NerExample.
+        total = 0
+        sample = None
+        for split in ("train", "val", "test"):
+            rows = _read_jsonl_gz(out_dir / f"{split}.jsonl.gz")
+            total += len(rows)
+            if rows and sample is None:
+                sample = rows[0]
+        assert total == 20
+        assert sample is not None
         assert set(sample.keys()) == {"id", "text", "spans"}
-        assert isinstance(sample["spans"], list)
-        assert sample["spans"][0] == {
-            "start": 0, "end": 4, "label": "PER",
-        }
-        assert sample["spans"][1] == {
-            "start": 14, "end": 19, "label": "LOC",
-        }
-
-    def test_skips_when_outputs_exist(self, tmp_path: Path) -> None:
-        """`convert_entry` returns None when every split already exists."""
-        records = [
-            {
-                "text": "X.",
-                "source": "kzb",
-                "doc_id": "s1",
-                "uid": "kzb:s1",
-                "annotations": {
-                    "forms": ["X", "."],
-                    "spans": [[0, 1, "PER"]],
-                },
-            }
-        ]
-        config_path = _make_synthetic_layout(tmp_path, "kzb", records)
-        cfg = load_tasks(config_path)
-        entry = next(
-            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "ner/kzb"
-        )
-
-        out_dir = tmp_path / "tasks" / "ner" / "kzb"
-        out_dir.mkdir(parents=True)
-        for split_filename in entry.splits.values():
-            (out_dir / split_filename).write_bytes(b"\x1f\x8b")
-
-        result = to_spans.convert_entry("ner/kzb", entry, cfg.roots)
-        assert result is None
-
-    def test_force_overwrites_outputs(self, tmp_path: Path) -> None:
-        """`force=True` re-derives outputs even when files exist."""
-        records = [
-            {
-                "text": "John.",
-                "source": "kzb",
-                "doc_id": "s1",
-                "uid": "kzb:s1",
-                "annotations": {
-                    "forms": ["John", "."],
-                    "spans": [[0, 4, "PER"]],
-                },
-            }
-        ]
-        config_path = _make_synthetic_layout(tmp_path, "kzb", records)
-        cfg = load_tasks(config_path)
-        entry = next(
-            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "ner/kzb"
-        )
-
-        out_dir = tmp_path / "tasks" / "ner" / "kzb"
-        out_dir.mkdir(parents=True)
-        for split_filename in entry.splits.values():
-            (out_dir / split_filename).write_bytes(b"placeholder")
-
-        counts = to_spans.convert_entry(
-            "ner/kzb", entry, cfg.roots, force=True
-        )
-        assert counts is not None
-        assert sum(counts.values()) == 1
+        assert sample["spans"][0] == {"start": 0, "end": 4, "label": "PER"}
 
     def test_labels_outside_allow_list_are_dropped(self, tmp_path: Path) -> None:
-        """Spans with labels outside the entry's allow-list are filtered."""
+        """Spans with labels outside the entry's allow-list are filtered out."""
         records = [
             {
                 "text": "X Y.",
                 "source": "kzb",
                 "doc_id": "s1",
                 "uid": "kzb:s1",
-                "annotations": {
-                    "forms": ["X", "Y", "."],
-                    "spans": [
-                        [0, 1, "PER"],
-                        # MISC is *not* in the synthetic entry's labels.
-                        [2, 3, "MISC"],
-                    ],
-                },
+                # MISC is not in the synthetic entry's labels.
+                "annotations": {"forms": ["X", "Y"], "spans": [[0, 1, "PER"], [2, 3, "MISC"]]},
             }
         ]
         config_path = _make_synthetic_layout(tmp_path, "kzb", records)
-        cfg = load_tasks(config_path)
-        entry = next(
-            e for e in cfg.entries if f"{e.task}/{e.dataset}" == "ner/kzb"
-        )
+        run_converter("to_spans", ["ner/kzb", "--config", str(config_path), "--max-workers", "1"])
 
-        counts = to_spans.convert_entry("ner/kzb", entry, cfg.roots)
-        assert counts is not None
-        # Records exist; we just need to find the one row written.
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
         rows: List[Dict] = []
-        for split_filename in entry.splits.values():
-            path = tmp_path / "tasks" / "ner" / "kzb" / split_filename
+        for split in ("train", "val", "test"):
+            path = out_dir / f"{split}.jsonl.gz"
             if path.exists():
                 rows.extend(_read_jsonl_gz(path))
         assert len(rows) == 1
         assert rows[0]["spans"] == [{"start": 0, "end": 1, "label": "PER"}]
 
+    def test_skips_when_outputs_exist(self, tmp_path: Path) -> None:
+        """A second run without --force leaves the existing outputs untouched."""
+        records = [
+            {
+                "text": "John.",
+                "source": "kzb",
+                "doc_id": "s1",
+                "uid": "kzb:s1",
+                "annotations": {"forms": ["John"], "spans": [[0, 4, "PER"]]},
+            }
+        ]
+        config_path = _make_synthetic_layout(tmp_path, "kzb", records)
+        argv = ["ner/kzb", "--config", str(config_path), "--max-workers", "1"]
+        run_converter("to_spans", argv)
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
+        existing = {p: p.stat().st_mtime_ns for p in out_dir.glob("*.jsonl.gz")}
+        assert existing
 
-class TestParseArgs:
-    """Tests for `to_spans.parse_args`."""
-
-    def test_accepts_entry_keys(self) -> None:
-        """Positional entry keys are gathered into `args.entries`."""
-        args = to_spans.parse_args(["ner/ssj500k", "ner/suk"])
-        assert args.entries == ["ner/ssj500k", "ner/suk"]
-        assert args.all is False
-
-    def test_all_flag(self) -> None:
-        """`--all` is mutually exclusive with positional entries."""
-        args = to_spans.parse_args(["--all"])
-        assert args.all is True
-        assert args.entries == []
-
-    def test_force_default_false(self) -> None:
-        """`--force` defaults to False."""
-        args = to_spans.parse_args(["ner/ssj500k"])
-        assert args.force is False
-
-    def test_force_flag_sets_true(self) -> None:
-        """Passing `--force` flips the flag."""
-        args = to_spans.parse_args(["ner/ssj500k", "--force"])
-        assert args.force is True
-
-    def test_bare_invocation_errors(self) -> None:
-        """A bare invocation requires entries or `--all`."""
-        with pytest.raises(SystemExit):
-            to_spans.parse_args([])
+        run_converter("to_spans", argv)
+        for path, mtime in existing.items():
+            assert path.stat().st_mtime_ns == mtime

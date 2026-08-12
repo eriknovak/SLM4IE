@@ -47,7 +47,12 @@ route owns its own output tree, and the split is intentional.
 The three task converters all read a single flat registry,
 [`configs/data/tasks.yaml`](https://github.com/eriknovak/SLM4IE/blob/main/configs/data/tasks.yaml),
 keyed `<task>/<dataset>`. Train/test isolation is enforced by each entry's
-`role` field (`finetune_and_eval` vs `held_out`), not by directory placement.
+`role` field (`finetune_and_eval` vs `held_out`), not by directory placement: a
+`held_out` entry never writes a `train` split (see
+[ADR 0002](../../adr/0002-role-gates-held-out-splits.md)). Nothing is dropped —
+hash-policy families (NER, sentiment) re-bucket the population ~50/50 across the
+remaining `val`/`test` splits, and SuperGLUE simply skips its `train` source
+file. `train`, not the blind/unlabeled `test` set, is the split dropped.
 
 ## Pretraining corpus
 
