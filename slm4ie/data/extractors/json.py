@@ -44,7 +44,7 @@ Example:
                      text are skipped).
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      record[id_field] if present.
+        doc_id:      record[id_field] if present (str-coerced).
         metadata:    the configured metadata_fields, or every other
                      field except the text field, the id field, and
                      the structural fields; None values are dropped.
@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -177,20 +178,12 @@ class JsonExtractor(BaseExtractor):
             if not text:
                 continue
 
-            doc_id: Optional[str] = record.get(id_field)
+            doc_id = probe_doc_id(record, [id_field])
 
             if metadata_fields is not None:
-                doc_metadata: Dict[str, Any] = {
-                    k: record[k]
-                    for k in metadata_fields
-                    if k in record and record[k] is not None
-                }
+                doc_metadata = project_metadata(record, whitelist=metadata_fields)
             else:
-                doc_metadata = {
-                    k: v
-                    for k, v in record.items()
-                    if k not in excluded and v is not None
-                }
+                doc_metadata = project_metadata(record, exclude=excluded)
 
             yield Document(
                 text=text,

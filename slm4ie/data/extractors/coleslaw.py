@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -128,23 +129,6 @@ def _candidate_texts(record: Dict[str, Any]) -> List[Tuple[str, str]]:
         candidates.append(("sp_claims", claims_text))
 
     return candidates
-
-
-def _record_doc_id(record: Dict[str, Any]) -> Optional[str]:
-    """Extract a document identifier from a COLESLAW record.
-
-    Args:
-        record (Dict[str, Any]): A parsed JSONL record.
-
-    Returns:
-        Optional[str]: doc_id if present, else id coerced to str,
-            else None.
-    """
-    if "doc_id" in record and record["doc_id"] is not None:
-        return str(record["doc_id"])
-    if "id" in record and record["id"] is not None:
-        return str(record["id"])
-    return None
 
 
 class ColeslawExtractor(BaseExtractor):
@@ -227,30 +211,27 @@ class ColeslawExtractor(BaseExtractor):
                 if not candidates:
                     continue
                 chosen_source, text = candidates[0]
+                doc_id = probe_doc_id(record, ["doc_id", "id"])
                 if len(candidates) > 1:
                     logger.warning(
                         "Record %s in subcorpus %s has multiple text sources %s; using %s",
-                        _record_doc_id(record),
+                        doc_id,
                         subcorpus,
                         [name for name, _ in candidates],
                         chosen_source,
                     )
 
-                metadata: Dict[str, Any] = {"subcorpus": subcorpus}
-                for k, v in record.items():
-                    if k in _RESERVED_FIELDS or k in _SP_COURTS_FIELDS:
-                        continue
-                    if k in _SP_CLAIMS_FIELDS:
-                        continue
-                    if v is None:
-                        continue
-                    metadata[k] = v
+                exclude = _RESERVED_FIELDS | set(_SP_COURTS_FIELDS) | set(_SP_CLAIMS_FIELDS)
+                metadata = {
+                    "subcorpus": subcorpus,
+                    **project_metadata(record, exclude=exclude),
+                }
 
                 yield Document(
                     text=text,
                     source=source,
                     domain=domain,
-                    doc_id=_record_doc_id(record),
+                    doc_id=doc_id,
                     metadata=metadata,
                 )
 
