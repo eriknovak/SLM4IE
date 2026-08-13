@@ -113,26 +113,6 @@ def _make_subtask_layout(
         _write_jsonl(variant_root / subtask_dir / f"{split}.jsonl", records)
 
 
-class TestStableId:
-    """Unit tests for `superglue.stable_id`."""
-
-    def test_int_idx_prefixed(self) -> None:
-        """An integer ``idx`` is prefixed with the dataset name."""
-        assert superglue.stable_id({"idx": 5}, "cb", 0) == "cb:5"
-
-    def test_id_with_colon_kept(self) -> None:
-        """An id already containing a colon is kept verbatim."""
-        assert superglue.stable_id({"id": "cb:7"}, "cb", 0) == "cb:7"
-
-    def test_dict_id_joined(self) -> None:
-        """A dict id is joined with '-' under the dataset prefix."""
-        assert superglue.stable_id({"id": {"p": 1, "q": 2}}, "cb", 0) == "cb:1-2"
-
-    def test_index_fallback(self) -> None:
-        """Without id/idx, the 8-digit index fallback is used."""
-        assert superglue.stable_id({}, "cb", 3) == "cb:idx-00000003"
-
-
 class TestVariantDiscovery:
     """Tests for the variant-root discovery helper."""
 

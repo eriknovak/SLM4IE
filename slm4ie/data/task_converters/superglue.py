@@ -40,6 +40,7 @@ from slm4ie.data.task_converter import (
 )
 from slm4ie.data.tasks import TaskEntry, TasksRoots
 from slm4ie.data.task_writer import find_first_existing, iter_jsonl
+from slm4ie.utils.coerce import coerce_bool
 
 logger = logging.getLogger(__name__)
 
@@ -69,24 +70,6 @@ _SPLIT_FILENAMES: Dict[str, Tuple[str, ...]] = {
     "val": ("val.jsonl", "val.json"),
     "test": ("test.jsonl", "test.json"),
 }
-
-
-def stable_id(record: Dict[str, Any], dataset: str, index: int) -> str:
-    """Synthesize a stable id for one SuperGLUE record.
-
-    A thin family-local alias for `synthesize_id`, kept because SuperGLUE
-    records carry their own `id` / `idx` fields (including compound dict ids
-    for MultiRC) rather than the `uid` / `doc_id` of extracted records.
-
-    Args:
-        record: Source record.
-        dataset: Entry dataset name, used as the id prefix.
-        index: Zero-based record position; used as the last-resort fallback.
-
-    Returns:
-        A string id, unique within the originating split.
-    """
-    return synthesize_id(record, dataset, index)
 
 
 def _find_variant_root(raw_dir: Path, variant: str) -> Path:
@@ -146,30 +129,6 @@ def _source_path_for_split(subtask_dir: Path, split: str) -> Optional[Path]:
     return find_first_existing([subtask_dir / name for name in names])
 
 
-def _coerce_bool(value: Any) -> Optional[bool]:
-    """Coerce common boolean spellings to `bool`.
-
-    Args:
-        value: A value pulled from a record.
-
-    Returns:
-        `True`/`False` for recognized inputs, None otherwise.
-    """
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(int(value))
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"true", "1", "yes", "y", "t"}:
-            return True
-        if lowered in {"false", "0", "no", "n", "f"}:
-            return False
-    return None
-
-
 def _convert_nli(
     record: Dict[str, Any],
     dataset: str,
@@ -197,7 +156,7 @@ def _convert_nli(
     if allow is not None and label_str and label_str not in allow:
         return None
     return NliExample(
-        id=stable_id(record, dataset, index),
+        id=synthesize_id(record, dataset, index),
         premise=str(premise),
         hypothesis=str(hypothesis),
         label=label_str,
@@ -221,16 +180,15 @@ def _convert_boolq(
     Returns:
         The `QaBooleanExample`, or None when required fields are missing.
     """
-    del allow
     passage = record.get("passage") or record.get("paragraph")
     question = record.get("question")
     if passage is None or question is None:
         return None
-    label = _coerce_bool(record.get("label"))
+    label = coerce_bool(record.get("label"))
     if label is None:
         label = False
     return QaBooleanExample(
-        id=stable_id(record, dataset, index),
+        id=synthesize_id(record, dataset, index),
         passage=str(passage),
         question=str(question),
         label=label,
@@ -254,7 +212,6 @@ def _convert_wsc(
     Returns:
         The `CorefExample`, or None when required fields are missing.
     """
-    del allow
     text = record.get("text")
     target = record.get("target") or {}
     span1_text = target.get("span1_text") or record.get("span1_text")
@@ -273,11 +230,11 @@ def _convert_wsc(
         span2["start"] = int(span2_index)
         span2["end"] = int(span2_index) + len(str(span2_text).split())
 
-    label = _coerce_bool(record.get("label"))
+    label = coerce_bool(record.get("label"))
     if label is None:
         label = False
     return CorefExample(
-        id=stable_id(record, dataset, index),
+        id=synthesize_id(record, dataset, index),
         text=str(text),
         span1=span1,
         span2=span2,
@@ -302,17 +259,16 @@ def _convert_wic(
     Returns:
         The `WsdExample`, or None when required fields are missing.
     """
-    del allow
     sentence1 = record.get("sentence1")
     sentence2 = record.get("sentence2")
     word = record.get("word")
     if sentence1 is None or sentence2 is None or word is None:
         return None
-    label = _coerce_bool(record.get("label"))
+    label = coerce_bool(record.get("label"))
     if label is None:
         label = False
     return WsdExample(
-        id=stable_id(record, dataset, index),
+        id=synthesize_id(record, dataset, index),
         sentence1=str(sentence1),
         sentence2=str(sentence2),
         word=str(word),
@@ -337,7 +293,6 @@ def _convert_copa(
     Returns:
         The `CommonsenseCopaExample`, or None when required fields are missing.
     """
-    del allow
     premise = record.get("premise")
     choice1 = record.get("choice1")
     choice2 = record.get("choice2")
@@ -350,7 +305,7 @@ def _convert_copa(
     except (TypeError, ValueError):
         label_int = 0
     return CommonsenseCopaExample(
-        id=stable_id(record, dataset, index),
+        id=synthesize_id(record, dataset, index),
         premise=str(premise),
         choice1=str(choice1),
         choice2=str(choice2),
@@ -390,7 +345,7 @@ def _iter_multirc(
             if ans_idx is not None:
                 parts.append(f"a{ans_idx}")
             example_id = f"{dataset}:{'-'.join(parts)}"
-            label = _coerce_bool(answer.get("label"))
+            label = coerce_bool(answer.get("label"))
             if label is None:
                 label = False
             combined_question = f"{q_text}\n{answer.get('text', '')}".strip()

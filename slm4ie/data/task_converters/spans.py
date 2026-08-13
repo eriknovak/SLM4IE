@@ -132,7 +132,6 @@ class SpansConverter(TaskConverter):
             ValueError: If the entry source kind is not `extracted`.
             FileNotFoundError: If a source `<key>.jsonl` is missing.
         """
-        del ctx, splits
         if entry.source.kind != "extracted":
             raise ValueError(
                 f"to_spans only supports source.kind='extracted'; got "

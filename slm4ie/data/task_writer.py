@@ -28,8 +28,8 @@ SPLIT_TEST: str = "test"
 def hash_split(
     key: str,
     splits: Iterable[str],
-    train_pct: int = 80,
-    val_pct: int = 10,
+    train_pct: int = 70,
+    val_pct: int = 15,
 ) -> str:
     """Assign *key* to a split using a deterministic hash bucket.
 
@@ -126,9 +126,7 @@ def _open_split_streams(
     streams: Dict[str, IO[str]] = {}
     for split, path in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        streams[split] = stack.enter_context(
-            gzip.open(path, "wt", encoding="utf-8")
-        )
+        streams[split] = stack.enter_context(gzip.open(path, "wt", encoding="utf-8"))
     return streams
 
 
@@ -158,9 +156,9 @@ def write_jsonl_splits(
             if stream is None:
                 if split not in warned:
                     logger.warning(
-                        "Dropping example for undeclared split %r "
-                        "(known: %s).",
-                        split, sorted(outputs.keys()),
+                        "Dropping example for undeclared split %r (known: %s).",
+                        split,
+                        sorted(outputs.keys()),
                     )
                     warned.add(split)
                 continue

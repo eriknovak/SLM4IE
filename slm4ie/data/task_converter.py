@@ -19,15 +19,14 @@ Each family only provides `iter_examples`, a declared `SplitPolicy`, and (for
 SuperGLUE) an argument hook for `--variant`. The thin scripts under
 `scripts/data/` are one-liners calling `run_converter("<name>")`.
 
-Role gating -- the behavior change in issue #38 -- lives here too. A
-`held_out` entry never writes a `train` split: its declared splits are trimmed
-to everything except `train` before any output file is opened. Nothing is
-dropped, only re-bucketed. For hash-policy families the population is spread
-across the remaining eval splits (`val`/`test` split ~50/50 when `train` is
-absent) rather than collapsing the whole train bucket into one split; for
-source-policy families (SuperGLUE) the `train.jsonl` source file is simply never
-read. Held-out eval uses the labeled `val` split, so `train` -- not the blind,
-unlabeled `test` set -- is the split dropped.
+Role gating lives here too: a `held_out` entry never writes a `train` split --
+its declared splits are trimmed to everything except `train` before any output
+file is opened. Nothing is dropped, only re-bucketed. For hash-policy families
+the population is spread across the remaining eval splits (`val`/`test` split
+~50/50 when `train` is absent) rather than collapsing the whole train bucket
+into one split; for source-policy families (SuperGLUE) the `train.jsonl` source
+file is simply never read. Held-out eval uses the labeled `val` split, so
+`train` -- not the blind, unlabeled `test` set -- is the split dropped.
 """
 
 from __future__ import annotations
@@ -77,6 +76,9 @@ _IDX_PAD: int = 8
 _HELD_OUT_VAL_PCT: int = 50
 
 
+# --- Split policy and per-run context ---
+
+
 class SplitPolicy(enum.Enum):
     """How a converter's yielded split key maps to an output split.
 
@@ -113,6 +115,9 @@ class ConvertContext:
         self.options: Dict[str, Any] = dict(options or {})
 
 
+# --- Shared record helpers (id synthesis, label sets, extracted reads) ---
+
+
 def synthesize_id(
     record: Dict[str, Any],
     dataset: str,
@@ -126,9 +131,9 @@ def synthesize_id(
 
     1. A non-empty `uid` (document-shaped extracted records).
     2. An explicit `id` / `idx` (SuperGLUE records): kept as-is when it
-       already contains a `":"`, otherwise prefixed with `dataset`. A dict
-       (e.g. MultiRC-style compound ids) is joined with `"-"` under the
-       `dataset` prefix.
+       already contains a `":"`, otherwise prefixed with the record's `source`
+       (falling back to `dataset`). A dict (e.g. MultiRC-style compound ids) is
+       joined with `"-"` under the same prefix.
     3. `"<source>:<doc_id>"` when a `doc_id` is present.
     4. `"<source-or-dataset>:idx-<zero-padded-index>"` as a last resort.
 
@@ -146,18 +151,19 @@ def synthesize_id(
     if uid:
         return str(uid)
 
+    source = record.get("source", dataset)
+
     raw = record.get("id") if record.get("id") is not None else record.get("idx")
     if isinstance(raw, bool):
         raw = None
     if isinstance(raw, (str, int)):
         text = str(raw)
-        return text if ":" in text else f"{dataset}:{text}"
+        return text if ":" in text else f"{source}:{text}"
     if isinstance(raw, dict):
         parts = [str(v) for v in raw.values() if v is not None]
         if parts:
-            return f"{dataset}:{'-'.join(parts)}"
+            return f"{source}:{'-'.join(parts)}"
 
-    source = record.get("source", dataset)
     doc_id = record.get("doc_id")
     if doc_id is not None:
         return f"{source}:{doc_id}"
@@ -207,6 +213,8 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[Dict
         ann_arg: Optional[Path] = ann_path if ann_path.exists() else None
         yield from iter_joined_records(text_path, ann_arg)
 
+
+# --- Converter registry and abstract base ---
 
 _CONVERTER_REGISTRY: Dict[str, Type["TaskConverter"]] = {}
 
@@ -295,7 +303,6 @@ class TaskConverter(abc.ABC):
         Returns:
             The context passed to every `iter_examples` call.
         """
-        del args
         return ConvertContext()
 
     @abc.abstractmethod
@@ -326,6 +333,9 @@ class TaskConverter(abc.ABC):
         """
 
 
+# --- Split assignment and the conversion driver ---
+
+
 def target_splits(entry: TaskEntry) -> List[str]:
     """Return the split names to write for `entry`, applying the role gate.
 
@@ -348,7 +358,7 @@ def target_splits(entry: TaskEntry) -> List[str]:
 def assign_hash_split(key: str, targets: List[str]) -> str:
     """Assign `key` to one of `targets` by deterministic hash bucket.
 
-    When `train` is among `targets`, the standard 80/10/10 train/val/test
+    When `train` is among `targets`, the standard 70/15/15 train/val/test
     boundaries apply. When `train` has been dropped (held-out re-bucketing), the
     whole population is spread ~50/50 across the remaining `val`/`test` splits
     instead of collapsing the train bucket into the first split.
@@ -455,6 +465,9 @@ def resolve_keys(
     return list(requested)
 
 
+# --- CLI plumbing ---
+
+
 def build_parser(converter: TaskConverter) -> argparse.ArgumentParser:
     """Build the argument parser for `converter`.
 
@@ -537,6 +550,9 @@ def parse_args(
     if not args.all and not args.entries:
         parser.error("one of the arguments entries --all is required")
     return args
+
+
+# --- Main entry point ---
 
 
 def run_converter(name: str, argv: Optional[List[str]] = None) -> None:

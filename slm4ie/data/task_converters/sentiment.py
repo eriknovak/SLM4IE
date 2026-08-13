@@ -151,8 +151,11 @@ def _iter_raw_sentinews_format(
                 label = normalize_label(raw_label, allow)
                 if label is None:
                     continue
-                nid = row.get("nid") or row.get("doc_id") or row.get("id") or f"idx-{index:08d}"
-                example_id = f"{dataset}:{nid}"
+                example_id = synthesize_id(
+                    {"id": row.get("nid") or row.get("doc_id") or row.get("id")},
+                    dataset,
+                    index,
+                )
                 example: SentimentExample = SentimentExample(id=example_id, text=text, label=label)
                 index += 1
                 yield example_id, example
@@ -212,7 +215,6 @@ class SentimentConverter(TaskConverter):
         Raises:
             ValueError: If the entry source kind is unknown.
         """
-        del ctx, splits
         allow = label_allow_set(entry)
 
         if entry.source.kind == "extracted":

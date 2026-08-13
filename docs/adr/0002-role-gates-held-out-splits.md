@@ -59,7 +59,7 @@ regress by re-adding a `train:` line.
   subtask now write `val`/`test` only. Any consumer that assumed a `train.jsonl.gz`
   for those datasets must stop doing so — there was never labeled held-out train
   data to rely on.
-- Held-out hash datasets re-bucket ~50/50 val/test rather than 80/10/10
+- Held-out hash datasets re-bucket ~50/50 val/test rather than 70/15/15
   train/val/test. `ner/suk` is the only held-out hash entry today; the ratio is
   documented in the driver and unit-tested.
 - The behavior is covered by a role-gating acceptance test that converts the same
