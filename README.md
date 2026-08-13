@@ -378,7 +378,7 @@ Output goes to `tokenization/<dataset>.jsonl.gz`. Existing outputs are skipped u
 
 The three task converters all read [`configs/data/tasks.yaml`](configs/data/tasks.yaml), a flat registry keyed `<task>/<dataset>`. They write to `tasks/<task>/<dataset>/<split>.jsonl.gz` using a task-family schema (TypedDicts in [`slm4ie/data/schema.py`](slm4ie/data/schema.py)). Each entry declares:
 
-- `role` — `finetune_and_eval` or `held_out`; the registry, not directory placement, enforces train/test isolation across families.
+- `role` — `finetune_and_eval` or `held_out`; the registry, not directory placement, enforces train/test isolation across families. A `held_out` entry never writes a `train` split (records are re-bucketed, not dropped); see [ADR 0002](docs/adr/0002-role-gates-held-out-splits.md).
 - `source` — `{kind: extracted, keys: […]}` for document-shaped sources joined via `extracted/`, or `{kind: raw, keys: […]}` for task-native bundles (SuperGLUE-SL) read straight from `raw/`.
 - `splits`, `labels`, `suite`, `language`, `license`.
 

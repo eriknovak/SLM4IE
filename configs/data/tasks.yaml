@@ -11,8 +11,9 @@
 #   entries      Map of <task>/<dataset> -> entry spec. The key IS the output dir.
 #
 # Entry fields:
-#   role         finetune_and_eval | held_out — enforces train/test isolation
-#                regardless of directory placement.
+#   role         finetune_and_eval | held_out — enforces train/test isolation.
+#                held_out drops the train split (writes only val/test); the
+#                converter never emits a train.jsonl.gz for a held_out entry.
 #   source       kind (extracted | raw) + keys (source dataset keys).
 #   splits       Split name -> output filename.
 #   labels       Label set for the task.
@@ -65,9 +66,9 @@ entries:
     license: cc-by-sa-4.0
 
   ner/suk:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: extracted, keys: [suk] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
     language: sl
@@ -93,63 +94,63 @@ entries:
 
   # --- SuperGLUE-SL subtasks --------------------------------------------
   nli/cb:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [entailment, neutral, contradiction]
     suite: superglue_sl
     language: sl
     license: cc-by-4.0
 
   nli/rte:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [entailment, not_entailment]
     suite: superglue_sl
     language: sl
     license: cc-by-4.0
 
   qa/boolq:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
     license: cc-by-4.0
 
   qa/multirc:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
     license: cc-by-4.0
 
   coref/wsc:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
     license: cc-by-4.0
 
   wsd/wic:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [true, false]
     suite: superglue_sl
     language: sl
     license: cc-by-4.0
 
   commonsense/copa:
-    role: held_out
+    role: held_out               # held_out -> train dropped (val/test only)
     source: { kind: raw, keys: [superglue_sl] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [0, 1]
     suite: superglue_sl
     language: sl
