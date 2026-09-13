@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use SLM4IE in your work, please cite it as below."
+type: software
+title: "SLM4IE: Small Language Models for Zero-Shot Information Extraction in European Languages"
+abstract: >-
+  Small language models for zero-shot information extraction across European
+  languages, with emphasis on Slovenian.
+authors:
+  - family-names: Novak
+    given-names: Erik
+    email: erik.novak@ijs.si
+    affiliation: Jožef Stefan Institute
+repository-code: "https://github.com/eriknovak/SLM4IE"
+url: "https://eriknovak.github.io/SLM4IE/"
+license: Apache-2.0
+version: 0.1.0
+keywords:
+  - small language models
+  - information extraction
+  - zero-shot
+  - named entity recognition
+  - Slovenian
+  - natural language processing

@@ -1,87 +1,114 @@
-![Image alt](./website/assets/imgs/banner/slm4ie_banner_dark_bg.png#gh-dark-mode-only)
-![Image alt](./website/assets/imgs/banner/slm4ie_banner_light_bg.png#gh-light-mode-only)
+![SLM4IE — Small Language Models for Information Extraction](./website/assets/imgs/banner/slm4ie_banner_dark_bg.png#gh-dark-mode-only)
+![SLM4IE — Small Language Models for Information Extraction](./website/assets/imgs/banner/slm4ie_banner_light_bg.png#gh-light-mode-only)
 
 <p align="center">
+  <a href="https://eriknovak.github.io/SLM4IE/"><img src="https://img.shields.io/badge/website-eriknovak.github.io%2FSLM4IE-15a3a3.svg" alt="Website"></a>
+  <a href="https://cris.cobiss.net/ecris/si/sl/project/24346"><img src="https://img.shields.io/badge/ARIS-Z2--70067-005a96.svg" alt="ARIS project Z2-70067"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.13%2B-blue.svg" alt="Python 3.13+"></a>
-  <a href="https://github.com/eriknovak/SLM4IE"><img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-brightgreen.svg" alt="Open Source"></a>
-</p>
+  <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json" alt="uv"></a>
+  <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff"></a></p>
 
-SLM4IE develops small language models (SLMs) for zero-shot information extraction across European languages, with emphasis on Slovenian. The project targets three limitations of current LLMs:
+SLM4IE develops small language models (SLMs) for zero-shot information
+extraction across European languages, with emphasis on Slovenian. The project
+targets three limitations of current LLMs:
 
-- **Compute cost:** LLMs require infrastructure beyond reach of smaller organizations for local deployment
-- **Low-resource gaps:** Limited training data for sensitive domains and underrepresented languages
-- **Output inconsistency:** Unreliable structured extraction from generative models
+- **Compute cost:** LLMs require infrastructure beyond reach of smaller
+  organizations for local deployment
+- **Low-resource gaps:** Limited training data for sensitive domains and
+  underrepresented languages
+- **Output inconsistency:** Unreliable structured extraction from generative
+  models
 
-We build computationally efficient models optimized for commodity hardware, create multilingual benchmark datasets for sensitive domains, and evaluate against existing SLMs and LLMs. All artifacts (models, datasets, code) will be released publicly where possible.
+We build computationally efficient models optimized for commodity hardware,
+create multilingual benchmark datasets for sensitive domains, and evaluate
+against existing SLMs and LLMs. All artifacts (models, datasets, code) will be
+released publicly where possible.
+
+The project website, in English and [Slovenian](https://eriknovak.github.io/SLM4IE/sl/),
+is at [**eriknovak.github.io/SLM4IE**](https://eriknovak.github.io/SLM4IE/). It
+covers the motivation, work packages, news and publications.
 
 The repository is a **collection of experiments**, not a service. Each one tests
 a hypothesis; the shared machinery exists to run them.
 [**What we have tried and what it showed**](experiments/README.md) is the place
 to start.
 
-## Quick start
+## Status
+
+The project runs from March 2026 to February 2028 and is in its first year.
+
+| Area                                                                           | State                                                  |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| **Experiment records**                                                         | None yet — see [`experiments/`](experiments/README.md) |
+| Data pipeline: download, extract, task datasets                                | Working                                                |
+| Pretraining corpus curation (eight stages)                                     | Working                                                |
+| Tokenizer sweep (six backends, six metrics)                                    | Working                                                |
+| Model architecture and training                                                | Planned                                                |
+| Evaluation against SLMs and LLMs                                               | Planned                                                |
+| Public models and datasets on [Hugging Face](https://huggingface.co/eriknovak) | Planned                                                |
+
+How the work is organised is set out in the
+[work packages](https://eriknovak.github.io/SLM4IE/work-packages/).
+
+## Code
+
+The code is early-stage research infrastructure: dataset preparation,
+pretraining corpus curation and tokenizer comparison, with no released models or
+stable interface yet. Setup instructions are in [`docs/setup.md`](docs/setup.md)
+and the pipelines are documented in [`docs/`](docs/).
+
+## Contributing
+
+Issues and pull requests are welcome — report bugs, suggest datasets or ask
+questions in [GitHub issues](https://github.com/eriknovak/SLM4IE/issues). Before
+opening a pull request, run the checks:
 
 ```bash
-git clone https://github.com/eriknovak/SLM4IE.git
-cd SLM4IE
-uv sync --group data
-
-uv run python scripts/prepare_datasets.py download --all   # raw corpora + benchmarks
-uv run python scripts/prepare_datasets.py extract  --all   # normalize to unified JSONL
-uv run python scripts/prepare_datasets.py tasks    --all   # evaluation task datasets
+uv run ruff check slm4ie/ scripts/ experiments/
+uv run pytest -m "not slow"
 ```
 
-Requires Python ≥ 3.13 and [uv](https://docs.astral.sh/uv/). Datasets are large
-and live outside the repo. Full prerequisites, dependency groups, git hooks and
-HuggingFace authentication: [`docs/setup.md`](docs/setup.md).
+## Citation
 
-## Documentation
+If you use SLM4IE in your work, please cite it. GitHub's **Cite this
+repository** button, built from [`CITATION.cff`](CITATION.cff), gives APA and
+BibTeX formats.
 
-| Page                                                     | Covers                                                              |
-| -------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`docs/setup.md`](docs/setup.md)                         | Requirements, install, dependency groups, git hooks, HF auth, tests |
-| [`docs/data-pipeline.md`](docs/data-pipeline.md)         | Download, extract, task conversion, tokenizer-quality data          |
-| [`docs/pretraining-corpus.md`](docs/pretraining-corpus.md) | The eight-stage corpus curation pipeline                          |
-| [`docs/datasets.md`](docs/datasets.md)                   | Catalog of every pretraining corpus and benchmark                   |
-| [`docs/tokenizer-sweep.md`](docs/tokenizer-sweep.md)     | Training and scoring the six tokenizer backends                     |
-| [`experiments/README.md`](experiments/README.md)         | The findings book — one entry per experiment                        |
-| [`CONTEXT.md`](CONTEXT.md)                               | The project's vocabulary                                            |
-
-## Repository layout
-
-```text
-experiments/  The experiments — one folder per hypothesis, plus the findings
-              book, the glossary, and the generated HTML report
-configs/      Shared registries: the dataset catalogs and the task registry
-slm4ie/       Library source — importable modules only
-scripts/      CLI entry points, one per pipeline, thin wrappers around slm4ie/
-slurm/        SLURM batch scripts for HPC training
-tests/        pytest suite
-docs/         This documentation, plus agent-skill config
-website/      The project showcase site (Material for MkDocs), deployed to GitHub Pages
+```bibtex
+@software{novak_slm4ie,
+  author  = {Novak, Erik},
+  title   = {{SLM4IE}: Small Language Models for Zero-Shot Information Extraction in European Languages},
+  url     = {https://github.com/eriknovak/SLM4IE},
+  license = {Apache-2.0},
+  year    = {2026}
+}
 ```
 
-Three scripts drive everything: `prepare_datasets.py` (download, extract, tasks,
-tokenization), `curate_pretraining_corpus.py` (the pretraining corpus), and
-`sweep_tokenizers.py` (the tokenizer sweep).
+## License
 
-## Data
+The code is released under the [Apache License 2.0](LICENSE). Datasets keep
+their original licenses, which are listed per dataset in
+[`docs/datasets.md`](docs/datasets.md); the pipeline downloads them from their
+sources rather than redistributing them.
 
-Datasets live **outside the repository**, under `/vault/data/SLM4IE/`; `data/`
-in the repo is a gitignored symlink to it. Never commit data files.
+## Contact
 
-Slovenian pretraining corpora come from CLARIN.SI (CLASSLA-web, MaCoCu,
-ParlaMint-SI, COLESLAW, OSS, siParl and more), HuggingFace (FineWeb-2, FinePDF,
-mC4, HPLT) and direct HTTP (CC100, Legal-mC4). Evaluation uses SUK 1.1,
-ssj500k 2.3, Slovene SuperGLUE and SentiNews, with Sloleks 3.1 as the tokenizer
-morphology lexicon. Sources, licenses and per-dataset notes:
-[`docs/datasets.md`](docs/datasets.md).
+SLM4IE is led by [dr. Erik Novak](https://cris.cobiss.net/ecris/si/sl/researcher/50358)
+at the [Department of Artificial Intelligence](https://ailab.ijs.si/),
+[Jožef Stefan Institute](https://www.ijs.si/), in partnership with
+[Event Registry](https://eventregistry.org/). Contact:
+[erik.novak@ijs.si](mailto:erik.novak@ijs.si).
 
 ## Acknowledgments
 
-The project is funded by ARIS (Slovenian Research and Innovation Agency) under the project number [Z2-70067](https://cris.cobiss.net/ecris/si/sl/project/24346).
-
-<figure>
-  <img src="https://github.com/eriknovak/SLM4IE/blob/main/website/assets/imgs/aris.png?raw=true" alt="ARIS Logo" width="460" />
-</figure>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./website/assets/imgs/aris_dark.png">
+    <img src="./website/assets/imgs/aris.png" alt="Slovenian Research and Innovation Agency" width="310">
+  </picture>
+</p>
+<p align="center">
+  Funded by <a href="https://www.aris-rs.si/">ARIS</a>, the Slovenian Research and Innovation Agency,<br>
+  under project number <a href="https://cris.cobiss.net/ecris/si/sl/project/24346">Z2-70067</a>.
+</p>
