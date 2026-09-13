@@ -1,0 +1,880 @@
+"""Tests for slm4ie.data.extract module."""
+
+import gzip
+import json
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional
+
+import pytest
+import yaml
+
+from slm4ie.data.extractors import register_extractor, BaseExtractor
+from slm4ie.data.schema import Annotations, Document, Token
+from slm4ie.data.extract import (
+    _chunk_files,
+    _extract_one,
+    extract_datasets,
+    load_extraction_config,
+)
+
+_STUB_DOC = Document(
+    text="stub text",
+    source="stub",
+    domain="test",
+    doc_id="stub-1",
+)
+
+
+class _StubExtractor(BaseExtractor):
+    """Yields one Document per call, regardless of input."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yields a single stub document.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Not used.
+            domain (str): Not used.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: A single stub document.
+        """
+        yield Document(
+            text="stub text",
+            source=source,
+            domain=domain,
+            doc_id="stub-1",
+        )
+
+
+register_extractor("stub", _StubExtractor)
+
+
+class _AnnotatedStubExtractor(BaseExtractor):
+    """Yields one annotated Document per call."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yields a single annotated document.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: A single annotated document.
+        """
+        yield Document(
+            text="Zdravo svet",
+            source=source,
+            domain=domain,
+            doc_id="ann-1",
+            annotations=Annotations(
+                tokens=[
+                    Token(form="Zdravo", lemma="zdrav", upos="INTJ"),
+                    Token(
+                        form="svet",
+                        lemma="svet",
+                        upos="NOUN",
+                        feats="Case=Nom",
+                    ),
+                ],
+                sentences=[[0, 1]],
+            ),
+        )
+
+
+register_extractor("annotated_stub", _AnnotatedStubExtractor)
+
+
+class _IdlessStubExtractor(BaseExtractor):
+    """Yields three Documents with no `doc_id`."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield three documents lacking `doc_id`.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: A document without doc_id.
+        """
+        for n in range(3):
+            yield Document(
+                text=f"doc {n}",
+                source=source,
+                domain=domain,
+            )
+
+
+register_extractor("idless_stub", _IdlessStubExtractor)
+
+
+class _IdlessAnnotatedStubExtractor(BaseExtractor):
+    """Yields two annotated Documents with no `doc_id`."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield two annotated documents lacking `doc_id`.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: An annotated document without doc_id.
+        """
+        for n in range(2):
+            yield Document(
+                text=f"doc {n}",
+                source=source,
+                domain=domain,
+                annotations=Annotations(
+                    tokens=[Token(form=f"w{n}")],
+                    sentences=[[0, 0]],
+                ),
+            )
+
+
+register_extractor("idless_annotated_stub", _IdlessAnnotatedStubExtractor)
+
+
+class _MixedStubExtractor(BaseExtractor):
+    """Yields a mix of annotated and unannotated documents.
+
+    Order: text-only, annotated, text-only, annotated. The leading
+    text-only doc forces the writer to backfill stubs the moment
+    annotations begin, exercising the lockstep contract.
+    """
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield four documents alternating annotated and plain.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: Mixed annotated/unannotated documents.
+        """
+        yield Document(
+            text="plain-0",
+            source=source,
+            domain=domain,
+            doc_id="plain-0",
+        )
+        yield Document(
+            text="ann-1",
+            source=source,
+            domain=domain,
+            doc_id="ann-1",
+            annotations=Annotations(
+                tokens=[Token(form="ann-1")],
+                sentences=[[0, 0]],
+            ),
+        )
+        yield Document(
+            text="plain-2",
+            source=source,
+            domain=domain,
+            doc_id="plain-2",
+        )
+        yield Document(
+            text="ann-3",
+            source=source,
+            domain=domain,
+            doc_id="ann-3",
+            annotations=Annotations(
+                tokens=[Token(form="ann-3")],
+                sentences=[[0, 0]],
+            ),
+        )
+
+
+register_extractor("mixed_stub", _MixedStubExtractor)
+
+
+class _RaisingMidStreamExtractor(BaseExtractor):
+    """Yields two documents then raises a RuntimeError."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield two documents, then raise to simulate mid-stream failure.
+
+        Args:
+            input_dir (Path): Not used.
+            source (str): Dataset key.
+            domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: Two documents before the explosion.
+
+        Raises:
+            RuntimeError: Always, after yielding two documents.
+        """
+        for n in range(2):
+            yield Document(
+                text=f"doc {n}",
+                source=source,
+                domain=domain,
+                doc_id=f"doc-{n}",
+            )
+        raise RuntimeError("boom")
+
+
+register_extractor("raising_mid_stream", _RaisingMidStreamExtractor)
+
+
+def _write_config(tmp_path: Path, datasets: dict) -> Path:
+    """Write a minimal extraction config YAML to tmp_path.
+
+    Args:
+        tmp_path (Path): Temporary directory.
+        datasets (dict): Dataset entries for the config.
+
+    Returns:
+        Path: Path to the written config file.
+    """
+    config_data = {
+        "input_dir": str(tmp_path / "raw"),
+        "output_dir": str(tmp_path / "processed"),
+        "datasets": datasets,
+    }
+    config_file = tmp_path / "extract.yaml"
+    config_file.write_text(yaml.dump(config_data))
+    return config_file
+
+
+class TestLoadExtractionConfig:
+    """Tests for load_extraction_config."""
+
+    def test_loads_config(self, tmp_path: Path):
+        """Verify all fields are parsed correctly."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "stub", "domain": "web"},
+            },
+        )
+        cfg = load_extraction_config(config_file)
+        assert cfg.input_dir == str(tmp_path / "raw")
+        assert cfg.output_dir == str(tmp_path / "processed")
+        assert "ds1" in cfg.datasets
+        assert cfg.datasets["ds1"]["extractor"] == "stub"
+        assert cfg.datasets["ds1"]["domain"] == "web"
+
+    def test_missing_file_raises(self):
+        """FileNotFoundError raised for non-existent config."""
+        with pytest.raises(FileNotFoundError):
+            load_extraction_config(Path("/nonexistent/extract.yaml"))
+
+
+class TestExtractDatasets:
+    """Tests for extract_datasets orchestrator."""
+
+    def test_extracts_single_dataset(self, tmp_path: Path):
+        """Creates raw dir, extracts, verifies JSONL output."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "dummy.txt").write_text("placeholder")
+
+        extract_datasets(config_file)
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        assert output_file.exists()
+        lines = output_file.read_text().strip().splitlines()
+        assert len(lines) == 1
+        doc = json.loads(lines[0])
+        assert doc["source"] == "ds1"
+        assert doc["domain"] == "web"
+        assert doc["text"] == "stub text"
+
+    def test_extracts_selected_datasets(self, tmp_path: Path):
+        """Only the requested dataset key is extracted."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "stub", "domain": "web"},
+                "ds2": {"extractor": "stub", "domain": "news"},
+            },
+        )
+        (tmp_path / "raw" / "ds1").mkdir(parents=True)
+        (tmp_path / "raw" / "ds2").mkdir(parents=True)
+
+        extract_datasets(config_file, dataset_keys=["ds1"])
+
+        processed = tmp_path / "processed"
+        assert (processed / "ds1.jsonl").exists()
+        assert not (processed / "ds2.jsonl").exists()
+
+    def test_text_jsonl_excludes_annotations(self, tmp_path: Path):
+        """Text JSONL file must not contain annotations."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "annotated_stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        lines = output_file.read_text().strip().splitlines()
+        data = json.loads(lines[0])
+        assert "annotations" not in data
+        assert data["text"] == "Zdravo svet"
+        assert data["doc_id"] == "ann-1"
+
+    def test_writes_annotation_file_for_annotated_datasets(self, tmp_path: Path):
+        """Annotated datasets produce a gzipped annotation file."""
+        import gzip
+
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "annotated_stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        ann_file = tmp_path / "processed" / "ds1.annotations.jsonl.gz"
+        assert ann_file.exists()
+
+        with gzip.open(ann_file, "rt", encoding="utf-8") as f:
+            lines = f.read().strip().splitlines()
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert data["doc_id"] == "ann-1"
+        assert data["forms"] == ["Zdravo", "svet"]
+        assert data["lemmas"] == ["zdrav", "svet"]
+        assert data["upos"] == ["INTJ", "NOUN"]
+        assert data["feats"] == [None, "Case=Nom"]
+        assert data["sentences"] == [[0, 1]]
+
+    def test_no_annotation_file_for_text_only_datasets(self, tmp_path: Path):
+        """Text-only datasets do not produce an annotation file."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        ann_file = tmp_path / "processed" / "ds1.annotations.jsonl.gz"
+        assert not ann_file.exists()
+
+    def test_unknown_key_raises(self, tmp_path: Path):
+        """ValueError raised for unknown dataset key."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "stub", "domain": "web"},
+            },
+        )
+        with pytest.raises(ValueError, match="unknown_ds"):
+            extract_datasets(config_file, dataset_keys=["unknown_ds"])
+
+    def test_synthesizes_doc_id_when_missing(self, tmp_path: Path):
+        """Documents without doc_id receive a stable idx-based id."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "idless_stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        records = [json.loads(ln) for ln in output_file.read_text().splitlines()]
+        assert [r["doc_id"] for r in records] == [
+            "idx-00000000000000",
+            "idx-00000000000001",
+            "idx-00000000000002",
+        ]
+        assert [r["uid"] for r in records] == [
+            "ds1:idx-00000000000000",
+            "ds1:idx-00000000000001",
+            "ds1:idx-00000000000002",
+        ]
+
+    def test_synthesized_doc_ids_are_unique_across_sources(self, tmp_path: Path):
+        """Two ID-less datasets produce distinct uids despite shared idx."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "idless_stub", "domain": "web"},
+                "ds2": {"extractor": "idless_stub", "domain": "news"},
+            },
+        )
+        (tmp_path / "raw" / "ds1").mkdir(parents=True)
+        (tmp_path / "raw" / "ds2").mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        ds1 = [json.loads(ln)["uid"] for ln in (tmp_path / "processed" / "ds1.jsonl").read_text().splitlines()]
+        ds2 = [json.loads(ln)["uid"] for ln in (tmp_path / "processed" / "ds2.jsonl").read_text().splitlines()]
+        assert set(ds1).isdisjoint(set(ds2))
+
+    def test_synthesized_doc_id_propagates_to_annotations(self, tmp_path: Path):
+        """Synthesized doc_ids appear in the annotation file too."""
+        import gzip
+
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {
+                    "extractor": "idless_annotated_stub",
+                    "domain": "web",
+                },
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        ann_file = tmp_path / "processed" / "ds1.annotations.jsonl.gz"
+        with gzip.open(ann_file, "rt", encoding="utf-8") as f:
+            records = [json.loads(ln) for ln in f.read().splitlines()]
+        assert [r["doc_id"] for r in records] == [
+            "idx-00000000000000",
+            "idx-00000000000001",
+        ]
+        assert [r["uid"] for r in records] == [
+            "ds1:idx-00000000000000",
+            "ds1:idx-00000000000001",
+        ]
+
+    def test_mixed_dataset_keeps_streams_aligned(self, tmp_path: Path):
+        """Annotation stubs preserve doc_id alignment for plain docs."""
+        import gzip
+
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds1": {"extractor": "mixed_stub", "domain": "web"},
+            },
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+
+        extract_datasets(config_file)
+
+        text_file = tmp_path / "processed" / "ds1.jsonl"
+        ann_file = tmp_path / "processed" / "ds1.annotations.jsonl.gz"
+
+        text_records = [json.loads(ln) for ln in text_file.read_text().splitlines()]
+        with gzip.open(ann_file, "rt", encoding="utf-8") as f:
+            ann_records = [json.loads(ln) for ln in f.read().splitlines()]
+
+        assert len(text_records) == len(ann_records) == 4
+        assert [r["doc_id"] for r in text_records] == [
+            "plain-0",
+            "ann-1",
+            "plain-2",
+            "ann-3",
+        ]
+        assert [r["doc_id"] for r in ann_records] == [
+            "plain-0",
+            "ann-1",
+            "plain-2",
+            "ann-3",
+        ]
+        # Stubs must carry only doc_id and uid, no parallel-array fields.
+        assert set(ann_records[0].keys()) == {"doc_id", "uid"}
+        assert set(ann_records[2].keys()) == {"doc_id", "uid"}
+        assert "forms" in ann_records[1]
+        assert "forms" in ann_records[3]
+
+    def test_skips_when_output_exists(self, tmp_path: Path):
+        """Without --force, existing output is left untouched."""
+        config_file = _write_config(
+            tmp_path,
+            {"ds1": {"extractor": "stub", "domain": "web"}},
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "dummy.txt").write_text("placeholder")
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text('{"sentinel": true}\n')
+
+        extract_datasets(config_file)
+
+        assert output_file.read_text() == '{"sentinel": true}\n'
+
+    def test_force_re_extracts(self, tmp_path: Path):
+        """With force=True, existing output is overwritten."""
+        config_file = _write_config(
+            tmp_path,
+            {"ds1": {"extractor": "stub", "domain": "web"}},
+        )
+        raw_dir = tmp_path / "raw" / "ds1"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "dummy.txt").write_text("placeholder")
+
+        output_file = tmp_path / "processed" / "ds1.jsonl"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text('{"sentinel": true}\n')
+
+        extract_datasets(config_file, force=True)
+
+        new = output_file.read_text().strip().splitlines()
+        assert len(new) == 1
+        assert json.loads(new[0])["text"] == "stub text"
+
+
+class TestAtomicWrites:
+    """Tests for atomic-write behaviour of `_extract_one`."""
+
+    def test_no_partial_files_after_success(self, tmp_path: Path):
+        """Happy path leaves only final outputs on disk."""
+        input_base = tmp_path / "raw"
+        output_base = tmp_path / "processed"
+        (input_base / "ds1").mkdir(parents=True)
+        output_base.mkdir(parents=True)
+
+        _extract_one(
+            key="ds1",
+            ds_cfg={"extractor": "annotated_stub", "domain": "web"},
+            input_base=input_base,
+            output_base=output_base,
+            force=False,
+        )
+
+        assert (output_base / "ds1.jsonl").exists()
+        assert (output_base / "ds1.annotations.jsonl.gz").exists()
+        assert not (output_base / "ds1.jsonl.partial").exists()
+        assert not (output_base / "ds1.annotations.jsonl.gz.partial").exists()
+
+    def test_recovers_from_orphan_partials(self, tmp_path: Path):
+        """Pre-existing `.partial` files are removed before extraction."""
+        input_base = tmp_path / "raw"
+        output_base = tmp_path / "processed"
+        (input_base / "ds1").mkdir(parents=True)
+        output_base.mkdir(parents=True)
+
+        text_partial = output_base / "ds1.jsonl.partial"
+        ann_partial = output_base / "ds1.annotations.jsonl.gz.partial"
+        text_partial.write_text("garbage\n")
+        ann_partial.write_bytes(b"garbage")
+
+        _extract_one(
+            key="ds1",
+            ds_cfg={"extractor": "annotated_stub", "domain": "web"},
+            input_base=input_base,
+            output_base=output_base,
+            force=False,
+        )
+
+        text_file = output_base / "ds1.jsonl"
+        ann_file = output_base / "ds1.annotations.jsonl.gz"
+        assert text_file.exists()
+        assert ann_file.exists()
+        assert not text_partial.exists()
+        assert not ann_partial.exists()
+
+        # Output matches a fresh run (single annotated doc).
+        records = [json.loads(ln) for ln in text_file.read_text().splitlines()]
+        assert len(records) == 1
+        assert records[0]["doc_id"] == "ann-1"
+
+    def test_mid_run_failure_leaves_partial(self, tmp_path: Path):
+        """A mid-stream raise leaves `.partial` and no final text file."""
+        input_base = tmp_path / "raw"
+        output_base = tmp_path / "processed"
+        (input_base / "ds1").mkdir(parents=True)
+        output_base.mkdir(parents=True)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            _extract_one(
+                key="ds1",
+                ds_cfg={
+                    "extractor": "raising_mid_stream",
+                    "domain": "web",
+                },
+                input_base=input_base,
+                output_base=output_base,
+                force=False,
+            )
+
+        text_file = output_base / "ds1.jsonl"
+        text_partial = output_base / "ds1.jsonl.partial"
+        assert not text_file.exists()
+        assert text_partial.exists()
+
+
+class TestPathOverrides:
+    """Tests for `input_dir_override` and `output_dir_override`."""
+
+    def test_overrides_redirect_io(self, tmp_path: Path):
+        """Overrides win over `input_dir` / `output_dir` from the YAML."""
+        bogus_in = tmp_path / "bogus_in"
+        bogus_out = tmp_path / "bogus_out"
+        bogus_in.mkdir()
+        bogus_out.mkdir()
+
+        # Config points at bogus paths; overrides must win.
+        config_data = {
+            "input_dir": str(bogus_in),
+            "output_dir": str(bogus_out),
+            "datasets": {
+                "ds1": {"extractor": "stub", "domain": "web"},
+            },
+        }
+        config_file = tmp_path / "extract.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        real_in = tmp_path / "real_in"
+        real_out = tmp_path / "real_out"
+        (real_in / "ds1").mkdir(parents=True)
+
+        extract_datasets(
+            config_file,
+            input_dir_override=str(real_in),
+            output_dir_override=str(real_out),
+        )
+
+        assert (real_out / "ds1.jsonl").exists()
+        assert not (bogus_out / "ds1.jsonl").exists()
+
+
+class TestFailuresArtifact:
+    """Tests for the `failures.txt` artifact written to `log_dir`."""
+
+    def test_failures_txt_written_on_failure(self, tmp_path: Path):
+        """One failing dataset produces a sorted `failures.txt`."""
+        config_file = _write_config(
+            tmp_path,
+            {
+                "ds_good": {"extractor": "stub", "domain": "web"},
+                "ds_bad": {
+                    "extractor": "raising_mid_stream",
+                    "domain": "web",
+                },
+            },
+        )
+        (tmp_path / "raw" / "ds_good").mkdir(parents=True)
+        (tmp_path / "raw" / "ds_bad").mkdir(parents=True)
+
+        log_dir = tmp_path / "logs"
+
+        with pytest.raises(RuntimeError, match="ds_bad"):
+            extract_datasets(
+                config_file,
+                log_dir=log_dir,
+                max_workers=1,
+            )
+
+        failures_file = log_dir / "failures.txt"
+        assert failures_file.exists()
+        lines = failures_file.read_text().strip().splitlines()
+        assert lines == ["ds_bad"]
+
+
+def test_chunk_files_contiguous_and_ordered() -> None:
+    """Chunks are contiguous, order-preserving, and cover all files."""
+    from pathlib import Path
+
+    files = [Path(f"{i}.xml") for i in range(10)]
+    chunks = _chunk_files(files, 3)
+
+    assert [len(c) for c in chunks] == [4, 3, 3]
+    assert [p for c in chunks for p in c] == files
+
+
+def test_chunk_files_more_chunks_than_files() -> None:
+    """Requesting more chunks than files yields one file per chunk."""
+    from pathlib import Path
+
+    files = [Path("a.xml"), Path("b.xml")]
+    chunks = _chunk_files(files, 8)
+
+    assert chunks == [[Path("a.xml")], [Path("b.xml")]]
+
+
+def test_chunk_files_empty() -> None:
+    """An empty file list yields no chunks."""
+    assert _chunk_files([], 4) == []
+
+
+def _write_tei_file(path: Path, doc_id: str, words: list) -> None:
+    """Write a minimal annotated TEI file with one sentence.
+
+    Args:
+        path (Path): Destination .xml path.
+        doc_id (str): Value for the file's xml:id and document id.
+        words (list): Word forms to emit as <w> tokens.
+    """
+    w_elems = "".join(f'<w lemma="{w}" msd="UPosTag=NOUN">{w}</w>' for w in words)
+    path.write_text(
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0" '
+        f'xml:id="{doc_id}" xml:lang="sl"><text><body>'
+        f'<s xml:id="{doc_id}.s1">{w_elems}</s>'
+        "</body></text></TEI>",
+        encoding="utf-8",
+    )
+
+
+def _read_gz_lines(path: Path) -> List[str]:
+    """Return decompressed, newline-split lines of a gzip file.
+
+    Args:
+        path (Path): Path to a gzip-compressed text file.
+
+    Returns:
+        List[str]: The decompressed lines without trailing newlines.
+    """
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return fh.read().splitlines()
+
+
+def test_sharded_matches_serial(tmp_path: Path) -> None:
+    """Sharded extraction equals serial output for the same input.
+
+    Text JSONL must be byte-identical; annotations must match after
+    decompression (the sharded gzip is multi-member).
+    """
+    n_files = 12
+    assert n_files >= 8  # _SHARD_MIN_FILES
+    src = tmp_path / "raw" / "tei_ds"
+    src.mkdir(parents=True)
+    for i in range(n_files):
+        _write_tei_file(src / f"doc{i:03d}.xml", f"doc{i:03d}", [f"w{i}a", f"w{i}b"])
+
+    ds_cfg = {"extractor": "tei", "domain": "mixed"}
+    out_serial = tmp_path / "serial"
+    out_shard = tmp_path / "shard"
+    out_serial.mkdir()
+    out_shard.mkdir()
+
+    _extract_one(
+        "tei_ds",
+        ds_cfg,
+        tmp_path / "raw",
+        out_serial,
+        force=True,
+        requested_workers=1,
+    )
+    _extract_one(
+        "tei_ds",
+        ds_cfg,
+        tmp_path / "raw",
+        out_shard,
+        force=True,
+        requested_workers=4,
+    )
+
+    serial_text = (out_serial / "tei_ds.jsonl").read_bytes()
+    shard_text = (out_shard / "tei_ds.jsonl").read_bytes()
+    assert serial_text == shard_text
+
+    serial_ann = _read_gz_lines(out_serial / "tei_ds.annotations.jsonl.gz")
+    shard_ann = _read_gz_lines(out_shard / "tei_ds.annotations.jsonl.gz")
+    assert serial_ann == shard_ann
+    assert len(serial_ann) == n_files
+
+
+def test_text_doc_ids_are_worker_count_independent(tmp_path: Path) -> None:
+    """The `text` extractor's ids do not depend on the worker count.
+
+    `text` derives its ids per file, so it must survive the transition
+    from the serial writer to the sharded one unchanged — this is the
+    property the orchestrator's positional fallback did not have.
+    """
+    n_files = 12
+    assert n_files >= 8  # _SHARD_MIN_FILES
+    src = tmp_path / "raw" / "cc100"
+    src.mkdir(parents=True)
+    for i in range(n_files):
+        (src / f"part{i:03d}.txt").write_text(
+            f"Prvi blok datoteke {i}.\n\nDrugi blok datoteke {i}.\n",
+            encoding="utf-8",
+        )
+
+    ds_cfg = {"extractor": "text", "domain": "web"}
+    outputs = {}
+    for label, workers in (("serial", 1), ("shard", 4)):
+        out_dir = tmp_path / label
+        out_dir.mkdir()
+        _extract_one(
+            "cc100",
+            ds_cfg,
+            tmp_path / "raw",
+            out_dir,
+            force=True,
+            requested_workers=workers,
+        )
+        outputs[label] = (out_dir / "cc100.jsonl").read_bytes()
+
+    assert outputs["serial"] == outputs["shard"]
+
+    records = [json.loads(line) for line in outputs["serial"].decode("utf-8").splitlines()]
+    ids = [r["doc_id"] for r in records]
+    assert len(ids) == n_files * 2
+    assert len(set(ids)) == len(ids)
+    assert ids[:2] == ["part000:000000", "part000:000001"]
+    assert records[0]["uid"] == "cc100:part000:000000"

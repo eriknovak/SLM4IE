@@ -1,0 +1,180 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Local config overlays — may hold secrets / presigned URLs. Never commit.
+# Deep-merged over the matching base config by slm4ie.data.catalog.load_config,
+# which resolves the overlay as a sibling of the config it overlays.
+*.local.yaml
+
+# Claude Code local state: personal settings, devflow worktrees and plans,
+# labflow plans and run logs. Never commit.
+.claude/settings.local.json
+.claude/worktrees/
+.claude/devflow/
+.claude/labflow/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ===================================
+# Additional ignores
+# ===================================
+
+# vscode settings folder
+.vscode/
+
+# Anchored: the root-level symlink to /vault/data/SLM4IE. Unanchored,
+# this would also swallow tests/data/ and any other nested `data` dir.
+/data
+
+# SQLite fallback store when MLFLOW_TRACKING_URI is unset (slm4ie/utils/mlflow.py)
+mlflow.db
+
+# Per-run logs from scripts/data/*
+/logs/
+
+# SLURM logs
+slurm/logs/*.out
+slurm/logs/*.err
+
+# Model binaries
+*.ckpt
+*.pt
+*.bin
+*.h5
+
+# Project document assets and files
+/docs/assets/files/
+
+# classla downloads its Slovenian model on first keyword pass.
+# Defensive entry — classla normally caches under ~/.classla_resources/,
+# but a user could redirect the cache root inside the repo.
+.classla_resources/
+
+# MkDocs build output (website/ -> site/); CI publishes it, never commit it.
+site/
+
+# Claude Code local state: personal settings, devflow worktrees and plans,
+# labflow plans and run logs. Never commit.
+.claude/worktrees/
+.claude/devflow/
+.claude/labflow/

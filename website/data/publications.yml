@@ -1,0 +1,27 @@
+# Outputs shown on the site's publications page: papers, preprints, datasets,
+# models, posters and talks. Rendered by website/hooks/publications.py, which
+# validates every entry and fails the build on a malformed one; it is also the
+# indicator evidence for the ARIS communication plan. Entries sort newest first.
+# Labels and all page text live in the front matter of each language's page.
+#
+# Required: kind, title, venue, year. `kind` is one of journal, conference,
+# preprint, dataset, model, poster or talk.
+# Optional: authors; details (volume, pages or place); month (1-12, orders
+# entries within a year); url (where the title links); doi (bare, 10.xxxx/...);
+# pdf; bibtex; thumbnail (a first-page PNG in assets/imgs/publications/);
+# summary (one line).
+#
+# - kind: journal
+#   title: A paper about small models
+#   authors: E. Novak
+#   venue: Applied Artificial Intelligence
+#   details: 40(1)
+#   year: 2027
+#   month: 5
+#   doi: 10.1080/...
+#   pdf: https://...
+#   thumbnail: small-models-2027.png
+#   bibtex: |
+#     @article{novak2027small, ...}
+
+publications: []

@@ -1,0 +1,97 @@
+{% extends "main.html" %}
+
+{#-
+  Publications page: the markdown body is the standing introduction, and the
+  entries below it are rendered from website/data/publications.yml, which
+  website/hooks/publications.py validates and sorts into the context. Every
+  string shown comes from the page's front matter, so each language fills it.
+-#}
+{% block tabs %}
+  {{ super() }}
+  {% include "partials/page-header.html" %}
+{% endblock %}
+
+{% block content %}
+  <div class="slm-page slm-page--narrow">
+    {{ super() }}
+
+    {% if publication_entries %}
+      <div class="slm-filters" role="group" aria-label="{{ page.meta.filter_label }}">
+        <button type="button" class="slm-chip" data-filter="all" aria-pressed="true">
+          {{ page.meta.filter_all }} ({{ publication_entries | length }})
+        </button>
+        {% for filter in publication_filters %}
+          <button type="button" class="slm-chip" data-filter="{{ filter.kind }}" aria-pressed="false">
+            <span class="slm-pubs__dot slm-family--{{ filter.family }}"></span>{{ filter.label }} ({{ filter.count }})
+          </button>
+        {% endfor %}
+      </div>
+
+      <ol class="slm-pubs" data-copied="{{ page.meta.bibtex_copied }}" data-failed="{{ page.meta.bibtex_failed }}">
+        {% for entry in publication_entries %}
+          {% set href = entry.url or entry.pdf or entry.doi_url %}
+          <li class="slm-pub{% if entry.thumbnail %} slm-pub--thumb{% endif %}" data-kind="{{ entry.kind }}">
+            {% if entry.thumbnail %}
+              <a class="slm-pub__thumb" href="{{ href or entry.thumbnail | url }}" target="_blank" rel="noopener">
+                <img src="{{ entry.thumbnail | url }}" alt="{{ page.meta.thumbnail_alt }}: {{ entry.title }}" loading="lazy">
+              </a>
+            {% endif %}
+            <div>
+              <p class="slm-pub__label slm-family--{{ entry.family }}">{{ entry.label }}</p>
+              <p class="slm-pub__title">
+                {% if href %}
+                  <a href="{{ href }}" target="_blank" rel="noopener">{{ entry.title }}</a>
+                {% else %}
+                  {{ entry.title }}
+                {% endif %}
+              </p>
+              <p class="slm-pub__meta">
+                {% if entry.authors %}{{ entry.authors }} · {% endif %}
+                <em>{{ entry.venue }}</em>{% if entry.details %}, {{ entry.details }}{% endif %}
+                · {{ entry.year }}
+                {% if entry.doi_url %}
+                  · <a class="slm-pub__action" href="{{ entry.doi_url }}" target="_blank" rel="noopener">DOI</a>
+                {% endif %}
+                {% if entry.pdf %}
+                  · <a class="slm-pub__action" href="{{ entry.pdf }}" target="_blank" rel="noopener">PDF</a>
+                {% endif %}
+                {% if entry.bibtex %}
+                  · <button type="button" class="slm-pub__action" data-bibtex="{{ entry.bibtex | e }}">BibTeX</button>
+                {% endif %}
+              </p>
+              {% if entry.summary %}
+                <p class="slm-pub__summary">{{ entry.summary }}</p>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ol>
+
+      {#- No instant navigation on this site, so an inline script runs on every load. -#}
+      <script>
+        (() => {
+          const chips = document.querySelectorAll(".slm-chip");
+          const list = document.querySelector(".slm-pubs");
+          const items = list.querySelectorAll(".slm-pub");
+          chips.forEach((chip) => chip.addEventListener("click", () => {
+            const kind = chip.dataset.filter;
+            chips.forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+            items.forEach((item) => { item.hidden = kind !== "all" && item.dataset.kind !== kind; });
+          }));
+          list.querySelectorAll("[data-bibtex]").forEach((button) => button.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(button.dataset.bibtex);
+              button.textContent = list.dataset.copied;
+            } catch (error) {
+              console.error("BibTeX copy failed", error);
+              button.textContent = list.dataset.failed;
+            }
+            setTimeout(() => { button.textContent = "BibTeX"; }, 1500);
+          }));
+        })();
+      </script>
+    {% else %}
+      <p class="slm-pubs__empty">{{ page.meta.empty_state }}</p>
+    {% endif %}
+  </div>
+{% endblock %}

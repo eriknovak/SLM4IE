@@ -1,0 +1,26 @@
+# tokenization.yaml — Tokenizer-quality evaluation corpus.
+#
+# Pipeline: prepare_datasets.py tokenization  raw/<key>/ -> tokenization/<key>.jsonl.gz
+#
+# Top-level keys:
+#   input_dir    Root of raw downloads (download.yaml's output_dir).
+#   output_dir   Root for tokenizer-eval outputs.
+#   datasets     Dataset keys to convert (see Notes: datasets).
+#
+# Notes:
+#   datasets     Each key must (1) be declared in configs/data/download.yaml
+#     (so its raw download dir resolves via `output_dir`) and (2) have a reader
+#     registered in slm4ie/data/tokenization.py. Lexicon-derived corpora
+#     (currently Sloleks 3.1); they measure tokenizer quality (compression ratio,
+#     fertility, OOV rate, morphological coverage) and never enter the
+#     pretraining corpus.
+#
+# Selection: pass dataset keys positionally, or --all.
+
+input_dir: ./data/raw
+output_dir: ./data/tokenization
+
+# --- Datasets -----------------------------------------------------------
+datasets:
+  - sloleks
+  - sloleks_relations

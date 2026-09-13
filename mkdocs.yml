@@ -1,0 +1,122 @@
+site_name: SLM4IE
+site_author: Erik Novak
+site_description: Small language models for zero-shot information extraction in European languages, with emphasis on Slovenian.
+site_url: https://eriknovak.github.io/SLM4IE/
+copyright: >-
+  Funded by <a href="https://www.aris-rs.si/">ARIS</a>,<br>
+  the Slovenian Research and Innovation Agency,<br>
+  under project number <a href="https://cris.cobiss.net/ecris/si/sl/project/24346">Z2-70067</a>.
+
+repo_name: eriknovak/SLM4IE
+repo_url: https://github.com/eriknovak/SLM4IE
+
+# The showcase site only; the operator guides stay under docs/ on GitHub.
+docs_dir: website
+
+# Under docs_dir but read by theme.custom_dir and hooks:, not site pages.
+exclude_docs: |
+  data/
+  hooks/
+  overrides/
+
+theme:
+  name: material
+  custom_dir: website/overrides
+  font:
+    text: Inter
+    code: Roboto Mono
+  logo: assets/imgs/logo/slm4ie_logo.svg
+  favicon: assets/imgs/favicon.ico
+  features:
+    - content.code.copy
+    - content.tooltips
+    - navigation.footer
+    - navigation.tabs
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+hooks:
+  - website/hooks/publications.py
+  - website/hooks/blog_i18n.py
+
+plugins:
+  - search:
+      separator: '[\s\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - blog:
+      blog_dir: news
+      blog_toc: true
+      post_url_format: "{slug}"
+      post_excerpt: required
+  # English is the site root; Slovenian builds under /sl/. Pages without a
+  # `.sl.md` twin fall back to the English file, so the toggle never 404s.
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: sl
+          name: Slovenščina
+          build: true
+          site_description: >-
+            Majhni jezikovni modeli za brezkontekstno pridobivanje informacij v
+            evropskih jezikih, s poudarkom na slovenščini.
+          copyright: >-
+            Financira <a href="https://www.aris-rs.si/">ARIS</a>,<br>
+            Javna agencija za znanstvenoraziskovalno in inovacijsko dejavnost Republike Slovenije,<br>
+            v okviru projekta številka <a href="https://cris.cobiss.net/ecris/si/sl/project/24346">Z2-70067</a>.
+          nav_translations:
+            Home: Domov
+            About: O projektu
+            Work packages: Delovni sklopi
+            Publications: Objave
+            News: Novice
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+
+nav:
+  - Home: index.md
+  - About: about.md
+  - Work packages: work-packages.md
+  - Publications: publications.md
+  - News: news/index.md

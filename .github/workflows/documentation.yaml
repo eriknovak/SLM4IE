@@ -1,0 +1,85 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/documentation.yaml"
+  pull_request:
+    paths:
+      - "website/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/documentation.yaml"
+  workflow_dispatch:
+
+# Least privilege by default; the deploy job needs Pages + OIDC.
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # Always strict-build the site. On pull requests this is the gate that
+  # catches broken links / nav before merge; on main it produces the artifact
+  # the deploy job publishes.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv (with Python 3.13)
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Configure mkdocs-material cache key (weekly)
+        run: echo "cache_id=$(date --utc '+%V')" >> "$GITHUB_ENV"
+
+      - name: Restore mkdocs-material cache
+        uses: actions/cache@v5
+        with:
+          key: mkdocs-material-${{ env.cache_id }}
+          path: .cache
+          restore-keys: |
+            mkdocs-material-
+
+      - name: Install site dependencies
+        run: uv sync --group docs
+
+      - name: Build site (strict)
+        # Silence mkdocs-material's advisory banner; harmless to the build.
+        env:
+          NO_MKDOCS_2_WARNING: "true"
+        run: uv run mkdocs build --strict --site-dir site
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # Publish to GitHub Pages. Runs only off main (push / manual dispatch),
+  # never on pull requests.
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

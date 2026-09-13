@@ -1,0 +1,16 @@
+{% extends "main.html" %}
+
+{#-
+  Work-programme page: the shared band carries the title, and the markdown body
+  follows underneath.
+-#}
+{% block tabs %}
+  {{ super() }}
+  {% include "partials/page-header.html" %}
+{% endblock %}
+
+{% block content %}
+  <div class="slm-page">
+    {{ super() }}
+  </div>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "main.html" %}
+
+{#-
+  About page: the shared band carries the title, the markdown body opens the
+  page, and the fact table below it is built from the `facts` front matter, so
+  every value stays in the page source rather than in this template. Values are
+  marked safe because they are author-written markup, not user input.
+-#}
+{% block tabs %}
+  {{ super() }}
+  {% include "partials/page-header.html" %}
+{% endblock %}
+
+{% block content %}
+  <div class="slm-page">
+    {{ super() }}
+
+    {% if page.meta and page.meta.facts %}
+      <dl class="slm-facts">
+        {% for fact in page.meta.facts %}
+          <div class="slm-facts__row">
+            <dt class="slm-facts__label">{{ fact.label }}</dt>
+            <dd class="slm-facts__value">{{ fact.value | safe }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% endif %}
+  </div>
+{% endblock %}

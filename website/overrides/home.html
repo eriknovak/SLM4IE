@@ -1,0 +1,46 @@
+{% extends "main.html" %}
+
+<!--
+  Landing-page template: a full-width hero above the normal page content. The
+  hero carries the project identity and the funder line, so the page body can
+  open straight into the plain-language summary. Selected per page with
+  `template: home.html` in the front matter, which also supplies every string
+  in the hero, so each language fills it from its own page source.
+-->
+{% block tabs %}
+  {{ super() }}
+  <section class="slm-hero">
+    <div class="md-grid slm-hero__inner">
+      <img
+        class="slm-hero__logo"
+        src="{{ 'assets/imgs/logo/slm4ie_logo_color.svg' | url }}"
+        alt=""
+        width="96"
+        height="108"
+      >
+      <div class="slm-hero__text">
+        <p class="slm-hero__eyebrow">{{ page.meta.hero_eyebrow }}</p>
+        <h1 class="slm-hero__title">{{ page.meta.hero_title }}</h1>
+        <p class="slm-hero__tagline">{{ page.meta.hero_tagline }}</p>
+        <nav class="slm-hero__actions">
+          {#- Relative to the page, not the site root, so each language's home links within it. -#}
+          <a class="md-button md-button--primary" href="{{ page.meta.hero_action }}">
+            {{ page.meta.hero_action_label }}
+          </a>
+          <a class="md-button" href="{{ config.repo_url }}">{{ page.meta.hero_repo_label }}</a>
+        </nav>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+<!--
+  Material emits an `<h1>` from the page title when the markdown has none. The
+  hero above already carries the title, so this wrapper lets the stylesheet hide
+  that heading on the pages whose template shows it themselves.
+-->
+{% block content %}
+  <div class="slm-page slm-home">
+    {{ super() }}
+  </div>
+{% endblock %}

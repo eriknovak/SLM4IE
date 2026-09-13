@@ -1,0 +1,198 @@
+# extract.yaml — Normalize raw sources into the canonical extracted/ tier.
+#
+# Pipeline: prepare_datasets.py extract  raw/<key>/ -> extracted/<key>.jsonl (+ .annotations.jsonl.gz)
+#           The dataset key list here is also what the curation pipeline iterates.
+#
+# Top-level keys:
+#   input_dir    Root of raw downloads (download.yaml's output_dir).
+#   output_dir   Root for the extracted/ tier.
+#   mlflow       Tracking for extraction builds (see Notes: mlflow).
+#   datasets     Map of <dataset key> -> extraction spec.
+#
+# Entry fields:
+#   extractor    Registered reader (see Notes: extractors).
+#   domain       Free-text provenance tag flowing into Document.metadata (web,
+#                wiki, parliamentary, academic, legal, medical, scientific, forum,
+#                blog, news, student, mixed); drives source-weighted sampling.
+#   metadata     Optional; two unrelated uses (see Notes: metadata).
+#
+# Notes:
+#   extractors   jsonl (line-delimited JSON), json (single doc/array), text
+#     (plain text), conllu (CoNLL-U columns), tei (TEI XML, parliamentary/academic),
+#     macocu (MaCoCu monolingual XML), coleslaw (COLESLAW legal), huggingface
+#     (locally cached HF dataset). Registry lives in slm4ie/data/extractors/.
+#   metadata     (a) conllu/tei extractors: per-document metadata loaded from an
+#     external TSV — keys path, key_column, key_from ("filename_stem" only),
+#     key_pattern (regex, group 1 = key), fields ({tsv_column: metadata_field}),
+#     splits ({tsv_column: separator} to explode list columns into JSON arrays).
+#     (b) jsonl extractor: field-mapping knobs — text_field (default "text"),
+#     id_field (default "doc_id"), metadata_fields (whitelist; default every
+#     non-structural field).
+#   mlflow       When enabled, one run per build is upserted to `experiment`
+#     (keyed by a content digest of the extracted tree): per-source row counts +
+#     empty-text rates as metrics, a per-source quality profile as profile.json,
+#     and the extracted tree as a `produced` dataset input.
+#
+# Selection: pass dataset keys positionally, or --all.
+#   --force re-extracts existing outputs; --max-workers sets parallelism.
+
+input_dir: ./data/raw
+output_dir: ./data/extracted
+
+# --- MLflow -------------------------------------------------------------
+mlflow:
+  enabled: false                  # opt in per run; toggle --mlflow / --no-mlflow
+  experiment: slm4ie/data/extract
+  tracking_uri: null              # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
+
+# --- Datasets -----------------------------------------------------------
+datasets:
+  classla_web_sl:
+    extractor: jsonl
+    domain: web
+
+  classlawiki_sl:
+    extractor: conllu
+    domain: wiki
+
+  macocu_sl:
+    extractor: macocu
+    domain: web
+
+  parlamint_si:
+    extractor: tei
+    domain: parliamentary
+
+  kas:
+    extractor: tei
+    domain: academic
+    metadata:
+      path: kas-meta.tsv
+      key_column: id # values like "kas-10000" match the TEI filename stem
+      key_from: filename_stem
+      fields:
+        cerif: cerif
+        cerif_conf: cerif_conf
+        udc: udc
+        udc_desc: udc_desc
+        type: doctype
+        publisher_abbr: faculty
+        keywords: keywords
+      splits:
+        keywords: "|"
+
+  coleslaw:
+    extractor: coleslaw
+    domain: legal
+
+  povejmo_vemo_med:
+    extractor: json
+    domain: medical
+
+  oss:
+    extractor: conllu
+    domain: scientific
+    metadata:
+      path: OSS.CoNLL-U/OSS-metadata.tsv
+      key_column: id
+      key_from: filename_stem
+      key_pattern: '^oss-(\d+)$' # filenames like oss-10000.conllu
+      fields:
+        cerif: cerif
+        udc: udc
+        udc_desc: udc_desc
+        type: doctype
+        publisher_abbr: faculty
+        keywords: keywords
+      splits:
+        cerif: "|"
+        keywords: "|"
+        udc_desc: "|"
+
+  siparl:
+    extractor: tei
+    domain: parliamentary
+
+  janes_forum:
+    extractor: tei
+    domain: forum
+
+  janes_blog:
+    extractor: tei
+    domain: blog
+
+  janes_news:
+    extractor: tei
+    domain: news
+
+  kzb:
+    extractor: conllu
+    domain: scientific
+    metadata:
+      path: KZB.conll/KZB.tsv
+      key_column: ID
+      key_from: filename_stem
+      fields:
+        Fields: field
+        Type: doctype
+        Keywords: keywords
+        Publisher: publisher
+      splits:
+        Fields: ","
+        Keywords: ","
+
+  solar:
+    extractor: conllu
+    domain: student
+
+  finepdf:
+    extractor: huggingface
+    domain: web
+
+  fineweb2:
+    extractor: huggingface
+    domain: web
+
+  culturax:
+    extractor: huggingface
+    domain: web
+
+  legal_mc4:
+    extractor: jsonl
+    domain: legal
+
+  slovenian_news:
+    # Living corpus of Slovenian news articles, refreshed weekly as new
+    # <YYYY-MM-DD>_<YYYY-MM-DD>.jsonl windows land under the raw dir.
+    # Records carry text in `body` and id in `uri`. Re-run
+    # extraction with --force to pick up newly added weekly files.
+    extractor: jsonl
+    domain: news
+    metadata:
+      text_field: body
+      id_field: uri
+      metadata_fields: [url, title, dateTime, source]
+
+  c4:
+    extractor: huggingface
+    domain: web
+
+  hplt:
+    extractor: huggingface
+    domain: web
+
+  cc100:
+    extractor: text
+    domain: web
+
+  gigafida:
+    extractor: tei
+    domain: mixed
+
+  suk:
+    extractor: conllu
+    domain: mixed
+
+  ssj500k:
+    extractor: conllu
+    domain: mixed

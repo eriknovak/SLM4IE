@@ -1,0 +1,18 @@
+{#-
+  Band above a page's content, carrying the page title so the body can open on
+  its first paragraph. Pages opt in through `template:` and fill it from their
+  front matter: `eyebrow` above the title, `subtitle` below it. A template can
+  set `band_title` and `band_subtitle` before including it to replace both.
+-#}
+<section class="slm-band">
+  <div class="md-grid slm-band__inner">
+    {% if page.meta and page.meta.eyebrow %}
+      <p class="slm-band__eyebrow">{{ page.meta.eyebrow }}</p>
+    {% endif %}
+    <h1 class="slm-band__title">{{ band_title | d(page.title, true) | d(config.site_name, true) }}</h1>
+    {% set subtitle = band_subtitle | d(page.meta and page.meta.subtitle, true) %}
+    {% if subtitle %}
+      <p class="slm-band__subtitle">{{ subtitle }}</p>
+    {% endif %}
+  </div>
+</section>

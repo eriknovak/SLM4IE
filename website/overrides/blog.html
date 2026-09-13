@@ -1,0 +1,54 @@
+{% extends "main.html" %}
+
+{#-
+  News index, archive and category pages: the shared title band carries the
+  heading, the category links sit under the intro, and the plugin's post list
+  follows. The container block restates the theme's own blog markup because a
+  custom_dir template cannot extend the theme file it overrides. The link
+  strings come from the index's front matter, so each language fills them.
+-#}
+{% block tabs %}
+  {{ super() }}
+  {% set blog = config.plugins["material/blog"].blog %}
+  {% set kind = page.__class__.__name__ %}
+  {% if page.url != blog.url and kind in ("Category", "Archive") %}
+    {% set band_title = blog.title %}
+    {% set band_subtitle = blog.meta[kind | lower ~ "_subtitle"] | replace("{name}", page.name) %}
+  {% endif %}
+  {% include "partials/page-header.html" %}
+{% endblock %}
+
+{% block container %}
+  <div class="md-content" data-md-component="content">
+    <div class="md-content__inner">
+      <header class="md-typeset slm-page">
+        {% set blog = config.plugins["material/blog"].blog %}
+        {#- An archive or category page's own body is only its generated heading. -#}
+        {% if page.url == blog.url %}
+          {{ page.content }}
+        {% endif %}
+        {% set categories = blog.views | selectattr("__class__.__name__", "eq", "Category") | list %}
+        {% if categories %}
+          <nav class="slm-filters" aria-label="{{ blog.meta.categories_label }}">
+            <a class="slm-chip" href="{{ blog.url | url }}"{% if page.url == blog.url %} aria-current="page"{% endif %}>
+              {{ blog.meta.categories_all }} ({{ blog.posts | length }})
+            </a>
+            {% for category in categories %}
+              <a class="slm-chip" href="{{ category.url | url }}"{% if page.url == category.url %} aria-current="page"{% endif %}>
+                {{ category.name }} ({{ category.posts | length }})
+              </a>
+            {% endfor %}
+          </nav>
+        {% endif %}
+      </header>
+      {% for post in posts %}
+        {% include "partials/post.html" %}
+      {% endfor %}
+      {% if pagination %}
+        {% block pagination %}
+          {% include "partials/pagination.html" %}
+        {% endblock %}
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

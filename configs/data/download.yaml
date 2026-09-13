@@ -1,0 +1,453 @@
+# download.yaml — Raw corpus & benchmark download catalog.
+#
+# Pipeline: prepare_datasets.py download  <urls|repo_id> -> data/<output_dir>/ (raw, untouched)
+#           Also read by the tokenization step to resolve per-dataset raw subdirs.
+#
+# Top-level keys:
+#   output_dir   Root for all raw downloads.
+#   datasets     Map of <dataset key> -> dataset spec.
+#
+# Entry fields:
+#   enabled      If false, --all skips it (still fetchable by key).
+#   source       http | huggingface — selects the download backend.
+#   name         Human-readable title.
+#   output_dir   Subdirectory under the top-level output_dir.
+#   provider     Origin, e.g. clarin.si. Informational.
+#   urls         [http] Files to fetch.
+#   repo_id      [huggingface] Hub repo id.
+#   configs      [huggingface] Subset/config names to pull.
+#   manual       If true, needs a manual download step (see the entry's note).
+#   note         Free-text caveats, stats, licensing.
+#   role         pretrain | benchmark | lexicon. Defaults to `pretrain`
+#                (pretraining corpus) when omitted — corpus entries below rely
+#                on the default. `benchmark` marks evaluation datasets;
+#                `lexicon` marks tokenizer/morphology lexicons. Neither enters
+#                the pretraining corpus. Unrelated to tasks.yaml's `role`.
+#   tasks        [non-pretrain] Downstream tasks supported.
+#
+# Selection: pass dataset keys positionally, or --all for enabled entries.
+
+output_dir: ./data/raw
+
+datasets:
+  # --- CLARIN.SI corpora ------------------------------------------------
+  classla_web_sl:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "CLASSLA-web.sl 2.0 (annotated)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2079/CLASSLA-web.sl.2.0.anno.jsonl.gz?sequence=19&isAllowed=y"
+    output_dir: classla_web_sl
+
+  classlawiki_sl:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "CLASSLAWiki-sl"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1427/classlawiki-sl.conllu.gz?sequence=6&isAllowed=y"
+    output_dir: classlawiki_sl
+
+  macocu_sl:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "MaCoCu-sl 2.0"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-sl-2.0.xml.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-monolingual.dtd?sequence=2&isAllowed=y"
+    output_dir: macocu_sl
+
+  parlamint_si:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "ParlaMint-SI 5.0 (linguistically annotated)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2005/ParlaMint-SI.ana.tgz?sequence=27&isAllowed=y"
+    output_dir: parlamint_si
+    note: >
+      The .ana variant (handle 11356/2005) ships TEI XML with <w>/<pc>
+      token annotations inside <u>/<seg> utterances — required by the
+      utterance-aware TEI extractor. The plain variant (handle
+      11356/2004) lacks <w> tokens and would silently fall back to
+      paragraph parsing on registry/header content.
+
+  kas:
+    enabled: false
+    source: http
+    provider: clarin.si
+    name: "KAS 2.0 (Academic Writing Corpus)"
+    manual: true
+    urls:
+      - "https://www.clarin.si/repository/xmlui/handle/11356/1448"
+    output_dir: kas
+    note: >
+      Requires CLARIN.SI academic login (Shibboleth). Download kas.tei.tar.gz
+      manually from the repository page and place it in data/raw/kas/.
+
+  coleslaw:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "COLESLAW 1.0 (Slovenian Legal Texts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2095/COLESLAW.zip?sequence=3&isAllowed=y"
+    output_dir: coleslaw
+
+  povejmo_vemo_med:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "PoVeJMo-VeMo-Med 1.0 (Slovenian Medical Texts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1983/PoVeJMo-VeMo-Med_1.0.zip?sequence=1&isAllowed=y"
+    output_dir: povejmo_vemo_med
+
+  oss:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "OSS 1.0 (Corpus of Scientific Texts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.1.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.2.zip?sequence=2&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1774/OSS.CoNLL-U.3.zip?sequence=3&isAllowed=y"
+    output_dir: oss
+    note: >
+      2.59 billion words / 3.26 billion tokens from 151K scientific texts
+      (monographs, articles, theses) from Slovenian universities (2000-2022).
+
+  siparl:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "siParl 4.0 (Slovenian Parliamentary Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1936/siParl.4.0.TEI.ana.zip?sequence=8&isAllowed=y"
+    output_dir: siparl
+    note: >
+      239 million words from parliamentary minutes (1990-2022). Annotated TEI XML
+      format, text extraction required. May overlap with ParlaMint-SI 5.0.
+
+  janes_forum:
+    enabled: false
+    source: http
+    provider: clarin.si
+    name: "Janes-Forum 1.0 (Slovenian Forum Posts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1139/Janes-Forum.TEI.zip?sequence=1&isAllowed=y"
+    output_dir: janes_forum
+    note: >
+      47 million tokens from Slovenian forum posts (2001-2015).
+      Informal register, user-generated content.
+
+  janes_blog:
+    enabled: false
+    source: http
+    provider: clarin.si
+    name: "Janes-Blog 1.0 (Slovenian Blog Posts)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1138/Janes-Blog.TEI.zip?sequence=1&isAllowed=y"
+    output_dir: janes_blog
+    note: >
+      34.5 million tokens from blog posts and comments (2006-2016).
+      Informal register, user-generated content.
+
+  janes_news:
+    enabled: false
+    source: http
+    provider: clarin.si
+    name: "Janes-News 1.0 (Slovenian News Comments)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1140/Janes-News.TEI.zip?sequence=1&isAllowed=y"
+    output_dir: janes_news
+    note: >
+      14.8 million tokens from news article comments (2007-2015).
+      Informal register, user-generated content.
+
+  kzb:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "KZB 1.0 (Scientific Texts of Contemporary Slovenian)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1872/KZB.conll.zip?sequence=1&isAllowed=y"
+    output_dir: kzb
+    note: >
+      25 million words / 33.6 million tokens of curated scientific
+      monographs and papers (2000-2023).
+
+  solar:
+    enabled: true
+    source: http
+    provider: clarin.si
+    name: "Solar 3.0 (Student Essays)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1589/Solar.CoNLL-U.zip?sequence=5&isAllowed=y"
+    output_dir: solar
+    note: >
+      1.6 million words from 5,485 student essays.
+
+  # --- Web-scale corpora (HuggingFace + direct) -------------------------
+  finepdf:
+    enabled: true
+    source: huggingface
+    name: "FinePDF"
+    repo_id: "HuggingFaceFW/finepdfs"
+    configs:
+      - "slv_Latn"
+    output_dir: finepdf
+
+  fineweb2:
+    enabled: true
+    source: huggingface
+    name: "FineWeb-2"
+    repo_id: "HuggingFaceFW/fineweb-2"
+    configs:
+      - "slv_Latn"
+    output_dir: fineweb2
+
+  culturax:
+    enabled: true
+    source: huggingface
+    name: "CulturaX"
+    repo_id: "uonlp/CulturaX"
+    configs:
+      - "sl"
+    output_dir: culturax
+    note: >
+      Gated dataset. Requires HF_TOKEN env var with a token that has
+      accepted the dataset terms at https://huggingface.co/datasets/uonlp/CulturaX.
+
+  legal_mc4:
+    enabled: true
+    source: http
+    name: "Legal-mC4 (Slovenian)"
+    urls:
+      - "https://huggingface.co/datasets/joelniklaus/legal-mc4/resolve/main/data/sl.train.0.jsonl.xz"
+      - "https://huggingface.co/datasets/joelniklaus/legal-mc4/resolve/main/data/sl.validation.0.jsonl.xz"
+    output_dir: legal_mc4
+    note: >
+      Legal domain text filtered from mC4. ~32.5K documents, ~107M words.
+      Downloaded directly from the HuggingFace LFS endpoint (the repo's
+      loading script is no longer supported by the datasets library).
+
+  c4:
+    enabled: true
+    source: huggingface
+    name: "mC4 (Slovenian)"
+    repo_id: "allenai/c4"
+    configs:
+      - "sl"
+    output_dir: c4
+    note: >
+      Cleaned multilingual Common Crawl corpus. ~5 GB+ for Slovenian.
+      May overlap with other Common Crawl-derived datasets.
+
+  hplt:
+    enabled: true
+    source: huggingface
+    name: "HPLT 2.0 Cleaned (Slovenian)"
+    repo_id: "HPLT/HPLT2.0_cleaned"
+    configs:
+      - "slv_Latn"
+    output_dir: hplt
+    note: >
+      HPLT project web-crawled corpus from CommonCrawl + Internet Archive,
+      cleaned tier. Parquet-based, loadable by datasets >= 4.0. Replaces the
+      v1.2 release, whose script-based loader is no longer supported.
+
+  cc100:
+    enabled: true
+    source: http
+    name: "CC100 (Slovenian)"
+    urls:
+      - "https://data.statmt.org/cc-100/sl.txt.xz"
+    output_dir: cc100
+    note: >
+      Monolingual data from CommonCrawl filtered using fastText language ID,
+      created by Facebook AI for the XLM-R paper. ~1.4 GB compressed for Slovenian.
+      Downloaded directly from statmt.org (the HuggingFace mirror was script-based
+      and is no longer supported by the datasets library).
+
+  # --- Unavailable / manual-access stubs --------------------------------
+  gigafida:
+    enabled: false
+    name: "Gigafida 2.2"
+    source: http
+    output_dir: gigafida
+    note: >
+      Not publicly downloadable. CJVT distributes it on request as
+      presigned MinIO URLs that embed short-lived S3 credentials (expire
+      after ~3 days). Those URLs are secrets and must never be committed,
+      so this stub stays `enabled: false`. Put the live `enabled: true`
+      entry and its `urls` list in configs/data/download.local.yaml
+      (gitignored); load_config deep-merges that overlay over this entry.
+      Contact: simon.krek@ijs.si
+
+  slovenian_news:
+    enabled: false
+    name: "Slovenian News (living corpus)"
+    output_dir: slovenian_news
+    note: >
+      Not downloadable via URL. A living corpus of Slovenian news
+      articles, refreshed weekly by a separate collection pipeline
+      that is not part of this repo.
+      Lands as <YYYY-MM-DD>_<YYYY-MM-DD>.jsonl windows directly under
+      data/raw/slovenian_news/. This stub stays `enabled: false` so
+      `download.py --all` skips it; extraction reads it via its
+      configs/data/extract.yaml entry (jsonl extractor, body/uri field
+      mapping). Re-run extraction with --force after new weekly windows
+      arrive to fold them into the corpus.
+
+  metafida:
+    enabled: false
+    name: "Metafida 1.0"
+    note: >
+      Not available for bulk download. Access via concordancers only
+      (KonText, NoSketch Engine).
+
+  trendi:
+    enabled: false
+    name: "Trendi"
+    note: >
+      Not available for download due to copyright restrictions.
+      Contact: iztok.kosem@ijs.si.
+
+  # --- Non-pretraining datasets (role: benchmark | lexicon) --------------
+  # Downstream evaluation benchmarks and tokenizer lexicons, not pretraining.
+  # The download script's --only-benchmarks / --exclude-benchmarks filter on
+  # the `role` field; per-task converters dispatch on `tasks`.
+  suk:
+    enabled: true
+    role: benchmark
+    source: http
+    provider: clarin.si
+    name: "SUK 1.1 (Slovene Training Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.TEI.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.CoNLL-U.zip?sequence=2&isAllowed=y"
+    output_dir: suk
+    tasks:
+      - POS
+      - LEMMA
+      - DEP
+      - NER
+      - SRL
+      - COREF
+      - WSD
+      - SA
+    note: >
+      ~1M tokens / 881K words / 48,594 sentences / 2,913 texts. Manually annotated
+      with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3,
+      Ambiga, ElexisWSD, and SentiCoref subcorpora. Gold-standard evaluation corpus
+      for IE tasks. License: CC BY-SA 4.0.
+
+  ssj500k:
+    enabled: true
+    role: benchmark
+    source: http
+    provider: clarin.si
+    name: "ssj500k 2.3 (Slovene Training Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1434/ssj500k.conllu.zip?sequence=10&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1434/ssj500k-en.TEI.zip?sequence=11&isAllowed=y"
+    output_dir: ssj500k
+    tasks:
+      - POS
+      - LEMMA
+      - DEP
+      - NER
+      - SRL
+    note: >
+      ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8),
+      named entities, and semantic role labels. Foundation corpus for SUK 1.1
+      (subset). Standalone version useful for direct comparison with prior work.
+      License: CC BY-NC-SA 4.0.
+
+  superglue_sl:
+    enabled: true
+    role: benchmark
+    source: http
+    provider: clarin.si
+    name: "Slovene SuperGLUE"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1380/SuperGLUE-HumanT.zip?sequence=1&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1380/SuperGLUE-GoogleMT.zip?sequence=2&isAllowed=y"
+    output_dir: superglue_sl
+    tasks:
+      - QA
+      - NLI
+      - WSD
+      - COREF
+      - MRC
+    note: >
+      Slovene translation of SuperGLUE: BoolQ, CB, COPA, MultiRC, ReCoRD, RTE,
+      WiC, WSC. Mix of human and Google MT translation (COPA + WSC fully human).
+      Formats: JSONL, CSV, TXT. License: CC BY 4.0. Submit predictions to SloBENCH
+      for leaderboard evaluation. Materialize per-task evaluation files with
+      `prepare_datasets.py tasks`.
+
+  sentinews:
+    enabled: true
+    role: benchmark
+    source: http
+    provider: clarin.si
+    name: "SentiNews 1.0 (Slovene News Sentiment)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1110/SentiNews_sentence-level.txt?sequence=2&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1110/SentiNews_paragraph-level.txt?sequence=3&isAllowed=y"
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1110/SentiNews_document-level.txt?sequence=4&isAllowed=y"
+    output_dir: sentinews
+    tasks:
+      - SA
+    note: >
+      Slovene news sentiment corpus with three-level annotations (sentence,
+      paragraph, document) and 3-class labels (negative/neutral/positive).
+      ~10K documents from Slovenian news outlets. Tab-separated text files,
+      directly downloadable (no API rehydration needed). License: CC BY-SA 4.0.
+      Convert to evaluation JSONL with `prepare_datasets.py tasks`.
+
+  sloleks:
+    enabled: true
+    role: lexicon
+    source: http
+    provider: clarin.si
+    name: "Sloleks 3.1 (Slovenian Inflectional Lexicon)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2080/Sloleks.3.1.zip?sequence=1&isAllowed=y"
+    output_dir: sloleks
+    tasks:
+      - TOKENIZER
+    note: >
+      Slovenian inflectional lexicon with lemmas and morphological forms
+      (MULTEXT-East V6 / JOS MSDs). Used for *tokenizer / morphology*
+      evaluation only -- NOT running text and must not enter the
+      pretraining corpus. Distributed as a single 263 MB zip with ~100
+      split TEI XML files. Intentionally absent from
+      configs/data/extract.yaml so the extract -> datatrove -> curate
+      pipeline never sees it. Convert via `prepare_datasets.py tokenization`.
+      License: CC BY-SA 4.0.
+
+  sloleks_relations:
+    enabled: true
+    role: lexicon
+    source: http
+    provider: clarin.si
+    name: "Sloleks 2.0 word relations 1.1 (derivational decomposition)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1986/nssss_sloleks_word_relations_1.1.zip?sequence=1&isAllowed=y"
+    output_dir: sloleks_relations
+    tasks:
+      - TOKENIZER
+    note: >
+      Derivational word-relation pairs from Sloleks 2.0 (CLARIN.SI 11356/1986,
+      DOI 10.34894/EBQJRF). Each derived lemma is decomposed into morphemes with
+      underscores (pis_at_elj); ~5k of the 66,347 pairs carry a manual linguist
+      score (0/1/2). Used as the *derivational* silver-gold for tokenizer /
+      morphology evaluation only -- NOT running text and must not enter the
+      pretraining corpus. Intentionally absent from configs/data/extract.yaml.
+      Convert via `prepare_datasets.py tokenization`. MSDs are MULTEXT-East V6.
+      License: CC BY-SA 4.0.

@@ -1,0 +1,80 @@
+# sweep.yaml — Tokenizer training + morphological evaluation sweep.
+#
+# Pipeline: tokenizers/{train,analyze}.py  pretrain/06_sentence_dedup/ + tokenization/*.jsonl.gz -> tokenizers/
+#
+# Top-level keys:
+#   corpus          Training-corpus root, dataset selection, and sampling budget.
+#   tokenizers      Backends to train (see Notes: backends).
+#   vocab_sizes     Vocab sweep applied to every backend.
+#   special_tokens  Reserved tokens shared by all trained tokenizers.
+#   morphology      Sloleks-derived silver gold (see Notes: morphology).
+#   output          Artifact + report roots.
+#   eval            Held-out evaluation sample + Rényi alpha.
+#   stats           Bootstrap CI + significance settings (see Notes: stats).
+#   mlflow          Tracking (see Notes: mlflow).
+#
+# Notes:
+#   backends     bpe = byte-level (canonical); charbpe = char-level (clean
+#     MorphBPE ablation); plus wordpiece, unigram, morphbpe, morphpiece.
+#   morphology   sloleks_path is the inflectional gold (form -> stem+suffix,
+#     heuristic); sloleks_relations_path is the derivational gold (lemma ->
+#     morphemes) from Sloleks 2.0 word relations (CLARIN 11356/1986). When set,
+#     its morphemes also enrich the morphological backends' table and the report
+#     gains derivational *_deriv columns.
+#   stats        Bootstrap CIs + paired significance for the decomposable metrics.
+#     Corpus metrics resample documents (block bootstrap over the held-out eval
+#     docs); morph metrics resample forms from a deterministic shared sample so
+#     forms align by index for the paired tests. renyi_efficiency and
+#     morph_consistency are global functionals that stay point estimates (no CI).
+#   mlflow       train + analyze both log to MLflow. tracking_uri null falls back
+#     to $MLFLOW_TRACKING_URI (localhost:5555 here), then to a local SQLite store.
+#
+# Secrets / machine-specific overrides (e.g. mlflow.tracking_uri) belong in a
+# gitignored sibling sweep.local.yaml, deep-merged over this file.
+
+# --- Training corpus ----------------------------------------------------
+corpus:
+  root: /vault/data/SLM4IE/pretrain/06_sentence_dedup  # final deduplicated corpus
+  datasets: []                    # [] = all dataset subdirs
+  budget:
+    max_bytes: 2_000_000_000      # ~2 GB sampled training text
+    max_docs: null
+    seed: 13
+    weight_key: dataset           # source = dataset subdir name
+    source_weights: {}            # per-source weights; default 1.0
+
+# --- Sweep --------------------------------------------------------------
+tokenizers: [bpe, charbpe, wordpiece, unigram, morphbpe, morphpiece]  # see Notes: backends
+vocab_sizes: [16000, 32000, 64000]
+special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
+
+# --- Morphology (Sloleks-derived silver gold) ---------------------------
+morphology:                       # see Notes: morphology
+  sloleks_path: /vault/data/SLM4IE/tokenization/sloleks.jsonl.gz
+  sloleks_relations_path: /vault/data/SLM4IE/tokenization/sloleks_relations.jsonl.gz
+  min_stem_len: 2
+
+# --- Output -------------------------------------------------------------
+output:
+  root: /vault/data/SLM4IE/tokenizers          # per-run artifact subdirs
+  report_dir: /vault/data/SLM4IE/tokenizers/_reports
+
+# --- Evaluation ---------------------------------------------------------
+eval:
+  corpus_budget:
+    max_bytes: 200_000_000        # held-out sample (different seed)
+    seed: 99
+  renyi_alpha: 2.5
+
+# --- Statistics ---------------------------------------------------------
+stats:                            # see Notes: stats
+  n_resamples: 2000               # bootstrap resamples (B)
+  ci_level: 0.95                  # confidence level
+  seed: 12345                     # shared-resample seed
+  morph_form_sample: 200000       # forms for morph CIs/tests
+
+# --- MLflow -------------------------------------------------------------
+mlflow:                           # see Notes: mlflow
+  enabled: true                   # sweep always logs; train + analyze both log
+  experiment: slm4ie/tokenizers/sweep
+  tracking_uri: null              # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
