@@ -104,16 +104,20 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 
 
 def _list_datasets(extract_config: Path) -> List[str]:
-    """Return dataset keys declared in `extract.yaml`.
+    """Return the pretraining dataset keys declared in `extract.yaml`.
+
+    Entries with `role: benchmark` are evaluation gold and never enter the
+    corpus on an `--all` build; they can still be passed positionally.
 
     Args:
         extract_config: Path to the extraction config.
 
     Returns:
-        Dataset keys in declaration order.
+        Dataset keys with `role: pretrain` (the default), in declaration order.
     """
     cfg = _load_yaml(extract_config)
-    return list((cfg.get("datasets") or {}).keys())
+    datasets = cfg.get("datasets") or {}
+    return [key for key, spec in datasets.items() if (spec or {}).get("role", "pretrain") == "pretrain"]
 
 
 def _resolve_dirs(input_dir: Optional[Path], output_dir: Optional[Path], cfg: Dict[str, Any]) -> Tuple[Path, Path]:

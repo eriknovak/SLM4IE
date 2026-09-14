@@ -13,7 +13,10 @@ Each stage writes a durable on-disk artifact and a `.complete` sentinel under
 and editing one section of the config cascade-invalidates that stage plus every
 downstream stage. `input_dir` is the folder of `<key>.jsonl` files from the
 extract step; `output_dir` is the pretrain-owned tree. The dataset key list
-comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml).
+comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml); entries
+marked `role: benchmark` (evaluation gold such as SUK) are skipped by `--all`
+so they never enter the corpus, and `access: gated` marks licence-bound sources
+whose totals are reported separately from the open ones.
 
 The settings are a shared registry, so the corpus is built once and reused by
 every experiment. The config is still passed explicitly, since an experiment may

@@ -15,6 +15,12 @@
 #                wiki, parliamentary, academic, legal, medical, scientific, forum,
 #                blog, news, student, mixed); drives source-weighted sampling.
 #   metadata     Optional; two unrelated uses (see Notes: metadata).
+#   role         Optional; `pretrain` (default) or `benchmark`. Benchmarks are
+#                extracted like any source but the curation pipeline's --all
+#                skips them, so evaluation gold never enters the corpus.
+#   access       Optional; `open` (default) or `gated` (login / licence-bound
+#                source). Informational: corpus totals are reported with and
+#                without gated sources, since a public release cannot ship them.
 #
 # Notes:
 #   extractors   jsonl (line-delimited JSON), json (single doc/array), text
@@ -66,6 +72,7 @@ datasets:
   kas:
     extractor: tei
     domain: academic
+    access: gated
     metadata:
       path: kas-meta.tsv
       key_column: id # values like "kas-10000" match the TEI filename stem
@@ -144,6 +151,7 @@ datasets:
   solar:
     extractor: conllu
     domain: student
+    access: gated
 
   finepdf:
     extractor: huggingface
@@ -156,6 +164,7 @@ datasets:
   culturax:
     extractor: huggingface
     domain: web
+    access: gated
 
   legal_mc4:
     extractor: jsonl
@@ -188,11 +197,14 @@ datasets:
   gigafida:
     extractor: tei
     domain: mixed
+    access: gated
 
   suk:
     extractor: conllu
     domain: mixed
+    role: benchmark
 
   ssj500k:
     extractor: conllu
     domain: mixed
+    role: benchmark
