@@ -1,1 +1,12 @@
-<svg viewBox="0 0 160 180" xmlns="http://www.w3.org/2000/svg"><polygon points="80.00,18.00 142.00,54.00 142.00,126.00 80.00,162.00 18.00,126.00 18.00,54.00" fill="#1b4dad" stroke="#1b4dad" stroke-width="1"/><polygon points="80.00,18.00 142.00,54.00 80.00,90.00" fill="#15a3a3" stroke="#15a3a3" stroke-width="1"/><polygon points="80.00,90.00 142.00,126.00 80.00,162.00" fill="#ffffff" opacity="0.16"/></svg>
+<svg viewBox="14 16 132 132" xmlns="http://www.w3.org/2000/svg">
+<g stroke="#1b4dad" stroke-width="10" stroke-linecap="round" fill="none">
+<line x1="26" y1="30" x2="118" y2="30"/>
+<line x1="26" y1="52" x2="46" y2="52"/>
+<line x1="116" y1="52" x2="134" y2="52"/>
+<line x1="26" y1="74" x2="92" y2="74"/>
+</g>
+<line x1="58" y1="52" x2="104" y2="52" stroke="#15a3a3" stroke-width="10" stroke-linecap="round"/>
+<path d="M70 88 L80 98 L90 88" stroke="#1b4dad" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="26" y="108" width="108" height="30" rx="6" fill="none" stroke="#1b4dad" stroke-width="4"/>
+<line x1="40" y1="123" x2="86" y2="123" stroke="#15a3a3" stroke-width="10" stroke-linecap="round"/>
+</svg>

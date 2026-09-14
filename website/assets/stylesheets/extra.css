@@ -49,10 +49,15 @@
   gap: 1.6rem;
 }
 
+/* White tile under the colour mark, so it reads on the banner gradient. */
 .slm-hero__logo {
   flex: 0 0 auto;
+  box-sizing: border-box;
   width: 6rem;
-  height: auto;
+  height: 6rem;
+  padding: 0.5rem;
+  background: #fff;
+  border-radius: 4px;
 }
 
 /* Stacked on a phone, the mark reads better centred above the title. */
