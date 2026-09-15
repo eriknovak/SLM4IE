@@ -23,10 +23,13 @@ build-backend = "hatchling.build"
 line-length = 120
 target-version = "py313"
 
+# Formatter (black-compatible): `uv run ruff format <paths>`, check only with `--check`.
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+line-ending = "lf"
 docstring-code-format = true
+docstring-code-line-length = "dynamic"
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
