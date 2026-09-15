@@ -67,6 +67,7 @@ def _stub_runner(monkeypatch: pytest.MonkeyPatch, ran: List[str]) -> None:
         dataset_keys: List[str],
         input_view: Any = None,
         log_dir: Any = None,
+        tasks: Any = None,
     ):
         def run() -> Tuple[int, int]:
             ran.append(stage)
@@ -83,8 +84,9 @@ def _stub_runner(monkeypatch: pytest.MonkeyPatch, ran: List[str]) -> None:
     monkeypatch.setattr(
         curate_runner,
         "_filter_stage_subset",
-        lambda _stage_dir, _keys: None,
+        lambda _stage_dir, _keys, holder=None: holder,
     )
+    monkeypatch.setattr(curate_runner, "_input_fingerprint", lambda _view: (1, "stub"))
     monkeypatch.setattr(
         curate_runner,
         "_has_stage_output",
@@ -305,3 +307,97 @@ def test_corpus_sentinel_records_counts_from_runner(monkeypatch: pytest.MonkeyPa
     records_in, records_out = _STUB_COUNTS
     assert sentinel.records_in == records_in
     assert sentinel.records_out == records_out
+
+
+def _write_stage_shards(stage_dir: Path, key: str, n_shards: int) -> None:
+    """Write *n_shards* placeholder shards for *key* under *stage_dir*.
+
+    Args:
+        stage_dir: Stage output folder.
+        key: Dataset key (subfolder name).
+        n_shards: Number of `<rank>.jsonl.gz` files to create.
+    """
+    (stage_dir / key).mkdir(parents=True, exist_ok=True)
+    for rank in range(n_shards):
+        (stage_dir / key / f"{rank:05d}.jsonl.gz").write_bytes(b"\x1f\x8b")
+
+
+def test_corpus_stage_reads_only_roster_datasets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A corpus stage skips upstream folders of keys outside the roster and runs one task per shard."""
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    output_dir = _setup_output(tmp_path)
+    repetition_dir = output_dir / STAGE_DIRS["repetition"]
+    _write_stage_shards(repetition_dir, _DATASET, 3)
+    _write_stage_shards(repetition_dir, "benchmark", 2)
+    seen: Dict[str, Any] = {}
+
+    def fake_runner(stage: str, paths: Any, cfg: Any, workers: int, *args: Any, **kwargs: Any):
+        def run() -> Tuple[int, int]:
+            view = kwargs["input_view"]
+            seen.update(
+                keys=kwargs["dataset_keys"],
+                tasks=kwargs["tasks"],
+                view_keys=sorted(child.name for child in view.iterdir()),
+            )
+            return _STUB_COUNTS
+
+        return run
+
+    monkeypatch.setattr(curate_runner, "_stage_runner", fake_runner)
+    _run_cli(monkeypatch, _common_cfg(input_dir, output_dir), ["--all", "--stage", "exact_dedup"], tmp_path)
+    assert seen == {"keys": [_DATASET], "tasks": 3, "view_keys": [_DATASET]}
+    assert not (output_dir / STAGE_DIRS["exact_dedup"] / curate_runner.PROGRESS_NAME).exists()
+
+
+class TestPrepareCorpusStage:
+    """`_prepare_corpus_stage` resumes a matching unfinished run and clears anything else."""
+
+    def _paths(self, tmp_path: Path) -> Any:
+        """Return curate paths with a stale shard, completion marker and dedup scratch in place."""
+        paths = curate_runner.CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
+        _write_stage_shards(paths.stage_dir("sentence_dedup"), "d1", 1)
+        (paths.logs_dir("sentence_dedup") / "1_sig" / "completions").mkdir(parents=True)
+        (paths.logs_dir("sentence_dedup") / "1_sig" / "completions" / "00000").touch()
+        (paths.dedup_state_dir / "sent_sigs").mkdir(parents=True)
+        return paths
+
+    def test_fresh_start_clears_stage(self, tmp_path: Path) -> None:
+        """Without a progress file, output, logs and dedup scratch are removed."""
+        paths = self._paths(tmp_path)
+        resumed = curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i")
+        assert resumed is False
+        assert list(paths.stage_dir("sentence_dedup").glob("*/*.jsonl.gz")) == []
+        assert not paths.logs_dir("sentence_dedup").exists()
+        assert not (paths.dedup_state_dir / "sent_sigs").exists()
+        assert (paths.stage_dir("sentence_dedup") / curate_runner.PROGRESS_NAME).is_file()
+
+    def test_matching_progress_resumes(self, tmp_path: Path) -> None:
+        """A progress file with the same hash, tasks and inputs keeps finished work."""
+        paths = self._paths(tmp_path)
+        curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i")
+        _write_stage_shards(paths.stage_dir("sentence_dedup"), "d1", 1)
+        (paths.logs_dir("sentence_dedup") / "1_sig" / "completions").mkdir(parents=True)
+        assert curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i") is True
+        assert (paths.stage_dir("sentence_dedup") / "d1" / "00000.jsonl.gz").exists()
+        assert (paths.logs_dir("sentence_dedup") / "1_sig" / "completions").exists()
+
+    @pytest.mark.parametrize("changed", [("h2", 4, "i"), ("h", 5, "i"), ("h", 4, "i2")])
+    def test_changed_settings_start_fresh(self, tmp_path: Path, changed: Tuple[str, int, str]) -> None:
+        """A different config hash, task count or input fingerprint clears the stage."""
+        paths = self._paths(tmp_path)
+        curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i")
+        _write_stage_shards(paths.stage_dir("sentence_dedup"), "d1", 1)
+        assert curate_runner._prepare_corpus_stage(paths, "sentence_dedup", *changed) is False
+        assert list(paths.stage_dir("sentence_dedup").glob("*/*.jsonl.gz")) == []
+
+
+def test_input_fingerprint_tracks_shard_rewrites(tmp_path: Path) -> None:
+    """The fingerprint counts shards and changes when a shard is rewritten."""
+    view = tmp_path / "view"
+    _write_stage_shards(view, "d1", 2)
+    count, digest = curate_runner._input_fingerprint(view)
+    assert count == 2
+    assert curate_runner._input_fingerprint(view) == (2, digest)
+    (view / "d1" / "00001.jsonl.gz").write_bytes(b"\x1f\x8b\x08")
+    assert curate_runner._input_fingerprint(view)[1] != digest

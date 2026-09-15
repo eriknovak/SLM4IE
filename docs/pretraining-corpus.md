@@ -70,10 +70,25 @@ result.
 Internally each dedup stage chains three datatrove executors via `depends=`:
 signature → find (single-worker reducer over signatures) → filter + write. The
 sig/find scratch lives at `<output_dir>/_dedup_state/` and is purged when the
-stage's sentinel lands. The statistics stage is single-process because
-`CorpusStats` keeps global counters on its instance. The sentence-dedup blocks
+stage's sentinel lands. The statistics stage maps `CorpusStats` over the corpus
+into per-task partials and reduces them in one process. The sentence-dedup blocks
 use `Languages.slovenian` so datatrove dispatches its bundled Slovenian
-`SpaCyTokenizer` for sentence boundaries.
+`SpaCyTokenizer` for sentence boundaries; its signature step packs hashes into
+numpy chunks rather than datatrove's per-sentence Python tuples, which cuts its
+memory about tenfold and writes identical files.
+
+The corpus-wide stages read only the roster's datasets (through a symlink view
+at `<output_dir>/_inputs/<stage>/`), so folders left upstream by keys dropped
+from `extract.yaml` or marked `role: benchmark` never reach them. They run one
+datatrove task per input shard, so a task holds at most one shard in memory and
+`--max-workers` only sets how many tasks run at once.
+
+**Resuming a crashed corpus stage.** Each corpus stage records its config hash,
+task count and an input fingerprint in `<stage folder>/.in_progress.json` when it
+starts. Rerunning the same command after a crash resumes: datatrove skips the
+tasks it marked complete under `_logs/<stage>/`, and the dedup scratch is kept.
+If any of the three values changed, the stage starts fresh and first clears its
+output folder, logs and scratch, so no shard from an earlier run survives.
 
 ## Sentinels: what triggers a rebuild
 
@@ -162,7 +177,9 @@ effectively non-overridable until some are surfaced.
 │   └── .complete
 ├── _dedup_state/                           sig/find scratch (auto-purged
 │                                           when each dedup sentinel lands)
-└── _logs/<stage>/                          datatrove per-executor logs
+├── _inputs/<stage>/                        roster view a corpus stage reads
+└── _logs/<stage>/                          datatrove per-executor logs and
+                                            per-task completion markers
 ```
 
 ## Useful invocations
@@ -196,7 +213,7 @@ uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --al
 ```
 
 `--max-workers` is **whole-pipeline**, not per-dataset: every parallel datatrove
-executor inside one stage uses the same worker count, so the per-dataset log
+executor inside one stage runs that many tasks at once, so the per-dataset log
 routing of `prepare_datasets.py` does not apply here. The default is 1 (serial)
 so a casual `--all` invocation does not silently saturate the box.
 

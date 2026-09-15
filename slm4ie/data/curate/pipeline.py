@@ -11,13 +11,18 @@ recursively, and every writer emits `<output_folder>/<dataset>/<rank>.jsonl.gz`,
 matching the convert stage's per-dataset shard layout. This
 preserves dataset provenance through every stage.
 
-Every builder sets `skip_completed=False` on every executor: per-stage
-skip is owned by the sentinel system in `slm4ie.data.curate.sentinel`,
-not by datatrove's built-in completion tracking. Builders are pure
-factories — they do not check, write, or honor sentinels.
+Stage-level skip is owned by the sentinel system in
+`slm4ie.data.curate.sentinel`. Within a stage, the corpus builders (exact
+dedup, sentence dedup, statistics) set `skip_completed=True`, so a rerun
+after a crash skips the tasks datatrove already marked complete; the runner
+clears the stage before a fresh start so stale markers never apply. The
+scoped builders keep `skip_completed=False`: their buckets share one
+logging folder, so a marker from one bucket would skip another's task.
+Builders are pure factories — they do not check, write, or honor sentinels.
 """
 
 import gzip
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +36,6 @@ from datatrove.pipeline.dedup import (
     ExactFindDedups,
     SentDedupConfig,
     SentenceDedupFilter,
-    SentenceDedupSignature,
     SentenceFindDedups,
 )
 from datatrove.pipeline.filters import GopherQualityFilter, GopherRepetitionFilter
@@ -40,7 +44,7 @@ from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.stats import PipelineStats
 from datatrove.utils.typeshelper import Languages
 
-from slm4ie.data.curate.dedup import default_exact_config
+from slm4ie.data.curate.dedup import CompactSentenceDedupSignature, default_exact_config
 from slm4ie.data.curate.language import LinguaLanguageFilter
 from slm4ie.data.curate.spam import SpamConfig, SpamFilter
 from slm4ie.data.curate.stages import STAGE_DIRS, upstream_stage
@@ -193,6 +197,27 @@ def pipeline_io_counts(stats: PipelineStats) -> Tuple[int, int]:
     records_in = int(stats.stats[0]["documents"].total)
     records_out = int(stats.stats[-1]["total"].total)
     return records_in, records_out
+
+
+def stage_io_counts(logging_dir: Path) -> Tuple[int, int]:
+    """Sum input/output document counts over every task a stage has finished.
+
+    datatrove writes each finished task's stats to
+    `<logging_dir>/stats/<rank>.json`. A resumed run returns stats for the
+    tasks it ran this time only (or `None` when all were already done), so
+    stage totals are read back from these per-task files instead.
+
+    Args:
+        logging_dir: The `logging_dir` of the stage's last executor.
+
+    Returns:
+        Tuple `(records_in, records_out)` as defined by `pipeline_io_counts`,
+        over all finished tasks; `(0, 0)` when none has finished.
+    """
+    merged = PipelineStats()
+    for stats_file in sorted((logging_dir / "stats").glob("*.json")):
+        merged = merged + PipelineStats.from_json(json.loads(stats_file.read_text(encoding="utf-8")))
+    return pipeline_io_counts(merged)
 
 
 def _count_jsonl_rows(path: Path) -> int:
@@ -493,8 +518,10 @@ def build_exact_dedup_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
+    workers: Optional[int] = None,
     finder_workers: int = 1,
     exact_config: Optional[ExactDedupConfig] = None,
+    input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the exact-dedup stage: sig → find → filter+write 05_exact_dedup/.
 
@@ -505,18 +532,24 @@ def build_exact_dedup_executors(
 
     Args:
         paths: Resolved input/output locations.
-        tasks: Parallel worker count for executors 1 and 3.
+        tasks: Task count for executors 1 and 3; each task reads its own
+            slice of the input shards, so more tasks means less memory per task.
+        workers: Tasks run at once; defaults to `tasks`.
         finder_workers: Worker count for the single-worker find
             executor 2 (and the `finder_workers` argument of the sig
             executor 1).
         exact_config: Optional `ExactDedupConfig`; defaults to one whose
             `content_getter` hashes `doc.text`.
+        input_override: Optional folder to read from instead of the
+            repetition stage's output, used to restrict the stage to the
+            roster's datasets through a symlinked view.
 
     Returns:
         Three chained `LocalPipelineExecutor`s.
     """
     cfg = exact_config or default_exact_config()
-    in_ = paths.stage_dir("repetition")
+    workers = workers or tasks
+    in_ = input_override if input_override is not None else paths.stage_dir("repetition")
     out = paths.stage_dir("exact_dedup")
     sigs = paths.dedup_state_dir / "exact_sigs"
     dups = paths.dedup_state_dir / "exact_dups"
@@ -527,9 +560,9 @@ def build_exact_dedup_executors(
             ExactDedupSignature(output_folder=str(sigs), config=cfg, finder_workers=finder_workers),
         ],
         tasks=tasks,
-        workers=tasks,
+        workers=workers,
         logging_dir=str(paths.logs_dir("exact_dedup") / "1_sig"),
-        skip_completed=False,
+        skip_completed=True,
     )
     find = LocalPipelineExecutor(
         pipeline=[ExactFindDedups(data_folder=str(sigs), output_folder=str(dups), config=cfg)],
@@ -537,7 +570,7 @@ def build_exact_dedup_executors(
         workers=finder_workers,
         logging_dir=str(paths.logs_dir("exact_dedup") / "2_find"),
         depends=sig,
-        skip_completed=False,
+        skip_completed=True,
     )
     filt = LocalPipelineExecutor(
         pipeline=[
@@ -546,10 +579,10 @@ def build_exact_dedup_executors(
             _writer(out),
         ],
         tasks=tasks,
-        workers=tasks,
+        workers=workers,
         logging_dir=str(paths.logs_dir("exact_dedup") / "3_filter"),
         depends=find,
-        skip_completed=False,
+        skip_completed=True,
     )
     return [sig, find, filt]
 
@@ -558,29 +591,37 @@ def build_sentence_dedup_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
+    workers: Optional[int] = None,
     finder_workers: int = 1,
     sentence_config: Optional[SentDedupConfig] = None,
     language: str = Languages.slovenian,
+    input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the sentence-dedup stage: sig → find → filter+write 06_sentence_dedup/.
 
     Three executors chained via `depends`, mirroring the exact stage:
-        1. (parallel) read 05_exact_dedup/ → SentenceDedupSignature → sent_sigs/
+        1. (parallel) read 05_exact_dedup/ → CompactSentenceDedupSignature → sent_sigs/
         2. (single)   SentenceFindDedups(sent_sigs/) → sent_dups/
         3. (parallel) read 05_exact_dedup/ → SentenceDedupFilter → write 06_sentence_dedup/
 
     Args:
         paths: Resolved input/output locations.
-        tasks: Parallel worker count for executors 1 and 3.
+        tasks: Task count for executors 1 and 3; each task reads its own
+            slice of the input shards, so more tasks means less memory per task.
+        workers: Tasks run at once; defaults to `tasks`.
         finder_workers: Worker count for the find executor.
         sentence_config: Optional `SentDedupConfig`.
         language: ISO-3 code for the sentence tokenizer.
+        input_override: Optional folder to read from instead of the
+            exact-dedup stage's output, used to restrict the stage to the
+            roster's datasets through a symlinked view.
 
     Returns:
         Three chained `LocalPipelineExecutor`s.
     """
     cfg = sentence_config or SentDedupConfig()
-    in_ = paths.stage_dir("exact_dedup")
+    workers = workers or tasks
+    in_ = input_override if input_override is not None else paths.stage_dir("exact_dedup")
     out = paths.stage_dir("sentence_dedup")
     sigs = paths.dedup_state_dir / "sent_sigs"
     dups = paths.dedup_state_dir / "sent_dups"
@@ -588,7 +629,7 @@ def build_sentence_dedup_executors(
     sig = LocalPipelineExecutor(
         pipeline=[
             _reader(in_),
-            SentenceDedupSignature(
+            CompactSentenceDedupSignature(
                 output_folder=str(sigs),
                 config=cfg,
                 finder_workers=finder_workers,
@@ -596,9 +637,9 @@ def build_sentence_dedup_executors(
             ),
         ],
         tasks=tasks,
-        workers=tasks,
+        workers=workers,
         logging_dir=str(paths.logs_dir("sentence_dedup") / "1_sig"),
-        skip_completed=False,
+        skip_completed=True,
     )
     find = LocalPipelineExecutor(
         pipeline=[SentenceFindDedups(data_folder=str(sigs), output_folder=str(dups), config=cfg)],
@@ -606,7 +647,7 @@ def build_sentence_dedup_executors(
         workers=finder_workers,
         logging_dir=str(paths.logs_dir("sentence_dedup") / "2_find"),
         depends=sig,
-        skip_completed=False,
+        skip_completed=True,
     )
     filt = LocalPipelineExecutor(
         pipeline=[
@@ -615,10 +656,10 @@ def build_sentence_dedup_executors(
             _writer(out),
         ],
         tasks=tasks,
-        workers=tasks,
+        workers=workers,
         logging_dir=str(paths.logs_dir("sentence_dedup") / "3_filter"),
         depends=find,
-        skip_completed=False,
+        skip_completed=True,
     )
     return [sig, find, filt]
 
@@ -627,9 +668,11 @@ def build_statistics_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
+    workers: Optional[int] = None,
     language: str = Languages.slovenian,
     stopwords: Optional[Set[str]] = None,
     top_k_words: int = 5_000,
+    input_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the statistics stage: map → reduce → 07_statistics/.
 
@@ -642,18 +685,22 @@ def build_statistics_executors(
 
     Args:
         paths: Resolved input/output locations.
-        tasks: Number of map workers. The reduce executor is always
+        tasks: Number of map tasks. The reduce executor is always
             single-process.
+        workers: Map tasks run at once; defaults to `tasks`.
         language: ISO-3 code for the tokenizer.
         stopwords: Stopword set used by `CorpusStats`.
         top_k_words: Word-frequency table size.
+        input_override: Optional folder to read from instead of the
+            sentence-dedup stage's output (a symlinked roster view).
 
     Returns:
         A list `[map_executor, reduce_executor]`. The reduce executor
         depends on the map executor, so callers can run the stage by
         invoking `executors[-1].run()`.
     """
-    in_ = paths.stage_dir("sentence_dedup")
+    workers = workers or tasks
+    in_ = input_override if input_override is not None else paths.stage_dir("sentence_dedup")
     out = paths.stage_dir("statistics")
     out.mkdir(parents=True, exist_ok=True)
     partials_dir = out / "_partials"
@@ -669,9 +716,9 @@ def build_statistics_executors(
             ),
         ],
         tasks=tasks,
-        workers=tasks,
+        workers=workers,
         logging_dir=str(paths.logs_dir("statistics") / "1_map"),
-        skip_completed=False,
+        skip_completed=True,
     )
     reduce_exec = LocalPipelineExecutor(
         pipeline=[
@@ -686,6 +733,6 @@ def build_statistics_executors(
         workers=1,
         logging_dir=str(paths.logs_dir("statistics") / "2_reduce"),
         depends=map_exec,
-        skip_completed=False,
+        skip_completed=True,
     )
     return [map_exec, reduce_exec]

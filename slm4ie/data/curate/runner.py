@@ -23,6 +23,8 @@ onto sentinels written before that fix. `scripts/curate_pretraining_corpus.py` i
 the CLI over both.
 """
 
+import hashlib
+import json
 import logging
 import os
 import shutil
@@ -76,6 +78,7 @@ from slm4ie.data.curate.pipeline import (
     build_statistics_executors,
     per_key_stage_counts,
     pipeline_io_counts,
+    stage_io_counts,
 )
 from slm4ie.data.curate.spam import SpamAssets, SpamConfig, load_spam_assets
 from slm4ie.data.io_utils import (
@@ -199,16 +202,19 @@ def _load_spam_assets(cfg: Dict[str, Any]) -> SpamAssets:
     return load_spam_assets(languages, url_blocklist=url_blocklist)
 
 
-def _filter_stage_subset(stage_dir: Path, keys: List[str]) -> Path:
-    """Materialize a tempdir of symlinks restricted to *keys* under *stage_dir*.
+def _filter_stage_subset(stage_dir: Path, keys: List[str], holder: Optional[Path] = None) -> Path:
+    """Materialize a folder of symlinks restricted to *keys* under *stage_dir*.
 
     Args:
         stage_dir: A scoped stage's output folder (e.g.
             `<output_dir>/01_language/`).
         keys: Dataset keys to expose.
+        holder: Folder to build the view in, replacing any previous view
+            there; a fresh tempdir when omitted. A fixed path keeps a
+            resumed corpus stage reading the same file paths.
 
     Returns:
-        Path to a tempdir mirroring the requested keys via symlinks, so a
+        Path to the folder mirroring the requested keys via symlinks, so a
         downstream stage's reader walks only the subset's shards.
 
     Raises:
@@ -224,7 +230,11 @@ def _filter_stage_subset(stage_dir: Path, keys: List[str]) -> Path:
         raise FileNotFoundError(
             f"No converted shard folder(s) under {stage_dir} for dataset(s): " + ", ".join(repr(k) for k in missing)
         )
-    holder = Path(tempfile.mkdtemp(prefix="slm4ie-pretrain-subset-"))
+    if holder is None:
+        holder = Path(tempfile.mkdtemp(prefix="slm4ie-pretrain-subset-"))
+    else:
+        shutil.rmtree(holder, ignore_errors=True)
+        holder.mkdir(parents=True)
     try:
         for key in keys:
             src = stage_dir / key
@@ -254,6 +264,61 @@ def _has_stage_output(stage_dir: Path, key: str) -> bool:
     """
     folder = stage_dir / key
     return folder.is_dir() and any(folder.glob("*.jsonl.gz"))
+
+
+#: File in a corpus stage folder recording what an unfinished run started with.
+PROGRESS_NAME: str = ".in_progress.json"
+
+
+def _input_fingerprint(view: Path) -> Tuple[int, str]:
+    """Count and fingerprint the shards a corpus stage will read.
+
+    Args:
+        view: Symlink view of the stage's input, one folder per dataset.
+
+    Returns:
+        Tuple `(shard_count, digest)`; the digest covers each shard's relative
+        path, size and modification time, so any upstream rewrite changes it.
+    """
+    shards = sorted(view.glob("*/*.jsonl.gz"))
+    digest = hashlib.sha256()
+    for shard in shards:
+        st = shard.stat()
+        digest.update(f"{shard.relative_to(view)}\t{st.st_size}\t{st.st_mtime_ns}\n".encode("utf-8"))
+    return len(shards), digest.hexdigest()
+
+
+def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str, tasks: int, inputs: str) -> bool:
+    """Resume an unfinished corpus stage, or clear it for a fresh start.
+
+    A run resumes only when the stage's progress file matches the current
+    config hash, task count and input fingerprint; datatrove then skips the
+    tasks it marked complete. Otherwise the stage output, its logs (with the
+    completion markers) and its dedup scratch are removed first, so no
+    shard or marker from an earlier run survives into this one.
+
+    Args:
+        paths: Resolved curation paths.
+        stage: Corpus stage name.
+        config_hash_value: Hash of the stage's config slice and roster.
+        tasks: Task count this run uses.
+        inputs: Input fingerprint from `_input_fingerprint`.
+
+    Returns:
+        True when resuming, False when the stage was cleared.
+    """
+    stage_dir = paths.stage_dir(stage)
+    progress_file = stage_dir / PROGRESS_NAME
+    expected = {"config_hash": config_hash_value, "tasks": tasks, "inputs": inputs}
+    if progress_file.is_file() and json.loads(progress_file.read_text(encoding="utf-8")) == expected:
+        return True
+    shutil.rmtree(stage_dir, ignore_errors=True)
+    shutil.rmtree(paths.logs_dir(stage), ignore_errors=True)
+    if stage in ("exact_dedup", "sentence_dedup"):
+        _purge_dedup_state(paths, stage)
+    stage_dir.mkdir(parents=True)
+    progress_file.write_text(json.dumps(expected), encoding="utf-8")
+    return False
 
 
 def _starting_input_hint(paths: CuratePaths, stage: str) -> str:
@@ -485,6 +550,7 @@ def _stage_runner(
     dataset_keys: List[str],
     input_view: Optional[Path] = None,
     log_dir: Optional[Path] = None,
+    tasks: Optional[int] = None,
 ) -> Callable[[], Tuple[int, int]]:
     """Return a zero-arg callable that runs *stage*'s executor chain.
 
@@ -499,20 +565,22 @@ def _stage_runner(
         dataset_keys: Dataset keys to process; consumed by the convert
             stage to know which `<key>.jsonl` files to read.
         input_view: Optional symlink view of the stage's upstream output,
-            restricting a scoped stage's reader to the keys being
-            (re)run. Consumed by the language, quality, and repetition
-            stages; ignored by convert (scoped by `dataset_keys`) and by
-            the corpus stages (full-corpus read).
+            restricting the reader to the keys being (re)run for a scoped
+            stage, or to the roster for a corpus stage. Ignored by convert
+            (scoped by `dataset_keys`).
         log_dir: Optional directory for per-task log files (currently
             only consumed by the convert stage).
+        tasks: Task count for the corpus stages; defaults to `workers`.
+            The scoped stages run one task per worker.
 
     Returns:
         A callable that runs the stage when invoked and returns its
         `(records_in, records_out)` document counts. The convert stage
         sums the per-dataset counts `run_convert_stage` returns; the
-        datatrove stages read theirs from the run's `PipelineStats`
-        via `pipeline_io_counts`. The statistics stage reports
-        `(records_in, 0)` since it emits a JSON bundle, not shards.
+        scoped datatrove stages read theirs from the run's `PipelineStats`
+        via `pipeline_io_counts`, and the resumable corpus stages from
+        every finished task's stats via `stage_io_counts`. The statistics
+        stage reports `(records_in, 0)` since it emits a JSON bundle, not shards.
 
     Raises:
         ValueError: If *stage* is not a known stage name.
@@ -625,15 +693,15 @@ def _stage_runner(
         )
 
         def run() -> Tuple[int, int]:
-            try:
-                execs = build_exact_dedup_executors(
-                    paths,
-                    tasks=workers,
-                    exact_config=exact_cfg,
-                )
-                return pipeline_io_counts(execs[-1].run())
-            finally:
-                _purge_dedup_state(paths, "exact_dedup")
+            execs = build_exact_dedup_executors(
+                paths,
+                tasks=tasks or workers,
+                workers=workers,
+                exact_config=exact_cfg,
+                input_override=input_view,
+            )
+            execs[-1].run()
+            return stage_io_counts(paths.logs_dir("exact_dedup") / "3_filter")
 
         return run
 
@@ -647,15 +715,15 @@ def _stage_runner(
         )
 
         def run() -> Tuple[int, int]:
-            try:
-                execs = build_sentence_dedup_executors(
-                    paths,
-                    tasks=workers,
-                    sentence_config=sent_cfg,
-                )
-                return pipeline_io_counts(execs[-1].run())
-            finally:
-                _purge_dedup_state(paths, "sentence_dedup")
+            execs = build_sentence_dedup_executors(
+                paths,
+                tasks=tasks or workers,
+                workers=workers,
+                sentence_config=sent_cfg,
+                input_override=input_view,
+            )
+            execs[-1].run()
+            return stage_io_counts(paths.logs_dir("sentence_dedup") / "3_filter")
 
         return run
 
@@ -665,13 +733,16 @@ def _stage_runner(
         def run() -> Tuple[int, int]:
             execs = build_statistics_executors(
                 paths,
-                tasks=workers,
+                tasks=tasks or workers,
+                workers=workers,
                 stopwords=stopwords,
                 top_k_words=int(stcfg.get("top_k_words", 5_000)),
+                input_override=input_view,
             )
+            execs[-1].run()
             # The statistics stage emits a JSON bundle, not shards: report the
-            # documents it consumed and a zero output count.
-            records_in, _ = pipeline_io_counts(execs[-1].run())
+            # documents its map tasks consumed and a zero output count.
+            records_in, _ = stage_io_counts(paths.logs_dir("statistics") / "1_map")
             return records_in, 0
 
         return run
@@ -1265,7 +1336,26 @@ def curate(
                 logger.info("[%s] sentinel current; skipping.", stage_name)
                 continue
             cascade_invalidate(output_dir, stage_name)
-            logger.info("[%s] starting%s", stage_name, _starting_input_hint(paths, stage_name))
+            # Read only the roster's datasets: folders left upstream by keys
+            # dropped from the roster (e.g. benchmarks) must not leak in.
+            up_dir = paths.stage_dir(cast(str, upstream_stage(stage_name)))
+            input_keys = [k for k in dataset_keys if _has_stage_output(up_dir, k)]
+            if not input_keys:
+                logger.info("[%s] no datasets with upstream output; skipping.", stage_name)
+                continue
+            view = _filter_stage_subset(up_dir, input_keys, holder=output_dir / "_inputs" / stage_name)
+            # One task per input shard caps a task's memory at one shard,
+            # and fixes the task count across reruns so a crash can resume.
+            tasks, inputs = _input_fingerprint(view)
+            resumed = _prepare_corpus_stage(paths, stage_name, current_hash, tasks, inputs)
+            logger.info(
+                "[%s] %s%s (tasks=%d, workers=%d)",
+                stage_name,
+                "resuming" if resumed else "starting",
+                _starting_input_hint(paths, stage_name),
+                tasks,
+                workers,
+            )
             runner = _stage_runner(
                 stage_name,
                 paths,
@@ -1273,8 +1363,9 @@ def curate(
                 workers,
                 stopwords,
                 spam_assets,
-                dataset_keys=dataset_keys,
-                input_view=None,
+                dataset_keys=input_keys,
+                input_view=view,
+                tasks=tasks,
             )
             records_in, records_out = runner()
             write_sentinel(
@@ -1284,6 +1375,10 @@ def curate(
                 records_in=records_in,
                 records_out=records_out,
             )
+            (stage_folder / PROGRESS_NAME).unlink(missing_ok=True)
+            if stage_name in ("exact_dedup", "sentence_dedup"):
+                _purge_dedup_state(paths, stage_name)
+            shutil.rmtree(view, ignore_errors=True)
             logger.info(
                 "[%s] done (records_in=%d, records_out=%d)",
                 stage_name,
