@@ -3,8 +3,9 @@
 The survey's evidence is one JSON file per searched source family under
 `data/experiments/data/data-landscape-slovenian/raw/`, each a list of rows on the
 schema fixed in the record's D4. This script merges them into the committed
-catalogue, flags what the project already downloads, scores each row against
-KPI 2 and KPI 4, and aggregates per domain under the three access filters of D8.
+catalogue, flags what the project already downloads, reads how each dataset's
+Slovene text came to exist, scores each row against KPI 2 and KPI 4, and
+aggregates per domain under the three access filters of D8.
 
 Run it from anywhere:
 
@@ -41,6 +42,7 @@ FAMILY_FILES: List[Tuple[str, str]] = [
     ("lindat", "lindat.json"),
     ("zenodo", "zenodo.json"),
     ("huggingface", "huggingface.json"),
+    ("huggingface", "huggingface-recheck.json"),
     ("medical-publishers", "medical-publishers.json"),
     ("elg", "elg.json"),
 ]
@@ -73,6 +75,28 @@ ACCESS_FILTERS: List[Tuple[str, Tuple[str, ...]]] = [
 # rather than of pretraining text (D7's second reading of KPI 2).
 IE_ANNOTATIONS: Tuple[str, ...] = ("IE spans", "IE spans,labels", "labels")
 
+# How a dataset's Slovene text came to exist (D11), read off the name and notes.
+# `generated` is tested first: a set that was translated and then automatically
+# annotated is machine output either way.
+GENERATED_TERMS: Tuple[str, ...] = (
+    r"synthetic",
+    r"generated",
+    r"instruction[- ]following",
+    r"instruct\b",
+    r"\bsft\b",
+    r"auto(matically)?[- ]annotat",
+    r"\bllm\b",
+    r"\bgpt\b",
+)
+TRANSLATED_TERMS: Tuple[str, ...] = (
+    r"translat",
+    r"parallel corpus",
+    r"parallel translation",
+    r"bilingual",
+    r"\btmx\b",
+    r"\bmt\b",
+)
+
 TOKENS_PER_WORD = 2.0  # D6: an estimate until the project tokenizer exists
 KPI2_EXAMPLES = 10_000
 KPI4_TOKENS = 500_000
@@ -91,6 +115,7 @@ CATALOGUE_COLUMNS: List[str] = [
     "annotation",
     "length_class",
     "format",
+    "provenance",
     "in_registry",
     "kpi2_fit",
     "kpi4_fit",
@@ -253,6 +278,31 @@ def row_keys(row: Dict[str, str]) -> Set[str]:
     return keys
 
 
+def provenance(row: Dict[str, str]) -> str:
+    """Says how the Slovene text in a dataset came to exist.
+
+    The hypothesis asks whether open sources cover the KPIs *without* synthetic
+    data, so a document count means little until machine output and translation
+    are separated from prose written in Slovene. The reading comes from what the
+    source says about itself, in the name and the notes, and never from the
+    domain or the size.
+
+    Args:
+        row: A merged catalogue row.
+
+    Returns:
+        `generated` for machine-written or automatically annotated text,
+        `translated` for text carried into Slovene from another language, and
+        `native` for the rest, which is text written in Slovene.
+    """
+    text = f"{row['name']} {row.get('notes', '')}".lower()
+    if any(re.search(term, text) for term in GENERATED_TERMS):
+        return "generated"
+    if row["annotation"] == "parallel" or any(re.search(term, text) for term in TRANSLATED_TERMS):
+        return "translated"
+    return "native"
+
+
 def kpi_fit(row: Dict[str, str]) -> Tuple[str, str]:
     """Scores one row against KPI 2 and KPI 4.
 
@@ -305,6 +355,7 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
             {
                 **row,
                 "tokens_estimated": str(int(words * TOKENS_PER_WORD)) if words is not None else "",
+                "provenance": provenance(row),
                 "in_registry": "yes" if in_registry(row, known) else "no",
                 "kpi2_fit": kpi2,
                 "kpi4_fit": kpi4,
@@ -368,26 +419,32 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
         for label, admitted in ACCESS_FILTERS:
             selected = [r for r in in_domain if r["access"] in admitted]
             annotated_rows = [r for r in selected if r["annotation"] in IE_ANNOTATIONS]
+            native_rows = [r for r in selected if r["provenance"] == "native"]
             words = sum(number(r["words"]) or 0 for r in selected)
             documents = sum(number(r["documents"]) or 0 for r in selected)
             annotated = sum(number(r["documents"]) or 0 for r in annotated_rows)
+            native = sum(number(r["documents"]) or 0 for r in native_rows)
             tokens = int(words * TOKENS_PER_WORD)
             no_words = sum(1 for r in selected if number(r["words"]) is None)
             no_documents = sum(1 for r in selected if number(r["documents"]) is None)
             no_annotated = sum(1 for r in annotated_rows if number(r["documents"]) is None)
+            no_native = sum(1 for r in native_rows if number(r["documents"]) is None)
             summary.append(
                 {
                     "domain": domain,
                     "access_filter": label,
                     "datasets": len(selected),
                     "datasets_new": sum(1 for r in selected if r["in_registry"] == "no"),
+                    "datasets_native": len(native_rows),
                     "datasets_without_word_count": no_words,
                     "datasets_without_document_count": no_documents,
                     "words": words,
                     "tokens_estimated": tokens,
                     "documents": documents,
+                    "documents_native": native,
                     "annotated_examples": annotated,
                     "meets_kpi2_documents": verdict(documents, KPI2_EXAMPLES, no_documents),
+                    "meets_kpi2_native": verdict(native, KPI2_EXAMPLES, no_native),
                     "meets_kpi2_annotated": verdict(annotated, KPI2_EXAMPLES, no_annotated),
                     "meets_kpi4_tokens": verdict(tokens, KPI4_TOKENS, no_words),
                 }
@@ -423,10 +480,12 @@ def series(
 
 
 def draw_figures(summary: List[Dict[str, object]]) -> None:
-    """Draws the three supply figures the record links.
+    """Draws the four supply figures the record links.
 
-    Two read supply against a KPI threshold; the third says how much of each
-    domain the first one has to leave out for want of a published size.
+    Three read supply against a KPI threshold — as tokens, as documents, and
+    as documents split by how the text came to exist. The fourth says how much
+    of each domain the token figure has to leave out for want of a published
+    size.
 
     Args:
         summary: The per-domain summary.
@@ -473,6 +532,27 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     )
 
     totals = {r["domain"]: r for r in summary if r["access_filter"] == "all"}
+    written = [
+        [{"label": d, "y": totals[d]["documents_native"]} for d in DOMAINS],
+        [{"label": d, "y": totals[d]["documents"] - totals[d]["documents_native"]} for d in DOMAINS],
+    ]
+    save_figure(
+        lambda: BarChart(
+            data=written,
+            title="Documents by provenance",
+            xlabel="domain",
+            ylabel="documents (log scale)",
+            subtitle=["written in Slovene", "translated or machine-written"],
+            bar_mode=BAR_MODE.GROUP,
+            scaley="log",
+            show_legend=True,
+            xtickrotate=40,
+            figsize=FIG_SIZE.FULL_MEDIUM,
+            hlines=[{"y": KPI2_EXAMPLES, "label": "KPI 2 threshold"}],
+        ),
+        FIGURES_DIR / "documents-by-domain-and-provenance.svg",
+    )
+
     sizing = [
         [{"label": d, "y": totals[d]["datasets"] - totals[d]["datasets_without_word_count"]} for d in DOMAINS],
         [{"label": d, "y": totals[d]["datasets_without_word_count"]} for d in DOMAINS],

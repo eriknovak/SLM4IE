@@ -11,7 +11,11 @@ up in [`docs/notes/`](../docs/notes/).
 
 ## data
 
-_No experiments recorded yet._
+### [Open Slovene data landscape — KPI coverage](data/data-landscape-slovenian/) · running
+
+- Medicine holds 3.04M open documents, of which 22,435 were written in Slovene; the rest is translation and machine output.
+- All 43 catalogued medical datasets report no word count, so KPI 4 for medicine cannot be read either way.
+- Science reaches 299,961 openly downloadable documents written in Slovene and 5.28B estimated tokens, both far past their thresholds.
 
 ## methods
 
