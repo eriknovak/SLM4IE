@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
-from datachart.constants import BAR_MODE, FIG_SIZE
-from datachart.charts import BarChart
+from datachart.charts import BarChart, DumbbellChart
+from datachart.constants import BAR_MODE, DUMBBELL_SORT_KEY, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
 
 import sys
 
@@ -452,121 +452,150 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
     return summary
 
 
-def series(
-    summary: List[Dict[str, object]], quantity: str, domains: List[str]
-) -> Tuple[List[List[Dict[str, object]]], List[str]]:
-    """Reshapes one summary quantity into a grouped bar chart's series.
+def access_gain(summary: List[Dict[str, object]], quantity: str) -> List[Dict[str, object]]:
+    """Pairs each domain's open total with its all-access total for a dumbbell.
+
+    A domain that has no sized dataset at either end is left out: a zero has
+    no place on a log axis, and the reported-sizes figure accounts for it.
+    Rows where loosening access more than doubles the total are highlighted,
+    because that gap — not either endpoint — is what the figure is for.
 
     Args:
         summary: The per-domain summary.
-        quantity: The summary field to plot.
-        domains: The domains to plot, in the order they should appear.
+        quantity: The summary field to pair.
 
     Returns:
-        One series of bars per access filter, and the filter names labelling them.
+        One `{label, start, end, emphasis}` record per drawable domain.
     """
-    labels = [label for label, _ in ACCESS_FILTERS]
-    data = [
-        [
+    totals = {(r["domain"], r["access_filter"]): r[quantity] for r in summary}
+    records: List[Dict[str, object]] = []
+    for domain in DOMAINS:
+        start, end = totals[(domain, "open")], totals[(domain, "all")]
+        if start <= 0 or end <= 0:
+            continue
+        records.append(
             {
                 "label": domain,
-                "y": next(r[quantity] for r in summary if r["domain"] == domain and r["access_filter"] == label),
+                "start": start,
+                "end": end,
+                "emphasis": EMPHASIS.HIGHLIGHT if end / start > 2 else None,
             }
-            for domain in domains
-        ]
-        for label in labels
-    ]
-    return data, labels
+        )
+    return records
 
 
 def draw_figures(summary: List[Dict[str, object]]) -> None:
     """Draws the four supply figures the record links.
 
-    Three read supply against a KPI threshold — as tokens, as documents, and
-    as documents split by how the text came to exist. The fourth says how much
-    of each domain the token figure has to leave out for want of a published
-    size.
+    Two dumbbells show what loosening access buys each domain, in tokens and
+    in documents, against the KPI thresholds. Two sorted bars carry the
+    medical result: the share of each domain written in Slovene, and the share
+    of each domain's datasets that publish a size at all.
 
     Args:
         summary: The per-domain summary.
     """
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    # Below the axes: inside, the legend would sit on the smallest domains' rows.
+    legend_out = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM}
 
-    # A domain nobody sized would be an empty slot on a log axis, so it is left
-    # out here and accounted for by the reported-sizes figure below.
-    sized = [d for d in DOMAINS if any(r["tokens_estimated"] for r in summary if r["domain"] == d)]
-    tokens, labels = series(summary, "tokens_estimated", sized)
+    tokens = access_gain(summary, "tokens_estimated")
     save_figure(
-        lambda: BarChart(
-            data=tokens,
-            title="Estimated tokens by domain",
-            xlabel="domain",
-            ylabel="estimated tokens (log scale)",
-            subtitle=labels,
-            bar_mode=BAR_MODE.GROUP,
+        lambda: DumbbellChart(
+            tokens,
+            title="Estimated tokens by access",
+            xlabel="estimated tokens (log scale)",
+            ylabel="domain",
+            start_name="open",
+            end_name="all",
             scaley="log",
+            sort=SORT.DESCENDING,
+            sort_by=DUMBBELL_SORT_KEY.END,
+            show_direction=True,
             show_legend=True,
-            xtickrotate=40,
+            legend=legend_out,
+            vlines=[{"x": KPI4_TOKENS, "label": "KPI 4 threshold"}],
             figsize=FIG_SIZE.FULL_MEDIUM,
-            hlines=[{"y": KPI4_TOKENS, "label": "KPI 4 threshold"}],
         ),
         FIGURES_DIR / "tokens-by-domain-and-access.svg",
     )
 
-    documents, labels = series(summary, "documents", DOMAINS)
+    documents = access_gain(summary, "documents")
     save_figure(
-        lambda: BarChart(
-            data=documents,
-            title="Documents by domain",
-            xlabel="domain",
-            ylabel="documents (log scale)",
-            subtitle=labels,
-            bar_mode=BAR_MODE.GROUP,
+        lambda: DumbbellChart(
+            documents,
+            title="Documents by access",
+            xlabel="documents (log scale)",
+            ylabel="domain",
+            start_name="open",
+            end_name="all",
             scaley="log",
+            sort=SORT.DESCENDING,
+            sort_by=DUMBBELL_SORT_KEY.END,
+            show_direction=True,
             show_legend=True,
-            xtickrotate=40,
+            legend=legend_out,
+            vlines=[{"x": KPI2_EXAMPLES, "label": "KPI 2 threshold"}],
             figsize=FIG_SIZE.FULL_MEDIUM,
-            hlines=[{"y": KPI2_EXAMPLES, "label": "KPI 2 threshold"}],
         ),
         FIGURES_DIR / "documents-by-domain-and-access.svg",
     )
 
-    totals = {r["domain"]: r for r in summary if r["access_filter"] == "all"}
-    written = [
-        [{"label": d, "y": totals[d]["documents_native"]} for d in DOMAINS],
-        [{"label": d, "y": totals[d]["documents"] - totals[d]["documents_native"]} for d in DOMAINS],
+    # Medicine is the subject of F1 and F2, so its row is bolded in both bar
+    # figures. The others stay unmuted: muting drops their value labels and,
+    # in the stack, the very segment the figure is about.
+    def emphasis(domain: str) -> Optional[str]:
+        return EMPHASIS.HIGHLIGHT if domain == "medical" else None
+
+    opened = {r["domain"]: r for r in summary if r["access_filter"] == "open"}
+    native_share = [
+        {
+            "label": f"{d}  ({opened[d]['documents']:,} docs)",
+            "y": 100 * opened[d]["documents_native"] / opened[d]["documents"] if opened[d]["documents"] else 0,
+            "emphasis": emphasis(d),
+        }
+        for d in DOMAINS
     ]
     save_figure(
         lambda: BarChart(
-            data=written,
-            title="Documents by provenance",
-            xlabel="domain",
-            ylabel="documents (log scale)",
-            subtitle=["written in Slovene", "translated or machine-written"],
-            bar_mode=BAR_MODE.GROUP,
-            scaley="log",
-            show_legend=True,
-            xtickrotate=40,
+            native_share,
+            title="Share of documents written in Slovene",
+            xlabel="documents written in Slovene (%)",
+            ylabel="domain (open documents)",
+            orientation=ORIENTATION.HORIZONTAL,
+            sort=SORT.ASCENDING,
+            show_values=True,
+            value_format="{x:.0f}%",
+            xmin=0,
+            xmax=100,
             figsize=FIG_SIZE.FULL_MEDIUM,
-            hlines=[{"y": KPI2_EXAMPLES, "label": "KPI 2 threshold"}],
         ),
         FIGURES_DIR / "documents-by-domain-and-provenance.svg",
     )
 
-    sizing = [
-        [{"label": d, "y": totals[d]["datasets"] - totals[d]["datasets_without_word_count"]} for d in DOMAINS],
-        [{"label": d, "y": totals[d]["datasets_without_word_count"]} for d in DOMAINS],
-    ]
+    totals = {r["domain"]: r for r in summary if r["access_filter"] == "all"}
+    sized: List[Dict[str, object]] = []
+    unsized: List[Dict[str, object]] = []
+    for d in DOMAINS:
+        count, missing = totals[d]["datasets"], totals[d]["datasets_without_word_count"]
+        label = f"{d}  ({count - missing} of {count})"
+        sized.append({"label": label, "y": 100 * (count - missing) / count, "emphasis": emphasis(d)})
+        unsized.append({"label": label, "y": 100 * missing / count, "emphasis": emphasis(d)})
     save_figure(
         lambda: BarChart(
-            data=sizing,
-            title="Reported sizes by domain",
-            xlabel="domain",
-            ylabel="datasets",
+            [sized, unsized],
+            title="Datasets with a reported size",
+            xlabel="datasets (%)",
+            ylabel="domain (sized of catalogued)",
             subtitle=["size reported", "no size reported"],
             bar_mode=BAR_MODE.STACK,
+            orientation=ORIENTATION.HORIZONTAL,
+            sort=SORT.ASCENDING,
+            sort_by="size reported",
             show_legend=True,
-            xtickrotate=40,
+            legend=legend_out,
+            xmin=0,
+            xmax=100,
             figsize=FIG_SIZE.FULL_MEDIUM,
         ),
         FIGURES_DIR / "reported-sizes-by-domain.svg",
