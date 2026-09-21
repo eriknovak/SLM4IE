@@ -119,4 +119,5 @@ analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store
     "datachart>=0.10.2",              # publication figures -> figures/*.svg
+    "pypdf>=5",
 ]

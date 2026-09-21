@@ -17,11 +17,11 @@ concluded:
 
 ## TL;DR
 
-- **Hypothesis**: refuted for medicine as worded — new open supply — and confirmed for science
+- **Hypothesis**: confirmed for science; for medicine confirmed on KPI 4 and refuted on KPI 2 as worded — new native supply is large in words and small in documents
 - Medicine holds 3.04M open documents but only 22,435 of them were written in Slovene; the rest is translation and machine output [F1]
-- No open Slovene medical dataset publishes a size; the corpus build's own count of PoVeJMo-VeMo-Med, 1.6M tokens, clears KPI 4 alone [F2]
+- No open Slovene medical dataset publishes a size; counted by this experiment, the new native sources hold about 7.9M words, thirty times KPI 4 [F2]
 - Science clears both KPIs on native prose alone, at 299,961 documents and 5.28B estimated tokens [F3]
-- **Next**: size the new native medical sources by sampling, to learn whether medicine can grow past what is already held; request access to the three gated `texdata` sets
+- **Next**: request access to the three gated `texdata` sets; then conclude
 
 ## Hypothesis
 
@@ -80,6 +80,14 @@ concluded:
 - **Code**: `analysis.py::summarise`
 - **Settings**: `DOMAINS`, `ACCESS_FILTERS`, `IE_ANNOTATIONS` in `analysis.py`
 
+### M6 — Sizing the new native medical sources
+
+- **Input**: The four native medical rows outside the registry that can be reached without scraping a repository that forbids bulk access ([D12]): the NLP-FBK clinical case reports on the Hub, the Slovene Wikipedia's medicine category, Zdravniški vestnik's OAI-PMH endpoint, and the faculty's list of clinical guidelines.
+- **Output**: `tables/native-medical-sizes.csv`, one line per source with items, words, an estimate and its basis; the fetched text under `data/experiments/data/data-landscape-slovenian/interim/<source>/`. [M4] reads the table back into the catalogue as `words_basis` `counted`, `partial` or `sampled`.
+- **How**: Case reports: every row through the Hub rows API, the longest string field of a row being its sentence; the unit reported is the case report, since a row is one sentence of one. Wikipedia: every article within two subcategory levels of `Kategorija:Medicina`, plain-text extracts through the API. Zdravniški vestnik: the whole OAI-PMH record list, restricted to records whose `dc:language` is Slovene, then 40 drawn with a fixed seed, each article's PDF fetched at one request per two seconds and its text extracted with pypdf; the estimate is the mean words per counted article times the Slovene record count. Guidelines: every link on the faculty page that resolves to a PDF, counted whole; the links that fail are left out and the count stands as a lower bound. Words are whitespace tokens throughout, as in the catalogue. A rerun reuses the fetched files and recounts.
+- **Code**: `size_medical_sources.py::main`
+- **Settings**: `SAMPLE_SIZE`, `SEED`, `WIKI_DEPTH`, `POLITE_DELAY` in `size_medical_sources.py`
+
 ## Decisions
 
 ### D1 — Language scope
@@ -128,6 +136,7 @@ concluded:
 - **History**:
   - 2026-09-14 first version, grill Q3/Q14
   - 2026-09-21 a registry source whose publisher reports no size takes the word count the pretraining build measured over its downloaded text, marked `words_basis: corpus`. That is a count over a downloaded sample — the stronger of the two verifications this decision already admits — and it is what turned medicine's KPI 4 from unreadable to met [F2]
+  - 2026-09-22 a source this experiment fetched and counted itself takes that count ahead of the corpus fallback, marked `counted`, `partial` (fewer items resolved than the source holds; a lower bound) or `sampled` (extrapolated from a fixed-seed sample) [M6]. A publisher's reported count still wins where one exists
 
 ### D7 — Two readings of KPI 2
 
@@ -166,6 +175,14 @@ concluded:
 - **History**:
   - 2026-09-19 first version
 
+### D12 — Which new medical sources to fetch
+
+- **Decision**: Sources reachable through an API or a standard harvesting endpoint are fetched whole or sampled; sources whose repository states there is no bulk export are not fetched. Of the native medical rows that meant four fetched — case reports, Wikipedia, Zdravniški vestnik, the guidelines list — and the University of Ljubljana repository left out.
+- **Why**: A word count over downloaded text is the only verification [D6] accepts, and none of these sources publishes one. Per-item fetching at a polite rate for a count is ordinary research use where the publisher offers an endpoint for it; the one source that says "no bulk export" is the one whose objection is explicit.
+- **Alternatives**: Estimate from document counts alone — rejected: half the rows have none, and the units differ (a case-report row is a sentence).
+- **History**:
+  - 2026-09-21 first version, approved at the fetch gate
+
 ## Findings
 
 ### F1 — Open Slovene medicine is mostly not written in Slovene · key
@@ -178,16 +195,17 @@ concluded:
 - **History**:
   - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]
 
-### F2 — Medicine clears KPI 4 only on text the project already holds · key
+### F2 — Medicine's new native supply is large in words and small in documents · key
 
-- **Summary**: No open Slovene medical dataset publishes a size; the corpus build's own count of PoVeJMo-VeMo-Med, 1.6M tokens, clears KPI 4 alone.
+- **Summary**: The four new native medical sources counted by this experiment hold about 7.9M words, thirty times KPI 4, in under four thousand documents.
 - **Runs**: effff1c099dc4d4db461059df98ba1b4
-- **Result**: ![Share of each domain's catalogued datasets whose source reports a size, sorted, with the count beside the name and medicine's row bolded. No domain is above 70 %; medicine and finance are at zero, medicine with 0 of 43.](figures/reported-sizes-by-domain.svg)
-- **Reading**: Every other domain has at least a few datasets whose publisher states a word or token count; medicine has none, at any access level. The one medical size in the catalogue is the project's own: the pretraining build measured PoVeJMo-VeMo-Med at 808,176 curated words ([D6] amended), three times the threshold at two tokens per word, and a count over downloaded text is the strongest verification [D6] admits. KPI 4 for medicine therefore reads `yes` — but on a source that was in the download registry before the survey began, which is exactly what the Prediction excludes: it asks for supply the registry does not already hold. For that new supply the verdict is still unreadable, since 42 of the 43 medical datasets remain unsized, and the Prediction is refuted as worded rather than confirmed. Two things would move this: sizing the eight native sources by downloading and counting them, and the three gated `texdata` sets, whose size is behind the same approval as their text. One discrepancy is left for the curation experiment: the catalogue reports 17,701 documents for PoVeJMo-VeMo-Med and the build kept 352, which is either a unit mismatch between the publisher's count and the extractor's or a curation loss.
-- **Implication**: Medicine's KPI 4 is met by what is already downloaded, so the open question is growth, not existence. Sizing the new native sources decides whether medicine can grow beyond PoVeJMo without gated or translated material.
+- **Result**: [Sizes counted for the new native medical sources](tables/native-medical-sizes.csv)
+- **Reading**: No open Slovene medical dataset publishes a size, so the experiment counted the reachable ones itself ([M6], [D12]). Zdravniški vestnik carries the domain: 1,616 Slovene-language articles, a median of 3,935 words each in a 39-article sample, about 6.8M words in all. The Slovene Wikipedia's medicine category adds 2,132 articles and just under a million words — fifty times the 39 the catalogue had counted at the top level. The clinical case reports are 84 reports, not the 1,471 rows the catalogue read as documents, and the guidelines list resolves to 2 PDFs of the 112 it names, the rest dead links; both are small. With PoVeJMo-VeMo-Med's 808,176 curated words from the corpus build ([D6]), native medicine stands at about 8.7M words, roughly 17M estimated tokens, and KPI 4 is met on new supply alone — the Prediction holds there. KPI 2 does not: the same four sources are 3,944 documents, and with PoVeJMo the openly downloadable native total is 24,757, of which only the case reports and PoVeJMo itself are anything like a corpus of documents rather than articles. The medical KPI 2 count of 3.04M in [F1] remains machine output. A larger vestnik sample, or the three gated `texdata` sets, would move the word figure; nothing in reach moves the document figure past a few thousand.
+- **Implication**: Medicine can be grown from open native text — Zdravniški vestnik alone is eight times PoVeJMo — so the multilingual fallback is a choice, not a necessity, for pretraining. For information-extraction examples in medicine, supply has to be built.
 - **History**:
   - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]: the domain read `unknown`, with no sized dataset at all
-  - 2026-09-21 revised: registry rows take the corpus build's curated word count when the source reports none ([D6]); the verdict moved from `unknown` to `yes` on held data, and the title and Summary changed with it
+  - 2026-09-21 revised: registry rows take the corpus build's curated word count when the source reports none ([D6]); the verdict moved from `unknown` to `yes` on held data
+  - 2026-09-22 revised: the four reachable new sources fetched and counted ([M6]); KPI 4 now met on new supply, title and Summary changed with it
 
 ### F3 — Science clears both KPIs on native prose alone · key
 

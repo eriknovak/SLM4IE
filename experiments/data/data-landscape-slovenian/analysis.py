@@ -42,6 +42,8 @@ FIGURES_DIR = HERE / "figures"
 REGISTRY = ROOT / "configs" / "data" / "download.yaml"
 # What the pretraining build measured per registry source after curation.
 CORPUS_STATISTICS = ROOT / "data" / "pretrain" / "07_statistics" / "aggregate.json"
+# What size_medical_sources.py counted for the new native medical sources.
+SIZES_TABLE = HERE / "tables" / "native-medical-sizes.csv"
 
 # One file per source family searched (D2), in the order that decides which
 # copy of a dataset catalogued twice is kept: the repository that publishes it
@@ -118,6 +120,7 @@ CATALOGUE_COLUMNS: List[str] = [
     "languages",
     "domains",
     "documents",
+    "documents_counted",
     "words",
     "words_basis",
     "words_corpus",
@@ -264,6 +267,19 @@ def registry_match(row: Dict[str, str], index: Dict[str, Set[str]]) -> Optional[
     return next((key for fragment, key in REGISTRY_NAME_FRAGMENTS.items() if fragment in name), None)
 
 
+def survey_sizes() -> Dict[str, Dict[str, str]]:
+    """Reads what the sizing pass counted for the new native medical sources.
+
+    Returns:
+        Normalised catalogue name to its line of the sizes table; empty until
+        `size_medical_sources.py` has run.
+    """
+    if not SIZES_TABLE.exists():
+        return {}
+    with SIZES_TABLE.open(encoding="utf-8") as handle:
+        return {normalise(r["catalogue_name"]): r for r in csv.DictReader(handle)}
+
+
 def corpus_counts() -> Dict[str, Dict[str, int]]:
     """Reads what the pretraining build measured for each registry source.
 
@@ -374,10 +390,14 @@ def kpi_fit(row: Dict[str, str]) -> Tuple[str, str]:
 def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     """Adds the derived catalogue columns to every row.
 
-    A row the project already downloads also carries what the pretraining
-    build measured for it. When its source reported no word count, that
-    measured count becomes the row's size — `words_basis` says so — because
-    a count taken from the downloaded text is the verification D6 asks for.
+    A size the source reported is kept as reported. A row whose source
+    reported none takes, in this order, what the sizing pass counted over its
+    downloaded text (`words_basis` `counted`, or `sampled` when extrapolated
+    from a sample) or what the pretraining build measured for a registry
+    source (`corpus`) — each a count over downloaded text, the verification
+    D6 asks for. `documents` takes the sizing pass's item count wherever it
+    exists, since it counts in the unit the catalogue means and a publisher's
+    figure may not; `documents_counted` carries it beside the result.
 
     Args:
         rows: Merged catalogue rows.
@@ -388,18 +408,34 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     """
     index = registry_index()
     measured = corpus_counts()
+    surveyed = survey_sizes()
     annotated: List[Dict[str, str]] = []
     for row in rows:
         key = registry_match(row, index)
         counts = measured.get(key or "", {})
-        reported = number(row["words"])
-        words = reported if reported is not None else number(counts.get("word_count"))
-        basis = "reported" if reported is not None else ("corpus" if words is not None else "")
-        sized = {**row, "words": words if words is not None else ""}
+        size = surveyed.get(normalise(row["name"]), {})
+        candidates = [
+            ("reported", number(row["words"])),
+            ("sampled" if size.get("basis") == "sampled" else "counted", number(size.get("words_estimated"))),
+            ("corpus", number(counts.get("word_count"))),
+        ]
+        basis, words = next(((b, w) for b, w in candidates if w is not None), ("", None))
+        # the sizing pass counted the source's items itself, in the unit the
+        # catalogue means; a publisher's figure stands only where it did not
+        documents = number(size.get("items_total"))
+        if documents is None:
+            documents = number(row["documents"])
+        sized = {
+            **row,
+            "words": words if words is not None else "",
+            "documents": documents if documents is not None else "",
+        }
         kpi2, kpi4 = kpi_fit(sized)
         annotated.append(
             {
                 **row,
+                "documents": str(documents) if documents is not None else "",
+                "documents_counted": str(size.get("items_total", "")),
                 "words": str(words) if words is not None else "",
                 "words_basis": basis,
                 "words_corpus": str(counts.get("word_count", "")),
@@ -478,6 +514,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
             tokens = int(words * TOKENS_PER_WORD)
             no_words = sum(1 for r in selected if number(r["words"]) is None)
             corpus_sized = sum(1 for r in selected if r["words_basis"] == "corpus")
+            survey_sized = sum(1 for r in selected if r["words_basis"] in ("counted", "sampled"))
             no_documents = sum(1 for r in selected if number(r["documents"]) is None)
             no_annotated = sum(1 for r in annotated_rows if number(r["documents"]) is None)
             no_native = sum(1 for r in native_rows if number(r["documents"]) is None)
@@ -490,6 +527,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
                     "datasets_native": len(native_rows),
                     "datasets_without_word_count": no_words,
                     "datasets_sized_by_corpus": corpus_sized,
+                    "datasets_sized_by_survey": survey_sized,
                     "datasets_without_document_count": no_documents,
                     "words": words,
                     "tokens_estimated": tokens,
@@ -631,7 +669,12 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     unsized: List[Dict[str, object]] = []
     for d in DOMAINS:
         count = totals[d]["datasets"]
-        reported = count - totals[d]["datasets_without_word_count"] - totals[d]["datasets_sized_by_corpus"]
+        reported = (
+            count
+            - totals[d]["datasets_without_word_count"]
+            - totals[d]["datasets_sized_by_corpus"]
+            - totals[d]["datasets_sized_by_survey"]
+        )
         label = f"{d}  ({reported} of {count})"
         sized.append({"label": label, "y": 100 * reported / count, "emphasis": emphasis(d)})
         unsized.append({"label": label, "y": 100 * (count - reported) / count, "emphasis": emphasis(d)})

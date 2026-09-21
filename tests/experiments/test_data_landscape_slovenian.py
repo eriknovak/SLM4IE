@@ -122,6 +122,7 @@ def fixture_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, analysis: Mod
     monkeypatch.setattr(analysis, "FAMILY_FILES", [("publisher", "publisher.json"), ("mirror", "mirror.json")])
     monkeypatch.setattr(analysis, "REGISTRY", registry)
     monkeypatch.setattr(analysis, "CORPUS_STATISTICS", stats)
+    monkeypatch.setattr(analysis, "SIZES_TABLE", tmp_path / "no-sizes.csv")
     return {"raw": raw, "registry": registry, "stats": stats}
 
 
@@ -162,6 +163,27 @@ def test_registry_match_and_corpus_count_size_an_unsized_row(
     science = rows["Science corpus"]
     assert science["in_registry"] == "no"
     assert science["words_basis"] == "reported"
+
+
+def test_survey_size_beats_the_corpus_count_and_fills_documents(
+    analysis: ModuleType, fixture_paths: Dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sizes = tmp_path / "sizes.csv"
+    sizes.write_text(
+        "source,catalogue_name,items_total,items_counted,words_counted,words_estimated,basis,method,sized_on\n"
+        "case-reports,Medical corpus,80,80,5000,5000,full,counted every row,2026-09-21\n"
+        "journal,Translated science,2000,40,8000,400000,sampled,forty articles,2026-09-21\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(analysis, "SIZES_TABLE", sizes)
+    rows = {r["name"]: r for r in annotated(analysis)}
+    medical = rows["Medical corpus"]
+    assert medical["words"] == "5000" and medical["words_basis"] == "counted"
+    assert medical["words_corpus"] == "300000"
+    assert medical["documents"] == "80" and medical["documents_counted"] == "80"
+    journal = rows["Translated science"]
+    assert journal["words"] == "400000" and journal["words_basis"] == "sampled"
+    assert journal["kpi4_fit"] == "yes"
 
 
 def test_provenance_reads_the_row_text(analysis: ModuleType, fixture_paths: Dict[str, Path]) -> None:
@@ -224,8 +246,8 @@ def test_committed_catalogue_matches_the_schema(analysis: ModuleType) -> None:
         assert r["annotation"] in annotation, r["name"]
         assert {d.strip() for d in r["domains"].split(",")} <= set(analysis.DOMAINS), r["name"]
         assert r["provenance"] in {"native", "translated", "generated"}, r["name"]
-        assert r["words_basis"] in {"reported", "corpus", ""}, r["name"]
+        assert r["words_basis"] in {"reported", "counted", "sampled", "corpus", ""}, r["name"]
         assert r["in_registry"] in {"yes", "no"} and bool(r["registry_key"]) == (r["in_registry"] == "yes"), r["name"]
         assert r["kpi2_fit"] in {"yes", "no", "unknown", "n/a"} and r["kpi4_fit"] in {"yes", "no", "unknown"}, r["name"]
-        for count in ("documents", "words", "tokens_estimated"):
+        for count in ("documents", "documents_counted", "words", "tokens_estimated"):
             assert r[count] == "" or r[count].isdigit(), (r["name"], count)

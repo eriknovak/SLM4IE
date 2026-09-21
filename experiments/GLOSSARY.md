@@ -33,3 +33,4 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **ELG** (European Language Grid): an EU platform cataloguing language resources and services; for Slovene it largely mirrors CLARIN.SI rather than publishing its own.
 - **NER** (named-entity recognition): labelling spans of text with the kind of entity they name — a person, a place, a drug, a diagnosis. One of the information-extraction tasks the project targets.
 - **IE** (information extraction): pulling structured facts — entities, relations, attributes — out of running text. The project's target task family.
+- **PDF** (Portable Document Format): the page-layout file most Slovene journals and institutions publish articles and guidelines in. Its text has to be extracted before it can be counted, and a scanned PDF yields none.
