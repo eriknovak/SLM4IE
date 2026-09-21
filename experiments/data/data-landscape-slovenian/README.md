@@ -8,9 +8,9 @@ base_commit: a0b3306
 status: running
 ticket: "#1"
 pr:
-mlflow:
+mlflow: http://localhost:5555/#/experiments/12
 builds_on: []
-types: []
+types: [lineage]
 concluded:
 ---
 # Open Slovene data landscape — KPI coverage
@@ -171,7 +171,7 @@ concluded:
 ### F1 — Open Slovene medicine is mostly not written in Slovene · key
 
 - **Summary**: Medicine holds 3.04M open documents, of which 22,435 were written in Slovene; the rest is translation and machine output.
-- **Runs**: none — this experiment is a survey, and its evidence is the committed catalogue rather than MLflow runs
+- **Runs**: effff1c099dc4d4db461059df98ba1b4 (lineage: the catalogue, tables and figures as artifacts; the evidence itself is the committed catalogue)
 - **Result**: ![Share of each domain's openly downloadable documents that were written in Slovene, with the domain's document total beside its name and medicine's row bolded. Seven domains are at or near 100 %; other, legal and academic sit between 50 and 60 % because translation memories and instruction sets weigh on them; medicine is at 1 %.](figures/documents-by-domain-and-provenance.svg)
 - **Reading**: Medicine is the only domain in the taxonomy whose supply inverts: everywhere else the documents written in Slovene outnumber the translated and machine-written ones, and in medicine they are outnumbered roughly 135 to 1. The total is carried by five GaMS-Instruct medical instruction sets and the HUMADEX NER set, which was built by translating English medical question-answer pairs and annotating them automatically. What remains after [D11]'s reading is 22,435 documents across eight sources, and 17,701 of those are PoVeJMo-VeMo-Med, which the project already downloads. This refutes the Prediction as it was meant rather than as it was worded: openly downloadable medicine does pass 10k examples, but not "without synthetic data", and not from sources outside the download registry. It would be overturned by sources that are native Slovene medical prose at scale — the three gated `texdata` sets are the nearest candidates, and none of them can be read without access.
 - **Implication**: The medical corpus cannot be grown from open data alone at the volume KPI 4 implies. Either the gated and not-downloadable sources are pursued, or the multilingual fallback becomes the plan rather than the reserve.
@@ -181,7 +181,7 @@ concluded:
 ### F2 — Medicine clears KPI 4 only on text the project already holds · key
 
 - **Summary**: No open Slovene medical dataset publishes a size; the corpus build's own count of PoVeJMo-VeMo-Med, 1.6M tokens, clears KPI 4 alone.
-- **Runs**: none — survey
+- **Runs**: effff1c099dc4d4db461059df98ba1b4
 - **Result**: ![Share of each domain's catalogued datasets whose source reports a size, sorted, with the count beside the name and medicine's row bolded. No domain is above 70 %; medicine and finance are at zero, medicine with 0 of 43.](figures/reported-sizes-by-domain.svg)
 - **Reading**: Every other domain has at least a few datasets whose publisher states a word or token count; medicine has none, at any access level. The one medical size in the catalogue is the project's own: the pretraining build measured PoVeJMo-VeMo-Med at 808,176 curated words ([D6] amended), three times the threshold at two tokens per word, and a count over downloaded text is the strongest verification [D6] admits. KPI 4 for medicine therefore reads `yes` — but on a source that was in the download registry before the survey began, which is exactly what the Prediction excludes: it asks for supply the registry does not already hold. For that new supply the verdict is still unreadable, since 42 of the 43 medical datasets remain unsized, and the Prediction is refuted as worded rather than confirmed. Two things would move this: sizing the eight native sources by downloading and counting them, and the three gated `texdata` sets, whose size is behind the same approval as their text. One discrepancy is left for the curation experiment: the catalogue reports 17,701 documents for PoVeJMo-VeMo-Med and the build kept 352, which is either a unit mismatch between the publisher's count and the extractor's or a curation loss.
 - **Implication**: Medicine's KPI 4 is met by what is already downloaded, so the open question is growth, not existence. Sizing the new native sources decides whether medicine can grow beyond PoVeJMo without gated or translated material.
@@ -192,7 +192,7 @@ concluded:
 ### F3 — Science clears both KPIs on native prose alone · key
 
 - **Summary**: Science reaches 299,961 openly downloadable documents written in Slovene and 5.28B estimated tokens, both far past their thresholds.
-- **Runs**: none — survey
+- **Runs**: effff1c099dc4d4db461059df98ba1b4
 - **Result**: [Per-domain supply under each access filter](tables/supply-by-domain-and-access.csv)
 - **Reading**: Reading science as scientific plus academic ([D5]), the open filter alone gives 433,671 documents, of which 299,961 are native, and 5.28B estimated tokens against KPI 4's 500,000. The margin is large enough that neither the two-tokens-per-word estimate ([D6]) nor the eight scientific and ten academic datasets that report no size can change the verdict. This confirms the Prediction for science on every reading: the threshold is cleared on native text, from sources outside the download registry, without the access filter having to be loosened. The one reading it does not satisfy is [D7]'s second: no scientific dataset carries information-extraction annotation at all, so science supplies pretraining text and evaluation material for the academic sub-domain only.
 - **Implication**: Science needs no further sourcing for pretraining. Information-extraction evaluation in the scientific domain has to be built, not found.
@@ -202,7 +202,7 @@ concluded:
 ### F4 — The catalogue is mostly supply the project does not use · supporting F3
 
 - **Summary**: 266 of the 295 catalogued Slovene datasets are outside the download registry.
-- **Runs**: none — survey
+- **Runs**: effff1c099dc4d4db461059df98ba1b4
 - **Result**: [The catalogue](tables/catalogue.csv)
 - **Reading**: The registry holds 31 entries and the catalogue matches 29 of them, missing only the Sloleks relations lexicon and the private Slovenian News living corpus, neither of which is openly published. The other 266 rows are datasets nobody on the project has drawn on. Most of that surplus is in `other` and `general-web`, where the corpus is already far past every threshold, so the headline number overstates how much of it matters; the surplus that bears on [F3] is the ten scientific and twelve academic datasets that are new. This qualifies [F3] rather than extending it: science clears its thresholds on new supply, not only on what is already downloaded.
 - **Implication**: The scientific and academic rows flagged new are the shortlist for the next corpus build; the general-web surplus is not worth ingesting.
@@ -212,7 +212,7 @@ concluded:
 ### F5 — Two aggregators re-list a twentieth of the catalogue · minor
 
 - **Summary**: 13 CLARIN.SI datasets arrive a second time through ELG or LINDAT and would otherwise be counted twice.
-- **Runs**: none — survey
+- **Runs**: effff1c099dc4d4db461059df98ba1b4
 - **Result**: [The catalogue](tables/catalogue.csv), `mirrors` column
 - **History**:
   - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]

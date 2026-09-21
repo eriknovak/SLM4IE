@@ -21,7 +21,6 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
-import matplotlib
 import yaml
 from datachart.charts import BarChart, DumbbellChart
 from datachart.constants import BAR_MODE, DUMBBELL_SORT_KEY, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
@@ -32,10 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the vendored helper resolves
 
 from slm4ie.utils import mlflow as ml  # noqa: E402
-
-# Stable element ids in the SVGs, so a rerun that draws the same figure does
-# not rewrite every file; only the embedded date still changes.
-matplotlib.rcParams["svg.hashsalt"] = "data-landscape-slovenian"
 
 MLFLOW_EXPERIMENT = "slm4ie/data/data-landscape-slovenian"
 
