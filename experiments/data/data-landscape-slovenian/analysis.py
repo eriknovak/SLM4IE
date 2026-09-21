@@ -33,6 +33,8 @@ RAW_DIR = ROOT / "data" / "experiments" / "data" / "data-landscape-slovenian" / 
 TABLES_DIR = HERE / "tables"
 FIGURES_DIR = HERE / "figures"
 REGISTRY = ROOT / "configs" / "data" / "download.yaml"
+# What the pretraining build measured per registry source after curation.
+CORPUS_STATISTICS = ROOT / "data" / "pretrain" / "07_statistics" / "aggregate.json"
 
 # One file per source family searched (D2), in the order that decides which
 # copy of a dataset catalogued twice is kept: the repository that publishes it
@@ -110,6 +112,9 @@ CATALOGUE_COLUMNS: List[str] = [
     "domains",
     "documents",
     "words",
+    "words_basis",
+    "words_corpus",
+    "documents_corpus",
     "tokens_estimated",
     "size_verified",
     "annotation",
@@ -117,6 +122,7 @@ CATALOGUE_COLUMNS: List[str] = [
     "format",
     "provenance",
     "in_registry",
+    "registry_key",
     "kpi2_fit",
     "kpi4_fit",
     "family",
@@ -126,11 +132,15 @@ CATALOGUE_COLUMNS: List[str] = [
 
 # Registry entries fetched by hand, so they name no URL or Hub repo: matched on
 # a fragment of the catalogue's own name for the same corpus instead.
-REGISTRY_NAME_FRAGMENTS: Tuple[str, ...] = ("gigafida22", "metafida10", "slovenetrendi")
+REGISTRY_NAME_FRAGMENTS: Dict[str, str] = {
+    "gigafida22": "gigafida",
+    "metafida10": "metafida",
+    "slovenetrendi": "trendi",
+}
 
 # Registry entries the catalogue found at a different address than the one the
-# project downloads from, keyed by the Hub repo that publishes the same corpus.
-REGISTRY_REPO_ALIASES: Tuple[str, ...] = ("statmt/cc100",)
+# project downloads from: the Hub repo that publishes the same corpus.
+REGISTRY_REPO_ALIASES: Dict[str, str] = {"statmt/cc100": "cc100"}
 
 
 def normalise(text: str) -> str:
@@ -205,40 +215,57 @@ def merge_duplicates(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     return list(merged.values())
 
 
-def registry_keys() -> Set[str]:
-    """Collects the identifiers of every dataset the project already downloads.
+def registry_index() -> Dict[str, Set[str]]:
+    """Collects, per registry entry, the identifiers a catalogue row can match.
 
-    A registry entry is identified by its CLARIN or LINDAT handle or its Hugging
-    Face repo; the entries fetched by hand carry neither and are matched on the
-    name instead, by `in_registry`.
+    An entry is identified by its CLARIN or LINDAT handle or its Hugging Face
+    repo, plus the Hub aliases of `REGISTRY_REPO_ALIASES`; the entries fetched
+    by hand carry neither and are matched on the name instead, by
+    `registry_match`.
 
     Returns:
-        Identifiers comparable with what `row_keys` reads off a catalogue row.
+        Registry key to the identifiers `row_keys` can produce for it.
     """
     registry = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))["datasets"]
-    keys: Set[str] = set(REGISTRY_REPO_ALIASES)
-    for entry in registry.values():
+    index: Dict[str, Set[str]] = {key: set() for key in registry}
+    for key, entry in registry.items():
         if entry.get("repo_id"):
-            keys.add(str(entry["repo_id"]).lower())
+            index[key].add(str(entry["repo_id"]).lower())
         for url in entry.get("urls") or []:
-            keys |= url_keys(str(url))
-    return keys
+            index[key] |= url_keys(str(url))
+    for repo, key in REGISTRY_REPO_ALIASES.items():
+        index[key].add(repo)
+    return index
 
 
-def in_registry(row: Dict[str, str], keys: Set[str]) -> bool:
-    """Decides whether the project already downloads this dataset.
+def registry_match(row: Dict[str, str], index: Dict[str, Set[str]]) -> Optional[str]:
+    """Names the registry entry the project downloads this dataset under.
 
     Args:
         row: A merged catalogue row.
-        keys: The registry identifiers from `registry_keys`.
+        index: The identifiers per entry, from `registry_index`.
 
     Returns:
-        True when the row's address or name matches a registry entry.
+        The registry key, or None when the project does not download it.
     """
-    if row_keys(row) & keys:
-        return True
+    keys = row_keys(row)
+    for key, identifiers in index.items():
+        if keys & identifiers:
+            return key
     name = normalise(row["name"])
-    return any(fragment in name for fragment in REGISTRY_NAME_FRAGMENTS)
+    return next((key for fragment, key in REGISTRY_NAME_FRAGMENTS.items() if fragment in name), None)
+
+
+def corpus_counts() -> Dict[str, Dict[str, int]]:
+    """Reads what the pretraining build measured for each registry source.
+
+    Returns:
+        Registry key to its curated `doc_count` and `word_count`; empty when
+        the build's statistics stage has not run.
+    """
+    if not CORPUS_STATISTICS.exists():
+        return {}
+    return json.loads(CORPUS_STATISTICS.read_text(encoding="utf-8"))["by_dataset"]
 
 
 def url_keys(url: str) -> Set[str]:
@@ -339,24 +366,40 @@ def kpi_fit(row: Dict[str, str]) -> Tuple[str, str]:
 def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     """Adds the derived catalogue columns to every row.
 
+    A row the project already downloads also carries what the pretraining
+    build measured for it. When its source reported no word count, that
+    measured count becomes the row's size — `words_basis` says so — because
+    a count taken from the downloaded text is the verification D6 asks for.
+
     Args:
         rows: Merged catalogue rows.
 
     Returns:
-        The same rows, each with `tokens_estimated`, `in_registry`, `kpi2_fit`
-        and `kpi4_fit` filled in.
+        The same rows, each with the registry, corpus, provenance, token and
+        KPI columns filled in.
     """
-    known = registry_keys()
+    index = registry_index()
+    measured = corpus_counts()
     annotated: List[Dict[str, str]] = []
     for row in rows:
-        words = number(row["words"])
-        kpi2, kpi4 = kpi_fit(row)
+        key = registry_match(row, index)
+        counts = measured.get(key or "", {})
+        reported = number(row["words"])
+        words = reported if reported is not None else number(counts.get("word_count"))
+        basis = "reported" if reported is not None else ("corpus" if words is not None else "")
+        sized = {**row, "words": words if words is not None else ""}
+        kpi2, kpi4 = kpi_fit(sized)
         annotated.append(
             {
                 **row,
+                "words": str(words) if words is not None else "",
+                "words_basis": basis,
+                "words_corpus": str(counts.get("word_count", "")),
+                "documents_corpus": str(counts.get("doc_count", "")),
                 "tokens_estimated": str(int(words * TOKENS_PER_WORD)) if words is not None else "",
                 "provenance": provenance(row),
-                "in_registry": "yes" if in_registry(row, known) else "no",
+                "in_registry": "yes" if key else "no",
+                "registry_key": key or "",
                 "kpi2_fit": kpi2,
                 "kpi4_fit": kpi4,
             }
@@ -426,6 +469,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
             native = sum(number(r["documents"]) or 0 for r in native_rows)
             tokens = int(words * TOKENS_PER_WORD)
             no_words = sum(1 for r in selected if number(r["words"]) is None)
+            corpus_sized = sum(1 for r in selected if r["words_basis"] == "corpus")
             no_documents = sum(1 for r in selected if number(r["documents"]) is None)
             no_annotated = sum(1 for r in annotated_rows if number(r["documents"]) is None)
             no_native = sum(1 for r in native_rows if number(r["documents"]) is None)
@@ -437,6 +481,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
                     "datasets_new": sum(1 for r in selected if r["in_registry"] == "no"),
                     "datasets_native": len(native_rows),
                     "datasets_without_word_count": no_words,
+                    "datasets_sized_by_corpus": corpus_sized,
                     "datasets_without_document_count": no_documents,
                     "words": words,
                     "tokens_estimated": tokens,
@@ -577,10 +622,11 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     sized: List[Dict[str, object]] = []
     unsized: List[Dict[str, object]] = []
     for d in DOMAINS:
-        count, missing = totals[d]["datasets"], totals[d]["datasets_without_word_count"]
-        label = f"{d}  ({count - missing} of {count})"
-        sized.append({"label": label, "y": 100 * (count - missing) / count, "emphasis": emphasis(d)})
-        unsized.append({"label": label, "y": 100 * missing / count, "emphasis": emphasis(d)})
+        count = totals[d]["datasets"]
+        reported = count - totals[d]["datasets_without_word_count"] - totals[d]["datasets_sized_by_corpus"]
+        label = f"{d}  ({reported} of {count})"
+        sized.append({"label": label, "y": 100 * reported / count, "emphasis": emphasis(d)})
+        unsized.append({"label": label, "y": 100 * (count - reported) / count, "emphasis": emphasis(d)})
     save_figure(
         lambda: BarChart(
             [sized, unsized],

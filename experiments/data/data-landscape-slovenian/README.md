@@ -17,11 +17,11 @@ concluded:
 
 ## TL;DR
 
-- **Hypothesis**: leaning refuted for medicine, confirmed for science
+- **Hypothesis**: refuted for medicine as worded — new open supply — and confirmed for science
 - Medicine holds 3.04M open documents but only 22,435 of them were written in Slovene; the rest is translation and machine output [F1]
-- No open Slovene medical dataset publishes a size, so KPI 4 for medicine cannot be read at all [F2]
+- No open Slovene medical dataset publishes a size; the corpus build's own count of PoVeJMo-VeMo-Med, 1.6M tokens, clears KPI 4 alone [F2]
 - Science clears both KPIs on native prose alone, at 299,961 documents and 5.28B estimated tokens [F3]
-- **Next**: request access to the three gated `texdata` medical sets, and size the native medical sources by sampling
+- **Next**: size the new native medical sources by sampling, to learn whether medicine can grow past what is already held; request access to the three gated `texdata` sets
 
 ## Hypothesis
 
@@ -68,7 +68,7 @@ concluded:
 
 - **Input**: The merged rows from [M3], and `configs/data/download.yaml`.
 - **Output**: Each row gains `tokens_estimated`, `provenance`, `in_registry`, `kpi2_fit` and `kpi4_fit`.
-- **How**: `tokens_estimated` is the reported word count at [D6]'s two tokens per word, left empty when no word count was reported. `in_registry` compares the row's own address and the addresses in `mirrors` against the registry, matching CLARIN and LINDAT handles and Hugging Face repositories; the four corpora the registry fetches by hand carry neither, so they are matched on a fragment of the catalogue's name for the same corpus. `provenance` reads the name and notes for the terms of [D11]. `kpi2_fit` is set only for rows carrying medicine or science and asks whether the row alone reaches 10,000 documents; `kpi4_fit` asks whether it reaches 500,000 estimated tokens. Either is `unknown` when the count it needs was never reported ([D9]).
+- **How**: `registry_key` names the entry a row is downloaded under, and `words_corpus` / `documents_corpus` carry what the pretraining build measured for it in `pretrain/07_statistics/aggregate.json`. A row whose source reported no word count takes that measured count as its `words`, with `words_basis` set to `corpus` rather than `reported` ([D6]). `tokens_estimated` is the resulting word count at [D6]'s two tokens per word, left empty when neither exists. `in_registry` compares the row's own address and the addresses in `mirrors` against the registry, matching CLARIN and LINDAT handles and Hugging Face repositories; the four corpora the registry fetches by hand carry neither, so they are matched on a fragment of the catalogue's name for the same corpus. `provenance` reads the name and notes for the terms of [D11]. `kpi2_fit` is set only for rows carrying medicine or science and asks whether the row alone reaches 10,000 documents; `kpi4_fit` asks whether it reaches 500,000 estimated tokens. Either is `unknown` when the count it needs was never reported ([D9]).
 - **Code**: `analysis.py::annotate`
 - **Settings**: `TOKENS_PER_WORD`, `KPI2_EXAMPLES`, `KPI4_TOKENS`, `GENERATED_TERMS`, `TRANSLATED_TERMS` in `analysis.py`
 
@@ -112,6 +112,7 @@ concluded:
 - **History**:
   - 2026-09-14 first version, grill Q19
   - 2026-09-19 the single `KPI fit` column became two, `kpi2_fit` and `kpi4_fit`, because a row can be decided for one KPI and undecidable for the other: most rows report a document count but not a word count. Three columns were added in the same pass — `tokens_estimated` (the word count at D6's factor, so the KPI comparison is not recomputed by every reader), `family` (which searched source returned the row) and `mirrors` (the addresses of the copies merged into it under D10)
+  - 2026-09-21 `registry_key`, `words_corpus`, `documents_corpus` and `words_basis` added, so a size taken from the project's own build is distinguishable from one the source reported [D6]
 
 ### D5 — Domain taxonomy
 
@@ -126,6 +127,7 @@ concluded:
 - **Why**: Published corpus sizes are frequently rounded, stale, or measured differently from what the project would ingest. Marking the provenance of each number keeps an unverified claim from silently becoming a KPI verdict. The token factor stays an estimate until the project tokenizer exists.
 - **History**:
   - 2026-09-14 first version, grill Q3/Q14
+  - 2026-09-21 a registry source whose publisher reports no size takes the word count the pretraining build measured over its downloaded text, marked `words_basis: corpus`. That is a count over a downloaded sample — the stronger of the two verifications this decision already admits — and it is what turned medicine's KPI 4 from unreadable to met [F2]
 
 ### D7 — Two readings of KPI 2
 
@@ -176,15 +178,16 @@ concluded:
 - **History**:
   - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]
 
-### F2 — No open Slovene medical dataset publishes a size · key
+### F2 — Medicine clears KPI 4 only on text the project already holds · key
 
-- **Summary**: All 43 catalogued medical datasets report no word count, so KPI 4 for medicine cannot be read either way.
+- **Summary**: No open Slovene medical dataset publishes a size; the corpus build's own count of PoVeJMo-VeMo-Med, 1.6M tokens, clears KPI 4 alone.
 - **Runs**: none — survey
 - **Result**: ![Share of each domain's catalogued datasets whose source reports a size, sorted, with the count beside the name and medicine's row bolded. No domain is above 70 %; medicine and finance are at zero, medicine with 0 of 43.](figures/reported-sizes-by-domain.svg)
-- **Reading**: Every other domain in the taxonomy has at least a few datasets whose publisher states a word or token count; medicine has none, at any access level. The domain's KPI 4 verdict is therefore `unknown` under [D9] rather than a miss, and the token figure cannot draw medicine at all. This neither confirms nor refutes the Prediction — it says the Prediction is unreadable on present evidence, which is a different result from the one the experiment set out to get. The gap is closable: the sources are mostly small enough to download and count, and PoVeJMo-VeMo-Med is already in the corpus, where it measured 352 documents and 808,176 words after curation. What cannot be closed by counting is the gated material, where the size is behind the same approval as the text.
-- **Implication**: Sizing the eight native medical sources by sampling is the cheapest way to turn this `unknown` into a number, and should happen before the verdict.
+- **Reading**: Every other domain has at least a few datasets whose publisher states a word or token count; medicine has none, at any access level. The one medical size in the catalogue is the project's own: the pretraining build measured PoVeJMo-VeMo-Med at 808,176 curated words ([D6] amended), three times the threshold at two tokens per word, and a count over downloaded text is the strongest verification [D6] admits. KPI 4 for medicine therefore reads `yes` — but on a source that was in the download registry before the survey began, which is exactly what the Prediction excludes: it asks for supply the registry does not already hold. For that new supply the verdict is still unreadable, since 42 of the 43 medical datasets remain unsized, and the Prediction is refuted as worded rather than confirmed. Two things would move this: sizing the eight native sources by downloading and counting them, and the three gated `texdata` sets, whose size is behind the same approval as their text. One discrepancy is left for the curation experiment: the catalogue reports 17,701 documents for PoVeJMo-VeMo-Med and the build kept 352, which is either a unit mismatch between the publisher's count and the extractor's or a curation loss.
+- **Implication**: Medicine's KPI 4 is met by what is already downloaded, so the open question is growth, not existence. Sizing the new native sources decides whether medicine can grow beyond PoVeJMo without gated or translated material.
 - **History**:
-  - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]
+  - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]: the domain read `unknown`, with no sized dataset at all
+  - 2026-09-21 revised: registry rows take the corpus build's curated word count when the source reports none ([D6]); the verdict moved from `unknown` to `yes` on held data, and the title and Summary changed with it
 
 ### F3 — Science clears both KPIs on native prose alone · key
 
