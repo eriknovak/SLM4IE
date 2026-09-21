@@ -7,17 +7,21 @@ catalogue, flags what the project already downloads, reads how each dataset's
 Slovene text came to exist, scores each row against KPI 2 and KPI 4, and
 aggregates per domain under the three access filters of D8.
 
-Run it from anywhere:
+Run it from anywhere; `--mlflow` also records the pass as a lineage run in the
+experiment's MLflow experiment, with the tables and figures as artifacts:
 
-    uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py
+    uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py [--mlflow]
 """
 
+import argparse
 import csv
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+import matplotlib
 import yaml
 from datachart.charts import BarChart, DumbbellChart
 from datachart.constants import BAR_MODE, DUMBBELL_SORT_KEY, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
@@ -26,6 +30,14 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the vendored helper resolves
+
+from slm4ie.utils import mlflow as ml  # noqa: E402
+
+# Stable element ids in the SVGs, so a rerun that draws the same figure does
+# not rewrite every file; only the embedded date still changes.
+matplotlib.rcParams["svg.hashsalt"] = "data-landscape-slovenian"
+
+MLFLOW_EXPERIMENT = "slm4ie/data/data-landscape-slovenian"
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -234,7 +246,8 @@ def registry_index() -> Dict[str, Set[str]]:
         for url in entry.get("urls") or []:
             index[key] |= url_keys(str(url))
     for repo, key in REGISTRY_REPO_ALIASES.items():
-        index[key].add(repo)
+        if key in index:
+            index[key].add(repo)
     return index
 
 
@@ -648,8 +661,73 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     )
 
 
+def git_output(*args: str) -> str:
+    """Runs one git query in the experiment folder's repository.
+
+    Args:
+        *args: The git subcommand and its arguments.
+
+    Returns:
+        The command's trimmed output, or an empty string outside a repository.
+    """
+    try:
+        return subprocess.run(["git", *args], cwd=HERE, capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def log_lineage(rows: List[Dict[str, str]], summary: List[Dict[str, object]]) -> None:
+    """Records this pass as a lineage run, with every table and figure as an artifact.
+
+    The run is tagged the way `labflow:run` asks — tier, branch, base commit,
+    type — so `labflow:analyze` can find it, and carries the catalogue's
+    headline counts as metrics so the run list reads without opening files.
+
+    Args:
+        rows: The annotated Slovene catalogue.
+        summary: The per-domain summary.
+    """
+    if not ml.ensure_experiment(MLFLOW_EXPERIMENT):
+        print("mlflow unavailable; lineage not logged")
+        return
+    tags = {
+        "tier": "tracked",
+        "branch": git_output("rev-parse", "--abbrev-ref", "HEAD"),
+        "base_commit": git_output("rev-parse", "--short", "HEAD"),
+        "type": "lineage",
+        "language": "sl",
+    }
+    medical = next(r for r in summary if r["domain"] == "medical" and r["access_filter"] == "open")
+    with ml.mlflow_run("catalogue", tags=tags) as run:
+        ml.log_params(
+            {
+                "families": len({f for f, _ in FAMILY_FILES}),
+                "tokens_per_word": TOKENS_PER_WORD,
+                "kpi2_examples": KPI2_EXAMPLES,
+                "kpi4_tokens": KPI4_TOKENS,
+            }
+        )
+        ml.log_metrics(
+            {
+                "datasets": len(rows),
+                "datasets_new": sum(1 for r in rows if r["in_registry"] == "no"),
+                "datasets_sized": sum(1 for r in rows if r["words_basis"]),
+                "medical_documents_open": int(medical["documents"]),
+                "medical_documents_native_open": int(medical["documents_native"]),
+                "medical_tokens_open": int(medical["tokens_estimated"]),
+            }
+        )
+        ml.log_artifacts(TABLES_DIR, artifact_path="tables")
+        ml.log_artifacts(FIGURES_DIR, artifact_path="figures")
+        print(f"mlflow run {run.info.run_id} in {MLFLOW_EXPERIMENT}")
+
+
 def main() -> None:
-    """Builds every table and figure the record links."""
+    """Builds every table and figure the record links, and optionally logs the pass."""
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--mlflow", action="store_true", help="also record this pass as an MLflow lineage run")
+    args = parser.parse_args()
+
     rows = annotate(merge_duplicates(load_rows()))
     slovene = [r for r in rows if r.get("part") != "B"]
     fallback = [r for r in rows if r.get("part") == "B"]
@@ -664,6 +742,8 @@ def main() -> None:
     print(f"catalogue: {len(slovene)} Slovene rows, {len(fallback)} medical rows in other languages")
     print(f"tables -> {TABLES_DIR}")
     print(f"figures -> {FIGURES_DIR}")
+    if args.mlflow:
+        log_lineage(slovene, summary)
 
 
 if __name__ == "__main__":
