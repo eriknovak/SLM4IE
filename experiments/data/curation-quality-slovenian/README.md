@@ -53,34 +53,39 @@ _Written by labflow:code as each step lands._
 
 ### D2 — What a judged unit is
 
-- **Decision**: One document truncated to its first 2,000 characters. Strata are source × stage × decision (kept or dropped), 15 documents per cell, sampled with a fixed seed; empty cells are skipped.
-- **Why**: The Gopher filters see the whole document but decide on surface statistics, so 2,000 characters carry the evidence that matters and keep judge tokens bounded. Fifteen per cell gives roughly ±25% precision per cell, tight enough at stage × source aggregation.
+- **Decision**: One document truncated to its first 2,000 characters. Strata are source × stage × decision (kept or dropped), 40 documents per cell, sampled with a fixed seed; empty cells are skipped. Six stages make a keep-or-drop decision, so 20 sources fill at most 240 cells and the judged set stays under 10,000 documents.
+- **Why**: The Gopher filters see the whole document but decide on surface statistics, so 2,000 characters carry the evidence that matters and keep judge tokens bounded. Forty per cell gives roughly ±15% precision per cell, so a single source's drop precision at one stage can be read on its own rather than only in aggregate.
 - **History**:
   - 2026-09-14 first version, grill Q21
+  - 2026-09-17 raised from 15 to 40 per cell; the funnel from the finished build showed per-source stage drops worth reading individually (medical loses 85% at `quality`), and 10,000 documents is within the judge budget
 
 ### D3 — The judge
 
-- **Decision**: Claude Sonnet 5 invoked from a standalone script through the Claude Code command-line tool (`claude -p`), with configurable model, prompt file, concurrency, batch size and maximum batch count; one JSON row per document; already-judged documents are skipped on rerun.
-- **Why**: A separate script makes the run resumable and bounds token use, which prior analyses of this kind showed to be the dominant cost. Subagents inside a session cannot be capped or resumed the same way.
+- **Decision**: A standalone script with two interchangeable backends: the Batch API (default), which costs half of standard rates and enforces the reply shape with a structured-output schema, and the Claude Code command-line tool (`claude -p`), which needs no API key and is used to try a rubric change quickly. Model, prompt file, group size and maximum request count are configurable; one JSON row per document; already-judged documents are skipped on rerun.
+- **Why**: A separate script makes the run resumable and bounds token use. Subagents inside a session cannot be capped or resumed the same way. Batch pricing halves the bill for work with no deadline, and grouping documents per request amortises the rubric, which would otherwise cost more than every verdict put together. Prompt caching earns nothing here and is deliberately not used: the rubric is about 1,500 tokens, under Haiku 4.5's 4,096-token minimum cacheable prefix, and batch requests run hours apart so a five-minute cache would miss anyway.
 - **Alternatives**:
   - Session subagents: no cap, no resume.
   - Local open model: weaker on Slovene, no calibration evidence.
 - **History**:
   - 2026-09-14 first version, grill Q17/Q21
+  - 2026-09-18 Batch API added as the default backend and the CLI kept as the second; the whole 8,930-document run costs about $5 on Haiku 4.5 or $10 on Sonnet 5, so the model is chosen by the kappa gate rather than by cost
 
 ### D4 — Judge rubric
 
-- **Decision**: Per document: language (sl / not), text type (natural prose / boilerplate / list / code / garbage), adult-or-spam (yes/no), coherence (1–5), looks machine-translated (yes/no), contains PII (yes/no), domain from the shared taxonomy (medical, scientific, legal, news, parliamentary, academic, encyclopedic, forum/social, general-web, finance, other).
+- **Decision**: Per document: language (sl / other code / mixed), text type (prose / boilerplate / list / code / garbage), adult-or-spam (yes/no), coherence (1–5), looks machine-translated (yes/no), contains PII (yes/no), domain from the catalog's taxonomy (medical, scientific, legal, news, parliamentary, academic, wiki, forum, blog, student, web, finance, other). The judge is blind: it sees the document's id and text only, never the stage or the decision under test. The rubric lives in `configs/judge-rubric.md`.
 - **Why**: Each stage targets one of these dimensions, so precision can be scored per stage. The domain label doubles as gold for the classifier in kpi-coverage-slovenian; machine-translation and PII flags cost nothing and matter for a public release.
 - **History**:
   - 2026-09-14 first version, grill Q12/Q16
+  - 2026-09-17 domain vocabulary aligned with `configs/data/extract.yaml` so a judged label can be compared against the source's declared domain; blindness written into the rubric
 
 ### D5 — Calibration gate
 
-- **Decision**: A 300-document set drawn from the same strata is labelled by the project lead on the same rubric in a marimo notebook. Stage metrics are reported only once Cohen's kappa is at least 0.6 on every dimension; below that the rubric is revised and the judge rerun.
-- **Why**: Judge labels are only evidence once their agreement with a human is known. Kappa 0.6 is the conventional floor for substantial agreement.
+- **Decision**: A 300-document set drawn from the same strata is labelled by the project lead on the same rubric in a marimo notebook. Stage metrics are reported only once agreement reaches 0.6 on every dimension; below that the rubric is revised and the judge rerun. Agreement is Cohen's kappa for the categorical dimensions and quadratic-weighted kappa for coherence, which is ordinal. The residual-bad-rate metric reads coherence as the binary `readable = coherence >= 4`.
+- **Why**: Judge labels are only evidence once their agreement with a human is known. Kappa 0.6 is the conventional floor for substantial agreement. Plain kappa is the wrong statistic for an ordinal scale: it scores a 4-against-5 exactly as harshly as a 1-against-5, and two judges that differ only in where they put the top of the scale would fail a gate they should pass.
 - **History**:
   - 2026-09-14 first version, grill Q22
+  - 2026-09-22 briefly cut to 100 documents for the labeller's time, then restored to 300 the same evening; the smaller set would have carried a kappa interval of about ±0.15 against ±0.09 on 300
+  - 2026-09-18 weighted kappa adopted for coherence after Haiku and Sonnet agreed on only 52% of the 1-5 scale while 98% of their disagreements were a single point, and one pair (Sonnet 5 against Haiku 4) accounted for 87 of 280 documents; the coherence anchors were rewritten as an ordered decision with an explicit 4/5 test
 
 ### D6 — Measure, do not tune
 
