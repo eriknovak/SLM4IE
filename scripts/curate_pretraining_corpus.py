@@ -3,7 +3,7 @@
 Parses arguments and dispatches into `slm4ie.data.curate.runner`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Three subcommands:
+Four subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
@@ -15,6 +15,8 @@ Three subcommands:
   and rewrites no data.
 * `diagnose` samples the finished corpus and reports where foreign-language
   text survives the language stage. Read-only: it writes nothing.
+* `sample` draws a `dataset x stage x decision` sample of kept and dropped
+  documents into a JSONL file, for judging how well each stage decided.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -42,6 +44,11 @@ Examples:
     # Report foreign-language leakage in the finished corpus.
     uv run python scripts/curate_pretraining_corpus.py diagnose --config $CURATION \
         --candidates sl,en,de,hr,sr,it,fr
+
+    # Draw the judged sample of kept and dropped documents.
+    uv run python scripts/curate_pretraining_corpus.py sample --config $CURATION \
+        --out data/experiments/data/curation-quality-slovenian/interim/sample.jsonl \
+        --max-workers 12
 """
 
 import argparse
@@ -53,6 +60,7 @@ from typing import List, Optional
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
 from slm4ie.data.curate.runner import curate, recount
+from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
 from slm4ie.data.curate.stages import CORPUS_STAGES
 from slm4ie.utils.cli import add_selection, validate_selection
 
@@ -181,7 +189,34 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ),
     )
 
+    sample_parser = subparsers.add_parser(
+        "sample",
+        help="Draw a dataset x stage x decision sample of kept and dropped documents.",
+    )
+    add_selection(sample_parser, "datasets", "Dataset keys to sample.", "Sample every dataset in the final corpus.")
+    _add_common_arguments(sample_parser)
+    sample_parser.add_argument("--out", type=Path, required=True, help="JSONL file to write the sample to.")
+    sample_parser.add_argument(
+        "--stage",
+        action="append",
+        choices=JUDGED_STAGES,
+        default=None,
+        help="Stage to sample; repeatable. Default: every stage that makes a decision.",
+    )
+    sample_parser.add_argument("--per-cell", type=int, default=40, help="Documents per dataset/stage/decision cell.")
+    sample_parser.add_argument(
+        "--shards-per-cell",
+        type=int,
+        default=3,
+        help="Input shards searched for drops per cell, or 0 for all of them.",
+    )
+    sample_parser.add_argument("--max-chars", type=int, default=2000, help="Characters of text kept per document.")
+    sample_parser.add_argument("--seed", type=int, default=20260916, help="Seed; the same seed redraws the sample.")
+    sample_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Cells sampled in parallel.")
+
     args = parser.parse_args(argv)
+    if args.command == "sample":
+        validate_selection(parser, args, "datasets")
     if args.command == "run":
         validate_selection(parser, args, "datasets")
         if args.datasets and args.stage in CORPUS_STAGES:
@@ -206,6 +241,20 @@ def main() -> None:
                 max_paragraphs=args.max_paragraphs,
                 candidates=args.candidates.split(",") if args.candidates else None,
             )
+        )
+        return
+
+    if args.command == "sample":
+        draw_stratified_sample(
+            output_dir=resolve_output_dir(args.config, args.output_dir),
+            destination=args.out,
+            datasets=args.datasets or None,
+            stages=args.stage or JUDGED_STAGES,
+            per_cell=args.per_cell,
+            shards_per_cell=args.shards_per_cell,
+            max_chars=args.max_chars,
+            seed=args.seed,
+            workers=args.workers,
         )
         return
 

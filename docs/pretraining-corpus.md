@@ -251,3 +251,39 @@ the likely confounders is much faster than the config's full European set and
 still separates Slovenian from English. `--base-dir` points it at a stage other
 than the final corpus; `--per-dataset` and `--max-shards-per-dataset` size the
 sample.
+
+## Sampling what each stage kept and dropped
+
+Every stage writes only the documents it keeps, so its drops exist on disk only
+as the difference between its output and its input. The `sample` subcommand
+reconstructs that difference and draws a balanced sample from it, so each
+stage's decisions can be judged rather than assumed.
+
+```bash
+uv run python scripts/curate_pretraining_corpus.py sample --config "$CURATION" \
+    --out data/experiments/data/<category>/<slug>/interim/sample.jsonl \
+    --all --max-workers 12
+```
+
+The strata are `dataset x stage x decision`, where the decision is `kept` (the
+document is in the stage's output) or `dropped` (it is in the stage's input but
+not its output). `--per-cell` sets how many documents each cell holds (40),
+`--max-chars` how much of each document is written (2,000), and `--seed` makes
+the draw reproducible. One row is written per document, listing every cell it
+was drawn into, so a document kept by several stages is judged once.
+
+A stage does not keep its documents in the shard they arrived in, so no output
+shard can be set against an input shard opposite it, and position pairs them
+wrongly: `culturax` alone redistributes every document between `01_language`
+and `02_spam`. Deciding what a stage dropped therefore needs the stage's whole
+output. Each cell reads all of it once — that gives both the kept sample and an
+index of surviving ids, held as one 64-bit hash per document — and then reads
+input shards, where any document the index does not know was dropped.
+`--shards-per-cell` (3 by default, 0 for all) bounds only that second read, so
+the cost is one pass over each stage plus a few input shards.
+
+Two caveats. A source whose document ids are not unique reports fewer drops than
+it made, because a dropped document sharing an id with a surviving one reads as
+a survivor — `coleslaw` is such a source. And only datasets present in the final
+corpus are sampled: sources excluded from the build, or dropped entirely by a
+stage, are not part of the roster.
