@@ -7,7 +7,7 @@ branch: exp/data-landscape-slovenian
 base_commit: a0b3306
 status: concluded
 ticket: "#1"
-pr:
+pr: "#7"
 mlflow: http://localhost:5555/#/experiments/12
 builds_on: []
 types: [lineage]
