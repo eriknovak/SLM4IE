@@ -256,7 +256,7 @@ concluded: 2026-09-28
 ### F1 — Open Slovene medicine is mostly not written in Slovene · key
 
 - **Summary**: Medicine holds 3.04M open documents, of which 24,757 were written in Slovene; the rest is translation and machine output.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
 - **Result**: ![Share of each domain's openly downloadable documents that were written in Slovene, with the domain's document total beside its name and medicine's row bolded. Most domains sit at or near full native share; other, legal and academic sit near half, weighed down by translation memories and instruction sets; medicine sits near zero.](figures/documents-by-domain-and-provenance.svg)
 - **Reading**:
   - **Medicine is the only domain where translated and machine-written documents far outnumber native ones.** Everywhere else most documents were written in Slovene. Medicine's total is carried by instruction sets, prompt-and-answer pairs written to train chat models, and by one medical question set translated from English and annotated automatically.
@@ -272,7 +272,7 @@ concluded: 2026-09-28
 ### F2 — Medicine's new native supply is large in words and small in documents · key
 
 - **Summary**: The four new native medical sources counted by this experiment hold about 7.9M words, thirty times KPI 4, in under four thousand documents.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
 - **Result**: [Items and words counted for each new native medical source](tables/native-medical-sizes.csv)
 - **Reading**:
   - **The national medical journal, Zdravniški vestnik, carries almost all of the new words.** Its Slovene articles, sized from a fixed-seed sample ([M6]), hold most of the total, and the Slovene Wikipedia's medicine category most of the rest. The case reports and the guidelines list are small: the reports are few once sentences are grouped, and most guideline links are dead.
@@ -287,7 +287,7 @@ concluded: 2026-09-28
 ### F3 — Science clears both KPIs on native prose alone · key
 
 - **Summary**: Native science outside the download registry reaches 147,291 open documents and 33.6M estimated tokens, both far past their thresholds.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
 - **Result**: [Native supply outside the download registry, per Prediction domain and access filter](tables/supply-by-clause.csv)
 - **Reading**:
   - **Science clears both thresholds under the open filter alone.** Science here is scientific plus academic datasets, each counted once ([D5]). Loosening access only adds to totals already past both thresholds.
@@ -301,7 +301,7 @@ concluded: 2026-09-28
 ### F4 — The catalogue is mostly supply the project does not use · supporting F3
 
 - **Summary**: 266 of the 295 catalogued Slovene datasets are outside the download registry.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
 - **Result**: [The catalogue, one row per dataset](tables/catalogue.csv)
 - **Reading**:
   - **Nine in ten catalogued datasets are ones the project does not download.** The catalogue finds nearly every registry entry; the two it misses are not openly published.
@@ -314,7 +314,7 @@ concluded: 2026-09-28
 ### F5 — An aggregator re-lists a twentieth of the catalogue · minor
 
 - **Summary**: 13 CLARIN.SI datasets arrive a second time through ELG and would otherwise be counted twice.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
 - **Result**: [The catalogue, one row per dataset](tables/catalogue.csv), `mirrors` column
 - **Reading**: Merging on the normalised dataset name ([D10]) keeps every per-domain total free of these double counts.
 - **History**:
@@ -324,23 +324,25 @@ concluded: 2026-09-28
 ### F6 — Machine-made Slovene is rare in the catalogue and gathers in medicine · supporting F1
 
 - **Summary**: Machine translation touches 15 catalogued datasets and model-written text 9; most wholly synthetic sets are medical.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
-- **Result**: [Datasets, documents and words per checked provenance class](tables/provenance-by-class.csv)
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
+- **Result**: ![Checked datasets per provenance class, each bar split into medical and other domains. Human translations lead, followed by bilingual resources and mixed sets; synthetic sets are the one class that is mostly medical. The bar of datasets found native counts rows the keyword reading had flagged wrongly.](figures/datasets-by-provenance-class.svg)
 - **Reading**:
   - **Most non-native datasets are human translations or bilingual resources, not machine output.** Of the rows checked ([M7]), professional translation memories and parallel corpora outnumber machine-translated and synthetic sets together. Five rows the keyword reading flagged turned out to be native Slovene.
   - **This qualifies medicine's machine-written majority ([F1]).** Machine output is uncommon across the catalogue, but five of the six wholly synthetic sets are medical, and they hold about half of the domain's documents. Medicine's shortfall is a property of that domain's open supply, not of the catalogue as a whole.
   - **Native rows misread as native would overturn the proportion.** Only rows the keyword reading flagged were checked, so a machine-translated set described without the usual words would still count as native.
 - **History**:
   - 2026-09-28 first result, from the provenance check ([M7])
+  - 2026-09-29 Result drawn as a figure; the table stays under `tables/`. Lineage rerun at 918a2f0
 
 ### F7 — Google Translate is the translation system named most often · minor
 
 - **Summary**: Of 15 datasets involving machine translation, 10 name the system; Google Translate is the most common.
-- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
-- **Result**: [Machine-translated and mixed datasets per translation system](tables/translation-systems.csv)
+- **Runs**: e3e60479801b4a339e8a38107c448ca9
+- **Result**: ![Datasets involving machine translation per translation system, as their cards or papers name it. Unknown marks a source that names none; Google Translate is the only named system behind more than one dataset.](figures/datasets-by-translation-system.svg)
 - **Reading**: The named systems range from Google Translate and DeepL to language models used as translators, so no single system's errors dominate the machine-translated Slovene.
 - **History**:
   - 2026-09-28 first result, from the provenance check ([M7])
+  - 2026-09-29 Result drawn as a figure; the table stays under `tables/`. Lineage rerun at 918a2f0
 
 ## Verdict
 
@@ -376,6 +378,6 @@ cd "$(git rev-parse --show-toplevel)"
 # F2 — fetch and count the new native medical sources (commit ff303ac)
 uv run --group analysis python experiments/data/data-landscape-slovenian/size_medical_sources.py
 
-# F1, F2, F3, F4, F5 — catalogue, tables, figures and the lineage run (commit e32f209)
+# F1, F2, F3, F4, F5 — catalogue, tables, figures and the lineage run (commit 918a2f0)
 uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py --mlflow
 ```
