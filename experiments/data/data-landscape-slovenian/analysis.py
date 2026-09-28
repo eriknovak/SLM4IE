@@ -44,6 +44,8 @@ REGISTRY = ROOT / "configs" / "data" / "download.yaml"
 CORPUS_STATISTICS = ROOT / "data" / "pretrain" / "07_statistics" / "aggregate.json"
 # What size_medical_sources.py counted for the new native medical sources.
 SIZES_TABLE = HERE / "tables" / "native-medical-sizes.csv"
+# Each non-native row's provenance as read from its card or paper (M7).
+PROVENANCE_CHECK = RAW_DIR / "provenance-check.json"
 
 # One file per source family searched (D2), in the order that decides which
 # copy of a dataset catalogued twice is kept: the repository that publishes it
@@ -113,6 +115,17 @@ TRANSLATED_TERMS: Tuple[str, ...] = (
     r"\bmt\b",
 )
 
+# A checked provenance class, folded into the three-way reading the Predictions use.
+PROVENANCE_OF_CLASS: Dict[str, str] = {
+    "native": "native",
+    "human_translated": "translated",
+    "machine_translated": "translated",
+    "mixed": "translated",
+    "bilingual_resource": "translated",
+    "synthetic": "generated",
+}
+PROVENANCE_CLASSES: List[str] = [*PROVENANCE_OF_CLASS, "unchecked"]
+
 # The sizing pass's basis, as the catalogue's `words_basis` records it (D6).
 SIZE_BASIS: Dict[str, str] = {"full": "counted", "partial": "partial", "sampled": "sampled"}
 
@@ -139,6 +152,11 @@ CATALOGUE_COLUMNS: List[str] = [
     "length_class",
     "format",
     "provenance",
+    "provenance_class",
+    "provenance_checked",
+    "source_language",
+    "translation_system",
+    "generator_model",
     "in_registry",
     "registry_key",
     "kpi2_fit",
@@ -288,6 +306,17 @@ def survey_sizes() -> Dict[str, Dict[str, str]]:
         return {normalise(r["catalogue_name"]): r for r in csv.DictReader(handle)}
 
 
+def provenance_checks() -> Dict[str, Dict[str, str]]:
+    """Reads the checked provenance of the rows the keyword reading marked non-native.
+
+    Returns:
+        Normalised catalogue name to its checked entry; empty until the check exists.
+    """
+    if not PROVENANCE_CHECK.exists():
+        return {}
+    return {normalise(c["name"]): c for c in json.loads(PROVENANCE_CHECK.read_text(encoding="utf-8"))}
+
+
 def corpus_counts() -> Dict[str, Dict[str, int]]:
     """Reads what the pretraining build measured for each registry source.
 
@@ -417,6 +446,7 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     index = registry_index()
     measured = corpus_counts()
     surveyed = survey_sizes()
+    checks = provenance_checks()
     annotated: List[Dict[str, str]] = []
     for row in rows:
         key = registry_match(row, index)
@@ -439,6 +469,10 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
             "documents": documents if documents is not None else "",
         }
         kpi2, kpi4 = kpi_fit(sized)
+        check = checks.get(normalise(row["name"]), {})
+        read = provenance(row)
+        # an unchecked keyword-native row stays native; any other unchecked row says so
+        klass = check.get("provenance_class") or ("native" if read == "native" else "unchecked")
         annotated.append(
             {
                 **row,
@@ -449,7 +483,12 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
                 "words_corpus": str(counts.get("word_count", "")),
                 "documents_corpus": str(counts.get("doc_count", "")),
                 "tokens_estimated": str(int(words * TOKENS_PER_WORD)) if words is not None else "",
-                "provenance": provenance(row),
+                "provenance": PROVENANCE_OF_CLASS[klass] if check else read,
+                "provenance_class": klass,
+                "provenance_checked": "yes" if check else "no",
+                "source_language": check.get("source_language", ""),
+                "translation_system": check.get("translation_system", ""),
+                "generator_model": check.get("generator_model", ""),
                 "in_registry": "yes" if key else "no",
                 "registry_key": key or "",
                 "kpi2_fit": kpi2,
@@ -577,6 +616,47 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
                 }
             )
     return summary
+
+
+def provenance_summary(rows: List[Dict[str, str]]) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    """Counts datasets per checked provenance class, and machine-translated ones per system.
+
+    Args:
+        rows: The annotated Slovene catalogue.
+
+    Returns:
+        One line per provenance class, and one line per translation system
+        behind the machine-translated and mixed rows.
+    """
+    classes = [
+        {
+            "provenance_class": klass,
+            "datasets": sum(1 for r in rows if r["provenance_class"] == klass),
+            "datasets_checked": sum(
+                1 for r in rows if r["provenance_class"] == klass and r["provenance_checked"] == "yes"
+            ),
+            "documents": sum(number(r["documents"]) or 0 for r in rows if r["provenance_class"] == klass),
+            "words": sum(number(r["words"]) or 0 for r in rows if r["provenance_class"] == klass),
+        }
+        for klass in PROVENANCE_CLASSES
+    ]
+    # a mixed row counts only when machine translation is part of the mix
+    machine = [
+        r
+        for r in rows
+        if r["provenance_class"] == "machine_translated"
+        or (r["provenance_class"] == "mixed" and r["translation_system"] not in ("", "human"))
+    ]
+    systems = [
+        {
+            "translation_system": system,
+            "datasets": len(named),
+            "names": "; ".join(sorted(r["name"] for r in named)),
+        }
+        for system in sorted({r["translation_system"] or "unknown" for r in machine})
+        for named in [[r for r in machine if (r["translation_system"] or "unknown") == system]]
+    ]
+    return classes, sorted(systems, key=lambda line: -int(line["datasets"]))
 
 
 def clause_supply(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
@@ -857,6 +937,9 @@ def main() -> None:
 
     summary = summarise(slovene)
     clauses = clause_supply(slovene)
+    classes, systems = provenance_summary(slovene)
+    write_table(TABLES_DIR / "provenance-by-class.csv", list(classes[0].keys()), classes)
+    write_table(TABLES_DIR / "translation-systems.csv", list(systems[0].keys()), systems)
     write_table(TABLES_DIR / "supply-by-clause.csv", list(clauses[0].keys()), clauses)
     write_table(TABLES_DIR / "supply-by-domain-and-access.csv", list(summary[0].keys()), summary)
     draw_figures(summary)

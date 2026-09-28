@@ -1,0 +1,8 @@
+provenance_class,datasets,datasets_checked,documents,words
+native,235,5,213368926,80985853460
+human_translated,24,24,1203529,2104147314
+machine_translated,7,7,1918691,0
+mixed,11,11,744251,682937
+bilingual_resource,12,12,5376312,113460466
+synthetic,6,6,1484244,0
+unchecked,0,0,0,0

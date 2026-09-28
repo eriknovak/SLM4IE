@@ -123,6 +123,7 @@ def fixture_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, analysis: Mod
     monkeypatch.setattr(analysis, "REGISTRY", registry)
     monkeypatch.setattr(analysis, "CORPUS_STATISTICS", stats)
     monkeypatch.setattr(analysis, "SIZES_TABLE", tmp_path / "no-sizes.csv")
+    monkeypatch.setattr(analysis, "PROVENANCE_CHECK", tmp_path / "no-check.json")
     return {"raw": raw, "registry": registry, "stats": stats}
 
 
@@ -196,6 +197,23 @@ def test_provenance_reads_the_row_text(analysis: ModuleType, fixture_paths: Dict
     assert rows["Translated science"]["provenance"] == "translated"
     generated = analysis.provenance(row(name="Synthetic notes", notes="LLM-generated clinical notes"))
     assert generated == "generated"
+
+
+def test_checked_provenance_overrides_the_keyword_reading(
+    analysis: ModuleType, fixture_paths: Dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row's checked provenance class decides its three-way reading (M7)."""
+    check = tmp_path / "provenance-check.json"
+    check.write_text(
+        json.dumps([{"name": "Translated science", "provenance_class": "native", "translation_system": ""}]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(analysis, "PROVENANCE_CHECK", check)
+    rows = {r["name"]: r for r in annotated(analysis)}
+    assert rows["Translated science"]["provenance"] == "native"
+    assert rows["Translated science"]["provenance_checked"] == "yes"
+    assert rows["Science corpus"]["provenance_class"] == "native"
+    assert rows["Science corpus"]["provenance_checked"] == "no"
 
 
 def test_kpi_fit_reads_missing_counts_as_unknown(analysis: ModuleType) -> None:

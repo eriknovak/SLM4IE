@@ -1,0 +1,9 @@
+translation_system,datasets,names
+unknown,5,Parallel corpus of idiomatic text ParaDiom 1.0; Post-edited and error annotated machine translation corpus PErr 1.0; Slovene translation of the SQuAD2.0 dataset; Slovenian Medical Eval (med-slo-eval); Slovenian Medical SFT Corpus (med-slo-sft)
+Google Translate,4,Extensions to the Slovene translation of SuperGLUE; Slovene SuperGLUE - MultiRC; Slovene translation of SuperGLUE; Slovenian LLM eval v0 (gordicaleksa)
+Claude Sonnet 4.6,1,M-ABSA-sl: Slovenian Aspect-Based Sentiment Analysis Corpus
+DeepL,1,Slovene Translation of the Atomic 2020 data set SloATOMIC 2020
+GPT-4.1,1,Slovene instruction-following dataset for large language models GaMS-Instruct-MED 2.0
+"Google Translate, DeepL, GPT-4",1,Slovenian LLM evaluation dataset (CJVT)
+facebook/mbart-large-50-many-to-many-mmt,1,"Slovenian NER dataset (HUMADEX, medical)"
+seven MT and LLM systems,1,2024 machine translation evaluation dataset
