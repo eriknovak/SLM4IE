@@ -46,6 +46,7 @@ concluded: 2026-09-28
   - Search the source families and keep every row with the URL it came from ([M1]), then re-read the Hugging Face harvest for rows the first pass missed ([M2]).
   - Merge datasets catalogued twice into one row ([M3]).
   - Size the reachable native medical sources by fetching and counting them ([M6]).
+  - Check how the text of every row the keyword reading marks non-native came to exist, and which translation system made it ([M7]).
   - Add token estimates, provenance, registry overlap and KPI fit to every row ([M4]).
   - Total each domain under three access filters and read each total against its KPI ([M5]).
 - **Metrics**: primary estimated tokens per domain against KPI 4; secondary documents per domain, native documents per domain, and annotated examples per domain against KPI 2.
@@ -54,7 +55,7 @@ concluded: 2026-09-28
 
 ## Datasets
 
-- **Survey rows**: One row per dataset a searched source family returned, on the catalogue schema ([D4]), kept as JSON per family under `data/experiments/data/data-landscape-slovenian/raw/`. [Rows each family returned, kept after merging, and already downloaded](tables/dataset-survey-rows-statistics.csv)
+- **Survey rows**: One row per dataset a searched source family returned, on the catalogue schema ([D4]), kept as JSON per family under `data/experiments/data/data-landscape-slovenian/raw/`, beside the provenance check of each non-native row ([M7]). [Rows each family returned, kept after merging, and already downloaded](tables/dataset-survey-rows-statistics.csv)
 - **Fetched native medical text**: One item per case report, Wikipedia article, journal article or guideline PDF, fetched under `data/experiments/data/data-landscape-slovenian/interim/<source>/` for counting only. [Items and words per fetched source](tables/native-medical-sizes.csv)
 
 ## Methods
@@ -97,13 +98,13 @@ concluded: 2026-09-28
 
 ### M4 — The derived columns
 
-- **Input**: The merged rows ([M3]), the download registry `configs/data/download.yaml`, the corpus build's per-source counts in `pretrain/07_statistics/aggregate.json`, and the counted medical sizes ([M6]).
-- **Output**: Each row gains `words_basis`, `tokens_estimated`, `provenance`, `in_registry`, `registry_key`, `kpi2_fit` and `kpi4_fit`.
+- **Input**: The merged rows ([M3]), the download registry `configs/data/download.yaml`, the corpus build's per-source counts in `pretrain/07_statistics/aggregate.json`, the counted medical sizes ([M6]) and the provenance checks ([M7]).
+- **Output**: Each row gains `words_basis`, `tokens_estimated`, `provenance`, `provenance_class`, `translation_system`, `in_registry`, `registry_key`, `kpi2_fit` and `kpi4_fit`.
 - **How**: Each column answers one question the KPIs ask.
   1. Match the row, and every address in `mirrors`, against the registry's CLARIN handles and Hugging Face repositories. The four corpora fetched by hand match on a fragment of their name.
   2. Take the word count the source reported. Where there is none, take this experiment's own count ([M6]), then the corpus build's count; `words_basis` says which ([D6]).
   3. Set `tokens_estimated` to the word count times two, empty when no count exists.
-  4. Read `provenance` from the terms the row's name and notes use ([D11]).
+  4. Read `provenance` from the terms the row's name and notes use ([D11]). Where the row was checked ([M7]), its checked class decides instead, and its translation system is carried over.
   5. Where this experiment counted a source's items itself ([M6]), take that as the row's `documents`, since it counts in the catalogue's unit.
   6. Set `kpi2_fit` for medical and scientific rows on 10,000 documents, and `kpi4_fit` on 500,000 estimated tokens. Either is `unknown` when its count was never reported ([D9]).
 - **Code**: `analysis.py::annotate`
@@ -135,6 +136,20 @@ concluded: 2026-09-28
   7. On a rerun, reuse the fetched files and recount.
 - **Code**: `size_medical_sources.py::main`
 - **Settings**: `SAMPLE_SIZE` (journal articles drawn), `SEED` (the draw's seed), `WIKI_DEPTH` (category levels walked), `POLITE_DELAY` (seconds between requests to a site) in `size_medical_sources.py`
+
+### M7 — Checking how non-native text came to exist
+
+- **Input**: Every catalogue row the keyword reading of provenance ([D11]) did not mark native, with its landing page and mirrors.
+- **Output**: `provenance-check.json` beside the searched rows, one entry per row with its class, source language, translation system, generating model, evidence URL and quote, and a confidence. `tables/provenance-by-class.csv` and `tables/translation-systems.csv` total it.
+- **How**: Three agents read the sources in parallel on 2026-09-28, each row's landing page first, then the paper or card it cites.
+  1. Assign one class: native, human-translated, machine-translated, synthetic (written by a language model), bilingual resource, or mixed.
+  2. A bilingual resource is a dictionary, term list or parallel corpus whose translation direction the source does not establish.
+  3. A translation post-edited only in part counts as machine-translated.
+  4. Record the translation system or generating model only where the source names it, with a verbatim quote; otherwise record it as unknown.
+  5. Mark confidence high where the source states it, medium where it is strongly implied, and low where the page could not be read.
+  6. Count a mixed row as machine-translated in the systems table only when machine translation is part of its mix.
+- **Code**: `analysis.py::provenance_summary`
+- **Settings**: `PROVENANCE_OF_CLASS` (how each checked class folds into native, translated or generated) in `analysis.py`
 
 ## Decisions
 
@@ -218,12 +233,14 @@ concluded: 2026-09-28
 
 ### D11 — Provenance of the Slovene text
 
-- **Decision**: Every row is read as `native`, `translated` or `generated` from the terms its own name and notes use. `generated` is tested first, so a set that was translated and then automatically annotated counts as machine output. Per-domain totals carry the native document count beside the full one.
+- **Decision**: Every row is first read as `native`, `translated` or `generated` from the terms its name and notes use. Every row not read as native is then checked against its card or paper into six classes ([M7]), and the checked class decides. Per-domain totals carry the native document count beside the full one.
 - **Why**: The Hypothesis asks whether open sources cover the KPIs *without* synthetic data, and a document count alone cannot answer that. Medicine forces it: the domain clears KPI 2 only on instruction sets and machine-translated material [F1].
 - **Alternatives**:
-  - Judge each row by hand — rejected: a judgement living outside the script cannot be rerun as the catalogue grows.
+  - Check every row by hand, native ones included — rejected: the non-native rows are where a misreading changes what the Predictions count.
+  - Keep the keyword reading alone — rejected: it counted dictionaries and human translation memories as translated text and named no translation system.
 - **History**:
   - 2026-09-19 first version
+  - 2026-09-28 non-native rows checked against their sources into six classes, stored as evidence so the reading still reruns ([M7]); five rows moved to native
 
 ### D12 — Which new medical sources to fetch
 
@@ -239,22 +256,23 @@ concluded: 2026-09-28
 ### F1 — Open Slovene medicine is mostly not written in Slovene · key
 
 - **Summary**: Medicine holds 3.04M open documents, of which 24,757 were written in Slovene; the rest is translation and machine output.
-- **Runs**: 9877583f146a4ba486c42382e64087c3
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
 - **Result**: ![Share of each domain's openly downloadable documents that were written in Slovene, with the domain's document total beside its name and medicine's row bolded. Most domains sit at or near full native share; other, legal and academic sit near half, weighed down by translation memories and instruction sets; medicine sits near zero.](figures/documents-by-domain-and-provenance.svg)
 - **Reading**:
   - **Medicine is the only domain where translated and machine-written documents far outnumber native ones.** Everywhere else most documents were written in Slovene. Medicine's total is carried by instruction sets, prompt-and-answer pairs written to train chat models, and by one medical question set translated from English and annotated automatically.
   - **It refutes the medical examples clause [H2] as the Statement meant it.** Open medical documents pass KPI 2's threshold only when machine output counts, and the Statement excludes it. Most of the native remainder is PoVeJMo-VeMo-Med, a corpus of Slovene medical texts the project already downloads, which the clause also excludes.
-  - **A native medical corpus at scale would overturn it.** None turned up in the eight searched source families. Three Hugging Face datasets from the `texdata` account, gated so they open only on request, are no such candidate. Two of the three are machine-generated by their own description.
+  - **A native medical corpus at scale would overturn it.** None turned up in the eight searched source families. Three Hugging Face datasets from the `texdata` account, gated so they open only on request, are no such candidate. Two are machine-translated from English, and the third is general Slovene web and Wikipedia text ([M7]).
 - **Implication**: Medical examples for KPI 2 cannot be collected from open native data. They have to be built, or found beyond the source families this survey searched.
 - **History**:
   - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]
-  - 2026-09-28 access to the three gated `texdata` sets, requested 2026-09-22, still ungranted; the reading no longer names them as candidates, since two are generated
+  - 2026-09-28 access to the three gated `texdata` sets, requested 2026-09-22, still ungranted; the reading no longer names them as candidates
+  - 2026-09-28 the `texdata` sets described from their checked provenance ([M7]): two machine-translated, one general native text. Lineage rerun at e32f209, replaces run 9877583f146a4ba486c42382e64087c3
   - 2026-09-28 Summary corrected to the native count after the sizing pass ([M6]); lineage rerun at b453686, replaces run e953aa30cf0948f9be2e6fcb3658bdde
 
 ### F2 — Medicine's new native supply is large in words and small in documents · key
 
 - **Summary**: The four new native medical sources counted by this experiment hold about 7.9M words, thirty times KPI 4, in under four thousand documents.
-- **Runs**: 9877583f146a4ba486c42382e64087c3
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
 - **Result**: [Items and words counted for each new native medical source](tables/native-medical-sizes.csv)
 - **Reading**:
   - **The national medical journal, Zdravniški vestnik, carries almost all of the new words.** Its Slovene articles, sized from a fixed-seed sample ([M6]), hold most of the total, and the Slovene Wikipedia's medicine category most of the rest. The case reports and the guidelines list are small: the reports are few once sentences are grouped, and most guideline links are dead.
@@ -269,7 +287,7 @@ concluded: 2026-09-28
 ### F3 — Science clears both KPIs on native prose alone · key
 
 - **Summary**: Native science outside the download registry reaches 147,291 open documents and 33.6M estimated tokens, both far past their thresholds.
-- **Runs**: 9877583f146a4ba486c42382e64087c3
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
 - **Result**: [Native supply outside the download registry, per Prediction domain and access filter](tables/supply-by-clause.csv)
 - **Reading**:
   - **Science clears both thresholds under the open filter alone.** Science here is scientific plus academic datasets, each counted once ([D5]). Loosening access only adds to totals already past both thresholds.
@@ -283,7 +301,7 @@ concluded: 2026-09-28
 ### F4 — The catalogue is mostly supply the project does not use · supporting F3
 
 - **Summary**: 266 of the 295 catalogued Slovene datasets are outside the download registry.
-- **Runs**: 9877583f146a4ba486c42382e64087c3
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
 - **Result**: [The catalogue, one row per dataset](tables/catalogue.csv)
 - **Reading**:
   - **Nine in ten catalogued datasets are ones the project does not download.** The catalogue finds nearly every registry entry; the two it misses are not openly published.
@@ -296,12 +314,33 @@ concluded: 2026-09-28
 ### F5 — An aggregator re-lists a twentieth of the catalogue · minor
 
 - **Summary**: 13 CLARIN.SI datasets arrive a second time through ELG and would otherwise be counted twice.
-- **Runs**: 9877583f146a4ba486c42382e64087c3
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
 - **Result**: [The catalogue, one row per dataset](tables/catalogue.csv), `mirrors` column
 - **Reading**: Merging on the normalised dataset name ([D10]) keeps every per-domain total free of these double counts.
 - **History**:
   - 2026-09-19 first result, from the catalogue at the second Hugging Face pass [M2]
   - 2026-09-28 corrected to ELG alone: no LINDAT row merged into a CLARIN.SI one
+
+### F6 — Machine-made Slovene is rare in the catalogue and gathers in medicine · supporting F1
+
+- **Summary**: Machine translation touches 15 catalogued datasets and model-written text 9; most wholly synthetic sets are medical.
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Result**: [Datasets, documents and words per checked provenance class](tables/provenance-by-class.csv)
+- **Reading**:
+  - **Most non-native datasets are human translations or bilingual resources, not machine output.** Of the rows checked ([M7]), professional translation memories and parallel corpora outnumber machine-translated and synthetic sets together. Five rows the keyword reading flagged turned out to be native Slovene.
+  - **This qualifies medicine's machine-written majority ([F1]).** Machine output is uncommon across the catalogue, but five of the six wholly synthetic sets are medical, and they hold about half of the domain's documents. Medicine's shortfall is a property of that domain's open supply, not of the catalogue as a whole.
+  - **Native rows misread as native would overturn the proportion.** Only rows the keyword reading flagged were checked, so a machine-translated set described without the usual words would still count as native.
+- **History**:
+  - 2026-09-28 first result, from the provenance check ([M7])
+
+### F7 — Google Translate is the translation system named most often · minor
+
+- **Summary**: Of 15 datasets involving machine translation, 10 name the system; Google Translate is the most common.
+- **Runs**: 607de533f6a04e7bbc60368b56ce8cb2
+- **Result**: [Machine-translated and mixed datasets per translation system](tables/translation-systems.csv)
+- **Reading**: The named systems range from Google Translate and DeepL to language models used as translators, so no single system's errors dominate the machine-translated Slovene.
+- **History**:
+  - 2026-09-28 first result, from the provenance check ([M7])
 
 ## Verdict
 
@@ -322,7 +361,7 @@ concluded: 2026-09-28
   - Under open access, medicine's document total reads `unknown` by the missing-size rule ([D9]) only because of one sentence collection with no document unit. The verdict reads it as a miss.
   - Tokens are estimated at two per word until the project tokenizer exists.
   - The journal's word count is extrapolated from a sample of about forty articles.
-  - Provenance is read from each dataset's own name and notes, not from its text.
+  - Only rows the keyword reading marked non-native were checked against their sources; a native row it misread stays native.
   - The three gated `texdata` sets are catalogued but unsized; access was never granted.
   - Source families beyond the eight searched were not covered.
 
@@ -337,6 +376,6 @@ cd "$(git rev-parse --show-toplevel)"
 # F2 — fetch and count the new native medical sources (commit ff303ac)
 uv run --group analysis python experiments/data/data-landscape-slovenian/size_medical_sources.py
 
-# F1, F2, F3, F4, F5 — catalogue, tables, figures and the lineage run (commit b453686)
+# F1, F2, F3, F4, F5 — catalogue, tables, figures and the lineage run (commit e32f209)
 uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py --mlflow
 ```
