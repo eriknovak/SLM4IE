@@ -126,6 +126,9 @@ PROVENANCE_OF_CLASS: Dict[str, str] = {
 }
 PROVENANCE_CLASSES: List[str] = [*PROVENANCE_OF_CLASS, "unchecked"]
 
+# Short axis labels for translation systems whose model ids run long.
+SYSTEM_LABELS: Dict[str, str] = {"facebook/mbart-large-50-many-to-many-mmt": "mBART-50"}
+
 # The sizing pass's basis, as the catalogue's `words_basis` records it (D6).
 SIZE_BASIS: Dict[str, str] = {"full": "counted", "partial": "partial", "sampled": "sampled"}
 
@@ -857,6 +860,68 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     )
 
 
+def draw_provenance_figures(rows: List[Dict[str, str]], systems: List[Dict[str, object]]) -> None:
+    """Draws the two provenance-check figures the record links.
+
+    The first splits the checked rows by class into medical and other domains,
+    since F6 is about where machine-made text gathers. The second counts the
+    machine-translated datasets behind each named translation system.
+
+    Args:
+        rows: The annotated Slovene catalogue.
+        systems: One line per translation system, from `provenance_summary`.
+    """
+    legend_out = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM}
+    checked = [r for r in rows if r["provenance_checked"] == "yes"]
+    split: Dict[str, List[Dict[str, object]]] = {"medical": [], "other": []}
+    for klass in PROVENANCE_CLASSES:
+        in_class = [r for r in checked if r["provenance_class"] == klass]
+        if not in_class:
+            continue
+        label = "found native" if klass == "native" else klass.replace("_", "-")
+        is_medical = sum(1 for r in in_class if "medical" in r["domains"])
+        split["medical"].append({"label": label, "y": is_medical})
+        split["other"].append({"label": label, "y": len(in_class) - is_medical})
+    save_figure(
+        lambda: BarChart(
+            [split["medical"], split["other"]],
+            title="Checked datasets by provenance class",
+            xlabel="datasets",
+            ylabel="provenance class",
+            subtitle=["medical", "other domains"],
+            bar_mode=BAR_MODE.STACK,
+            orientation=ORIENTATION.HORIZONTAL,
+            sort=SORT.ASCENDING,
+            show_legend=True,
+            legend=legend_out,
+            xmin=0,
+            figsize=FIG_SIZE.FULL_MEDIUM,
+        ),
+        FIGURES_DIR / "datasets-by-provenance-class.svg",
+    )
+    save_figure(
+        lambda: BarChart(
+            [
+                {
+                    "label": SYSTEM_LABELS.get(str(line["translation_system"]), str(line["translation_system"])),
+                    "y": int(line["datasets"]),
+                }
+                for line in systems
+            ],
+            title="Datasets involving machine translation, by system",
+            xlabel="datasets",
+            ylabel="translation system",
+            orientation=ORIENTATION.HORIZONTAL,
+            sort=SORT.ASCENDING,
+            show_values=True,
+            value_format="{x:.0f}",
+            xmin=0,
+            figsize=FIG_SIZE.FULL_MEDIUM,
+        ),
+        FIGURES_DIR / "datasets-by-translation-system.svg",
+    )
+
+
 def git_output(*args: str) -> str:
     """Runs one git query in the experiment folder's repository.
 
@@ -943,6 +1008,7 @@ def main() -> None:
     write_table(TABLES_DIR / "supply-by-clause.csv", list(clauses[0].keys()), clauses)
     write_table(TABLES_DIR / "supply-by-domain-and-access.csv", list(summary[0].keys()), summary)
     draw_figures(summary)
+    draw_provenance_figures(slovene, systems)
 
     print(f"catalogue: {len(slovene)} Slovene rows, {len(fallback)} medical rows in other languages")
     print(f"tables -> {TABLES_DIR}")
