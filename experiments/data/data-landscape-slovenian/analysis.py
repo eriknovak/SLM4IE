@@ -73,6 +73,11 @@ DOMAINS: List[str] = [
     "other",
 ]
 KPI2_DOMAINS: Tuple[str, ...] = ("medical", "scientific", "academic")
+# The Predictions' domains, each the taxonomy domains it spans; a row counts once.
+CLAUSE_DOMAINS: List[Tuple[str, Tuple[str, ...]]] = [
+    ("medicine", ("medical",)),
+    ("science", ("scientific", "academic")),
+]
 
 # What each access filter of D8 admits: what anyone can download, what a
 # registered researcher can, and what exists at all.
@@ -107,6 +112,9 @@ TRANSLATED_TERMS: Tuple[str, ...] = (
     r"\btmx\b",
     r"\bmt\b",
 )
+
+# The sizing pass's basis, as the catalogue's `words_basis` records it (D6).
+SIZE_BASIS: Dict[str, str] = {"full": "counted", "partial": "partial", "sampled": "sampled"}
 
 TOKENS_PER_WORD = 2.0  # D6: an estimate until the project tokenizer exists
 KPI2_EXAMPLES = 10_000
@@ -416,7 +424,7 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
         size = surveyed.get(normalise(row["name"]), {})
         candidates = [
             ("reported", number(row["words"])),
-            ("sampled" if size.get("basis") == "sampled" else "counted", number(size.get("words_estimated"))),
+            (SIZE_BASIS.get(size.get("basis", ""), "counted"), number(size.get("words_estimated"))),
             ("corpus", number(counts.get("word_count"))),
         ]
         basis, words = next(((b, w) for b, w in candidates if w is not None), ("", None))
@@ -464,6 +472,34 @@ def write_table(path: Path, columns: List[str], rows: Iterable[Dict[str, object]
         writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def survey_statistics(raw: List[Dict[str, str]], rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
+    """Counts, per source family, what it returned and what survived the merge.
+
+    Args:
+        raw: Every row as the families returned it, before merging.
+        rows: The merged, annotated catalogue, Slovene and fallback rows together.
+
+    Returns:
+        One line per family plus a `total` line.
+    """
+    lines: List[Dict[str, object]] = []
+    for family in dict.fromkeys(f for f, _ in FAMILY_FILES):
+        kept = [r for r in rows if r["family"] == family]
+        lines.append(
+            {
+                "family": family,
+                "rows_returned": sum(1 for r in raw if r["family"] == family),
+                "rows_kept": len(kept),
+                "rows_slovene": sum(1 for r in kept if r.get("part") != "B"),
+                "rows_medical_other_languages": sum(1 for r in kept if r.get("part") == "B"),
+                "rows_in_registry": sum(1 for r in kept if r["in_registry"] == "yes"),
+            }
+        )
+    total = {"family": "total"}
+    total.update({k: sum(int(line[k]) for line in lines) for k in lines[0] if k != "family"})
+    return [*lines, total]
 
 
 def verdict(total: int, threshold: int, uncounted: int) -> str:
@@ -514,7 +550,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
             tokens = int(words * TOKENS_PER_WORD)
             no_words = sum(1 for r in selected if number(r["words"]) is None)
             corpus_sized = sum(1 for r in selected if r["words_basis"] == "corpus")
-            survey_sized = sum(1 for r in selected if r["words_basis"] in ("counted", "sampled"))
+            survey_sized = sum(1 for r in selected if r["words_basis"] in SIZE_BASIS.values())
             no_documents = sum(1 for r in selected if number(r["documents"]) is None)
             no_annotated = sum(1 for r in annotated_rows if number(r["documents"]) is None)
             no_native = sum(1 for r in native_rows if number(r["documents"]) is None)
@@ -541,6 +577,48 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
                 }
             )
     return summary
+
+
+def clause_supply(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
+    """Totals what the Predictions count: native rows outside the registry.
+
+    Each clause domain is read once per access filter, a row spanning two of
+    its taxonomy domains counted once, so these totals are the ones H1 to H4
+    are decided on.
+
+    Args:
+        rows: The annotated Slovene catalogue.
+
+    Returns:
+        One entry per clause domain and access filter.
+    """
+    lines: List[Dict[str, object]] = []
+    for name, spans in CLAUSE_DOMAINS:
+        in_domain = [r for r in rows if set(spans) & {d.strip() for d in str(r["domains"]).split(",")}]
+        for label, admitted in ACCESS_FILTERS:
+            counted = [
+                r
+                for r in in_domain
+                if r["access"] in admitted and r["provenance"] == "native" and r["in_registry"] == "no"
+            ]
+            documents = sum(number(r["documents"]) or 0 for r in counted)
+            tokens = int(sum(number(r["words"]) or 0 for r in counted) * TOKENS_PER_WORD)
+            no_documents = sum(1 for r in counted if number(r["documents"]) is None)
+            no_words = sum(1 for r in counted if number(r["words"]) is None)
+            lines.append(
+                {
+                    "domain": name,
+                    "access_filter": label,
+                    "datasets": len(counted),
+                    "documents": documents,
+                    "tokens_estimated": tokens,
+                    "datasets_without_document_count": no_documents,
+                    "datasets_without_word_count": no_words,
+                    "meets_kpi2": verdict(documents, KPI2_EXAMPLES, no_documents),
+                    "meets_kpi4": verdict(tokens, KPI4_TOKENS, no_words),
+                }
+            )
+    return lines
 
 
 def access_gain(summary: List[Dict[str, object]], quantity: str) -> List[Dict[str, object]]:
@@ -766,14 +844,20 @@ def main() -> None:
     parser.add_argument("--mlflow", action="store_true", help="also record this pass as an MLflow lineage run")
     args = parser.parse_args()
 
-    rows = annotate(merge_duplicates(load_rows()))
+    raw = load_rows()
+    rows = annotate(merge_duplicates(raw))
     slovene = [r for r in rows if r.get("part") != "B"]
     fallback = [r for r in rows if r.get("part") == "B"]
+
+    statistics = survey_statistics(raw, rows)
+    write_table(TABLES_DIR / "dataset-survey-rows-statistics.csv", list(statistics[0].keys()), statistics)
 
     write_table(TABLES_DIR / "catalogue.csv", CATALOGUE_COLUMNS, slovene)
     write_table(TABLES_DIR / "catalogue-medical-other-languages.csv", CATALOGUE_COLUMNS, fallback)
 
     summary = summarise(slovene)
+    clauses = clause_supply(slovene)
+    write_table(TABLES_DIR / "supply-by-clause.csv", list(clauses[0].keys()), clauses)
     write_table(TABLES_DIR / "supply-by-domain-and-access.csv", list(summary[0].keys()), summary)
     draw_figures(summary)
 

@@ -139,6 +139,7 @@ def annotated(analysis: ModuleType) -> List[Dict[str, str]]:
 
 
 def test_merge_keeps_publisher_and_backfills_from_mirror(analysis: ModuleType, fixture_paths: Dict[str, Path]) -> None:
+    """The publisher's row wins a merge and the mirror only fills its blanks (D10)."""
     rows = {r["name"]: r for r in annotated(analysis)}
     assert len(rows) == 4
     medical = rows["Medical corpus"]
@@ -151,6 +152,7 @@ def test_merge_keeps_publisher_and_backfills_from_mirror(analysis: ModuleType, f
 def test_registry_match_and_corpus_count_size_an_unsized_row(
     analysis: ModuleType, fixture_paths: Dict[str, Path]
 ) -> None:
+    """A registry row with no reported size takes the corpus build's word count (D6)."""
     rows = {r["name"]: r for r in annotated(analysis)}
     medical = rows["Medical corpus"]
     assert medical["in_registry"] == "yes"
@@ -168,6 +170,7 @@ def test_registry_match_and_corpus_count_size_an_unsized_row(
 def test_survey_size_beats_the_corpus_count_and_fills_documents(
     analysis: ModuleType, fixture_paths: Dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """This experiment's own count wins over the corpus count and sets documents (M6)."""
     sizes = tmp_path / "sizes.csv"
     sizes.write_text(
         "source,catalogue_name,items_total,items_counted,words_counted,words_estimated,basis,method,sized_on\n"
@@ -187,6 +190,7 @@ def test_survey_size_beats_the_corpus_count_and_fills_documents(
 
 
 def test_provenance_reads_the_row_text(analysis: ModuleType, fixture_paths: Dict[str, Path]) -> None:
+    """Provenance is read from the row's own name and notes (D11)."""
     rows = {r["name"]: r for r in annotated(analysis)}
     assert rows["Science corpus"]["provenance"] == "native"
     assert rows["Translated science"]["provenance"] == "translated"
@@ -195,6 +199,7 @@ def test_provenance_reads_the_row_text(analysis: ModuleType, fixture_paths: Dict
 
 
 def test_kpi_fit_reads_missing_counts_as_unknown(analysis: ModuleType) -> None:
+    """A row with no reported count reads `unknown` for both KPIs (D9)."""
     assert analysis.kpi_fit(row(domains="medical", documents=20000, words=300000)) == ("yes", "yes")
     assert analysis.kpi_fit(row(domains="medical", documents=500, words=1000)) == ("no", "no")
     assert analysis.kpi_fit(row(domains="medical")) == ("unknown", "unknown")
@@ -202,6 +207,7 @@ def test_kpi_fit_reads_missing_counts_as_unknown(analysis: ModuleType) -> None:
 
 
 def test_verdict_never_reads_a_missing_size_as_a_miss(analysis: ModuleType) -> None:
+    """A short total with unsized datasets is `unknown`, never `no` (D9)."""
     assert analysis.verdict(600000, 500000, uncounted=5) == "yes"
     assert analysis.verdict(100, 500000, uncounted=0) == "no"
     assert analysis.verdict(100, 500000, uncounted=1) == "unknown"
@@ -210,6 +216,7 @@ def test_verdict_never_reads_a_missing_size_as_a_miss(analysis: ModuleType) -> N
 def test_summary_totals_per_domain_under_each_access_filter(
     analysis: ModuleType, fixture_paths: Dict[str, Path]
 ) -> None:
+    """Per-domain totals widen as the access filter loosens (D8)."""
     summary = {(r["domain"], r["access_filter"]): r for r in analysis.summarise(annotated(analysis))}
     medical_open = summary[("medical", "open")]
     assert medical_open["datasets"] == 1
@@ -233,6 +240,7 @@ def test_summary_totals_per_domain_under_each_access_filter(
 
 
 def test_committed_catalogue_matches_the_schema(analysis: ModuleType) -> None:
+    """The committed catalogue carries exactly the schema's columns (D4)."""
     with (EXPERIMENT / "tables" / "catalogue.csv").open(encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         assert reader.fieldnames == analysis.CATALOGUE_COLUMNS
@@ -246,7 +254,7 @@ def test_committed_catalogue_matches_the_schema(analysis: ModuleType) -> None:
         assert r["annotation"] in annotation, r["name"]
         assert {d.strip() for d in r["domains"].split(",")} <= set(analysis.DOMAINS), r["name"]
         assert r["provenance"] in {"native", "translated", "generated"}, r["name"]
-        assert r["words_basis"] in {"reported", "counted", "sampled", "corpus", ""}, r["name"]
+        assert r["words_basis"] in {"reported", "corpus", "", *analysis.SIZE_BASIS.values()}, r["name"]
         assert r["in_registry"] in {"yes", "no"} and bool(r["registry_key"]) == (r["in_registry"] == "yes"), r["name"]
         assert r["kpi2_fit"] in {"yes", "no", "unknown", "n/a"} and r["kpi4_fit"] in {"yes", "no", "unknown"}, r["name"]
         for count in ("documents", "documents_counted", "words", "tokens_estimated"):
