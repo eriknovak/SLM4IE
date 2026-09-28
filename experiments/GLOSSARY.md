@@ -34,3 +34,9 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **NER** (named-entity recognition): labelling spans of text with the kind of entity they name — a person, a place, a drug, a diagnosis. One of the information-extraction tasks the project targets.
 - **IE** (information extraction): pulling structured facts — entities, relations, attributes — out of running text. The project's target task family.
 - **PDF** (Portable Document Format): the page-layout file most Slovene journals and institutions publish articles and guidelines in. Its text has to be extracted before it can be counted, and a scanned PDF yields none.
+- **Tokenizer**: the component that splits text into the subword units a language model reads; its vocabulary decides how many tokens a word becomes.
+- **OAI-PMH** (Open Archives Initiative Protocol for Metadata Harvesting): the standard interface journals and repositories expose for listing every record they hold, so a whole archive can be enumerated without scraping.
+- **Instruction set** (instruction sets): prompt-and-answer pairs written, often by another model, to train a chat model to follow requests; machine output rather than native prose.
+- **MLflow**: the experiment-tracking server the project logs every run to, with its parameters, metrics and output files.
+- **Lineage run** (lineage): an MLflow run that trains or scores nothing and only records which data and code produced a set of outputs, keeping them as attached files.
+- **Download registry** (registry): the project's list of datasets it downloads and builds its corpus from, kept in `configs/data/download.yaml`.

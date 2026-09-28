@@ -28,9 +28,18 @@ not exist, or prose
 over the record template's word caps (CAPS below), prose outside the rows of
 Design or Verdict, a finding titled as a fix (FIX_WORDS — a fix revises the
 entry it corrects, it is not an entry), a supporting finding naming no key
-finding, a key finding whose Reading names no prediction, a Summary citing a
-ticket or carrying more than a pair of numbers, or a concluded record whose
-Verdict has no Discussion.
+finding, a key finding whose Reading cites no `[H<n>]` clause, a Summary citing a
+ticket or carrying more than a pair of numbers, a concluded record whose
+Verdict has no Discussion, or prose the voice rules reject (VOICE below): a
+sentence over SENTENCE_WORDS words or with more than SENTENCE_SEMICOLONS
+semicolons, a `[D<n>]` / `[F<n>]` / `[M<n>]` citation with fewer than
+CITATION_WORDS words of its own sentence before it, a Reading with more than
+READING_NUMBERS numbers beyond its Summary's, a long Reading, Rationale or
+Discussion that is not bold-lead blocks, a long How that is not numbered
+steps, a Settings key with no gloss, a minor finding with no Reading, or a
+TL;DR key-finding line not shaped `**F<n> — title.** Summary`. Standard
+methods named in prose but not in the glossary are listed alongside the
+undefined abbreviations.
 """
 
 from __future__ import annotations
@@ -65,26 +74,55 @@ REQUIRED_WHEN_CONCLUDED = {"hypothesis": "Hypothesis", "design": "Design", "meth
 SECTION_TITLES = {
     "hypothesis": "Question and hypothesis",
     "design": "Setup",
+    "datasets": "Datasets",
     "methods": "Methods",
     "findings": "Results",
     "verdict": "Verdict",
     "decisions": "Decisions",
     "reproduce": "Reproduce",
 }
-PAGE_ORDER = ["hypothesis", "design", "findings", "verdict", "builds", "methods", "decisions", "reproduce"]
+PAGE_ORDER = ["hypothesis", "design", "datasets", "findings", "verdict", "builds", "methods", "decisions", "reproduce"]
 # word caps from the record template; Alternatives is per bullet, Design per row
 CAPS = {"Summary": 25, "Reading": 240, "Implication": 50, "Decision": 60, "Why": 60, "Alternatives": 25,
-        "Design": 120, "Discussion": 200, "How": 240}
+        "Design": 120, "Method / factors": 200, "Discussion": 200, "How": 240}
 SUMMARY_NUMBERS = 2  # a Summary carries its one number, at most a pair
+TABLE_ROWS = 20  # a table longer than this scrolls vertically under a sticky header (the CSS hard-codes the same 20)
 TICKET = re.compile(r"(?<![\w`])#\d+\b")
 NUMBER = re.compile(r"(?<![#\w.])\d[\d,.]*%?")
-PREDICTION = re.compile(r"\b(predict\w*|confirm\w*|refute\w*)\b", re.I)
-MINOR_LABELS = {"Summary", "Runs", "Result", "History"}
+
+
+MODEL_VERSION = re.compile(r"\b(?:Haiku|Sonnet|Opus|Fable|Claude|GPT|Gemini|Llama|Mistral|Qwen)[- ]?\d[\d.]*", re.I)
+
+
+def numbers(text: str) -> list[str]:
+    """Numbers in prose, trailing punctuation dropped so `0.92,` and `0.92` match;
+    a model version (`Sonnet 4.5`) is a name, not a number."""
+    return [n.rstrip(",.") for n in NUMBER.findall(MODEL_VERSION.sub(" ", text))]
+PREDICTION = re.compile(r"\[H\d+\]")  # a key Reading cites the clause it decides
+MINOR_LABELS = {"Summary", "Runs", "Result", "Reading", "History"}
+# voice rules from dev-tools/references/voice.md, "In records"
+SENTENCE_WORDS = 35
+SENTENCE_SEMICOLONS = 2
+CITATION_WORDS = 3  # words of its own sentence a citation needs before it: "with score rules removed ([D3])"
+READING_NUMBERS = 2  # beyond the Summary's; the rest belong in the Result
+BLOCK_WORDS = 60  # past this a Reading, Rationale or Discussion is bold-lead blocks and a How is numbered steps
+CITATION = re.compile(r"\[([DFMH]\d+)\]")
+LEAD_BULLET = re.compile(r"(?m)^\s*- \*\*[^*\n]+\*\*")
+NUMBERED_STEP = re.compile(r"(?m)^\s*\d+\. ")
+TLDR_LINE = re.compile(r"^\*\*F\d+ — [^*\n]+?[.!?]\*\* \S")
+ABBREV_BEFORE_STOP = re.compile(r"\b(e\.g|i\.e|vs|et al|cf|fig|no|approx|ca)\.", re.I)
+# standard methods a reader outside the domain needs a glossary line for; matched as whole words, any case
+METHOD_TERMS = ["bootstrap", "BCa", "SVD", "TF-IDF", "k-means", "kmeans", "embedding", "embeddings", "regularisation",
+                "regularization", "logistic regression", "Kendall", "tau-b", "cosine", "z-score", "log-odds", "percentile",
+                "quantile", "kappa", "argmax", "softmax", "tokeniser", "tokenizer", "transformer", "fine-tuning", "distillation",
+                "perplexity", "BLEU", "ROUGE", "BERTScore", "TPE", "Optuna", "cross-validation", "AUC", "ROC", "PCA", "t-SNE",
+                "UMAP", "LLM", "few-shot", "zero-shot", "chain-of-thought"]
 DECISION_LABELS = {"Decision", "Why", "Alternatives", "History"}
 METHOD_LABELS = {"Input", "Output", "How", "Code", "Settings"}
 METHOD_REQUIRED = ("Input", "Output", "How", "Code")
 # a Code row points at what runs the step: `file.py`, or `file.py::symbol`
 CODE_REF = re.compile(r"([\w./-]+\.py)(?:::(\w+))?")
+FILE_EXT = re.compile(r"\.(ya?ml|py|csv|json|svg|png|md|txt|toml)(::\w+)?$")
 # a finding titled as a fix is a History line on the entry it corrects, not an entry
 FIX_WORDS = re.compile(r"\b(bug|bugs|defect|defects|fix|fixed|fixes|rewrite|rewritten|typo|notebook)\b", re.I)
 
@@ -145,7 +183,10 @@ def md(text: str) -> str:
     out = markdown.markdown(text, extensions=["tables", "fenced_code"])
     out = re.sub(r"<td([^>]*)>([^<]*)</td>",
                  lambda m: f'<td class="n"{m.group(1)}>{num(m.group(2))}</td>' if NUMERIC.match(m.group(2).strip()) else m.group(0), out)
-    return out.replace("<table>", '<div class="scroll"><table class="data">').replace("</table>", "</table></div>")
+    def wrap(m: re.Match) -> str:
+        tall = " tall" if m.group(0).count("<tr>") - 1 > TABLE_ROWS else ""
+        return f'<div class="scroll{tall}"><table class="data{tall}">{m.group(1)}</table></div>'
+    return re.sub(r"<table>(.*?)</table>", wrap, out, flags=re.S)
 
 
 def cap(text: str) -> str:
@@ -174,6 +215,46 @@ def repo_url() -> str | None:
 
 def esc(v) -> str:
     return html.escape(str(v)) if v is not None else ""
+
+
+def prose(text: str) -> str:
+    """Prose only: code, equations, tables and link targets removed, link text and
+    citations kept, emphasis markers dropped — the text the voice rules read."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = MATH.sub(" ", re.sub(r"`[^`\n]*`", "x", text))
+    text = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("|"))
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    return text.replace("**", "").replace("*", "")
+
+
+def sentences(text: str) -> list[str]:
+    """Sentences of a prose run: split at a full stop, question or exclamation
+    mark followed by space, and at every line break, so a bullet is its own
+    sentence. A stop inside `e.g.` or a decimal does not split."""
+    text = ABBREV_BEFORE_STOP.sub(lambda m: m.group(0).replace(".", "\x00"), prose(text))
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [s.replace("\x00", ".").strip() for s in parts if s.strip()]
+
+
+def voice_problems(where: str, text: str, length: bool = True) -> list[str]:
+    """What the voice rules reject in one prose field: a sentence too long or
+    semicolon-stacked, and a citation with nothing of its own sentence before
+    it — `see [F3]`, `per [D6]`, `([D2]) lifts` — the reader needs the words."""
+    out = []
+    for s in sentences(text):
+        n = len(s.split())
+        if length and n > SENTENCE_WORDS:
+            out.append(f"{where} has a {n}-word sentence (cap {SENTENCE_WORDS}): {s[:50]}…")
+        if length and s.count(";") > SENTENCE_SEMICOLONS:
+            out.append(f"{where} has a sentence with {s.count(';')} semicolons (cap {SENTENCE_SEMICOLONS}): {s[:50]}…")
+        for m in CITATION.finditer(s):
+            if m.group(1).startswith("H"):
+                continue  # a clause id reads on its own: "confirms [H2]"
+            clause = re.split(r"[;:—]", s[:m.start()])[-1]  # the gloss belongs to the citation's own clause
+            before = re.sub(r"\[[DFMH]\d+\]|[^\w\s]", " ", clause).split()
+            if len(before) < CITATION_WORDS:
+                out.append(f"{where} cites [{m.group(1)}] with no words saying what it is: {s[:50]}…")
+    return out
 
 
 def words(text: str) -> int:
@@ -224,6 +305,7 @@ class Record:
         self.children: list[Record] = []
         self.problems: list[str] = []
         self.counts = {"Figure": 0, "Table": 0}
+        self.anchors: set[str] = set()  # assets already inlined on the page
         hyp = parse_kv(self.sections.get("hypothesis", ""))
         outcome = re.sub(r"<.*?>", "", hyp.get("Outcome", "")).strip().split()[:1]
         self.outcome = outcome[0].lower() if outcome and outcome[0].lower() != "open" else ""
@@ -256,14 +338,21 @@ class Record:
                 over(fid, label, kv.get(label, ""), CAPS[label])
                 if refs := TICKET.findall(kv.get(label, "")):
                     self.problems.append(f"{fid} {label} cites a ticket ({', '.join(refs)}): findings read cold")
-            if len(nums := NUMBER.findall(kv.get("Summary", ""))) > SUMMARY_NUMBERS:
+            if len(nums := numbers(kv.get("Summary", ""))) > SUMMARY_NUMBERS:
                 self.problems.append(f"{fid} Summary carries {len(nums)} numbers (cap {SUMMARY_NUMBERS}): the rest belong in the Result")
             if f.weight == "minor" and (extra := sorted(set(kv) - MINOR_LABELS)):
                 self.problems.append(f"{fid} is minor but has {', '.join(extra)}")
-            if f.weight in ("key", "supporting") and not strip_placeholders(kv.get("Reading", "")):
-                self.problems.append(f"{fid} is {f.weight} but has no Reading")
+            if f.weight and not strip_placeholders(kv.get("Reading", "")):
+                self.problems.append(f"{fid} is {f.weight} but has no Reading: a number with no meaning is not a result")
+            reading = kv.get("Reading", "")
+            if (extra_nums := [n for n in numbers(reading) if n not in numbers(kv.get("Summary", ""))]) and len(extra_nums) > READING_NUMBERS:
+                self.problems.append(f"{fid} Reading carries {len(extra_nums)} numbers beyond the Summary's (cap {READING_NUMBERS}): the rest belong in the Result")
+            if words(reading) > BLOCK_WORDS and not LEAD_BULLET.search(reading):
+                self.problems.append(f"{fid} Reading is one paragraph of {words(reading)} words: split it into bold-lead blocks")
+            for label in ("Summary", "Reading", "Implication"):
+                self.problems += voice_problems(f"{fid} {label}", kv.get(label, ""))
             if f.weight == "key" and kv.get("Reading") and not PREDICTION.search(kv["Reading"]):
-                self.problems.append(f"{fid} is key but its Reading names no prediction it confirms or refutes")
+                self.problems.append(f"{fid} is key but its Reading cites no clause as [H<n>]")
             if f.weight == "supporting" and f.target not in keys:
                 self.problems.append(f"{fid} is supporting but names no key finding (`· supporting F<k>`)")
             if hits := sorted({w.lower() for w in FIX_WORDS.findall(f"{f.title} {kv.get('Summary', '')}")}):
@@ -278,6 +367,8 @@ class Record:
                 over(did, "Alternatives bullet", alt, CAPS["Alternatives"])
             if extra := sorted(set(kv) - DECISION_LABELS):
                 self.problems.append(f"{did} has labels outside the template: {', '.join(extra)}")
+            for label in ("Decision", "Why", "Alternatives"):
+                self.problems += voice_problems(f"{did} {label}", kv.get(label, ""))
         for m in self.methods:
             mid, kv = m.id, m.kv
             if not mid:
@@ -288,14 +379,51 @@ class Record:
             if missing := [l for l in METHOD_REQUIRED if not strip_placeholders(kv.get(l, ""))]:
                 self.problems.append(f"{mid} has no {', '.join(missing)}: a step reads cold or not at all")
             self.check_code(mid, kv.get("Code", ""))
-        for key, name in (("design", "Design"), ("verdict", "Verdict")):
+            how = kv.get("How", "")
+            if words(how) > BLOCK_WORDS and not NUMBERED_STEP.search(how):
+                self.problems.append(f"{mid} How is one paragraph of {words(how)} words: write it as numbered steps")
+            for label in ("Input", "Output", "How"):
+                self.problems += voice_problems(f"{mid} {label}", kv.get(label, ""))
+            self.check_settings(mid, kv.get("Settings", ""))
+        for key, name in (("design", "Design"), ("datasets", "Datasets"), ("verdict", "Verdict")):
             block = strip_placeholders(self.sections.get(key, ""))
             for line in outside_rows(block):
                 self.problems.append(f"{name} has content outside `- **Label**:` rows: {line[:60]}")
             for label, value in parse_kv(block).items():
                 over(name, label, value, CAPS.get(label, CAPS["Design"]))
+                if not (name == "Verdict" and label == "Evidence"):  # Evidence is the list of citations by design
+                    self.problems += voice_problems(f"{name} {label}", value)
+                if label in ("Discussion", "Rationale") and words(value) > BLOCK_WORDS and not LEAD_BULLET.search(value):
+                    self.problems.append(f"{name} {label} is one paragraph of {words(value)} words: split it into bold-lead blocks")
+        for label, value in parse_kv(strip_placeholders(self.sections.get("hypothesis", ""))).items():
+            self.problems += voice_problems(f"Hypothesis {label}", value, length=label != "Predictions")
+            if label == "Rationale" and words(value) > BLOCK_WORDS and not LEAD_BULLET.search(value):
+                self.problems.append(f"Hypothesis Rationale is one paragraph of {words(value)} words: split it into bold-lead blocks")
+        for line in self.key_lines():
+            if not TLDR_LINE.match(line):
+                self.problems.append(f"TL;DR line is not `**F<n> — <title>.** <Summary>`: {line[:50]}…")
         if self.status == "concluded" and not strip_placeholders(parse_kv(self.sections.get("verdict", "")).get("Discussion", "")):
             self.problems.append("concluded record has no Verdict Discussion")
+        predictions = strip_placeholders(parse_kv(self.sections.get("hypothesis", "")).get("Predictions", ""))
+        if predictions:
+            clauses = CLAUSE.findall(predictions)
+            if not clauses:
+                self.problems.append("Predictions has no `- **H<n> — <claim>**:` line: one per clause, so findings can cite H<n>")
+            elif len(clauses) > 1 and not VERDICT_RULE.search(predictions):
+                self.problems.append("Predictions has several clauses but no `- **Verdict rule**:` line")
+
+    def check_settings(self, mid: str, value: str) -> None:
+        """Every config key in a Settings row carries a gloss in parentheses —
+        `clusters` (how many groups of sources) — so the row reads without the
+        repo open. A file path is the place the keys live, not a key."""
+        value = strip_placeholders(value)
+        if not value or value.strip().lower() == "none":
+            return
+        for m in re.finditer(r"`([^`]+)`(\s*(?:\(|in\b|:)|)", value):
+            key = m.group(1)
+            if "/" in key or FILE_EXT.search(key) or m.group(2):  # glossed, or a section named as the place
+                continue
+            self.problems.append(f"{mid} Settings key `{key}` carries no gloss: write `{key}` (what it steers)")
 
     def check_code(self, mid: str, value: str) -> None:
         """A Code row must resolve: the file exists and, when a symbol is named, that
@@ -343,6 +471,26 @@ def bullets(block: str) -> list[str]:
         elif out and line.startswith("  ") and line.strip():
             out[-1] += " " + line.strip()
     return out
+
+
+CLAUSE = re.compile(r"^\s*- \*\*H\d+ — [^*]+\*\*:", re.M)
+CLAUSE_LINE = re.compile(r"^\s*- \*\*(H\d+) — ([^*]+)\*\*:\s*(.*)$")
+
+
+def clauses(predictions: str) -> tuple[str, list[tuple[str, str, str]], str]:
+    """A Predictions row split into its framing prose, its `(id, claim, conditions)`
+    clauses, and whatever follows them (the Verdict rule and read-beside lines)."""
+    before, items, after = [], [], []
+    for line in predictions.splitlines():
+        m = CLAUSE_LINE.match(line)
+        if m:
+            items.append((m.group(1), m.group(2).strip(), m.group(3).strip()))
+        elif items and line.strip():
+            after.append(line)
+        elif not items:
+            before.append(line)
+    return "\n".join(before).strip(), items, "\n".join(after).strip()
+VERDICT_RULE = re.compile(r"^\s*- \*\*Verdict rule\*\*:", re.M)
 
 
 def parse_kv(block: str) -> dict[str, str]:
@@ -429,7 +577,8 @@ def inline_asset(record: Record, src: str) -> str | None:
         body = "".join("<tr>" + "".join(f"<td{cls(i, c)}>{esc(num(c))}</td>" for i, c in enumerate(row)) + "</tr>" for row in rows[1:])
         check_width(record, rows, src)
         wide = " wide" if is_wide(rows) else ""
-        return f'<table class="data{wide}"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+        tall = " tall" if len(rows) - 1 > TABLE_ROWS else ""
+        return f'<table class="data{wide}{tall}"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
     return None
 
 
@@ -469,29 +618,48 @@ def caption(record: Record, kind: str, lead: str, prose: str) -> str:
     return f'<figcaption>{label}{" — " + body if body else ""}</figcaption>'
 
 
+ASSET_LINK = re.compile(r"!?\[([^\]]*)\]\(((?:figures|tables)/[^)]+\.(?:csv|svg|png|jpe?g|gif|webp))\)", re.I)
+
+
+def asset_anchor(record: Record, src: str) -> str:
+    """In-page id of an inlined table or figure, so prose that links the file
+    reaches the rendering instead of a path the self-contained page cannot open."""
+    return f"{record.slug}/asset/{re.sub(r'[^A-Za-z0-9_-]', '-', Path(src).stem)}"
+
+
+def render_asset(record: Record, src: str, lead: str, prose: str) -> tuple[str, bool]:
+    """One inlined figure or table with its numbered caption. Returns (html, wide)."""
+    inlined = inline_asset(record, src)
+    if inlined is None:
+        return f'<p class="missing">missing: {esc(src)}</p>', False
+    wide = 'class="data wide"' in inlined
+    kind = "Table" if inlined.startswith("<table") else "Figure"
+    cap_html = caption(record, kind, esc(lead), md_inline(prose))
+    if inlined.startswith("<table"):
+        inlined = f'<div class="scroll{" tall" if "tall" in inlined[:40] else ""}">{inlined}</div>'
+    elif not wide:
+        path = Path(src)
+        dark = path.with_name(f"{path.stem}.dark{path.suffix}")
+        variants = f'<div class="fig-light">{inlined}</div>'
+        if (record.dir / dark).is_file():
+            variants += f'<div class="fig-dark">{inline_asset(record, str(dark))}</div>'
+        inlined = f'<div class="fig">{variants}</div>'
+    anchor = asset_anchor(record, src)
+    aid = ""
+    if anchor not in record.anchors:
+        record.anchors.add(anchor)
+        aid = f' id="{anchor}"'
+    return f"<figure{aid}>{inlined}{cap_html}</figure>", wide
+
+
 def render_result(record: Record, value: str) -> tuple[str, bool]:
     """A finding's Result: a figure or table from figures/ or tables/, or an inline
     markdown table; prose around either becomes the caption. Returns (html, wide)."""
     # only an inlinable asset counts as the Result; a tables/*.md link is a pointer, not the result
-    m = re.search(r"!?\[([^\]]*)\]\(((?:figures|tables)/[^)]+\.(?:csv|svg|png|jpe?g|gif|webp))\)", value, re.I)
+    m = ASSET_LINK.search(value)
     if m:
-        inlined = inline_asset(record, m.group(2))
-        if inlined is None:
-            return f'<p class="missing">missing: {esc(m.group(2))}</p>', False
-        wide = 'class="data wide"' in inlined
         prose = " ".join(l.strip() for l in value.replace(m.group(0), "").splitlines() if l.strip())
-        kind = "Table" if inlined.startswith("<table") else "Figure"
-        cap_html = caption(record, kind, esc(m.group(1)), md_inline(prose))
-        if inlined.startswith("<table"):
-            inlined = f'<div class="scroll">{inlined}</div>'
-        elif not wide:
-            src = Path(m.group(2))
-            dark = src.with_name(f"{src.stem}.dark{src.suffix}")
-            variants = f'<div class="fig-light">{inlined}</div>'
-            if (record.dir / dark).is_file():
-                variants += f'<div class="fig-dark">{inline_asset(record, str(dark))}</div>'
-            inlined = f'<div class="fig">{variants}</div>'
-        return f"<figure>{inlined}{cap_html}</figure>", wide
+        return render_asset(record, m.group(2), m.group(1), prose)
     lines = value.splitlines()
     rows = [l.strip() for l in lines if l.lstrip().startswith("|")]
     if rows:
@@ -508,6 +676,47 @@ def render_result(record: Record, value: str) -> tuple[str, bool]:
         return f"<figure>{table}{caption(record, 'Table', '', md_inline(prose))}</figure>", wide
     record.problems.append("finding Result is not a figure or table")
     return f'<p class="missing">Result must be a figure or table, got: {esc(value)}</p>', False
+
+
+def render_datasets(record: Record, block: str) -> str:
+    """The Datasets section: one row per dataset, its prose first and every linked
+    statistics table or figure inlined under it with a numbered caption."""
+    rows = []
+    for label, value in parse_kv(block).items():
+        if not strip_placeholders(value):
+            continue
+        links = ASSET_LINK.findall(value)
+        prose = value
+        for full in ASSET_LINK.finditer(value):
+            # a trailing link is the row's statistics table, shown below; one inside a
+            # sentence stays as a link to its inlined rendering
+            tail = value[full.end():].strip()
+            keep = tail and not tail.startswith("![") and not tail.startswith("[")
+            prose = prose.replace(full.group(0), f"[{full.group(1)}]({full.group(2)})" if keep and not full.group(0).startswith("!") else "")
+        prose = " ".join(l.strip() for l in prose.splitlines() if l.strip())
+        assets = "".join(render_asset(record, src, lead, "")[0] for lead, src in links)
+        rows.append(f'<div><h3>{esc(label)}</h3><div class="v">{md(cap(prose))}</div>{assets}</div>')
+    return f'<div class="kv datasets">{"".join(rows)}</div>' if rows else ""
+
+
+def render_hypothesis(record: Record, block: str) -> str:
+    """The Hypothesis rows, with Predictions as its framing line, then the
+    clauses as a list whose marker is the clause id — each an anchor a
+    `[H<n>]` citation links to — then the Verdict rule and read-beside lines."""
+    kv = parse_kv(block)
+    rows = []
+    for k, v in kv.items():
+        if not strip_placeholders(v):
+            continue
+        if k == "Predictions" and (parts := clauses(v))[1]:
+            before, items, after = parts
+            lis = "".join(f'<li id="{record.slug}/{cid.lower()}"><span class="tag">{cid}</span><div><b>{md_inline(claim)}</b>'
+                          f'{(": " + md_inline(cond)) if cond else ""}</div></li>' for cid, claim, cond in items)
+            body = (md(cap(before)) if before else "") + f'<ol class="clauses">{lis}</ol>' + (md(after) if after else "")
+        else:
+            body = md(cap(v))
+        rows.append(f'<div><h3>{esc(k)}</h3><div class="v">{body}</div></div>')
+    return f'<div class="kv">{"".join(rows)}</div>' if rows else ""
 
 
 def render_kv(block: str) -> str:
@@ -559,9 +768,6 @@ def render_findings(record: Record) -> str:
     out += [render_finding(record, f, f.weight or "solo") for f in record.findings
             if f.id and f.weight != "key" and f.id not in placed]
     return "".join(out)
-
-
-FILE_EXT = re.compile(r"\.(ya?ml|py|csv|json|svg|png|md|txt|toml)(::\w+)?$")
 
 
 def mark_refs(record: Record, html_: str, runs: bool = False) -> str:
@@ -714,7 +920,8 @@ def tip(head: str, body: str, label: str = "") -> str:
     """data-tip value: a plain heading line, then the body as inline HTML so code
     and emphasis render in the hover card. A label names the row the body is
     quoted from, for a card whose text does not say what it is on its own."""
-    inline = re.sub(r"\s+", " ", md_inline(body)).strip()
+    # an equation in a card is its LaTeX source: MathML carries quotes that would end the attribute
+    inline = restore_math(re.sub(r"\s+", " ", md_inline(body)).strip(), source=True)
     if label:
         inline = f"<strong>{label}:</strong> {inline}"  # not <b>: the card styles its own <b> as the heading line
     return esc(f"{plain(head)}\n{inline}")
@@ -747,17 +954,20 @@ def sub_prose(html_: str, fn, per_block: bool = False) -> str:
 
 
 def link_refs(record: Record, html_: str) -> str:
-    """Bracketed `[D<n>]` / `[F<n>]` / `[M<n>]` citations in prose become in-page links
-    carrying a hover card — the decision's Decision line, the finding's Summary, the
-    method step's Output. A bare `F1` stays text: it may be the metric. Text inside
+    """Bracketed `[D<n>]` / `[F<n>]` / `[M<n>]` / `[H<n>]` citations in prose become
+    in-page links carrying a hover card — the decision's Decision line, the finding's
+    Summary, the method step's Output, the clause's conditions. A bare `F1` stays
+    text: it may be the metric. Text inside
     code, links, headings and id tags is left alone."""
     tips = {d.id: tip(f"{d.id} — {d.title}", d.kv.get("Decision", "")) for d in record.decisions if d.id}
     tips |= {f.id: tip(f"{f.id} — {f.title}", f.kv.get("Summary", "")) for f in record.findings if f.id}
     # a step's Output reads as a fragment out of context, so the card says which row it is
     tips |= {m.id: tip(f"{m.id} — {m.title}", cap(m.kv.get("Output", "")), "Output") for m in record.methods if m.id}
+    predictions = parse_kv(record.sections.get("hypothesis", "")).get("Predictions", "")
+    tips |= {cid: tip(f"{cid} — {claim}", cond) for cid, claim, cond in clauses(predictions)[1]}
     if not tips:
         return html_
-    ref = re.compile(r"\[([DFM]\d+)\]")
+    ref = re.compile(r"\[([DFMH]\d+)\]")
 
     def link(m: re.Match) -> str:
         rid = m.group(1)
@@ -826,15 +1036,18 @@ KNOWN_ABBREV = {"PR", "ID", "URL", "CSV", "JSON", "YAML", "API", "CLI", "TL", "D
 
 
 def undefined_terms(records: list[Record], terms: list[Term]) -> list[str]:
-    """Abbreviation-shaped tokens in record prose that the glossary does not define."""
+    """Abbreviation-shaped tokens and standard method names (METHOD_TERMS) in
+    record prose that the glossary does not define."""
     known = {f.lower() for t in terms for f in t.forms} | {k.lower() for k in KNOWN_ABBREV}
+    methods = re.compile(r"(?<![\w-])(" + "|".join(re.escape(m) for m in METHOD_TERMS) + r")(?![\w-])", re.I)
     hits: set[str] = set()
     for r in records:
-        for key in ("hypothesis", "design", "methods", "findings", "verdict"):
-            text = re.sub(r"```.*?```|`[^`]*`|\[[DFM]\d+\]|!?\[[^\]]*\]\([^)]*\)", " ", r.sections.get(key, ""), flags=re.S)
+        for key in ("hypothesis", "design", "datasets", "methods", "findings", "verdict"):
+            text = re.sub(r"```.*?```|`[^`]*`|\[[DFMH]\d+\]|!?\[[^\]]*\]\([^)]*\)", " ", r.sections.get(key, ""), flags=re.S)
             text = "\n".join(l for l in MATH.sub(" ", text).splitlines() if not l.lstrip().startswith(("|", "###")))
-            hits |= {w for w in ABBREV.findall(text) if w.lower() not in known and not re.fullmatch(r"[DFM]\d+", w)}
-    return sorted(hits)
+            hits |= {w for w in ABBREV.findall(text) if w.lower() not in known and not re.fullmatch(r"[DFMH]\d+", w)}
+            hits |= {w for w in methods.findall(text) if w.lower() not in known}
+    return sorted({h.lower(): h for h in sorted(hits, reverse=True)}.values(), key=str.lower)
 
 
 def render_glossary(terms: list[Term]) -> str:
@@ -861,11 +1074,20 @@ def relink(page: str, records: list[Record]) -> str:
     a self-contained file cannot resolve it. External links open in a new tab."""
     by_slug = {r.slug for r in records}
 
+    anchors = {a for r in records for a in r.anchors}
+    slugs = "|".join(re.escape(r.slug) for r in records)
+
     def sub(m: re.Match) -> str:
         href, text = m.group(1), m.group(2)
         t = re.match(r"(?:[^#]*/)?([^/#]+)/README\.md(?:#(f\d+)\b.*)?$", href)
         if t and t.group(1) in by_slug:
             return f'<a href="#{t.group(1)}{"/" + t.group(2) if t.group(2) else ""}">{text}</a>'
+        a = re.match(r"(?:(" + slugs + r")/)?(?:tables|figures)/([^/]+)\.\w+$", href) if slugs else None
+        if a:
+            stem = re.sub(r"[^A-Za-z0-9_-]", "-", a.group(2))
+            hits = [x for x in anchors if x.endswith("/asset/" + stem) and (not a.group(1) or x.startswith(a.group(1) + "/"))]
+            if hits:
+                return f'<a class="ref" href="#{hits[0]}">{text}</a>'
         return text
 
     page = re.sub(r'<a href="(?!#|https?://|mailto:)([^"]*)">(.*?)</a>', sub, page, flags=re.S)
@@ -903,12 +1125,16 @@ def render_page(record: Record, parents: list[Record], terms: list[Term]) -> str
                 body = render_findings(record)
                 if record.status != "concluded":
                     title = "Results so far"
+            elif key == "datasets":
+                body = render_datasets(record, block)
             elif key == "methods":
                 body = render_method(record).replace("{slug}", record.slug)
             elif key == "decisions":
                 body = render_decisions(record).replace("{slug}", record.slug)
             elif key == "reproduce":
                 body = render_reproduce(record, block)
+            elif key == "hypothesis":
+                body = render_hypothesis(record, block)
             else:
                 body = render_kv(block) or f'<div class="prose">{md(block)}</div>'
         if not body:
@@ -975,7 +1201,8 @@ h3{font-size:var(--t-h3);font-weight:600;margin:0 0 8px}
 .kv{display:flex;flex-direction:column;gap:26px}.kv h3{font-size:var(--t-mono);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:0 0 4px}.v p,.v ul{margin:0 0 6px}.v>:last-child{margin-bottom:0}
 .res{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:16px 0;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:10px 28px;scroll-margin-top:20px}
 .res>h3{grid-column:1/-1;display:flex;gap:10px;align-items:center;font-size:var(--t-lead)}.tag{font-family:var(--mono);font-size:var(--t-mono);background:var(--soft);padding:1px 7px;border-radius:5px;font-weight:500}.wt{margin-left:auto;font-size:var(--t-mono);color:var(--muted);font-weight:500}
-.fp{margin:0 0 10px}.fp .lbl{display:block;font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}.fp.summary{font-size:var(--t-sm);background:var(--soft);padding:10px 12px;border-radius:8px;margin:0 0 12px}.fp p{margin:0 0 6px}.fp p:last-child{margin-bottom:0}
+ol.clauses{list-style:none;margin:8px 0;padding:0}ol.clauses li{display:grid;grid-template-columns:auto 1fr;gap:0 10px;align-items:start;margin:0 0 8px;scroll-margin-top:20px}ol.clauses li .tag{margin-top:2px}ol.clauses li b{font-weight:600}
+.fp{margin:0 0 10px}.fp .lbl{display:block;font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}.fp.summary{font-size:var(--t-sm);background:var(--soft);padding:10px 12px;border-radius:8px;margin:0 0 12px}.fp p{margin:0 0 6px}.fp p:last-child{margin-bottom:0}.fp ul,.fp ol{margin:4px 0 0;padding-left:18px}.fp li{margin:0 0 6px}.fp li:last-child{margin-bottom:0}
 .dec{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:20px}.dec h3{display:flex;gap:10px;align-items:center;font-size:var(--t-body);margin:0 0 8px}.dec .decision p{margin:0 0 6px}.dec details{border:0;padding:0;margin:6px 0 0}.dec summary{color:var(--muted)}.dec .src{margin:8px 0 0}
 .met{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin:12px 0;scroll-margin-top:20px}.met h3{display:flex;gap:10px;align-items:center;font-size:var(--t-lead);margin:0 0 12px}
 .met .io{display:grid;grid-template-columns:1fr 1fr;gap:12px 28px;margin:0 0 14px}.met .io .fp{margin:0;font-size:var(--t-sm)}.met .how{font-size:var(--t-sm);line-height:1.6}.met .how p{margin:0 0 8px}.met .how>:last-child{margin-bottom:0}.met .src{margin:14px 0 0}
@@ -995,7 +1222,8 @@ figure svg,figure img{width:100%;height:auto;display:block}.res>figure .fig{curs
 :root[data-theme=dark] .fig-light:not(:only-child){display:none}:root[data-theme=dark] .fig-dark{display:block}:root[data-theme=dark] .fig-light:only-child{background:var(--plate);border-radius:10px;padding:12px 14px}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .fig-light:not(:only-child){display:none}:root:not([data-theme=light]) .fig-dark{display:block}:root:not([data-theme=light]) .fig-light:only-child{background:var(--plate);border-radius:10px;padding:12px 14px}}
 figcaption{font-size:var(--t-mono);color:var(--muted);margin-top:8px;line-height:1.5}figcaption .lbl{color:var(--fg);font-weight:600}
-.scroll{overflow-x:auto;max-width:100%;margin:6px 0 10px;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding-bottom:2px}.scroll::-webkit-scrollbar{height:8px}.scroll::-webkit-scrollbar-track{background:transparent}.scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}.scroll.cut{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent)}figure .scroll{margin:0}table.data{border-collapse:collapse;width:100%;font-size:var(--t-sm);line-height:1.45;font-variant-numeric:tabular-nums}table.data th{text-align:left;font-size:var(--t-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:bottom}table.data td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}table.data td.id{font-family:var(--mono);font-size:var(--t-mono);white-space:nowrap}table.data td:first-child,table.data th:first-child{position:sticky;left:0;background:inherit;font-weight:500}table.data.wide td:first-child,table.data.wide th:first-child{border-right:1px solid var(--line)}table.data tr{background:var(--panel)}.res.sub table.data tr,.prose table.data tr,.v table.data tr{background:var(--bg)}table.data th.n{text-align:right}table.data td.n{text-align:right;font-family:var(--mono);font-size:var(--t-mono);white-space:nowrap}table.data code{overflow-wrap:anywhere}
+.scroll{overflow-x:auto;max-width:100%;margin:6px 0 10px;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding-bottom:2px}.scroll.tall{overflow-y:auto;max-height:calc(20 * (1.45 * var(--t-sm) + 13px) + 2.6em)}.scroll.tall table.data thead th{position:sticky;top:0;background:var(--panel);z-index:1}.scroll.tall table.data th:first-child{z-index:2}
+.scroll::-webkit-scrollbar{height:8px;width:8px}.scroll::-webkit-scrollbar-track{background:transparent}.scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}.scroll.cut{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 44px),transparent)}figure .scroll{margin:0}table.data{border-collapse:collapse;width:100%;font-size:var(--t-sm);line-height:1.45;font-variant-numeric:tabular-nums}table.data th{text-align:left;font-size:var(--t-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:bottom}table.data td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}table.data td.id{font-family:var(--mono);font-size:var(--t-mono);white-space:nowrap}table.data td:first-child,table.data th:first-child{position:sticky;left:0;background:inherit;font-weight:500}table.data.wide td:first-child,table.data.wide th:first-child{border-right:1px solid var(--line)}table.data tr{background:var(--panel)}.res.sub table.data tr,.prose table.data tr,.v table.data tr{background:var(--bg)}table.data th.n{text-align:right}table.data td.n{text-align:right;font-family:var(--mono);font-size:var(--t-mono);white-space:nowrap}table.data code{overflow-wrap:anywhere}
 .prose h3,.v h3{font-size:var(--t-body);font-weight:600;margin:36px 0 10px}.prose h4,.v h4{font-size:var(--t-mono);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:24px 0 8px}.prose>:first-child{margin-top:0}.prose p,.prose ul,.prose ol{margin:0 0 10px}
 .missing{color:var(--bad);font-family:var(--mono);font-size:var(--t-mono)}
 .steps{list-style:none;padding:0;margin:8px 0 12px;counter-reset:step}.step{display:grid;grid-template-columns:30px minmax(0,1fr);gap:6px 12px;align-items:start;margin:0 0 18px}
@@ -1012,7 +1240,7 @@ details{border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin
 .right a{display:block;color:var(--muted);padding:5px 10px;border-left:2px solid transparent;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.right a:hover{color:var(--fg)}.right a.sub{padding-left:22px;font-size:var(--t-mono)}.right a.on{color:var(--accent);border-left-color:var(--accent)}
 .book{color:var(--muted);font-size:var(--t-h3)}.book h2{color:var(--fg)}.list{display:flex;flex-direction:column}.row{display:grid;grid-template-columns:minmax(200px,1fr) minmax(0,3fr);gap:24px;padding:12px 0;border-bottom:1px solid var(--line);color:var(--fg);align-items:baseline}.row:hover .t{color:var(--accent)}.row .who{display:flex;flex-direction:column;gap:4px}.row .t{font-weight:600}.row .m{font-size:var(--t-mono);color:var(--muted);font-family:var(--mono);white-space:nowrap}.row ul{margin:0;padding-left:16px;font-size:var(--t-sm)}.row.d1 .who{padding-left:18px}.row.d2 .who{padding-left:36px}.row.d3 .who{padding-left:54px}
 @media(max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:52px auto minmax(0,1fr)}.side{max-height:200px;border-right:0;border-bottom:1px solid var(--line)}.right{display:none}.main{padding:24px}}
-@media print{:root{--bg:#fff;--panel:#fff;--plate:#fff}.app{display:block;height:auto}.top,.side,.right{display:none}.main{overflow:visible;padding:0;background:#fff}.fig-dark{display:none!important}.fig-light{display:block!important;background:none!important;padding:0!important}pre{background:#f4f5f7;color:#16181d;border:1px solid #d8dce3}pre .c{color:#6b7280}.page{display:block!important;max-width:none;break-before:page}h2{break-after:avoid}.res,.dec,.met,details,.rel a{break-inside:avoid}a{color:inherit}body{font-size:11pt}}
+@media print{.scroll.tall{max-height:none;overflow:visible}:root{--bg:#fff;--panel:#fff;--plate:#fff}.app{display:block;height:auto}.top,.side,.right{display:none}.main{overflow:visible;padding:0;background:#fff}.fig-dark{display:none!important}.fig-light{display:block!important;background:none!important;padding:0!important}pre{background:#f4f5f7;color:#16181d;border:1px solid #d8dce3}pre .c{color:#6b7280}.page{display:block!important;max-width:none;break-before:page}h2{break-after:avoid}.res,.dec,.met,details,.rel a{break-inside:avoid}a{color:inherit}body{font-size:11pt}}
 """
 
 JS = """
@@ -1102,7 +1330,7 @@ def build(out: Path) -> int:
         print("  experiments/GLOSSARY.md missing: seed it from the report skill's references/glossary.md", file=sys.stderr)
         problems.append(("glossary", "missing"))
     if undefined := undefined_terms(records, terms):
-        print(f"  glossary: abbreviations without a definition: {', '.join(undefined)}", file=sys.stderr)
+        print(f"  glossary: abbreviations and methods without a definition: {', '.join(undefined)}", file=sys.stderr)
     return 1 if problems else 0
 
 
@@ -1143,7 +1371,7 @@ def selftest() -> int:
             and 'holds at <a class="term" href="#glossary/q05"' in body and "AUC is flat" in body and 'href="#glossary/auc"' not in body,
         "term linked once per page, never in code, headings or step titles": body[body.find('id="alpha"'):body.find('id="beta"')].count('href="#glossary/precision"') == 1
             and '<code>[D1]</code>' in body and 'scores F1 0.605<span class="wt">' in body and 'class="t"><a class="ref" href="#alpha/f1"' in body,
-        "undefined abbreviations reported": undefined_terms(records, load_glossary()) == ["AUC"],
+        "undefined abbreviations and methods reported": undefined_terms(records, load_glossary()) == ["AUC", "bootstrap"],
         "reproduce rendered as steps": '<ol class="steps"><li class="step env">' in body and '<li class="step"><div class="t">' in body and 'class="c">#' in body
             and '<div class="t">3 ' not in body and 'class="t">tables/ and figures/ — every finding' in body,
         "spaced double dash renders as a dash, flags untouched": "pool — the members" in body and "<code>git log -- prep.py</code>" in body and "--dry-run" in body,
@@ -1153,7 +1381,18 @@ def selftest() -> int:
         "lede and overview list key finding titles": '<span class="tag">F1</span> First thing</a>' in body and '<span class="tag">F1</span> First thing</li>' in overview,
         "row values start with a capital": '<p>Inconclusive — see' in body and '<p>Reading text; it confirms' in body and '<div class="decision"><p>Pool it' in body,
         "reading and implication visible": '<div class="fp reading"><span class="lbl">Reading</span>' in body and "what it means" not in body,
-        "caps linted": {"F5 is minor but has Reading", "D2 Why is 68 words (cap 60)", "F1 Summary is 29 words (cap 25)"} <= set(problems),
+        "caps linted": {"F5 is minor but has Implication", "D2 Why is 68 words (cap 60)", "F1 Summary is 29 words (cap 25)"} <= set(problems),
+        "voice rules linted": {"F4 Reading cites [F1] with no words saying what it is: a reading that names nothing; see [F1].…",
+                               "D2 Why has a 68-word sentence (cap 35): word word word word word word word word word word …",
+                               "M1 Settings key `min_chars` carries no gloss: write `min_chars` (what it steers)",
+                               "F1 Reading carries 3 numbers beyond the Summary's (cap 2): the rest belong in the Result",
+                               "F6 is supporting but has no Reading: a number with no meaning is not a result",
+                               "TL;DR line is not `**F<n> — <title>.** <Summary>`: **F3** — held out, the harness agrees at κ 0.69.…"} <= set(problems)
+            and any(p.startswith("F4 Reading is one paragraph of") for p in problems)
+            and any(p.startswith("M3 How is one paragraph of") for p in problems)
+            and any(p.startswith("Design Stages has a sentence with 3 semicolons") for p in problems)
+            and not any(p.startswith(("F3 Reading", "M1 How", "Verdict Evidence")) for p in problems),
+        "bold-lead reading blocks rendered as a list": '<div class="fp reading"><span class="lbl">Reading</span><ul>\n<li><strong>Holds on the hold-out.</strong>' in body,
         "fix-as-finding rejected": "F6 reads as a fix (defect, fixed, notebook): revise the F<n> it corrects instead" in problems,
         "supporting folded under its key finding": re.search(r'id="alpha/f1".*?<summary>supporting evidence \(1\)</summary><article class="res sub[^"]*" id="alpha/f3"', body, re.S) is not None,
         "method step rendered with its rows, footer and rail entry": '<article class="met" id="alpha/m1" data-title="M1 · The candidate pool each language contributes">' in body
@@ -1162,14 +1401,22 @@ def selftest() -> int:
             and '<b>settings</b>' in body,
         "equations rendered as MathML, none left as source": '<span class="math block"><math' in body
             and "<mfrac>" in body and '<span class="math"><math' in body and "$$" not in body and "mathx0x" not in body,
-        "[M<n>] citation linked with a hover card": '<a class="ref" href="#alpha/m2"' in body,
+        "[M<n>] citation linked with a hover card, no MathML inside a card": '<a class="ref" href="#alpha/m2"' in body
+            and not re.search(r'data-tip="[^"]*<math', body) and "mathx" not in body,
         "method gates fire": {"M2 has no Output: a step reads cold or not at all",
                               "M3 Code names vanished, which prep.py does not define",
                               "method step heading not `### M<n> — title`: M4 Broken heading no dash"} <= set(problems),
         "concluded record without Method flagged": "concluded record has no ## Methods" in Record(fixture / "methods" / "beta" / "README.md").problems,
+        "long table scrolls under a sticky header, short one does not": '<div class="scroll tall"><table class="data tall">' in body
+            and body.count('class="scroll tall"') == 1,
+        "prose link to an inlined table reaches its figure": 'id="alpha/asset/t"' in body and '<a class="ref" href="#alpha/asset/t">Every row</a>' in body,
+        "datasets section rendered with its table and figure": '<h2 id="alpha/datasets">Datasets</h2><div class="kv datasets"><div><h3>Gold set</h3>' in body
+            and body.count("<figcaption>") >= 2 and 'id="alpha-a-' in body[body.find('id="alpha/datasets"'):body.find('id="alpha/findings"')],
         "prose outside Design rows flagged": "Design has content outside `- **Label**:` rows: #### Notes" in problems,
         "ticket ref in a Summary flagged": "F1 Summary cites a ticket (#32): findings read cold" in problems,
-        "key finding without a prediction flagged": "F4 is key but its Reading names no prediction it confirms or refutes" in problems,
+        "key finding without a clause citation flagged": "F4 is key but its Reading cites no clause as [H<n>]" in problems,
+        "clauses rendered as an id-marked list, [H<n>] linked with a hover card": '<ol class="clauses"><li id="alpha/h1"><span class="tag">H1</span><div><b>something holds</b>: confirmed if a; refuted if b — c.</div></li></ol>' in body
+            and '<a class="ref" href="#alpha/h1" data-tip="H1 — something holds\nconfirmed if a; refuted if b — c.">[H1]</a>' in body,
         "missing Discussion flagged": "concluded record has no Verdict Discussion" in Record(fixture / "methods" / "beta" / "README.md").problems,
     }
     for name, ok in checks.items():

@@ -11,11 +11,13 @@ up in [`docs/notes/`](../docs/notes/).
 
 ## data
 
-### [Open Slovene data landscape — KPI coverage](data/data-landscape-slovenian/) · running
+### [Open Slovene data landscape — KPI coverage](data/data-landscape-slovenian/) · refuted · 2026-09-28
 
-- Medicine holds 3.04M open documents, of which 22,435 were written in Slovene; the rest is translation and machine output.
-- No open Slovene medical dataset publishes a size; counted by this experiment, the new native sources hold about 7.9M words, thirty times KPI 4.
-- Science reaches 299,961 openly downloadable documents written in Slovene and 5.28B estimated tokens, both far past their thresholds.
+The first survey of what Slovene text exists openly beyond the project's own downloads. It covers science on both KPIs and medicine on tokens, but not medicine on examples.
+
+- **[F1](data/data-landscape-slovenian/#f1--open-slovene-medicine-is-mostly-not-written-in-slovene) — Open Slovene medicine is mostly not written in Slovene.** Medicine holds 3.04M open documents, of which 24,757 were written in Slovene; the rest is translation and machine output.
+- **[F2](data/data-landscape-slovenian/#f2--medicines-new-native-supply-is-large-in-words-and-small-in-documents) — Medicine's new native supply is large in words and small in documents.** The four new native medical sources counted by this experiment hold about 7.9M words, thirty times KPI 4, in under four thousand documents. Together with F1, this places the medical gap in documents, not in text.
+- **[F3](data/data-landscape-slovenian/#f3--science-clears-both-kpis-on-native-prose-alone) — Science clears both KPIs on native prose alone.** Native science outside the download registry reaches 147,291 open documents and 33.6M estimated tokens, both far past their thresholds.
 
 ## methods
 
