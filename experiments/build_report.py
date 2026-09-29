@@ -110,8 +110,10 @@ TLDR_STATUS = re.compile(r"^\s*(?:confirmed|refuted|inconclusive|open|leaning \w
 # lint that reads as advice on prose, not a broken record: counted per record, listed with --warnings, never fails the build
 WARNING = re.compile(
     r"\(cap \d+\)|sentence|cites \[|numbers beyond|one paragraph|TL;DR line|carries no gloss|is minor but|"
-    r"is supporting but|content outside|cites a ticket|constraints|will scroll|Predictions has no"
+    r"is supporting but|content outside|cites a ticket|constraints|will scroll|Predictions has no|names a topic"
 )
+# a decision or method title shorter than this names a topic, not the choice or the step
+TITLE_MIN_WORDS = 4
 # a programme is a question several experiments answer together: experiments/programmes/<slug>.md
 PROGRAMME_SECTIONS = {
     "question": "Question",
@@ -435,6 +437,12 @@ class Record:
         def over(eid: str, label: str, text: str, cap: int) -> None:
             if (n := words(text)) > cap:
                 self.problems.append(f"{eid} {label} is {n} words (cap {cap})")
+
+        # a title of a few words names a topic ("Outputs"); the fold heading must say the step or the choice
+        for e in self.decisions + self.methods:
+            if e.id and words(e.title) < TITLE_MIN_WORDS:
+                what = "the choice made" if e.id.startswith("D") else "what the step does"
+                self.problems.append(f"{e.id} title names a topic, not {what}: {e.title}")
 
         keys = {f.id for f in self.findings if f.weight == "key"}
         clause_ids = {c["id"] for c in clause_rows(self)}
