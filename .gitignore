@@ -104,10 +104,11 @@ celerybeat.pid
 # which resolves the overlay as a sibling of the config it overlays.
 *.local.yaml
 
-# Claude Code local state: personal settings, devflow worktrees and plans,
-# labflow plans and run logs. Never commit.
+# Claude Code local state: personal settings, devflow and labflow worktrees,
+# labflow run snapshots, plans and run logs. Never commit.
 .claude/settings.local.json
 .claude/worktrees/
+.claude/runs/
 .claude/devflow/
 .claude/labflow/
 
@@ -173,8 +174,9 @@ slurm/logs/*.err
 # MkDocs build output (website/ -> site/); CI publishes it, never commit it.
 site/
 
-# Claude Code local state: personal settings, devflow worktrees and plans,
-# labflow plans and run logs. Never commit.
+# Claude Code local state: personal settings, devflow and labflow worktrees,
+# labflow run snapshots, plans and run logs. Never commit.
 .claude/worktrees/
+.claude/runs/
 .claude/devflow/
 .claude/labflow/

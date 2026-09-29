@@ -23,3 +23,22 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 ## Terms
 
 - **q05, q50, q95** (q05, q50, q95): the 5th, 50th (median) and 95th percentiles of a distribution.
+- **KPI** (KPI 2, KPI 3, KPI 4): a key performance indicator the ARIS proposal (Z2-70067) commits the project to. KPI 2 asks for more than 10,000 examples in each of at least two domains, medicine and science; KPI 3 for more than 5B tokens per language; KPI 4 for more than 500,000 tokens per domain.
+- **Access filter** (open, open+login, all): which datasets a total counts. `open` is what anyone can download, `open+login` adds what a registered user can, `all` adds gated and not-downloadable sources — what exists rather than what is reachable.
+- **Provenance** (native, translated, generated): how a dataset's Slovene text came to exist. `native` is written in Slovene, `translated` is carried into Slovene from another language, `generated` is machine-written or automatically annotated.
+- **Provenance class** (human-translated, machine-translated, synthetic, bilingual resource, mixed): the finer reading of a checked row. Human-translated text was translated by people; machine-translated by a translation system or a language model; synthetic text was written by a language model; a bilingual resource is a dictionary or parallel corpus whose translation direction is unknown; mixed combines several.
+- **Machine translation** (MT): translating text automatically, with a dedicated system such as Google Translate or DeepL or with a language model prompted to translate.
+- **Estimated tokens** (tokens_estimated): a reported word count multiplied by two, the working subword-tokens-per-word factor until the project tokenizer exists. Empty when the source reported no word count.
+- **Unknown** (as a KPI verdict): the total falls short of the threshold but datasets in that domain reported no size, so the shortfall may be an absence of evidence rather than an absence of text.
+- **CLARIN.SI** (CLARIN, clarin.si): the Slovenian node of CLARIN, the European research infrastructure for language resources; the main publisher of Slovene corpora, which it addresses by `11356/<n>` handles.
+- **LINDAT** (LINDAT/CLARIAH-CZ): the Czech CLARIN node, which re-publishes some Slovene holdings under `11234/<n>` handles.
+- **ELG** (European Language Grid): an EU platform cataloguing language resources and services; for Slovene it largely mirrors CLARIN.SI rather than publishing its own.
+- **NER** (named-entity recognition): labelling spans of text with the kind of entity they name — a person, a place, a drug, a diagnosis. One of the information-extraction tasks the project targets.
+- **IE** (information extraction): pulling structured facts — entities, relations, attributes — out of running text. The project's target task family.
+- **PDF** (Portable Document Format): the page-layout file most Slovene journals and institutions publish articles and guidelines in. Its text has to be extracted before it can be counted, and a scanned PDF yields none.
+- **Tokenizer**: the component that splits text into the subword units a language model reads; its vocabulary decides how many tokens a word becomes.
+- **OAI-PMH** (Open Archives Initiative Protocol for Metadata Harvesting): the standard interface journals and repositories expose for listing every record they hold, so a whole archive can be enumerated without scraping.
+- **Instruction set** (instruction sets): prompt-and-answer pairs written, often by another model, to train a chat model to follow requests; machine output rather than native prose.
+- **MLflow**: the experiment-tracking server the project logs every run to, with its parameters, metrics and output files.
+- **Lineage run** (lineage): an MLflow run that trains or scores nothing and only records which data and code produced a set of outputs, keeping them as attached files.
+- **Download registry** (registry): the project's list of datasets it downloads and builds its corpus from, kept in `configs/data/download.yaml`.
