@@ -17,6 +17,9 @@ Four subcommands:
   text survives the language stage. Read-only: it writes nothing.
 * `sample` draws a `dataset x stage x decision` sample of kept and dropped
   documents into a JSONL file, for judging how well each stage decided.
+* `duplication` asks whether the documents the dedup stages dropped are still
+  in the corpus as another copy, which is the only thing a dedup stage can be
+  wrong about. Read-only apart from the tables it writes.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -52,6 +55,7 @@ Examples:
 """
 
 import argparse
+import csv
 import logging
 import sys
 from pathlib import Path
@@ -60,6 +64,7 @@ from typing import List, Optional
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
 from slm4ie.data.curate.runner import curate, recount
+from slm4ie.data.curate.duplication import DEDUP_STAGES, assess_dedup
 from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
 from slm4ie.data.curate.stages import CORPUS_STAGES
 from slm4ie.utils.cli import add_selection, validate_selection
@@ -214,6 +219,27 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     sample_parser.add_argument("--seed", type=int, default=20260916, help="Seed; the same seed redraws the sample.")
     sample_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Cells sampled in parallel.")
 
+    duplication_parser = subparsers.add_parser(
+        "duplication",
+        help="Check whether the dedup stages' drops survive in the corpus as another copy.",
+    )
+    _add_common_arguments(duplication_parser)
+    duplication_parser.add_argument("--sample", type=Path, required=True, help="The stratified sample's JSONL file.")
+    duplication_parser.add_argument("--out", type=Path, required=True, help="CSV file for the per-stage summary.")
+    duplication_parser.add_argument(
+        "--unmatched", type=Path, default=None, help="JSONL file for drops with no surviving twin, for judging."
+    )
+    duplication_parser.add_argument(
+        "--stage", action="append", choices=DEDUP_STAGES, default=None, help="Dedup stage to assess; repeatable."
+    )
+    duplication_parser.add_argument(
+        "--coverage-floor",
+        type=float,
+        default=0.5,
+        help="Share of a document's sentence windows a twin must hold to count as a match.",
+    )
+    duplication_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards read at once.")
+
     args = parser.parse_args(argv)
     if args.command == "sample":
         validate_selection(parser, args, "datasets")
@@ -242,6 +268,25 @@ def main() -> None:
                 candidates=args.candidates.split(",") if args.candidates else None,
             )
         )
+        return
+
+    if args.command == "duplication":
+        rows, _ = assess_dedup(
+            sample_path=args.sample,
+            pretrain_dir=resolve_output_dir(args.config, args.output_dir),
+            stages=args.stage or DEDUP_STAGES,
+            workers=args.workers,
+            coverage_floor=args.coverage_floor,
+            unmatched_path=args.unmatched,
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        with args.out.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+        for row in rows:
+            print(row)
+        print(f"wrote {args.out}")
         return
 
     if args.command == "sample":

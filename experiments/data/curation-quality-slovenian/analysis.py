@@ -186,6 +186,45 @@ def stage_rows(grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]], by_sou
     return rows
 
 
+def lost_text_rows(unmatched: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Score what the dedup stages lost, rather than what they dropped.
+
+    A dedup drop whose twin survives costs the corpus nothing, so only the
+    unmatched drops are worth reading — and the question about them is the
+    ordinary one: was the text any good? These rows answer it from the
+    verdicts the rubric pass already produced, so nothing is judged twice.
+
+    Args:
+        unmatched: Rows written by the `duplication` subcommand, each carrying
+            `id`, `stage`, `dataset`, `window_coverage` and `sharers`.
+        verdicts: Judge verdicts by document id.
+
+    Returns:
+        One row per dedup stage, in the order the stages appear.
+    """
+    rows: List[Dict[str, Any]] = []
+    for stage in (name for name in STAGES if any(row["stage"] == name for row in unmatched)):
+        lost = [row for row in unmatched if row["stage"] == stage]
+        judged = [verdicts[row["id"]] for row in lost if row["id"] in verdicts]
+        good = sum(1 for verdict in judged if not is_bad(verdict))
+        low, high = wilson(good, len(judged))
+        coverages = sorted(row["window_coverage"] for row in lost)
+        rows.append(
+            {
+                "stage": stage,
+                "lost": len(lost),
+                "judged": len(judged),
+                "good_text": good,
+                "good_text_share": round(good / len(judged), 4) if judged else "",
+                "good_text_low": round(low, 4),
+                "good_text_high": round(high, 4),
+                "median_window_coverage": round(coverages[len(coverages) // 2], 4) if coverages else "",
+                "shares_no_window": sum(1 for row in lost if not row["sharers"]),
+            }
+        )
+    return rows
+
+
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     """Write rows to a CSV, creating the directory if needed.
 
@@ -255,10 +294,24 @@ def main() -> None:
     pooled = stage_rows(grouped, by_source=False)
     per_source = stage_rows(grouped, by_source=True)
     print_stage_table(pooled)
-    for path in (
+    written = [
         write_csv(args.tables / "stage-decisions.csv", pooled),
         write_csv(args.tables / "source-stage-decisions.csv", per_source),
-    ):
+    ]
+
+    # Written by `curate_pretraining_corpus.py duplication`, which has to read
+    # the corpus; absent until that has run.
+    unmatched_path = args.data_root / "interim" / "dedup-unmatched.jsonl"
+    if unmatched_path.is_file():
+        lost = lost_text_rows(read_jsonl(unmatched_path), verdicts)
+        for row in lost:
+            print(
+                f"{row['stage']:15s}{row['lost']:5d} lost, {row['good_text']} good text "
+                f"({row['good_text_share']:.1%} [{row['good_text_low']:.1%}-{row['good_text_high']:.1%}])"
+            )
+        written.append(write_csv(args.tables / "dedup-lost-text.csv", lost))
+
+    for path in written:
         print(f"wrote {path}")
 
 
