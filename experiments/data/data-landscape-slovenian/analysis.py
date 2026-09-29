@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
-from datachart.charts import BarChart, DumbbellChart
-from datachart.constants import BAR_MODE, DUMBBELL_SORT_KEY, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
+from datachart.charts import BarChart
+from datachart.constants import BAR_MODE, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
 
 import sys
 
@@ -704,107 +704,20 @@ def clause_supply(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
     return lines
 
 
-def access_gain(summary: List[Dict[str, object]], quantity: str) -> List[Dict[str, object]]:
-    """Pairs each domain's open total with its all-access total for a dumbbell.
-
-    A domain that has no sized dataset at either end is left out: a zero has
-    no place on a log axis, and the reported-sizes figure accounts for it.
-    Rows where loosening access more than doubles the total are highlighted,
-    because that gap — not either endpoint — is what the figure is for.
-
-    Args:
-        summary: The per-domain summary.
-        quantity: The summary field to pair.
-
-    Returns:
-        One `{label, start, end, emphasis}` record per drawable domain.
-    """
-    totals = {(r["domain"], r["access_filter"]): r[quantity] for r in summary}
-    records: List[Dict[str, object]] = []
-    for domain in DOMAINS:
-        start, end = totals[(domain, "open")], totals[(domain, "all")]
-        if start <= 0 or end <= 0:
-            continue
-        records.append(
-            {
-                "label": domain,
-                "start": start,
-                "end": end,
-                "emphasis": EMPHASIS.HIGHLIGHT if end / start > 2 else None,
-            }
-        )
-    return records
-
-
 def draw_figures(summary: List[Dict[str, object]]) -> None:
-    """Draws the four supply figures the record links.
-
-    Two dumbbells show what loosening access buys each domain, in tokens and
-    in documents, against the KPI thresholds. Two sorted bars carry the
-    medical result: the share of each domain written in Slovene, and the share
-    of each domain's datasets that publish a size at all.
+    """Draws the share of each domain's open documents written in Slovene, the figure F1 links.
 
     Args:
         summary: The per-domain summary.
     """
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    # Below the axes: inside, the legend would sit on the smallest domains' rows.
-    legend_out = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM}
-
-    tokens = access_gain(summary, "tokens_estimated")
-    save_figure(
-        lambda: DumbbellChart(
-            tokens,
-            title="Estimated tokens by access",
-            xlabel="estimated tokens (log scale)",
-            ylabel="domain",
-            start_name="open",
-            end_name="all",
-            scaley="log",
-            sort=SORT.DESCENDING,
-            sort_by=DUMBBELL_SORT_KEY.END,
-            show_direction=True,
-            show_legend=True,
-            legend=legend_out,
-            vlines=[{"x": KPI4_TOKENS, "label": "KPI 4 threshold"}],
-            figsize=FIG_SIZE.FULL_MEDIUM,
-        ),
-        FIGURES_DIR / "tokens-by-domain-and-access.svg",
-    )
-
-    documents = access_gain(summary, "documents")
-    save_figure(
-        lambda: DumbbellChart(
-            documents,
-            title="Documents by access",
-            xlabel="documents (log scale)",
-            ylabel="domain",
-            start_name="open",
-            end_name="all",
-            scaley="log",
-            sort=SORT.DESCENDING,
-            sort_by=DUMBBELL_SORT_KEY.END,
-            show_direction=True,
-            show_legend=True,
-            legend=legend_out,
-            vlines=[{"x": KPI2_EXAMPLES, "label": "KPI 2 threshold"}],
-            figsize=FIG_SIZE.FULL_MEDIUM,
-        ),
-        FIGURES_DIR / "documents-by-domain-and-access.svg",
-    )
-
-    # Medicine is the subject of F1 and F2, so its row is bolded in both bar
-    # figures. The others stay unmuted: muting drops their value labels and,
-    # in the stack, the very segment the figure is about.
-    def emphasis(domain: str) -> Optional[str]:
-        return EMPHASIS.HIGHLIGHT if domain == "medical" else None
-
     opened = {r["domain"]: r for r in summary if r["access_filter"] == "open"}
+    # medicine is the subject of F1, so its bar is outlined; the rest keep their value labels
     native_share = [
         {
             "label": f"{d}  ({opened[d]['documents']:,} docs)",
             "y": 100 * opened[d]["documents_native"] / opened[d]["documents"] if opened[d]["documents"] else 0,
-            "emphasis": emphasis(d),
+            "emphasis": EMPHASIS.HIGHLIGHT if d == "medical" else None,
         }
         for d in DOMAINS
     ]
@@ -823,40 +736,6 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
             figsize=FIG_SIZE.FULL_MEDIUM,
         ),
         FIGURES_DIR / "documents-by-domain-and-provenance.svg",
-    )
-
-    totals = {r["domain"]: r for r in summary if r["access_filter"] == "all"}
-    sized: List[Dict[str, object]] = []
-    unsized: List[Dict[str, object]] = []
-    for d in DOMAINS:
-        count = totals[d]["datasets"]
-        reported = (
-            count
-            - totals[d]["datasets_without_word_count"]
-            - totals[d]["datasets_sized_by_corpus"]
-            - totals[d]["datasets_sized_by_survey"]
-        )
-        label = f"{d}  ({reported} of {count})"
-        sized.append({"label": label, "y": 100 * reported / count, "emphasis": emphasis(d)})
-        unsized.append({"label": label, "y": 100 * (count - reported) / count, "emphasis": emphasis(d)})
-    save_figure(
-        lambda: BarChart(
-            [sized, unsized],
-            title="Datasets with a reported size",
-            xlabel="datasets (%)",
-            ylabel="domain (sized of catalogued)",
-            subtitle=["size reported", "no size reported"],
-            bar_mode=BAR_MODE.STACK,
-            orientation=ORIENTATION.HORIZONTAL,
-            sort=SORT.ASCENDING,
-            sort_by="size reported",
-            show_legend=True,
-            legend=legend_out,
-            xmin=0,
-            xmax=100,
-            figsize=FIG_SIZE.FULL_MEDIUM,
-        ),
-        FIGURES_DIR / "reported-sizes-by-domain.svg",
     )
 
 
