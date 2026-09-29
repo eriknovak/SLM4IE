@@ -64,7 +64,7 @@ concluded: 2026-09-28
 
 ## Methods
 
-### M1 — The searched rows, one file per source family
+### M1 — Search the source families, one evidence file per family
 
 - **Input**: The eight source families of the language scope ([D1]) and the source list ([D2]). Four agents searched them in parallel on 2026-09-17, one per family.
 - **Output**: One JSON file per family under `data/experiments/data/data-landscape-slovenian/raw/`, each a list of rows on the catalogue schema ([D4]).
@@ -76,7 +76,7 @@ concluded: 2026-09-28
 - **Code**: `analysis.py::load_rows`
 - **Settings**: `FAMILY_FILES` (which family files are read, in merge order) in `analysis.py`
 
-### M2 — The second pass on Hugging Face
+### M2 — Re-read the Hugging Face harvest for missed medical and science sets
 
 - **Input**: The Hugging Face harvest kept in the evidence of the searched rows ([M1]) and the catalogue as it stood after the first pass.
 - **Output**: `huggingface-recheck.json`, the rows the first pass missed, on the same schema.
@@ -88,7 +88,7 @@ concluded: 2026-09-28
 - **Code**: `analysis.py::load_rows`
 - **Settings**: none
 
-### M3 — One row per dataset
+### M3 — Merge datasets catalogued twice into one row
 
 - **Input**: Every row from the searched rows ([M1]) and the second pass ([M2]), in family order.
 - **Output**: One row per dataset, carrying a `mirrors` field with the addresses of the copies folded into it.
@@ -100,7 +100,7 @@ concluded: 2026-09-28
 - **Code**: `analysis.py::merge_duplicates`
 - **Settings**: `FAMILY_FILES` (the merge order) in `analysis.py`
 
-### M4 — The derived columns
+### M4 — Add sizes, provenance, registry overlap and KPI fit to each row
 
 - **Input**: The merged rows ([M3]), the download registry `configs/data/download.yaml`, the corpus build's per-source counts in `pretrain/07_statistics/aggregate.json`, the counted medical sizes ([M6]) and the provenance checks ([M7]).
 - **Output**: Each row gains `words_basis`, `tokens_estimated`, `provenance`, `provenance_class`, `translation_system`, `in_registry`, `registry_key`, `kpi2_fit` and `kpi4_fit`.
@@ -114,7 +114,7 @@ concluded: 2026-09-28
 - **Code**: `analysis.py::annotate`
 - **Settings**: `TOKENS_PER_WORD` (the tokens-per-word estimate), `KPI2_EXAMPLES` (the KPI 2 threshold), `KPI4_TOKENS` (the KPI 4 threshold), `GENERATED_TERMS` (words marking machine output), `TRANSLATED_TERMS` (words marking translation) in `analysis.py`
 
-### M5 — Per-domain supply under each access filter
+### M5 — Total each domain under three access filters and read it against the KPIs
 
 - **Input**: The annotated Slovene rows ([M4]). The rows sizing the other-language medical fallback are excluded and written to their own table.
 - **Output**: `tables/supply-by-domain-and-access.csv`, one line per domain and access filter; `tables/supply-by-clause.csv`, the totals the Predictions are decided on; and the four figures.
@@ -126,7 +126,7 @@ concluded: 2026-09-28
 - **Code**: `analysis.py::summarise`, `analysis.py::clause_supply`
 - **Settings**: `DOMAINS` (the domain taxonomy), `ACCESS_FILTERS` (which access classes each filter admits), `IE_ANNOTATIONS` (annotation types that make a row IE supply) in `analysis.py`
 
-### M6 — Sizing the new native medical sources
+### M6 — Fetch and count the four reachable native medical sources
 
 - **Input**: The four native medical rows outside the registry that can be fetched without scraping a repository that forbids bulk access ([D12]). They are the clinical case reports on Hugging Face, the Slovene Wikipedia's medicine category, the Zdravniški vestnik journal and the faculty's clinical guidelines list.
 - **Output**: `tables/native-medical-sizes.csv`, one line per source with items, words, an estimate and its basis. The derived columns ([M4]) read it back as `words_basis` `counted`, `partial` or `sampled`.
@@ -141,7 +141,7 @@ concluded: 2026-09-28
 - **Code**: `size_medical_sources.py::main`
 - **Settings**: `SAMPLE_SIZE` (journal articles drawn), `SEED` (the draw's seed), `WIKI_DEPTH` (category levels walked), `POLITE_DELAY` (seconds between requests to a site) in `size_medical_sources.py`
 
-### M7 — Checking how non-native text came to exist
+### M7 — Check each non-native dataset's source for how its text was made
 
 - **Input**: Every catalogue row the keyword reading of provenance ([D11]) did not mark native, with its landing page and mirrors.
 - **Output**: `provenance-check.json` beside the searched rows, one entry per row with its class, source language, translation system, generating model, evidence URL and quote, and a confidence. `tables/provenance-by-class.csv` and `tables/translation-systems.csv` total it.
@@ -157,14 +157,14 @@ concluded: 2026-09-28
 
 ## Decisions
 
-### D1 — Language scope
+### D1 — Survey Slovene in every domain, plus a medical side table for other languages
 
 - **Decision**: Slovene across all domains, with a medical-only side table for other European languages.
 - **Why**: The project is Slovene-first, but if open Slovene medicine falls short, the fallback is medical text in a related or larger language. Sizing that fallback costs little while the search is already running.
 - **History**:
   - 2026-09-14 first version, design interview, question 6
 
-### D2 — Sources searched
+### D2 — Search eight source families, from CLARIN.SI to Slovene medical publishers
 
 - **Decision**: CLARIN.SI, HuggingFace Hub, Zenodo, ELG, LINDAT, OPUS (with parallel medical sets such as EMEA), and Common Crawl derivatives. Also Slovene medical publishers and institutions (Zdravniški vestnik, NIJZ, ZZZS, JAZMP, Wikipedia medical categories), plus synthetic and translated medical sets. Every hit is verified against its landing page.
 - **Why**: These are where Slovene text is actually published. Naming them fixes the survey's scope, so the record can say what was covered and a refresh knows what to re-check.
@@ -173,14 +173,14 @@ concluded: 2026-09-28
   - 2026-09-17 searched by four parallel agents, one per family, each required to return the URL it read for every row and to leave a field empty rather than guess
   - 2026-09-19 the Hugging Face family was searched a second time [M2]. Two corpora the project already downloads, FinePDFs and Legal-mC4, were missing although the harvest held both. The harvest is now kept as evidence, so a third pass re-reads it instead of re-searching the Hub
 
-### D3 — Inclusion
+### D3 — Catalogue every dataset found, whatever its access
 
 - **Decision**: Every dataset found is a row, regardless of access. An `access` column (open / login / gated / not downloadable) decides what counts toward the verdict.
 - **Why**: A source that exists but is not packaged — a journal archive of individual PDFs, say — is not supply today but is the answer to "what would close the gap". Excluding it would lose the most actionable finding.
 - **History**:
   - 2026-09-14 first version, design interview, question 20
 
-### D4 — Catalogue schema
+### D4 — One catalogue row per dataset, one column per question the KPIs ask
 
 - **Decision**: One row per dataset. Its columns are name, source handle or URL, licence, access, languages, domains, reported document count, and reported word or token count. The rest are size verified, annotation type, document-length class, format, already in the download registry, and KPI fit.
 - **Why**: Each column answers a question the KPIs ask. Annotation type separates pretraining supply from IE fine-tuning supply; document-length class separates a sentence bank from a document corpus, which matters for pretraining.
@@ -189,14 +189,14 @@ concluded: 2026-09-28
   - 2026-09-19 the single `KPI fit` column became `kpi2_fit` and `kpi4_fit`, because most rows report a document count but not a word count. `tokens_estimated`, `family` and `mirrors` added in the same pass
   - 2026-09-21 `registry_key`, `words_corpus`, `documents_corpus` and `words_basis` added, so a size taken from the project's own build is distinguishable from one the source reported [D6]
 
-### D5 — Domain taxonomy
+### D5 — Eleven shared domains, with science as scientific plus academic
 
 - **Decision**: medical, scientific, legal, news, parliamentary, academic, encyclopedic, forum/social, general-web, finance, other. A dataset may carry several. The headline science figure is scientific plus academic.
 - **Why**: Shared with the project's other data experiments, so their records can be read against each other.
 - **History**:
   - 2026-09-14 first version, design interview, question 12
 
-### D6 — Token unit and verification
+### D6 — Count words, estimate two tokens per word, trust only counted sizes
 
 - **Decision**: Sizes are recorded as the words the source reports, with about 2 subword tokens per word applied for KPI comparisons. A size counts as verified only when read from a downloaded sample or an official statistics page; a publisher's prose claim is unverified.
 - **Why**: Published corpus sizes are frequently rounded, stale, or measured differently from what the project would ingest. Marking the provenance of each number keeps an unverified claim from silently becoming a KPI verdict. The token factor stays an estimate until the project tokenizer exists.
@@ -205,14 +205,14 @@ concluded: 2026-09-28
   - 2026-09-21 a registry source whose publisher reports no size takes the word count the corpus build measured, marked `words_basis: corpus`; that is a count over downloaded text, the stronger verification this decision admits
   - 2026-09-22 a source this experiment fetched and counted itself takes that count ahead of the corpus fallback, marked `counted`, `partial` (a lower bound) or `sampled` (extrapolated from a fixed-seed sample) [M6]
 
-### D7 — Two readings of KPI 2
+### D7 — Report KPI 2 as documents and as annotated extraction examples
 
 - **Decision**: KPI 2 is reported twice: once as pretraining documents, once as annotated IE examples.
 - **Why**: "10k examples" means different things for pretraining and for information extraction, and the proposal commits to both. Reporting one number would hide which commitment is met.
 - **History**:
   - 2026-09-14 first version, design interview, question 10
 
-### D8 — Outputs
+### D8 — Report every total under three access filters
 
 - **Decision**: The catalogue CSV and per-domain summary tables under `tables/`, figures via datachart, produced by `analysis.py`. Per-domain totals are reported under three access filters: open only, open plus login, and all. No MLflow runs beyond a lineage run logging the catalogue as an artifact.
 - **Why**: The three filters are the honest way to state supply: what anyone can download, what a registered researcher can, and what exists at all. A single total would conflate them.
@@ -220,14 +220,14 @@ concluded: 2026-09-28
   - 2026-09-14 first version
   - 2026-09-19 a third figure, `reported-sizes-by-domain`, added, because the token figure cannot draw a domain whose datasets nobody sized, and medicine was that domain
 
-### D9 — Reading a missing size
+### D9 — Read a shortfall behind unsized datasets as unknown, not a miss
 
 - **Decision**: A domain total that falls short of a KPI threshold while the domain still holds datasets nobody sized is reported as `unknown`, not as a miss. A total that clears the threshold is `yes` whatever is missing, since the missing datasets could only raise it. Every table carries the count of datasets behind each verdict that reported no size.
 - **Why**: An unreported size is not a verified zero, as the token unit and verification rule holds ([D6]). Reporting a medical domain nobody sized as a KPI 4 miss would turn a gap in the evidence into a finding about Slovene.
 - **History**:
   - 2026-09-19 first version
 
-### D10 — Merging a dataset catalogued twice
+### D10 — Keep the publisher's row when a dataset is catalogued twice
 
 - **Decision**: Rows are merged on the dataset name, normalised. The publisher's row wins over an aggregator's row mirroring it. The duplicates only fill fields the winner left empty, and their addresses are kept in a `mirrors` column.
 - **Why**: ELG re-lists CLARIN.SI holdings, so 13 datasets arrived twice and would have been double-counted in every per-domain total. Keeping the publisher's record keeps the licence and size as the publisher states them; the mirrors stay reachable.
@@ -235,7 +235,7 @@ concluded: 2026-09-28
   - 2026-09-19 first version
   - 2026-09-28 Why corrected: every merged duplicate came through ELG; LINDAT's rows matched no CLARIN.SI name
 
-### D11 — Provenance of the Slovene text
+### D11 — Separate native Slovene from translated and machine-made text
 
 - **Decision**: Every row is first read as `native`, `translated` or `generated` from the terms its name and notes use. Every row not read as native is then checked against its card or paper into six classes ([M7]), and the checked class decides. Per-domain totals carry the native document count beside the full one.
 - **Why**: The Hypothesis asks whether open sources cover the KPIs *without* synthetic data, and a document count alone cannot answer that. Medicine forces it: the domain clears KPI 2 only on instruction sets and machine-translated material [F1].
@@ -246,7 +246,7 @@ concluded: 2026-09-28
   - 2026-09-19 first version
   - 2026-09-28 non-native rows checked against their sources into six classes, stored as evidence so the reading still reruns ([M7]); five rows moved to native
 
-### D12 — Which new medical sources to fetch
+### D12 — Fetch only medical sources that offer an API or harvesting endpoint
 
 - **Decision**: Sources reachable through an API or a standard harvesting endpoint are fetched whole or sampled. Sources whose repository states there is no bulk export are not fetched. Of the native medical rows, four were fetched and the University of Ljubljana repository was left out.
 - **Why**: A word count over downloaded text is the only verification the token unit rule accepts ([D6]), and none of these sources publishes one. Polite per-item fetching is ordinary research use where the publisher offers an endpoint. The one source saying "no bulk export" is left alone.
