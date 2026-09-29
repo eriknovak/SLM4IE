@@ -117,7 +117,7 @@ concluded: 2026-09-28
 ### M5 — Total each domain under three access filters and read it against the KPIs
 
 - **Input**: The annotated Slovene rows ([M4]). The rows sizing the other-language medical fallback are excluded and written to their own table.
-- **Output**: `tables/supply-by-domain-and-access.csv`, one line per domain and access filter; `tables/supply-by-clause.csv`, the totals the Predictions are decided on; and the four figures.
+- **Output**: `tables/supply-by-domain-and-access.csv`, one line per domain and access filter; `tables/supply-by-clause.csv`, the totals the Predictions are decided on; and the share of each domain written in Slovene as a figure.
 - **How**: A row counts toward every domain it carries, so the domain columns do not sum to the catalogue.
   1. For each domain and each access filter ([D8]), total words, estimated tokens, documents, native documents and annotated examples.
   2. Count the datasets behind each total that reported no size.
@@ -219,6 +219,7 @@ concluded: 2026-09-28
 - **History**:
   - 2026-09-14 first version
   - 2026-09-19 a third figure, `reported-sizes-by-domain`, added, because the token figure cannot draw a domain whose datasets nobody sized, and medicine was that domain
+  - 2026-09-29 the two access dumbbells and `reported-sizes-by-domain` removed: no finding rests on them, and the tables carry their numbers
 
 ### D9 — Read a shortfall behind unsized datasets as unknown, not a miss
 
