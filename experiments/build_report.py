@@ -979,10 +979,13 @@ def render_clauses(record: Record) -> str:
         return f'<div class="pred"><span class="lbl">Predictions</span>{md(cap(predictions))}</div>'
     trs = []
     for r in rows:
+        # one block per reading finding, so a clause read twice shows two rows
         result = (
-            " ".join(
-                (f'<span class="badge b-{o}">{o}</span> ' if (o := clause_outcome(f, r["id"])) else "")
+            "".join(
+                '<div class="reading">'
+                + (f'<span class="badge b-{o}">{o}</span> ' if (o := clause_outcome(f, r["id"])) else "")
                 + f'<a href="#{record.slug}/{f.id.lower()}"><span class="tag">{f.id}</span></a> {md_inline(cap(f.kv.get("Summary", "")))}'
+                + "</div>"
                 for f in r["findings"]
             )
             or '<span class="muted">not read yet</span>'
@@ -2087,7 +2090,7 @@ h1{font-size:26px;margin:6px 0 6px}h2{margin:52px 0 14px}.prose p,.v p{margin:0 
 .needs{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:var(--t-sm);margin:0 0 18px;overflow:hidden}
 .needs>div{padding:8px 12px;border-right:1px solid var(--line);min-width:0}.needs>div:last-child{border-right:0}.needs .hot{background:var(--run-soft)}.needs .hot .lbl{color:var(--run)}
 .pred{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 18px;font-size:var(--t-prose);line-height:1.6}.pred p{margin:0 0 6px}
-table.clauses td.result{font-weight:500}table.clauses td.result .badge{margin-right:4px}table.clauses td.muted{color:var(--muted)}td.hot{background:var(--run-soft)}
+table.clauses td.result{font-weight:500}table.clauses td.result .badge{margin-right:4px}table.clauses td.result .reading+.reading{margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)}table.clauses td.muted{color:var(--muted)}td.hot{background:var(--run-soft)}
 .bar{position:sticky;top:-28px;z-index:5;display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--line);background:var(--bg);margin:22px 0 0;font-size:var(--t-sm)}
 .bar a{padding:8px 12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}.bar a i{font-style:normal;font-family:var(--mono);font-size:var(--t-xs)}.bar a:hover{color:var(--fg)}.bar a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 .bar .hint{margin-left:auto;padding:8px 4px;font-family:var(--mono);font-size:var(--t-xs);color:var(--muted)}.bar .filter{margin:4px 0 4px auto;width:220px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg);padding:4px 10px;font:inherit;font-size:var(--t-sm)}.bar .filter:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}.hint kbd{margin:0 1px}
