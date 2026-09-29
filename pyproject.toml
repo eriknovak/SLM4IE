@@ -118,6 +118,6 @@ docs = [
 analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store
-    "datachart>=0.10.2",              # publication figures -> figures/*.svg
+    "datachart>=1.0.0",               # publication figures -> figures/*.svg
     "pypdf>=5",                       # PDF text for the medical sizing pass
 ]

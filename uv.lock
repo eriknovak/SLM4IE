@@ -559,7 +559,7 @@ wheels = [
 
 [[package]]
 name = "datachart"
-version = "0.10.2"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -567,9 +567,9 @@ dependencies = [
     { name = "pypalettes" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/62/32138daefa3d3f845ca8498e96714288a40e5aba98b45a7d5ca77ba24fd9/datachart-0.10.2.tar.gz", hash = "sha256:9d475a1fa2cfcfa7b637a537c384757ab201d099dd5263b310d08da5b5ed2863", size = 847541, upload-time = "2026-09-18T15:00:36.163Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/c0/508108f0d810227ba74d99df27fbc2b2b3bf7cdcdc4f0168863f55040447/datachart-1.0.0.tar.gz", hash = "sha256:ae74ccdec6a5771d1fda802656731fa5f80c6f6b7a0dfbfc7f59bb88227ea1a7", size = 551955, upload-time = "2026-09-29T06:42:42.502Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/03/4c87309fcde859e713dc1507f4bd5d86c6c35a64a7e54c235fef31e5e078/datachart-0.10.2-py3-none-any.whl", hash = "sha256:1b45cb1230efcb1fb427ce729380998ce9ae729ae43d8d741909a1d5078aaf1c", size = 748082, upload-time = "2026-09-18T15:00:33.941Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/db/52ea3f559ba5ab4cb0609c8b57f0303c205b280c549565f1bf41cd81bdd3/datachart-1.0.0-py3-none-any.whl", hash = "sha256:98f8a1822e02cf2e4a7a61c4d1653414f7a2e643af96d5cfabc71a84503db619", size = 407498, upload-time = "2026-09-29T06:42:40.671Z" },
 ]
 
 [[package]]
@@ -2898,7 +2898,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 analysis = [
-    { name = "datachart", specifier = ">=0.10.2" },
+    { name = "datachart", specifier = ">=1.0.0" },
     { name = "mlflow", specifier = ">=3.13.0" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pypdf", specifier = ">=5" },
