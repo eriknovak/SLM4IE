@@ -7,15 +7,19 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import pytest
 
 from slm4ie.data.judge import (
     DOCUMENTS_PLACEHOLDER,
+    PAIRWISE_STAGES,
+    PAIRWISE_TASK,
     VERDICT_SCHEMA,
     draw_calibration_set,
+    draw_pairs,
     judge_documents,
+    judge_pairs,
     judged_ids,
     parse_verdicts,
     read_documents,
@@ -638,6 +642,173 @@ class TestBatchBackend:
 
         with pytest.raises(ValueError, match="unknown backend"):
             judge_documents(source, tmp_path / "out.jsonl", _rubric(tmp_path), backend="batch")
+
+
+def _pair_sample(path: Path, datasets: Sequence[str] = ("alpha",), per_cell: int = 3) -> List[Dict[str, Any]]:
+    """Write a sample the pairwise drawing can be run over.
+
+    Args:
+        path: File to write.
+        datasets: Sources to write documents for.
+        per_cell: Documents per source, stage and decision.
+
+    Returns:
+        The documents written.
+    """
+    documents = []
+    for dataset in datasets:
+        for stage in PAIRWISE_STAGES:
+            for decision in ("kept", "dropped"):
+                for index in range(per_cell):
+                    documents.append(
+                        {
+                            "id": f"{dataset}:{stage}:{decision}:{index}",
+                            "dataset": dataset,
+                            "cells": [{"stage": stage, "decision": decision}],
+                            "text": f"besedilo {dataset} {stage} {decision} {index}",
+                        }
+                    )
+    path.write_text("\n".join(json.dumps(doc) for doc in documents) + "\n", encoding="utf-8")
+    return documents
+
+
+#: A stub that answers every comparison by naming the first text.
+_ANSWER_EVERY_PAIR = """
+prompt = sys.stdin.read()
+pairs = json.loads(prompt[prompt.index("["):prompt.rindex("]") + 1])
+print(json.dumps([{"id": p["id"], "better": "a", "note": ""} for p in pairs]))
+"""
+
+
+class TestDrawingPairs:
+    """Each source and stage contributes the same comparisons in both orders."""
+
+    def test_every_pair_is_asked_in_both_orders(self, tmp_path: Path) -> None:
+        """A pair is asked twice, once with the kept document in each slot."""
+        documents = _pair_sample(tmp_path / "sample.jsonl", per_cell=2)
+
+        pairs = draw_pairs(documents, pairs_per_cell=2)
+
+        assert len(pairs) == len(PAIRWISE_STAGES) * 2 * 2
+        first, second = pairs[0], pairs[1]
+        assert (first["kept"], second["kept"]) == ("a", "b")
+        assert (first["a_id"], first["b_id"]) == (second["b_id"], second["a_id"])
+
+    def test_a_pair_holds_one_kept_and_one_dropped_document(self, tmp_path: Path) -> None:
+        """The two documents differ only in what the stage decided about them."""
+        documents = _pair_sample(tmp_path / "sample.jsonl")
+
+        for pair in draw_pairs(documents):
+            kept_slot, dropped_slot = (
+                (pair["a_id"], pair["b_id"]) if pair["kept"] == "a" else (pair["b_id"], pair["a_id"])
+            )
+            assert f":{pair['stage']}:kept:" in kept_slot
+            assert f":{pair['stage']}:dropped:" in dropped_slot
+
+    def test_a_stage_with_no_drops_is_skipped(self, tmp_path: Path) -> None:
+        """Nothing is compared where the stage dropped nothing in that source."""
+        documents = [doc for doc in _pair_sample(tmp_path / "sample.jsonl") if ":spam:dropped:" not in doc["id"]]
+
+        assert not [pair for pair in draw_pairs(documents) if pair["stage"] == "spam"]
+
+    def test_the_cap_is_bounded_by_what_the_sample_holds(self, tmp_path: Path) -> None:
+        """Asking for more pairs than there are documents draws what exists."""
+        documents = _pair_sample(tmp_path / "sample.jsonl", per_cell=2)
+
+        pairs = draw_pairs(documents, stages=["quality"], pairs_per_cell=20)
+
+        assert len({pair["pair"] for pair in pairs}) == 2
+
+    def test_the_same_seed_draws_the_same_pairs(self, tmp_path: Path) -> None:
+        """The drawing is reproducible, so a rerun asks about the same pairs."""
+        documents = _pair_sample(tmp_path / "sample.jsonl", datasets=("alpha", "beta"))
+
+        assert draw_pairs(documents, seed=7) == draw_pairs(documents, seed=7)
+        assert draw_pairs(documents, seed=7) != draw_pairs(documents, seed=8)
+
+
+class TestPairwiseJudging:
+    """A comparison sends two texts and stores which slot won, never which was kept."""
+
+    def test_the_prompt_carries_both_texts_and_no_decision(self, tmp_path: Path) -> None:
+        """The judge sees two texts under neutral names and nothing else."""
+        unit = {"id": "alpha|quality|00|a", "a": "prvo besedilo", "b": "drugo besedilo", "kept": "a"}
+
+        prompt = render_prompt(_RUBRIC, [unit], 2000, PAIRWISE_TASK.text_keys)
+
+        assert '"a": "prvo besedilo"' in prompt
+        assert '"b": "drugo besedilo"' in prompt
+        assert "kept" not in prompt
+
+    def test_a_verdict_is_narrowed_to_the_choice(self, tmp_path: Path) -> None:
+        """Only `better` and `note` survive validation."""
+        batch = [{"id": "alpha|quality|00|a", "a": "x", "b": "y"}]
+        verdicts = [{"id": "alpha|quality|00|a", "better": "b", "note": "b is cleaner", "extra": 1}]
+
+        assert validate_batch(verdicts, batch, PAIRWISE_TASK.checks) == [
+            {"id": "alpha|quality|00|a", "better": "b", "note": "b is cleaner"}
+        ]
+
+    @pytest.mark.parametrize("value", ["A", "neither", "", 1])
+    def test_a_choice_outside_the_prompt_is_refused(self, value: Any) -> None:
+        """A judge that answers anything but a, b or tie fails its batch."""
+        batch = [{"id": "alpha|quality|00|a", "a": "x", "b": "y"}]
+
+        with pytest.raises(ValueError, match="better="):
+            validate_batch([{"id": "alpha|quality|00|a", "better": value}], batch, PAIRWISE_TASK.checks)
+
+    def test_the_drawing_is_written_beside_the_verdicts(self, tmp_path: Path) -> None:
+        """Which slot held the kept document is kept on disk, not in the prompt."""
+        source = tmp_path / "sample.jsonl"
+        _pair_sample(source, per_cell=1)
+        destination = tmp_path / "pairwise.jsonl"
+        command = _stub_judge(tmp_path / "judge.py", _ANSWER_EVERY_PAIR)
+
+        counts = judge_pairs(source, destination, _rubric(tmp_path), backend="cli", concurrency=1, command=command)
+
+        pairs = [json.loads(line) for line in (tmp_path / "pairwise.pairs.jsonl").read_text().splitlines()]
+        assert counts["judged"] == len(pairs) == len(PAIRWISE_STAGES) * 2
+        assert judged_ids(destination) == {pair["id"] for pair in pairs}
+        assert {json.loads(line)["better"] for line in destination.read_text().splitlines()} == {"a"}
+
+    def test_a_drawing_on_disk_is_reused(self, tmp_path: Path) -> None:
+        """A resumed run asks about the pairs already drawn, not a fresh draw."""
+        source = tmp_path / "sample.jsonl"
+        _pair_sample(source, per_cell=3)
+        pairs_path = tmp_path / "chosen.jsonl"
+        command = _stub_judge(tmp_path / "judge.py", _ANSWER_EVERY_PAIR)
+        judge_pairs(
+            source,
+            tmp_path / "pairwise.jsonl",
+            _rubric(tmp_path),
+            pairs_path=pairs_path,
+            pairs_per_cell=1,
+            backend="cli",
+            concurrency=1,
+            command=command,
+        )
+        drawn = pairs_path.read_text()
+
+        counts = judge_pairs(
+            source,
+            tmp_path / "pairwise.jsonl",
+            _rubric(tmp_path),
+            pairs_path=pairs_path,
+            pairs_per_cell=3,
+            backend="cli",
+            concurrency=1,
+            command=command,
+        )
+
+        assert pairs_path.read_text() == drawn
+        assert counts["batches"] == 0
+
+
+def test_the_experiment_pairwise_prompt_carries_the_placeholder() -> None:
+    """The comparison prompt shipped with the experiment can actually be filled."""
+    prompt = Path("experiments/data/curation-quality-slovenian/configs/judge-pairwise.md")
+
+    assert DOCUMENTS_PLACEHOLDER in prompt.read_text(encoding="utf-8")
 
 
 def test_the_experiment_rubric_carries_the_placeholder() -> None:
