@@ -1,0 +1,13 @@
+stage,decision,documents,judged,sources
+language,dropped,695,695,19
+language,kept,800,800,20
+spam,dropped,800,800,20
+spam,kept,800,800,20
+quality,dropped,800,800,20
+quality,kept,800,800,20
+repetition,dropped,774,774,20
+repetition,kept,800,800,20
+exact_dedup,dropped,497,497,16
+exact_dedup,kept,800,800,20
+sentence_dedup,dropped,689,689,19
+sentence_dedup,kept,800,800,20

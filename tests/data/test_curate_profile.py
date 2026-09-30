@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import List, Sequence, Tuple
 
 from slm4ie.data.curate.profile import (
+    count_source_documents,
     iter_stage_sentinels,
     language_confidence,
     oov_rate,
@@ -131,3 +132,14 @@ class TestStageSentinels:
             ("01_language", "demo", 100, 90),
             ("02_spam", "demo", 100, 80),
         ]
+
+
+class TestCountSourceDocuments:
+    """The dedup stages' per-source counts are read off their output."""
+
+    def test_counts_every_shard_of_every_source(self, tmp_path: Path) -> None:
+        """Shards of one source add up, and each source is counted apart."""
+        _write_shard(tmp_path / "a" / "00000.jsonl.gz", 3)
+        _write_shard(tmp_path / "a" / "00001.jsonl.gz", 2, start=3)
+        _write_shard(tmp_path / "b" / "00000.jsonl.gz", 4)
+        assert count_source_documents(tmp_path, workers=1) == {"a": 5, "b": 4}

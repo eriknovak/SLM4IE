@@ -3,7 +3,7 @@
 Parses arguments and dispatches into `slm4ie.data.curate.runner`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Four subcommands:
+Six subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
@@ -20,6 +20,9 @@ Four subcommands:
 * `duplication` asks whether the documents the dedup stages dropped are still
   in the corpus as another copy, which is the only thing a dedup stage can be
   wrong about. Read-only apart from the tables it writes.
+* `describe` counts every source after exact dedup and profiles the finished
+  corpus — length, vocabulary, language confidence — for the statistics that
+  need no judge. Read-only apart from the two JSON files it writes.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -65,6 +68,7 @@ from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
 from slm4ie.data.curate.runner import curate, recount
 from slm4ie.data.curate.duplication import DEDUP_STAGES, assess_dedup
+from slm4ie.data.curate.profile import describe_corpus
 from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
 from slm4ie.data.curate.stages import CORPUS_STAGES
 from slm4ie.utils.cli import add_selection, validate_selection
@@ -240,6 +244,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     duplication_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards read at once.")
 
+    describe_parser = subparsers.add_parser(
+        "describe",
+        help="Count sources after exact dedup and profile the finished corpus.",
+    )
+    _add_common_arguments(describe_parser)
+    describe_parser.add_argument("--out-dir", type=Path, required=True, help="Folder for the two JSON files.")
+    describe_parser.add_argument(
+        "--sloleks", type=Path, default=None, help="Sloleks JSONL for the out-of-vocabulary rate; skipped if absent."
+    )
+    describe_parser.add_argument("--per-source", type=int, default=2000, help="Documents profiled per source.")
+    describe_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards counted at once.")
+
     args = parser.parse_args(argv)
     if args.command == "sample":
         validate_selection(parser, args, "datasets")
@@ -287,6 +303,17 @@ def main() -> None:
         for row in rows:
             print(row)
         print(f"wrote {args.out}")
+        return
+
+    if args.command == "describe":
+        for path in describe_corpus(
+            pretrain_dir=resolve_output_dir(args.config, args.output_dir),
+            destination_dir=args.out_dir,
+            sloleks_path=args.sloleks,
+            per_source=args.per_source,
+            workers=args.workers,
+        ):
+            print(f"wrote {path}")
         return
 
     if args.command == "sample":

@@ -31,8 +31,11 @@ import json
 import logging
 import re
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+
+from slm4ie.data.curate.pipeline import _count_jsonl_rows
 
 logger = logging.getLogger(__name__)
 
@@ -331,3 +334,59 @@ def iter_stage_sentinels(pretrain_dir: Path, stages: Sequence[str]) -> Iterator[
         for path in sorted((pretrain_dir / stage).glob("*/.complete")):
             sentinel = json.loads(path.read_text(encoding="utf-8"))
             yield stage, path.parent.name, sentinel["records_in"], sentinel["records_out"]
+
+
+def count_source_documents(stage_dir: Path, workers: int = 10) -> Dict[str, int]:
+    """Count the documents each source holds in a stage's output.
+
+    The corpus-wide dedup stages keep no per-source sentinel, so the funnel
+    counts their output instead.
+
+    Args:
+        stage_dir: A stage folder holding one directory per source.
+        workers: Shards counted at once.
+
+    Returns:
+        Documents per source.
+    """
+    folders = [folder for folder in sorted(stage_dir.iterdir()) if folder.is_dir()]
+    shards = [(folder.name, shard) for folder in folders for shard in sorted(folder.glob("*.jsonl.gz"))]
+    counts: Dict[str, int] = {folder.name: 0 for folder in folders}
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for (source, _), rows in zip(shards, pool.map(_count_jsonl_rows, [shard for _, shard in shards])):
+            counts[source] += rows
+    return counts
+
+
+def describe_corpus(
+    pretrain_dir: Path,
+    destination_dir: Path,
+    sloleks_path: Optional[Path],
+    per_source: int = 2000,
+    workers: int = 10,
+) -> Tuple[Path, Path]:
+    """Write the no-judge description of the finished corpus.
+
+    Two files, both read by the experiment's analysis: the document count of
+    every source after exact dedup, and the sampled profile of every source in
+    the finished corpus.
+
+    Args:
+        pretrain_dir: The curation `output_dir`.
+        destination_dir: Folder the two JSON files are written to.
+        sloleks_path: The Sloleks JSONL, or None to skip the vocabulary rate.
+        per_source: Documents sampled per source for the profile.
+        workers: Shards counted at once.
+
+    Returns:
+        The paths of the stage counts and of the profile.
+    """
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    counts_path = destination_dir / "stage-counts.json"
+    stage = "05_exact_dedup"
+    counts = {stage: count_source_documents(pretrain_dir / stage, workers=workers)}
+    counts_path.write_text(json.dumps(counts, indent=1), encoding="utf-8")
+    profile_path = destination_dir / "corpus-profile.json"
+    profiles = profile_corpus(pretrain_dir / "06_sentence_dedup", sloleks_path=sloleks_path, per_source=per_source)
+    profile_path.write_text(json.dumps(profiles, ensure_ascii=False, indent=1), encoding="utf-8")
+    return counts_path, profile_path

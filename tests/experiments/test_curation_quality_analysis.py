@@ -59,6 +59,26 @@ class TestBars:
         assert analysis.is_bad(verdict) is lenient
         assert analysis.is_bad(verdict, strict=True) is strict
 
+    def test_language_filter_also_counts_other_languages(self) -> None:
+        """Fluent English is bad text for the language filter only."""
+        english = {**_verdict(5), "language": "en"}
+        assert analysis.is_bad(english, stage="language")
+        assert not analysis.is_bad(english, stage="quality")
+        assert not analysis.is_bad(english)
+
+    def test_agreement_compares_runs_with_the_person_and_each_other(self) -> None:
+        """Each run is scored against the person, then against the reference run."""
+        labels = [{"id": "a", **_verdict(5)}, {"id": "b", **_verdict(1)}]
+        runs = {
+            "first": {"a": _verdict(5), "b": _verdict(1)},
+            "second": {"a": _verdict(1), "b": _verdict(1)},
+        }
+        rows = analysis.agreement_rows(labels, runs, reference="first")
+        by_pair = {(row["judge_run"], row["compared_with"]): row for row in rows}
+        assert by_pair[("first", "person")]["kappa"] == 1.0
+        assert by_pair[("second", "person")]["raw_agreement"] == 0.5
+        assert by_pair[("second", "first")]["documents"] == 2
+
     def test_wilson_stays_inside_the_scale(self) -> None:
         """An empty share still has a positive upper bound, and none runs past 0 or 1."""
         low, high = analysis.wilson(0, 10)

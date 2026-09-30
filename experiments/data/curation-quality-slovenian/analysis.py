@@ -103,18 +103,26 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
-def is_bad(verdict: Dict[str, Any], strict: bool = False) -> bool:
+def is_bad(verdict: Dict[str, Any], strict: bool = False, stage: Optional[str] = None) -> bool:
     """Decide whether a judged document falls below the bar (D8).
 
+    At the language filter a document is also bad when the judge does not call
+    it Slovene, since removing other languages is that filter's whole purpose;
+    the bar would otherwise count its correct drops of well-written English as
+    mistakes.
+
     Args:
-        verdict: One judge verdict, carrying `coherence`, `text_type` and
-            `adult_or_spam`.
+        verdict: One judge verdict, carrying `coherence`, `text_type`,
+            `adult_or_spam` and `language`.
         strict: Use the stricter bar, which also counts coherence 3.
+        stage: The stage whose decision is scored, or None for no stage.
 
     Returns:
-        True when the document counts as bad text.
+        True when the document counts as bad text for that stage.
     """
     floor = 3 if strict else 2
+    if stage == "language" and verdict.get("language", "sl") != "sl":
+        return True
     return verdict["coherence"] <= floor or verdict["text_type"] in BAD_TEXT_TYPES or bool(verdict["adult_or_spam"])
 
 
@@ -169,17 +177,18 @@ def _cells(
     return grouped
 
 
-def _rate(verdicts: List[Dict[str, Any]], strict: bool) -> Tuple[int, int, float, float, float]:
+def _rate(verdicts: List[Dict[str, Any]], strict: bool, stage: str) -> Tuple[int, int, float, float, float]:
     """Score one cell at one bar.
 
     Args:
         verdicts: The cell's judge verdicts.
         strict: Use the stricter bar.
+        stage: The stage whose decisions the cell holds.
 
     Returns:
         Bad count, total count, share, and the share's interval bounds.
     """
-    bad = sum(1 for verdict in verdicts if is_bad(verdict, strict))
+    bad = sum(1 for verdict in verdicts if is_bad(verdict, strict, stage))
     total = len(verdicts)
     low, high = wilson(bad, total)
     return bad, total, (bad / total if total else 0.0), low, high
@@ -218,7 +227,7 @@ def stage_rows(grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]], by_sou
                 row["source"] = source
             for name, verdicts in (("drop_precision", dropped), ("residual_bad_rate", kept)):
                 for bar, strict in (("", False), ("_strict", True)):
-                    bad, total, share, low, high = _rate(verdicts, strict)
+                    bad, total, share, low, high = _rate(verdicts, strict, stage)
                     # A cell the sample never reached has no rate, and writing 0
                     # there would read as "this stage drops only good text".
                     empty = total == 0
@@ -387,9 +396,7 @@ def gated_rows(pretrain_dir: Path, extract_config: Path) -> List[Dict[str, Any]]
     Returns:
         One row for open sources, one for gated, and one for the total.
     """
-    catalog = yaml.safe_load(extract_config.read_text(encoding="utf-8")) or {}
-    entries = catalog.get("datasets", catalog)
-    access = {key: (entry or {}).get("access", "open") for key, entry in entries.items() if isinstance(entry, dict)}
+    access = _access(extract_config)
     rows = [row for row in funnel_rows(pretrain_dir) if row["source"] != "TOTAL"]
     groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -417,6 +424,127 @@ def gated_rows(pretrain_dir: Path, extract_config: Path) -> List[Dict[str, Any]]
         }
     )
     return out
+
+
+def _access(extract_config: Path) -> Dict[str, str]:
+    """Read whether each source may be redistributed.
+
+    Args:
+        extract_config: `configs/data/extract.yaml`.
+
+    Returns:
+        `open` or `gated` per source.
+    """
+    catalog = yaml.safe_load(extract_config.read_text(encoding="utf-8")) or {}
+    entries = catalog.get("datasets", catalog)
+    return {key: (entry or {}).get("access", "open") for key, entry in entries.items() if isinstance(entry, dict)}
+
+
+def corpus_dataset_rows(funnel: List[Dict[str, Any]], extract_config: Path) -> List[Dict[str, Any]]:
+    """Describe every source of the curated corpus, for the record's Datasets section.
+
+    Args:
+        funnel: Rows from `funnel_rows`.
+        extract_config: `configs/data/extract.yaml`, read for each source's access.
+
+    Returns:
+        One row per source with its domain, kind, access and sizes before and
+        after curation.
+    """
+    access = _access(extract_config)
+    return [
+        {
+            "source": row["source"],
+            "domain": row["domain"],
+            "kind": "raw web crawl" if row["domain"] == "web" else "curated",
+            "access": access.get(row["source"], "open"),
+            "converted": row["convert"],
+            "finished": row["final"],
+            "finished_words": row["final_words"],
+        }
+        for row in sorted(funnel, key=lambda row: row["source"])
+        if row["source"] != "TOTAL"
+    ]
+
+
+def sample_dataset_rows(sample: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Count the judged sample per stage and decision.
+
+    Args:
+        sample: Sample rows, each carrying the `cells` it was drawn into.
+        verdicts: Judge verdicts by document id.
+
+    Returns:
+        One row per stage and decision, in pipeline order.
+    """
+    cells: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for row in sample:
+        for cell in row["cells"]:
+            cells[(cell["stage"], cell["decision"])].append(row)
+    return [
+        {
+            "stage": stage,
+            "decision": decision,
+            "documents": len(rows),
+            "judged": sum(1 for row in rows if row["id"] in verdicts),
+            "sources": len({row["dataset"] for row in rows}),
+        }
+        for stage in STAGES
+        for decision in ("dropped", "kept")
+        if (rows := cells.get((stage, decision)))
+    ]
+
+
+def pairs_dataset_rows(pairs: List[Dict[str, Any]], answers: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Count the pairwise drawing per stage.
+
+    Args:
+        pairs: The drawing, one row per comparison.
+        answers: The judge's answers, keyed by comparison id.
+
+    Returns:
+        One row per stage with its pairs, comparisons answered and sources.
+    """
+    rows = []
+    for stage in STAGES:
+        comparisons = [pair for pair in pairs if pair["stage"] == stage]
+        if not comparisons:
+            continue
+        rows.append(
+            {
+                "stage": stage,
+                "pairs": len({(pair["dataset"], pair["pair"]) for pair in comparisons}),
+                "comparisons": len(comparisons),
+                "answered": sum(1 for pair in comparisons if pair["id"] in answers),
+                "sources": len({pair["dataset"] for pair in comparisons}),
+            }
+        )
+    return rows
+
+
+def labels_dataset_rows(
+    calibration: List[Dict[str, Any]], adjudication: List[Dict[str, Any]], sample: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Describe the two sets of hand labels.
+
+    Args:
+        calibration: The frozen calibration labels.
+        adjudication: The frozen adjudication labels.
+        sample: Sample rows, to find each labelled document's source.
+
+    Returns:
+        One row per label set.
+    """
+    source = {row["id"]: row["dataset"] for row in sample}
+    return [
+        {
+            "label_set": name,
+            "documents": len(labels),
+            "sources": len({source[label["id"]] for label in labels if label["id"] in source}),
+            "bad_text_share": round(sum(is_bad(label) for label in labels) / len(labels), 3) if labels else "",
+        }
+        for name, labels in (("calibration", calibration), ("adjudication", adjudication))
+    ]
 
 
 def profile_rows(profiles: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -789,6 +917,72 @@ def draw_figures(
     return written
 
 
+def _kappa(pairs: List[Tuple[bool, bool]]) -> Tuple[float, float]:
+    """Return Cohen's kappa and raw agreement for two raters' yes-or-no calls.
+
+    Args:
+        pairs: One (first rater, second rater) pair per document.
+
+    Returns:
+        Kappa and the share of documents both raters called alike.
+    """
+    total = len(pairs)
+    observed = sum(first == second for first, second in pairs) / total
+    first_yes = sum(first for first, _ in pairs) / total
+    second_yes = sum(second for _, second in pairs) / total
+    expected = first_yes * second_yes + (1 - first_yes) * (1 - second_yes)
+    return ((observed - expected) / (1 - expected) if expected < 1 else 1.0), observed
+
+
+def agreement_rows(
+    labels: List[Dict[str, Any]], runs: Dict[str, Dict[str, Dict[str, Any]]], reference: str
+) -> List[Dict[str, Any]]:
+    """Report how far each judge run agrees with the person, and the runs with each other.
+
+    Agreement is taken on the collapsed keep-or-drop decision at both bars
+    (D8), which is what the calibration gate reads (D5); coherence is reported
+    beside it on its 1-5 scale.
+
+    Args:
+        labels: The person's calibration labels.
+        runs: Judge verdicts by run name, each keyed by document id.
+        reference: The run the others are compared against as well.
+
+    Returns:
+        One row per run against the person, then one per other run against
+        the reference run over every document both judged.
+    """
+    comparisons: List[Tuple[str, str, List[Tuple[Dict[str, Any], Dict[str, Any]]]]] = []
+    for name, verdicts in runs.items():
+        comparisons.append(
+            (name, "person", [(label, verdicts[label["id"]]) for label in labels if label["id"] in verdicts])
+        )
+    for name, verdicts in runs.items():
+        if name == reference:
+            continue
+        shared = [(runs[reference][doc_id], verdicts[doc_id]) for doc_id in runs[reference] if doc_id in verdicts]
+        comparisons.append((name, reference, shared))
+
+    rows: List[Dict[str, Any]] = []
+    for name, against, pairs in comparisons:
+        lenient, raw = _kappa([(is_bad(first), is_bad(second)) for first, second in pairs])
+        strict, _ = _kappa([(is_bad(first, strict=True), is_bad(second, strict=True)) for first, second in pairs])
+        gaps = [abs(first["coherence"] - second["coherence"]) for first, second in pairs]
+        rows.append(
+            {
+                "judge_run": name,
+                "compared_with": against,
+                "documents": len(pairs),
+                "kappa": round(lenient, 3),
+                "raw_agreement": round(raw, 3),
+                "kappa_strict": round(strict, 3),
+                "coherence_exact": round(sum(gap == 0 for gap in gaps) / len(gaps), 3),
+                "coherence_within_one": round(sum(gap <= 1 for gap in gaps) / len(gaps), 3),
+            }
+        )
+    return rows
+
+
 def draw_adjudications(
     sample: List[Dict[str, Any]],
     verdicts: Dict[str, Dict[str, Any]],
@@ -805,6 +999,10 @@ def draw_adjudications(
     agreement there is what D5 leaves untested. The draw is stratified by
     source and conflict direction and interleaved, so stopping early still
     covers every source.
+
+    The conflicts are found with the bar as it stood when the set was drawn,
+    without the language filter's own rule, so the labelled set can be drawn
+    again exactly.
 
     Args:
         sample: Sample rows, each carrying the `cells` it was drawn into.
@@ -862,7 +1060,8 @@ def adjudication_rows(adjudications: List[Dict[str, Any]], labels: List[Dict[str
             continue
         dropped = document["conflicts"][0]["decision"] == "dropped"
         direction = "pipeline dropped, judge clean" if dropped else "pipeline kept, judge bad"
-        with_judge = not is_bad(label) if dropped else is_bad(label)
+        stage = document["conflicts"][0]["stage"]
+        with_judge = not is_bad(label, stage=stage) if dropped else is_bad(label, stage=stage)
         sided[direction].append(with_judge)
         sided["all"].append(with_judge)
 
@@ -965,6 +1164,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Score the curation pipeline's decisions against the judge.")
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT, help="This experiment's derived-data folder.")
     parser.add_argument("--verdicts", default="verdicts-full-sonnet.jsonl", help="Judge verdicts under interim/.")
+    parser.add_argument(
+        "--calibration-verdicts",
+        default="verdicts-sonnet.jsonl",
+        help="The judge run the calibration gate was read on, under interim/.",
+    )
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
     parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
     parser.add_argument(
@@ -1011,6 +1215,22 @@ def main() -> None:
         write_csv(args.tables / "source-stage-decisions.csv", per_source),
     ]
 
+    # Two runs of one judge: the calibration pass the gate was read on, and the
+    # full-sample pass every stage metric uses.
+    calibration_labels = read_jsonl(args.data_root / "final" / "human-labels-calibration.jsonl")
+    runs = {
+        "calibration pass": {
+            row["id"]: row for row in read_jsonl(args.data_root / "interim" / args.calibration_verdicts)
+        },
+        "full-sample pass": verdicts,
+    }
+    agreement = agreement_rows(calibration_labels, runs, reference="calibration pass")
+    for row in agreement:
+        print(
+            f"{row['judge_run']:18s} vs {row['compared_with']:18s} n={row['documents']:4d} kappa {row['kappa']:.2f}, raw {row['raw_agreement']:.1%}"
+        )
+    written.append(write_csv(args.tables / "calibration-agreement.csv", agreement))
+
     answers_path = args.data_root / "interim" / args.pairwise
     answers = {row["id"]: row for row in read_jsonl(answers_path)}
     pairwise = pairwise_rows(read_jsonl(answers_path.with_suffix(".pairs.jsonl")), answers)
@@ -1048,6 +1268,24 @@ def main() -> None:
                 f"({row['good_text_share']:.1%} [{row['good_text_low']:.1%}-{row['good_text_high']:.1%}])"
             )
         written.append(write_csv(args.tables / "dedup-lost-text.csv", lost))
+
+    adjudication_labels_path = args.data_root / "final" / "human-labels-adjudication.jsonl"
+    written += [
+        write_csv(args.tables / "dataset-corpus-statistics.csv", corpus_dataset_rows(funnel, args.extract_config)),
+        write_csv(args.tables / "dataset-sample-statistics.csv", sample_dataset_rows(sample, verdicts)),
+        write_csv(
+            args.tables / "dataset-pairs-statistics.csv",
+            pairs_dataset_rows(read_jsonl(answers_path.with_suffix(".pairs.jsonl")), answers),
+        ),
+        write_csv(
+            args.tables / "dataset-labels-statistics.csv",
+            labels_dataset_rows(
+                calibration_labels,
+                read_jsonl(adjudication_labels_path) if adjudication_labels_path.is_file() else [],
+                sample,
+            ),
+        ),
+    ]
 
     losses = loss_rows(funnel)
     written.append(write_csv(args.tables / "source-losses.csv", losses))
