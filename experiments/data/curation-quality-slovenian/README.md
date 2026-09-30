@@ -445,11 +445,11 @@ concluded: 2026-09-30
 - **Limitations**:
   - The judge run behind every judged number agrees with the person at κ 0.43, below the record's own gate ([F12]).
   - The calibration labels reach only web-derived sources, and the adjudication covers 29 documents ([F5]).
-  - Pooled rates weigh every source equally, so they are not corpus-weighted volumes.
-  - Five sources reached the later stages doubled by stale output files, inflating their dedup drops.
+  - Pooled rates weigh every source equally, not by size.
+  - Stale output files doubled five sources, inflating their dedup drops.
   - Filter timings survive for one group of sources only ([F11]).
-  - Dedup survival is checked for each drop's best twin only, which can overstate the text dedup loses ([F6]).
-  - The judge script logs no token use per request, so the judging cost is known only from the bill.
+  - Only each dedup drop's best twin is checked for survival ([F6]).
+  - The judge script logs no token use per request.
   - The near-duplicate rate among kept documents and sentence-dedup drops by reason were not measured.
 
 ## Reproduce

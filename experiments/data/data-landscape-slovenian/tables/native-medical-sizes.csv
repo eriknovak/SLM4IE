@@ -1,0 +1,5 @@
+source,catalogue_name,items_total,items_counted,words_counted,words_estimated,basis,method,sized_on
+clinical-case-reports,Slovenian Relation Extraction (clinical case reports),84,84,24471,24471,full,every row via the Hub rows API; 1471 sentences over 84 case reports,2026-09-22
+wikipedia-medicina,Slovenska Wikipedija — Kategorija:Medicina,2132,2132,995680,995680,full,"category walk to depth 2, plain-text extracts via the API",2026-09-22
+zdravniski-vestnik,Zdravniški vestnik — official archive,1616,39,164610,6820763,sampled,"OAI-PMH harvest, 40 Slovene articles drawn with seed 20260921, PDF text via pypdf",2026-09-22
+clinical-guidelines,Slovenian clinical guidelines list (UL Medical Faculty),112,2,24558,24558,partial,every link on the faculty list that resolves to a PDF (2 of 93 candidates),2026-09-22

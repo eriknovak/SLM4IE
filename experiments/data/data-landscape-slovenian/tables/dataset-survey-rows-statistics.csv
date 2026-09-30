@@ -1,0 +1,8 @@
+family,rows_returned,rows_kept,rows_slovene,rows_medical_other_languages,rows_in_registry
+clarin-si,157,157,157,0,22
+lindat,27,27,27,0,0
+zenodo,7,7,7,0,0
+huggingface,75,75,75,0,7
+medical-publishers,27,27,16,11,0
+elg,26,13,13,0,0
+total,319,306,295,11,29

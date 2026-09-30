@@ -124,4 +124,5 @@ analysis = [
     "datachart>=1.0.0",               # publication figures -> figures/*.svg
     "anthropic>=1.6.0",
     "marimo>=0.24.2",
+    "pypdf>=5",                       # PDF text for the medical sizing pass
 ]
