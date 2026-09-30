@@ -30,7 +30,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -1985,33 +1985,52 @@ def status(
 def _scan_all(
     requests: Dict[Tuple[str, str], Tuple[List[Path], str, bool]], workers: int
 ) -> Dict[Tuple[str, str], UnitScan]:
-    """Scan many units at once, one file per worker task.
+    """Scan many units at once, one file per worker task, largest files first.
+
+    Units under the pseudo-stage `extracted` are single source files; their
+    scan also hashes the raw bytes, so each is read only once.
 
     Args:
         requests: Per unit id, its files, id field and whether to digest.
-        workers: Worker processes; 1 scans in-process.
+        workers: Worker processes; keep this low on spinning disks, where
+            parallel readers thrash.
 
     Returns:
         The merged `UnitScan` per unit id.
     """
-    total = sum(len(files) for files, _, _ in requests.values())
-    logger.info("[adopt] scanning %d file(s) across %d unit(s) (workers=%d)", total, len(requests), workers)
-    if workers <= 1:
-        return {
-            unit: scan_documents(files, id_key=id_key, digest=digest)
-            for unit, (files, id_key, digest) in requests.items()
+    jobs = [(unit, f, id_key, digest) for unit, (files, id_key, digest) in requests.items() for f in files]
+    jobs.sort(key=lambda job: job[1].stat().st_size, reverse=True)
+    total_bytes = sum(job[1].stat().st_size for job in jobs)
+    logger.info(
+        "[adopt] scanning %d file(s), %s, across %d unit(s) (workers=%d)",
+        len(jobs),
+        _human_bytes(total_bytes),
+        len(requests),
+        workers,
+    )
+    parts: Dict[Tuple[str, str], List[UnitScan]] = {unit: [] for unit in requests}
+    done_bytes = 0
+    with ProcessPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures: Dict[Future, Tuple[Tuple[str, str], Path]] = {
+            pool.submit(scan_documents, [f], id_key=id_key, digest=digest, raw_sha256=unit[0] == "extracted"): (
+                unit,
+                f,
+            )
+            for unit, f, id_key, digest in jobs
         }
-    parts: Dict[Tuple[str, str], List[Future]] = {}
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        for unit, (files, id_key, digest) in requests.items():
-            parts[unit] = [pool.submit(scan_documents, [f], id_key=id_key, digest=digest) for f in files]
-        done = 0
-        scans: Dict[Tuple[str, str], UnitScan] = {}
-        for unit, futures in parts.items():
-            scans[unit] = merge_scans([f.result() for f in futures])
-            done += len(futures)
-            logger.info("[adopt] scanned %s/%s (%d/%d files)", unit[0], unit[1], done, total)
-    return scans
+        for n, future in enumerate(as_completed(futures), start=1):
+            unit, path = futures[future]
+            parts[unit].append(future.result())
+            done_bytes += path.stat().st_size
+            logger.info(
+                "[adopt] %d/%d files, %s/%s: %s",
+                n,
+                len(jobs),
+                _human_bytes(done_bytes),
+                _human_bytes(total_bytes),
+                path,
+            )
+    return {unit: scans[0] if len(scans) == 1 else merge_scans(scans) for unit, scans in parts.items()}
 
 
 def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
@@ -2069,13 +2088,17 @@ def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
                 need(stage, key, True)
                 need(cast(str, upstream_stage(stage)), key, False)
     scans = _scan_all(requests, workers)
-    # hashlib releases the GIL on large reads, so threads hash files in parallel.
-    convert_keys = [key for stage, key in scoped if stage == "convert"]
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        hashed = pool.map(
-            lambda k: _convert_input_files(paths.input_folder, k, setup.include_annotations(k)), convert_keys
-        )
-        input_files = dict(zip(convert_keys, hashed))
+    # Reuse the hash each source file's scan took, so it is not read twice.
+    input_files: Dict[str, Dict[str, Any]] = {}
+    for stage, key in scoped:
+        source = paths.input_folder / f"{key}.jsonl"
+        if stage == "convert" and source.is_file():
+            st = source.stat()
+            known = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "sha256": scans[("extracted", key)].raw_sha256}
+            previous = {source.name: known}
+            input_files[key] = _convert_input_files(paths.input_folder, key, setup.include_annotations(key), previous)
+        elif stage == "convert":
+            input_files[key] = _convert_input_files(paths.input_folder, key, setup.include_annotations(key))
     info = {**_run_info(setup.project_root), "adopted_at": datetime.now(timezone.utc).isoformat()}
 
     for stage, key in scoped:

@@ -153,7 +153,9 @@ or `missing` (nothing to build it from), compares the lock file too, and exits
 while legacy sentinels remain. `status --adopt` reads each legacy unit once,
 checks it, computes its document digest and rewrites its sentinel, so a corpus
 built earlier becomes current without a rebuild. Units failing the check are
-recorded as such and are the only ones the next run rebuilds.
+recorded as such and are the only ones the next run rebuilds. Adoption reads the whole corpus and every extracted file once;
+keep `--max-workers` low (about 4) on a spinning disk, where parallel readers
+thrash.
 
 ## Per-dataset overrides
 
@@ -232,7 +234,7 @@ uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --al
 uv run python scripts/curate_pretraining_corpus.py status --config "$CURATION"
 
 # One-off: adopt sentinels written before lineage tracking, without a rebuild.
-uv run python scripts/curate_pretraining_corpus.py status --config "$CURATION" --adopt --max-workers 16
+uv run python scripts/curate_pretraining_corpus.py status --config "$CURATION" --adopt --max-workers 4
 
 # Run only one stage. Downstream units see its new document digest and
 # rebuild on the next --all, unless its documents came out the same.

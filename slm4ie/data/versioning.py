@@ -51,11 +51,14 @@ class UnitScan:
             scan was asked for ids only.
         id_hashes: Sorted 64-bit hashes of every document id, one per
             document (repeats kept), for the integrity check.
+        raw_sha256: SHA-256 of the files' bytes in the order read, when asked
+            for; lets one read serve both the id scan and a file hash.
     """
 
     records: int
     document_digest: Optional[str]
     id_hashes: np.ndarray
+    raw_sha256: Optional[str] = None
 
 
 def _format_digest(total: int) -> str:
@@ -95,7 +98,9 @@ def _id_hash(value: Any) -> int:
     return int.from_bytes(hashlib.blake2b(str(value).encode("utf-8"), digest_size=8).digest(), "big")
 
 
-def scan_documents(files: Iterable[Path], *, id_key: str = "id", digest: bool = True) -> UnitScan:
+def scan_documents(
+    files: Iterable[Path], *, id_key: str = "id", digest: bool = True, raw_sha256: bool = False
+) -> UnitScan:
     """Read JSONL documents once, collecting ids and optionally the digest.
 
     Args:
@@ -103,10 +108,12 @@ def scan_documents(files: Iterable[Path], *, id_key: str = "id", digest: bool = 
         id_key: Top-level field holding each document's id.
         digest: Compute the document digest; skip it when only the ids are
             needed (e.g. for a stage's input side).
+        raw_sha256: Also hash the raw bytes read (meaningful for one plain file).
 
     Returns:
         The `UnitScan` of every document across *files*.
     """
+    raw = hashlib.sha256() if raw_sha256 else None
     total = 0
     records = 0
     ids = array("Q")
@@ -114,6 +121,8 @@ def scan_documents(files: Iterable[Path], *, id_key: str = "id", digest: bool = 
         opener = gzip.open if path.suffix == ".gz" else open
         with opener(path, "rb") as fh:
             for line in fh:
+                if raw is not None:
+                    raw.update(line)
                 if not line.strip():
                     continue
                 record = orjson.loads(line)
@@ -122,7 +131,12 @@ def scan_documents(files: Iterable[Path], *, id_key: str = "id", digest: bool = 
                 if digest:
                     total += _document_hash(record)
     id_hashes = np.sort(np.frombuffer(ids, dtype=np.uint64)) if records else np.empty(0, dtype=np.uint64)
-    return UnitScan(records=records, document_digest=_format_digest(total) if digest else None, id_hashes=id_hashes)
+    return UnitScan(
+        records=records,
+        document_digest=_format_digest(total) if digest else None,
+        id_hashes=id_hashes,
+        raw_sha256=raw.hexdigest() if raw is not None else None,
+    )
 
 
 def merge_scans(scans: Sequence[UnitScan]) -> UnitScan:

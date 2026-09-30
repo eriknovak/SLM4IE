@@ -166,3 +166,12 @@ def test_parallel_scan_matches_serial(tmp_path: Path) -> None:
     assert parallel.document_digest == serial.document_digest
     assert parallel.records == serial.records == 12
     assert (parallel.id_hashes == serial.id_hashes).all()
+
+
+def test_scan_can_hash_raw_bytes_in_the_same_pass(tmp_path: Path) -> None:
+    """The raw-bytes hash of a scanned file equals its file hash, blank lines included."""
+    path = tmp_path / "k.jsonl"
+    path.write_text(json.dumps({"uid": "k:1"}) + "\n\n" + json.dumps({"uid": "k:2"}))
+    scan = scan_documents([path], id_key="uid", digest=False, raw_sha256=True)
+    assert scan.raw_sha256 == file_sha256(path)
+    assert scan.records == 2

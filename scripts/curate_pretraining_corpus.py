@@ -53,7 +53,7 @@ Examples:
 
     # Adopt sentinels written before lineage tracking; rebuilds nothing.
     uv run python scripts/curate_pretraining_corpus.py status --config $CURATION --adopt \
-        --max-workers 16
+        --max-workers 4
 
     # Backfill per-source counts onto existing sentinels; reprocesses no data.
     uv run python scripts/curate_pretraining_corpus.py recount --config $CURATION
