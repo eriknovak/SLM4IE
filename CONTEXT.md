@@ -112,9 +112,27 @@ dataset can differ without forking the config. Corpus stages reject them.
 _Avoid_: exception, patch, custom config
 
 **Sentinel**:
-The completion marker a stage writes, carrying a hash of the config slice that
-produced it. A changed hash invalidates that stage and every stage after it.
+The completion marker a stage writes, carrying the config hash, stage version
+and input digest that produced it plus the document digest of what it wrote.
+Any mismatch invalidates that stage and every stage after it.
 _Avoid_: checkpoint, marker, lock, cache
+
+**Stage version**:
+An integer per stage, raised by hand when its code changes what it outputs.
+Refactors that leave the output alone do not raise it.
+_Avoid_: code hash, revision
+
+**Document digest**:
+An order-independent hash over the documents a stage wrote for one dataset. It
+ignores shard layout, worker count, compression and timestamps, so it changes
+only when the documents do; a rerun that reproduces it leaves downstream
+stages current.
+_Avoid_: checksum, fingerprint, version
+
+**Lock file**:
+The committed record of every sentinel's hashes and digests, so each commit
+names the corpus it expects and `status` can report where the disk differs.
+_Avoid_: manifest, snapshot, dvc.lock
 
 ### Task conversion
 
