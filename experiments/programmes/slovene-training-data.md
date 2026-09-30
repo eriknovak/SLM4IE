@@ -20,6 +20,7 @@ planned:
     title: whether the curated corpus and the task sets together meet every KPI, scientific extraction examples included
     builds_on: [curation-quality-slovenian, medical-ie-slovenian]
 ---
+
 # Slovene training data — a dataset for tokenizers, models and information extraction
 
 ## Question

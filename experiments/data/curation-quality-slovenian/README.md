@@ -18,6 +18,7 @@ evidence: {}
 types: [assessment]
 concluded: 2026-09-30
 ---
+
 # Curation pipeline quality — Slovenian
 
 ## TL;DR
@@ -412,7 +413,6 @@ concluded: 2026-09-30
 - **Reading**: On the one source whose filter timings survive, the spam filter costs far less per document than any other filter, so the case for changing it rests on the text it drops ([F2]).
 - **History**:
   - 2026-09-30 first result, checked within 3% against the build log's stage times
-
 
 ### F12 — Two runs of the same judge agree with each other more than with the person · supporting F1
 

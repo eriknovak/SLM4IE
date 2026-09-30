@@ -270,6 +270,15 @@ def extract(dataset: str, force: bool = False) -> Path:
 Type hints required on all public signatures. Use `typing` collection generics
 (`List`, `Dict`, `Optional`, etc.) for consistency across the codebase.
 
+### Formatting is enforced
+
+The pre-commit hook (`.githooks/pre-commit`, enabled with
+`git config core.hooksPath .githooks`) and CI (`.github/workflows/lint.yaml`)
+reject Python that fails `ruff format --check` or `ruff check`, and Markdown
+that fails `rumdl check`. Run `uv run ruff format` and `uv run rumdl fmt` on
+the files you touched before committing. `experiments/build_report.py` is
+vendored from the labflow skill and excluded from ruff.
+
 ### Verify with ruff before claiming Python work is done
 
 Ruff bundles pydocstyle, and `pyproject.toml` already pins

@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 #
-# Pre-commit guard: refuse to commit presigned S3/MinIO URLs.
+# Pre-commit guard:
+#   1. refuse to commit presigned S3/MinIO URLs;
+#   2. refuse Python that ruff would reformat or lint;
+#   3. refuse Markdown that rumdl would reformat or lint.
 #
-# These URLs embed short-lived credentials (X-Amz-Credential /
+# Presigned URLs embed short-lived credentials (X-Amz-Credential /
 # X-Amz-Signature) and are secrets. They belong only in a gitignored
 # *.local.yaml overlay sitting next to the config it patches, which
 # load_config deep-merges over that base. This hook is a backstop for that.
+#
+# The format checks run on the staged paths as they sit in the working tree;
+# tool settings, including the labflow-vendored files that are exempt, live
+# in pyproject.toml under [tool.ruff] and [tool.rumdl].
 #
 # Activate once with:  git config core.hooksPath .githooks
 # Bypass in an emergency with:  git commit --no-verify
@@ -31,4 +38,27 @@ if [ -n "$offenders" ]; then
     echo "the config they patch, instead of committing them." >&2
     echo "Emergency bypass: git commit --no-verify" >&2
     exit 1
+fi
+
+# Staged (added/copied/modified/renamed) files of one extension, NUL-separated.
+staged() {
+    git diff --cached --name-only --diff-filter=ACMR -z -- "$1"
+}
+
+if [ -n "$(staged '*.py' | tr -d '\0')" ]; then
+    staged '*.py' | xargs -0 uv run ruff format --check --quiet || {
+        echo "pre-commit: BLOCKED — run 'uv run ruff format <files>' and re-stage." >&2
+        exit 1
+    }
+    staged '*.py' | xargs -0 uv run ruff check --quiet || {
+        echo "pre-commit: BLOCKED — fix the ruff findings above and re-stage." >&2
+        exit 1
+    }
+fi
+
+if [ -n "$(staged '*.md' | tr -d '\0')" ]; then
+    staged '*.md' | xargs -0 uv run rumdl check --quiet || {
+        echo "pre-commit: BLOCKED — run 'uv run rumdl fmt <files>' and re-stage." >&2
+        exit 1
+    }
 fi

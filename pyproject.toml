@@ -22,6 +22,11 @@ build-backend = "hatchling.build"
 [tool.ruff]
 line-length = 120
 target-version = "py313"
+# Vendored from the labflow skill; kept byte-identical so it stays diffable
+# against upstream when the skill updates it. force-exclude keeps it excluded
+# when the pre-commit hook passes staged paths explicitly.
+extend-exclude = ["experiments/build_report.py"]
+force-exclude = true
 
 # Formatter (black-compatible): `uv run ruff format <paths>`, check only with `--check`.
 [tool.ruff.format]
@@ -36,9 +41,21 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["D104"]
-# Vendored from the labflow skill; kept byte-identical so it stays diffable
-# against upstream when the skill updates it.
-"experiments/build_report.py" = ["D", "E", "F401"]
+
+# Markdown linter + formatter: `uv run rumdl check .`, fix with `uv run rumdl fmt .`.
+[tool.rumdl]
+# MD013: records and tables carry long lines by design. MD033: the README and
+# the site pages embed HTML for badges and layout (mkdocs md_in_html).
+disable = ["MD013", "MD033"]
+
+[tool.rumdl.MD025]
+# Records repeat the frontmatter title as the H1; count only real headings.
+front-matter-title = ""
+
+[tool.rumdl.per-file-ignores]
+# The README opens with the banner image, judge prompts are not documents.
+"README.md" = ["MD041"]
+"experiments/**/configs/*.md" = ["MD041"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -59,6 +76,7 @@ markers = [
 dev = [
     "pytest>=9.0.2",
     "ruff>=0.15.6",
+    "rumdl>=0.2.78",
 ]
 
 # MLflow, shared by every group below: each experiment logs its runs, and the

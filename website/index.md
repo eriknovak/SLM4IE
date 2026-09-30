@@ -35,7 +35,7 @@ Everything the project produces is public as it is made, not at the end.
     where one exists.
 
 - :simple-huggingface: **[Models and datasets](https://huggingface.co/eriknovak)**
-  
+
     The trained models and the curated corpora, released as they become
     usable.
 

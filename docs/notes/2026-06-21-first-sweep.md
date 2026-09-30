@@ -46,15 +46,16 @@ fertility (~1.17) and highest chars/token (~4.63). The byte-level vs char-level
 ablation is essentially a wash on compression (charbpe marginally ahead).
 
 **3. Morphology splits into two different "best" backends:**
-   - **Boundary alignment** (`morph_score_f1` + `morph_edit_distance`):
-     **`morphbpe`** wins — highest F1 (~0.063, ~2.4× the plain BPE backends) and
-     lowest edit distance (2.94 at 64k). This is the constrained-training
-     backend doing exactly what it's designed for.
-   - **Segmentation consistency** (`morph_consistency`): **`morphpiece`**
-     dominates by a wide margin (0.36–0.37 vs ≤0.22 for everything else) — its
-     MorphTable produces consistent splits of shared stems. Notably `morphbpe`
-     is *lowest* on consistency (0.12–0.16), so the two morph backends optimize
-     different morphological properties.
+
+- **Boundary alignment** (`morph_score_f1` + `morph_edit_distance`):
+  **`morphbpe`** wins — highest F1 (~0.063, ~2.4× the plain BPE backends) and
+  lowest edit distance (2.94 at 64k). This is the constrained-training
+  backend doing exactly what it's designed for.
+- **Segmentation consistency** (`morph_consistency`): **`morphpiece`**
+  dominates by a wide margin (0.36–0.37 vs ≤0.22 for everything else) — its
+  MorphTable produces consistent splits of shared stems. Notably `morphbpe`
+  is *lowest* on consistency (0.12–0.16), so the two morph backends optimize
+  different morphological properties.
 
 **4. The compression↔morphology trade-off is real.** The morph-aware backends
 pay for their morphology: `morphbpe`/`morphpiece` have the highest fertility

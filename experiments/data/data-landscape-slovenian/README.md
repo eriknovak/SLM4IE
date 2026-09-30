@@ -14,6 +14,7 @@ builds_on: []
 types: [lineage]
 concluded: 2026-09-28
 ---
+
 # Open Slovene data landscape — KPI coverage
 
 ## TL;DR

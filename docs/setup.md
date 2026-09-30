@@ -49,12 +49,26 @@ Or prefix individual commands with `uv run` to skip activation.
 ## Enable the git hooks
 
 The repository ships a pre-commit hook under `.githooks/` that blocks commits
-containing presigned-URL credentials (`X-Amz-Signature` / `X-Amz-Credential`).
+containing presigned-URL credentials (`X-Amz-Signature` / `X-Amz-Credential`)
+and refuses staged Python or Markdown that fails the format and lint checks.
 Activate it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
+
+The same checks run in CI (`.github/workflows/lint.yaml`) on every push and
+pull request. Both read their settings from `pyproject.toml`: `[tool.ruff]` for
+Python and `[tool.rumdl]` for Markdown. Fix findings with:
+
+```bash
+uv run ruff format <paths>   # Python formatting
+uv run ruff check <paths>    # Python lint (docstrings included)
+uv run rumdl fmt <paths>     # Markdown formatting and lint
+```
+
+`experiments/build_report.py` is vendored from the labflow skill and excluded
+from ruff so it stays byte-identical to upstream.
 
 Secrets and ephemeral values (such as presigned download URLs) belong in a
 gitignored `*.local.yaml` sibling overlay, which `load_config` deep-merges

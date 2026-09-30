@@ -1,0 +1,37 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Formatting and lint gate for Python (ruff) and Markdown (rumdl). Both
+  # tools read their settings from pyproject.toml, so this job and the
+  # pre-commit hook under .githooks/ enforce the same rules.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv (with Python 3.13)
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install dev dependencies
+        run: uv sync
+
+      - name: Python formatting
+        run: uv run ruff format --check .
+
+      - name: Python lint
+        run: uv run ruff check .
+
+      - name: Markdown formatting and lint
+        run: uv run rumdl check .

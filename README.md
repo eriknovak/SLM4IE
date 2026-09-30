@@ -65,7 +65,9 @@ questions in [GitHub issues](https://github.com/eriknovak/SLM4IE/issues). Before
 opening a pull request, run the checks:
 
 ```bash
-uv run ruff check slm4ie/ scripts/ experiments/
+uv run ruff format --check .   # Python formatting
+uv run ruff check .            # Python lint
+uv run rumdl check .           # Markdown formatting and lint
 uv run pytest -m "not slow"
 ```
 
