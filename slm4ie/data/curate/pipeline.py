@@ -321,6 +321,7 @@ def build_language_executors(
     lang_low_accuracy: bool = False,
     lang_max_chars: Optional[int] = None,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the language stage: read 00_convert/ → lingua filter → write 01_language/.
 
@@ -341,11 +342,13 @@ def build_language_executors(
             restrict the language stage to a symlinked subset of
             `<output_dir>/00_convert/` when the user requests a subset
             of dataset keys.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
-    out = paths.stage_dir("language")
+    out = output_override if output_override is not None else paths.stage_dir("language")
     in_ = input_override if input_override is not None else paths.stage_dir("convert")
     executor = LocalPipelineExecutor(
         pipeline=[
@@ -379,6 +382,7 @@ def build_spam_executors(
     model_fn: Optional[Callable[[str], float]] = None,
     seed: Optional[int] = None,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the spam stage: read 01_language/ → SpamFilter → write 02_spam/.
 
@@ -396,12 +400,14 @@ def build_spam_executors(
         input_override: Optional folder to read from instead of the
             language stage's output, used to restrict the stage to a
             symlinked subset of datasets.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
     in_ = input_override if input_override is not None else paths.stage_dir("language")
-    out = paths.stage_dir("spam")
+    out = output_override if output_override is not None else paths.stage_dir("spam")
     executor = LocalPipelineExecutor(
         pipeline=[
             _reader(in_),
@@ -431,6 +437,7 @@ def build_quality_executors(
     language: str = Languages.slovenian,
     stopwords: Optional[Set[str]] = None,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the quality stage: read 02_spam/ → Gopher quality → write 03_quality/.
 
@@ -444,13 +451,15 @@ def build_quality_executors(
         input_override: Optional folder to read from instead of the
             language stage's output, used to restrict the stage to a
             symlinked subset of datasets.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
     cfg = quality_config or QualityConfig()
     in_ = input_override if input_override is not None else paths.stage_dir("language")
-    out = paths.stage_dir("quality")
+    out = output_override if output_override is not None else paths.stage_dir("quality")
     executor = LocalPipelineExecutor(
         pipeline=[
             _reader(in_),
@@ -483,6 +492,7 @@ def build_repetition_executors(
     tasks: int = 1,
     language: str = Languages.slovenian,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the repetition stage: read 03_quality/ → Gopher repetition → write 04_repetition/.
 
@@ -494,12 +504,14 @@ def build_repetition_executors(
         input_override: Optional folder to read from instead of the
             quality stage's output, used to restrict the stage to a
             symlinked subset of datasets.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
     in_ = input_override if input_override is not None else paths.stage_dir("quality")
-    out = paths.stage_dir("repetition")
+    out = output_override if output_override is not None else paths.stage_dir("repetition")
     executor = LocalPipelineExecutor(
         pipeline=[
             _reader(in_),
@@ -522,6 +534,7 @@ def build_exact_dedup_executors(
     finder_workers: int = 1,
     exact_config: Optional[ExactDedupConfig] = None,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the exact-dedup stage: sig → find → filter+write 05_exact_dedup/.
 
@@ -543,6 +556,8 @@ def build_exact_dedup_executors(
         input_override: Optional folder to read from instead of the
             repetition stage's output, used to restrict the stage to the
             roster's datasets through a symlinked view.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         Three chained `LocalPipelineExecutor`s.
@@ -550,7 +565,7 @@ def build_exact_dedup_executors(
     cfg = exact_config or default_exact_config()
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("repetition")
-    out = paths.stage_dir("exact_dedup")
+    out = output_override if output_override is not None else paths.stage_dir("exact_dedup")
     sigs = paths.dedup_state_dir / "exact_sigs"
     dups = paths.dedup_state_dir / "exact_dups"
 
@@ -596,6 +611,7 @@ def build_sentence_dedup_executors(
     sentence_config: Optional[SentDedupConfig] = None,
     language: str = Languages.slovenian,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the sentence-dedup stage: sig → find → filter+write 06_sentence_dedup/.
 
@@ -615,6 +631,8 @@ def build_sentence_dedup_executors(
         input_override: Optional folder to read from instead of the
             exact-dedup stage's output, used to restrict the stage to the
             roster's datasets through a symlinked view.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         Three chained `LocalPipelineExecutor`s.
@@ -622,7 +640,7 @@ def build_sentence_dedup_executors(
     cfg = sentence_config or SentDedupConfig()
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("exact_dedup")
-    out = paths.stage_dir("sentence_dedup")
+    out = output_override if output_override is not None else paths.stage_dir("sentence_dedup")
     sigs = paths.dedup_state_dir / "sent_sigs"
     dups = paths.dedup_state_dir / "sent_dups"
 
@@ -673,6 +691,7 @@ def build_statistics_executors(
     stopwords: Optional[Set[str]] = None,
     top_k_words: int = 5_000,
     input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
 ) -> List[LocalPipelineExecutor]:
     """Build the statistics stage: map → reduce → 07_statistics/.
 
@@ -693,6 +712,8 @@ def build_statistics_executors(
         top_k_words: Word-frequency table size.
         input_override: Optional folder to read from instead of the
             sentence-dedup stage's output (a symlinked roster view).
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the runner's staging folder).
 
     Returns:
         A list `[map_executor, reduce_executor]`. The reduce executor
@@ -701,7 +722,7 @@ def build_statistics_executors(
     """
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("sentence_dedup")
-    out = paths.stage_dir("statistics")
+    out = output_override if output_override is not None else paths.stage_dir("statistics")
     out.mkdir(parents=True, exist_ok=True)
     partials_dir = out / "_partials"
 

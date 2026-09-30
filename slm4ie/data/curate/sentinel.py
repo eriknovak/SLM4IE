@@ -1,55 +1,67 @@
-"""Per-stage sentinel files for the curate pipeline.
+"""Per-unit sentinel files for the curate pipeline.
 
-Each stage writes a JSON `.complete` sentinel into its output folder
-once the underlying datatrove executors finish cleanly. The sentinel
-records the config slice that drove the run, a SHA-256 hash of that
-slice (so future runs can detect config drift and cascade-invalidate
-downstream stages), the completion timestamp, and the input/output
-record counts.
+A unit is one scoped stage × one dataset (sentinel at
+`<stage_dir>/<dataset>/.complete`) or one corpus stage (sentinel at
+`<stage_dir>/.complete`). The sentinel records the unit's full lineage:
 
-Conventions:
+* the config hash of the slice that drove it (runtime knobs excluded),
+* the stage version (`slm4ie.data.curate.stages.STAGE_VERSIONS`),
+* the input digest — the upstream units' document digests, or for `convert`
+  a content hash of the extracted source files,
+* the unit's own document digest and the shard set it wrote,
+* record counts, plus informational fields (completion time, git commit,
+  datatrove version) that never affect currency.
 
-* Per-stage sentinel: each `<output_dir>/<stage_dir>/.complete` is
-  independent. A stage is "current" if and only if its sentinel exists
-  AND its recorded hash matches the freshly computed slice hash.
-* Cascade invalidation: when a stage is determined stale, every
-  downstream stage's sentinel is removed as well (their inputs are now
-  potentially different).
-* Runtime-only inputs (CLI flags, worker counts, output paths) MUST NOT
-  enter the hash; only output-affecting config does.
+A unit is current when every lineage field matches and its shards are still
+on disk as recorded (`stale_reason`). Upstream reruns that reproduce the same
+documents leave the recorded input digest valid, so downstream stays current.
 """
 
 import hashlib
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from slm4ie.data.curate.stages import STAGE_DIRS, cascade_from, is_scoped
+from slm4ie.data.versioning import shard_set
 
 
-#: Sentinel filename written into every completed stage folder.
+#: Sentinel filename written into every completed unit folder.
 SENTINEL_NAME = ".complete"
+
+#: Stale reasons `stale_reason` reports, in the order they are checked.
+NOT_BUILT = "not built"
+CONFIG_CHANGED = "config changed"
+LEGACY = "legacy sentinel (run `status --adopt`)"
+INTEGRITY_FAILED = "integrity failure"
+STAGE_VERSION_CHANGED = "stage version changed"
+INPUT_CHANGED = "input changed"
+OUTPUT_CHANGED = "output changed on disk"
 
 
 @dataclass(frozen=True)
 class Sentinel:
-    """Parsed contents of a stage's `.complete` sentinel file.
+    """Parsed contents of a unit's `.complete` sentinel file.
 
     Attributes:
-        completed_at: ISO-8601 UTC timestamp the stage finished.
-        config_hash: SHA-256 hex digest of the stage's config slice.
-        config_slice: The raw config slice the hash was computed from
-            (useful for human inspection).
-        records_in: Number of records read into the stage.
+        completed_at: ISO-8601 UTC timestamp the unit finished.
+        config_hash: SHA-256 hex digest of the unit's config slice.
+        config_slice: The raw config slice the hash was computed from.
+        records_in: Number of records read into the unit.
         records_out: Number of records written out (i.e. surviving).
-        input_fingerprint: Cheap size+mtime fingerprint of the stage's
-            source input file(s), or `None` for stages that do not read
-            an external input (only the `convert` stage records one).
-            Lets a refreshed input invalidate the stage without hashing
-            its contents.
+        stage_version: Stage version that built the unit; `None` marks a
+            legacy sentinel written before lineage was recorded.
+        input_digest: Digest of the unit's input (see module docstring).
+        document_digest: Document digest of what the unit wrote, or `None`
+            for a unit that writes no documents (statistics).
+        shards: The unit's files, relative path to byte size.
+        input_files: `convert` only: per source file `{size, sha256,
+            mtime_ns}`, or `None` for an absent file. The mtime only lets a
+            later run skip rehashing an untouched file.
+        integrity_error: Why the unit failed its integrity check, if it did.
+        info: Informational fields that never affect currency.
     """
 
     completed_at: str
@@ -57,7 +69,18 @@ class Sentinel:
     config_slice: Dict[str, Any]
     records_in: int
     records_out: int
-    input_fingerprint: Optional[str] = None
+    stage_version: Optional[int] = None
+    input_digest: Optional[str] = None
+    document_digest: Optional[str] = None
+    shards: Dict[str, int] = field(default_factory=dict)
+    input_files: Optional[Dict[str, Any]] = None
+    integrity_error: Optional[str] = None
+    info: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_legacy(self) -> bool:
+        """Return True for a sentinel written before lineage was recorded."""
+        return self.stage_version is None
 
 
 def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
@@ -89,6 +112,19 @@ def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def _write_payload(sentinel_path: Path, payload: Dict[str, Any]) -> None:
+    """Write *payload* as JSON to *sentinel_path* atomically.
+
+    Args:
+        sentinel_path: Destination sentinel file.
+        payload: JSON-serializable sentinel contents.
+    """
+    # os.replace is atomic on POSIX, so a crash never leaves a half-written sentinel.
+    tmp_path = sentinel_path.with_suffix(sentinel_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_path, sentinel_path)
+
+
 def write_sentinel(
     stage_folder: Path,
     *,
@@ -96,21 +132,33 @@ def write_sentinel(
     config_hash_value: str,
     records_in: int,
     records_out: int,
-    input_fingerprint: Optional[str] = None,
+    stage_version: Optional[int] = None,
+    input_digest: Optional[str] = None,
+    document_digest: Optional[str] = None,
+    input_files: Optional[Dict[str, Any]] = None,
+    integrity_error: Optional[str] = None,
+    info: Optional[Dict[str, Any]] = None,
+    completed_at: Optional[str] = None,
 ) -> Path:
-    """Write the sentinel JSON file for *stage_folder*.
+    """Write the sentinel JSON file for the unit in *stage_folder*.
+
+    The shard set is taken from *stage_folder* as it stands, so write the
+    sentinel only once the unit's output is complete.
 
     Args:
-        stage_folder: The stage's output folder (e.g. `<output_dir>/02_quality`).
+        stage_folder: The unit's output folder.
         config_slice: The config slice the run consumed.
         config_hash_value: Pre-computed hash of *config_slice* (plus
             any extra payload like stopword file contents).
         records_in: Records read.
         records_out: Records written.
-        input_fingerprint: Optional size+mtime fingerprint of the stage's
-            source input file(s). Recorded so a refreshed input can be
-            detected without rehashing its contents. Omitted for stages
-            that read no external input.
+        stage_version: Stage version that built the unit.
+        input_digest: Digest of the unit's input.
+        document_digest: Document digest of the unit's output.
+        input_files: `convert` only: per source file size and hash.
+        integrity_error: Integrity-check failure to record, if any.
+        info: Informational fields (git commit, datatrove version).
+        completed_at: Completion timestamp to keep; now when omitted.
 
     Returns:
         Path to the written sentinel file.
@@ -118,22 +166,20 @@ def write_sentinel(
     stage_folder.mkdir(parents=True, exist_ok=True)
     sentinel_path = stage_folder / SENTINEL_NAME
     payload = {
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": completed_at or datetime.now(timezone.utc).isoformat(),
         "config_hash": config_hash_value,
         "config_slice": config_slice,
         "records_in": records_in,
         "records_out": records_out,
-        "input_fingerprint": input_fingerprint,
+        "stage_version": stage_version,
+        "input_digest": input_digest,
+        "document_digest": document_digest,
+        "shards": shard_set(stage_folder),
+        "input_files": input_files,
+        "integrity_error": integrity_error,
+        "info": info or {},
     }
-    # Atomic write: render the payload to a sibling .tmp file, then rename.
-    # os.replace is atomic on POSIX so a partially-written sentinel can never
-    # be observed by a concurrent reader (or a future run after a crash).
-    tmp_path = sentinel_path.with_suffix(sentinel_path.suffix + ".tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    os.replace(tmp_path, sentinel_path)
+    _write_payload(sentinel_path, payload)
     return sentinel_path
 
 
@@ -141,7 +187,7 @@ def read_sentinel(stage_folder: Path) -> Optional[Sentinel]:
     """Read the sentinel JSON from *stage_folder*, or return None.
 
     Args:
-        stage_folder: The stage's output folder.
+        stage_folder: The unit's output folder.
 
     Returns:
         Parsed `Sentinel` instance, or `None` if the sentinel file is
@@ -152,32 +198,64 @@ def read_sentinel(stage_folder: Path) -> Optional[Sentinel]:
         return None
     try:
         data = json.loads(sentinel_path.read_text(encoding="utf-8"))
-        fingerprint = data.get("input_fingerprint")
+        version = data.get("stage_version")
         return Sentinel(
             completed_at=str(data.get("completed_at", "")),
             config_hash=str(data.get("config_hash", "")),
             config_slice=dict(data.get("config_slice") or {}),
             records_in=int(data.get("records_in", 0)),
             records_out=int(data.get("records_out", 0)),
-            input_fingerprint=str(fingerprint) if fingerprint is not None else None,
+            stage_version=int(version) if version is not None else None,
+            input_digest=data.get("input_digest"),
+            document_digest=data.get("document_digest"),
+            shards={str(k): int(v) for k, v in (data.get("shards") or {}).items()},
+            input_files=data.get("input_files"),
+            integrity_error=data.get("integrity_error"),
+            info=dict(data.get("info") or {}),
         )
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+    except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError):
         return None
 
 
-def sentinel_is_current(stage_folder: Path, expected_hash: str) -> bool:
-    """Return True iff *stage_folder*'s sentinel exists and matches *expected_hash*.
+def stale_reason(
+    sentinel: Optional[Sentinel],
+    folder: Path,
+    *,
+    expected_hash: str,
+    stage_version: int,
+    input_digest: Optional[str],
+) -> Optional[str]:
+    """Return why a unit must be rebuilt, or `None` when it is current.
+
+    No check reads the unit's documents: the input digest is compared as
+    recorded upstream, and the disk check compares file sizes, never mtimes.
 
     Args:
-        stage_folder: The stage's output folder.
-        expected_hash: The hash recomputed from current config.
+        sentinel: The unit's parsed sentinel, or `None` when missing.
+        folder: The unit's output folder, for the disk check.
+        expected_hash: Config hash recomputed from current config.
+        stage_version: The stage's current version.
+        input_digest: The unit's input digest as it stands now.
 
     Returns:
-        True if the recorded hash matches; False otherwise (including
-        when the sentinel is missing).
+        One of the module's reason strings (with detail for an integrity
+        failure), or `None`.
     """
-    sentinel = read_sentinel(stage_folder)
-    return sentinel is not None and sentinel.config_hash == expected_hash
+    if sentinel is None:
+        return NOT_BUILT
+    if sentinel.config_hash != expected_hash:
+        return CONFIG_CHANGED
+    if sentinel.is_legacy:
+        return LEGACY
+    if sentinel.integrity_error:
+        return f"{INTEGRITY_FAILED}: {sentinel.integrity_error}"
+    if sentinel.stage_version != stage_version:
+        return STAGE_VERSION_CHANGED
+    if sentinel.input_digest != input_digest:
+        return INPUT_CHANGED
+    if shard_set(folder) != sentinel.shards:
+        return OUTPUT_CHANGED
+    return None
 
 
 def dataset_sentinel_path(stage_folder: Path, dataset: str) -> Path:
@@ -194,42 +272,18 @@ def dataset_sentinel_path(stage_folder: Path, dataset: str) -> Path:
     return stage_folder / dataset / SENTINEL_NAME
 
 
-def write_dataset_sentinel(
-    stage_folder: Path,
-    dataset: str,
-    *,
-    config_slice: Dict[str, Any],
-    config_hash_value: str,
-    records_in: int,
-    records_out: int,
-    input_fingerprint: Optional[str] = None,
-) -> Path:
-    """Write a per-dataset `.complete` sentinel for a scoped stage.
+def write_dataset_sentinel(stage_folder: Path, dataset: str, **fields: Any) -> Path:
+    """Write the sentinel of *dataset*'s unit under a scoped stage.
 
     Args:
         stage_folder: The scoped stage's output folder.
         dataset: Dataset key the sentinel covers.
-        config_slice: The config slice the run consumed.
-        config_hash_value: Pre-computed hash of *config_slice* (the
-            dataset roster is intentionally excluded for scoped stages).
-        records_in: Records read for this dataset.
-        records_out: Records written for this dataset.
-        input_fingerprint: Optional size+mtime fingerprint of this
-            dataset's source input file(s). Only the `convert` stage
-            records one; later scoped stages read regenerated upstream
-            output and leave it `None`.
+        **fields: Keyword arguments of `write_sentinel`.
 
     Returns:
         Path to the written sentinel file.
     """
-    return write_sentinel(
-        stage_folder / dataset,
-        config_slice=config_slice,
-        config_hash_value=config_hash_value,
-        records_in=records_in,
-        records_out=records_out,
-        input_fingerprint=input_fingerprint,
-    )
+    return write_sentinel(stage_folder / dataset, **fields)
 
 
 def update_dataset_sentinel_counts(
@@ -243,11 +297,9 @@ def update_dataset_sentinel_counts(
 
     Used to backfill per-source counts onto sentinels written before the
     per-source fix (which stamped a shared bucket total into every
-    bucket-mate). Every other field — `completed_at`, `config_hash`,
-    `config_slice`, `input_fingerprint` — is preserved verbatim, so the
-    sentinel stays current against its config and is not treated as a
-    fresh run. A dataset with no existing sentinel is left untouched
-    rather than fabricated.
+    bucket-mate). Every other field is preserved verbatim, so the sentinel
+    stays current and is not treated as a fresh run. A dataset with no
+    existing sentinel is left untouched rather than fabricated.
 
     Args:
         stage_folder: The scoped stage's output folder.
@@ -268,28 +320,8 @@ def update_dataset_sentinel_counts(
         return None
     payload["records_in"] = records_in
     payload["records_out"] = records_out
-    tmp_path = sentinel_path.with_suffix(sentinel_path.suffix + ".tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    os.replace(tmp_path, sentinel_path)
+    _write_payload(sentinel_path, payload)
     return sentinel_path
-
-
-def dataset_sentinel_is_current(stage_folder: Path, dataset: str, expected_hash: str) -> bool:
-    """Return True iff *dataset*'s per-dataset sentinel matches *expected_hash*.
-
-    Args:
-        stage_folder: The scoped stage's output folder.
-        dataset: Dataset key to check.
-        expected_hash: The hash recomputed from current config.
-
-    Returns:
-        True if the recorded per-dataset hash matches; False otherwise
-        (including when the sentinel is missing).
-    """
-    return sentinel_is_current(stage_folder / dataset, expected_hash)
 
 
 def invalidate_dataset_sentinels(stage_folder: Path, datasets: List[str]) -> None:
@@ -302,50 +334,3 @@ def invalidate_dataset_sentinels(stage_folder: Path, datasets: List[str]) -> Non
     """
     for dataset in datasets:
         dataset_sentinel_path(stage_folder, dataset).unlink(missing_ok=True)
-
-
-def cascade_invalidate_scoped(output_dir: Path, stage: str, keys: List[str]) -> Tuple[str, ...]:
-    """Invalidate *stage* and downstream, honoring per-dataset granularity.
-
-    For scoped stages, only the named *keys*' per-dataset sentinels are
-    removed; for corpus stages the whole stage-level sentinel is removed.
-    A scoped stage's downstream set spans into the corpus stages, so a
-    scoped edit also drops the corpus sentinels.
-
-    Args:
-        output_dir: The curation output root.
-        stage: First stage to invalidate.
-        keys: Dataset keys whose scoped-stage sentinels should drop.
-
-    Returns:
-        The stage names considered (i.e. `cascade_from(stage)`).
-    """
-    affected = cascade_from(stage)
-    for name in affected:
-        stage_folder = output_dir / STAGE_DIRS[name]
-        if is_scoped(name):
-            invalidate_dataset_sentinels(stage_folder, keys)
-        else:
-            (stage_folder / SENTINEL_NAME).unlink(missing_ok=True)
-    return affected
-
-
-def cascade_invalidate(output_dir: Path, stage: str) -> Tuple[str, ...]:
-    """Remove the sentinel of *stage* and every downstream stage.
-
-    Args:
-        output_dir: The curation output root (which contains the
-            `01_language/`, `02_quality/`, ... folders).
-        stage: First stage to invalidate. `cascade_from(stage)` is used
-            to compute the downstream set.
-
-    Returns:
-        Tuple of stage names considered for invalidation (i.e.
-        `cascade_from(stage)`), regardless of whether each sentinel
-        file existed.
-    """
-    affected = cascade_from(stage)
-    for name in affected:
-        sentinel_path = output_dir / STAGE_DIRS[name] / SENTINEL_NAME
-        sentinel_path.unlink(missing_ok=True)
-    return affected

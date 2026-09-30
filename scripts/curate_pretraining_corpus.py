@@ -3,7 +3,7 @@
 Parses arguments and dispatches into `slm4ie.data.curate.runner`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Six subcommands:
+Seven subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
@@ -11,6 +11,10 @@ Six subcommands:
   every stage for every dataset in `extract.yaml`, skipping sentinels that are
   already current. The corpus stages (exact_dedup, sentence_dedup, statistics)
   require `--all` -- `--stage exact_dedup` without it is an error.
+* `status` reports every unit (stage x dataset, or corpus stage) as current,
+  stale with the reason, or missing, and exits non-zero when any is stale.
+  Read-only; `--adopt` first gives legacy sentinels their lineage by reading
+  each unit once, and rewrites only sentinels and the lock file.
 * `recount` backfills per-source record counts onto existing scoped sentinels
   and rewrites no data.
 * `diagnose` samples the finished corpus and reports where foreign-language
@@ -44,6 +48,13 @@ Examples:
     uv run python scripts/curate_pretraining_corpus.py run --config $CURATION --all \
         --max-workers 0
 
+    # Which units would the next run rebuild, and why?
+    uv run python scripts/curate_pretraining_corpus.py status --config $CURATION
+
+    # Adopt sentinels written before lineage tracking; rebuilds nothing.
+    uv run python scripts/curate_pretraining_corpus.py status --config $CURATION --adopt \
+        --max-workers 16
+
     # Backfill per-source counts onto existing sentinels; reprocesses no data.
     uv run python scripts/curate_pretraining_corpus.py recount --config $CURATION
 
@@ -66,7 +77,7 @@ from typing import List, Optional
 
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
-from slm4ie.data.curate.runner import curate, recount
+from slm4ie.data.curate.runner import curate, recount, status
 from slm4ie.data.curate.duplication import DEDUP_STAGES, assess_dedup
 from slm4ie.data.curate.profile import describe_corpus
 from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
@@ -151,6 +162,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "Enable/disable MLflow pretrain-build tracking (only on --all builds), overriding "
             "the config's mlflow.enabled. Default: defer to config."
         ),
+    )
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Report which units are current, stale (and why) or missing; exits 1 when any is stale.",
+    )
+    _add_common_arguments(status_parser)
+    status_parser.add_argument(
+        "--adopt",
+        action="store_true",
+        help=(
+            "First adopt legacy sentinels: read each unit once, check it, and record its lineage. "
+            "Rewrites sentinels and the lock file only; rebuilds nothing."
+        ),
+    )
+    status_parser.add_argument(
+        "--max-workers", dest="workers", type=int, default=1, help="Shards read at once when adopting."
     )
 
     recount_parser = subparsers.add_parser(
@@ -330,6 +358,23 @@ def main() -> None:
             seed=args.seed,
             workers=args.workers,
         )
+        return
+
+    if args.command == "status":
+        results = status(
+            input_dir=args.input_dir,
+            output_dir=args.output_dir,
+            pretrain_config=args.config,
+            extract_config=args.extract_config,
+            adopt=args.adopt,
+            workers=args.workers,
+        )
+        for unit in results:
+            print(f"{unit.stage:<15} {unit.dataset or '-':<28} {unit.state:<8} {unit.reason or ''}".rstrip())
+        stale = sum(unit.state == "stale" for unit in results)
+        print(f"{len(results)} unit(s), {stale} stale")
+        if stale:
+            raise SystemExit(1)
         return
 
     if args.command == "recount":

@@ -31,6 +31,7 @@ from slm4ie.data.curate.stages import (
     ALL_STAGE_NAMES,
     STAGE_DIRS,
     STAGE_NAMES,
+    STAGE_VERSIONS,
     cascade_from,
     config_slice_keys,
     final_corpus_dir,
@@ -40,10 +41,9 @@ from slm4ie.data.curate.stages import (
 from slm4ie.data.curate.sentinel import (
     Sentinel,
     SENTINEL_NAME,
-    cascade_invalidate,
     config_hash,
     read_sentinel,
-    sentinel_is_current,
+    stale_reason,
     write_sentinel,
 )
 from slm4ie.data.curate.overrides import (
@@ -65,6 +65,7 @@ __all__ = [
     "ALL_STAGE_NAMES",
     "STAGE_DIRS",
     "STAGE_NAMES",
+    "STAGE_VERSIONS",
     "cascade_from",
     "config_slice_keys",
     "final_corpus_dir",
@@ -73,10 +74,9 @@ __all__ = [
     # sentinel
     "Sentinel",
     "SENTINEL_NAME",
-    "cascade_invalidate",
     "config_hash",
     "read_sentinel",
-    "sentinel_is_current",
+    "stale_reason",
     "write_sentinel",
     # overrides
     "STAGE_KNOBS",

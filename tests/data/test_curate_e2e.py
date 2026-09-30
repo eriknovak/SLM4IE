@@ -507,8 +507,8 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     """A sentence-dedup crash after its signature step resumes without redoing it.
 
     The first `--all` run fails once the signature tasks are done; the rerun
-    must keep their completion markers, finish the stage, clear its progress
-    file, and produce the same corpus as an uninterrupted run. Stale shards of
+    must keep their completion markers, finish the stage in its staging folder,
+    promote it, and produce the same corpus as an uninterrupted run. Stale shards of
     a key outside the roster must not reach the corpus either.
     """
     import slm4ie.data.curate.runner as curate_runner
@@ -555,13 +555,63 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     completions = crash_dir / "_logs" / "sentence_dedup" / "1_sig" / "completions"
     markers = sorted(completions.iterdir())
     assert markers
-    assert (crash_dir / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).is_file()
+    assert (crash_dir / "_partial" / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).is_file()
+    assert not (crash_dir / "06_sentence_dedup").exists()
 
     monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", real_builder)
     marker_mtimes = {m: m.stat().st_mtime_ns for m in markers}
     run_all(crash_dir)
     assert {m: m.stat().st_mtime_ns for m in markers} == marker_mtimes
     assert not (crash_dir / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).exists()
+    assert not (crash_dir / "_partial" / "06_sentence_dedup").exists()
     assert (crash_dir / "07_statistics" / ".complete").exists()
     assert _dataset_dirs(crash_dir / "05_exact_dedup") == {"alfa", "beta"}
     assert _corpus_rows(crash_dir / "06_sentence_dedup") == _corpus_rows(clean_dir / "06_sentence_dedup")
+
+
+@pytest.mark.slow
+def test_real_stages_rebuild_only_what_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Against real datatrove stages: more workers rebuild nothing, a version bump stops at its stage.
+
+    A stage rerun must reproduce the same document digest even though the
+    reader stamps a different `file_path` into every document, so downstream
+    sentinels stay untouched (early cutoff).
+    """
+    import slm4ie.data.curate.runner as curate_runner
+
+    in_dir = tmp_path / "extracted"
+    out_dir = tmp_path / "pretrain"
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS)
+    extract_cfg = tmp_path / "extract.yaml"
+    pretrain_cfg = tmp_path / "pretrain.yaml"
+    _write_extract_config(extract_cfg)
+    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+
+    def run_all(workers: int) -> None:
+        curate(
+            datasets=[],
+            run_all=True,
+            stage="all",
+            input_dir=in_dir,
+            output_dir=out_dir,
+            force=False,
+            workers=workers,
+            pretrain_config=pretrain_cfg,
+            extract_config=extract_cfg,
+        )
+
+    def sentinel_mtimes() -> dict:
+        return {p: p.stat().st_mtime_ns for p in out_dir.rglob(".complete")}
+
+    run_all(workers=1)
+    before = sentinel_mtimes()
+    run_all(workers=2)
+    assert sentinel_mtimes() == before
+
+    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "language", 2)
+    run_all(workers=1)
+    after = sentinel_mtimes()
+    rewritten = {p.relative_to(out_dir).parts[0] for p in after if after[p] != before[p]}
+    assert rewritten == {"01_language"}
+    assert (tmp_path / "pretrain.lock.yaml").is_file()

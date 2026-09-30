@@ -56,6 +56,11 @@ STAGE_DIRS: Dict[str, str] = {
 }
 
 
+#: Stage version per stage: raise one by hand when a change to that stage's
+#: code changes what it writes. Refactors that keep the output leave it alone.
+STAGE_VERSIONS: Dict[str, int] = {name: 1 for name in STAGE_NAMES}
+
+
 #: Per-stage top-level YAML keys that go into the sentinel config hash.
 _CONFIG_SLICE_KEYS: Dict[str, Tuple[str, ...]] = {
     "convert": ("convert",),
