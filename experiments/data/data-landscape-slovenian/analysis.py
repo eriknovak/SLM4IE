@@ -722,7 +722,7 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
         for d in DOMAINS
     ]
     save_figure(
-        lambda: BarChart(
+        BarChart(
             native_share,
             title="Share of documents written in Slovene",
             xlabel="documents written in Slovene (%)",
@@ -762,7 +762,7 @@ def draw_provenance_figures(rows: List[Dict[str, str]], systems: List[Dict[str, 
         split["medical"].append({"label": label, "y": is_medical})
         split["other"].append({"label": label, "y": len(in_class) - is_medical})
     save_figure(
-        lambda: BarChart(
+        BarChart(
             [split["medical"], split["other"]],
             title="Checked datasets by provenance class",
             xlabel="datasets",
@@ -779,7 +779,7 @@ def draw_provenance_figures(rows: List[Dict[str, str]], systems: List[Dict[str, 
         FIGURES_DIR / "datasets-by-provenance-class.svg",
     )
     save_figure(
-        lambda: BarChart(
+        BarChart(
             [
                 {
                     "label": SYSTEM_LABELS.get(str(line["translation_system"]), str(line["translation_system"])),

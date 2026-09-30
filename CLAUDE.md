@@ -300,6 +300,15 @@ checks structure but not semantic agreement with the code.
   `slm4ie/utils/cli.py`.
 - Annotated extractors should keep text and annotations split (see Data
   layout). Don't add a "merged" output without a strong reason.
+- Every figure is drawn through `experiments/report_figures.py`: an
+  `analysis.py` imports it before building any chart and writes each figure
+  with its `save_figure` (a figure or a zero-argument builder). Importing it
+  registers and activates the `slm4ie` datachart theme, the project's own:
+  series in the site's colours (`SERIES`), the banner ramp (`SEQUENTIAL`) and
+  rust-against-blue (`DIVERGING`), every pair passing `score_palette`. The
+  file is **not** the labflow skill's vendored copy any more — never overwrite
+  it from the skill or switch a chart to another theme; change the palette
+  only there, and `tests/experiments/test_report_figures.py` guards the gate.
 - Tests under `tests/data/` use small fixtures committed in-tree; do not
   point tests at `/vault/data/SLM4IE/`.
 

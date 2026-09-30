@@ -31,6 +31,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
+
 import yaml
 
 from slm4ie.data.curate.profile import iter_stage_sentinels
@@ -818,6 +823,7 @@ def draw_figures(
     from datachart.charts import BarChart, DumbbellChart, Heatmap
     from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, VALUE_FORMAT
 
+    # fixed clip-path ids, so a rerun on unchanged tables leaves the committed SVG untouched
     plt.rcParams["svg.hashsalt"] = "curation-quality-slovenian"
     figures_dir.mkdir(parents=True, exist_ok=True)
     horizontal = {"orientation": ORIENTATION.HORIZONTAL, "show_values": True}
@@ -913,8 +919,7 @@ def draw_figures(
     written = []
     for name, figure in figures.items():
         path = figures_dir / f"{name}.svg"
-        # no date, so a rerun on unchanged tables leaves the committed SVG untouched
-        figure.savefig(path, bbox_inches="tight", metadata={"Date": None})
+        save_figure(figure, path)
         written.append(path)
     return written
 
