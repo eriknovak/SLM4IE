@@ -827,8 +827,12 @@ def draw_figures(
     plt.rcParams["svg.hashsalt"] = "curation-quality-slovenian"
     figures_dir.mkdir(parents=True, exist_ok=True)
     horizontal = {"orientation": ORIENTATION.HORIZONTAL, "show_values": True}
-    # a legend inside the axes would sit on marks that reach their edge
-    beside = {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_RIGHT}}
+
+    # a legend inside the axes would sit on marks that reach their edge, and one
+    # beside them would squeeze the plot with its long labels, so it goes below
+    def below(ncols: int) -> Dict[str, Any]:
+        return {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": ncols}}
+
     figures: Dict[str, Any] = {}
 
     # the gap between the dots is how well a stage separates bad text from good
@@ -844,8 +848,8 @@ def draw_figures(
         xmax=xmax,
         show_values=True,
         value_format=VALUE_FORMAT.PERCENT_INT,
-        figsize=FIG_SIZE.FULL_SHORT,
-        **beside,
+        figsize=FIG_SIZE.FULL_MEDIUM,
+        **below(2),
     )
 
     # DumbbellChart takes no xticks, and a share has no negative tick to show
@@ -876,9 +880,9 @@ def draw_figures(
         xlabel="share of pairs",
         xmax=1.0,
         bar_mode=BAR_MODE.STACK,
-        figsize=FIG_SIZE.FULL_SHORT,
+        figsize=FIG_SIZE.FULL_MEDIUM,
         orientation=ORIENTATION.HORIZONTAL,
-        **beside,
+        **below(2),
     )
 
     parts = (*STAGES, "kept")
@@ -897,8 +901,8 @@ def draw_figures(
         orientation=ORIENTATION.HORIZONTAL,
         # the palette holds six colours, so the seventh part gets a neutral one
         style=[None] * len(STAGES) + [{"plot_bar_color": "#b8b8b8"}],
-        figsize=FIG_SIZE.FULL_MEDIUM,
-        **beside,
+        figsize=FIG_SIZE.FULL_TALL,
+        **below(2),
     )
 
     steps = [row for row in throughput if row["stage"] != "TOTAL"]
