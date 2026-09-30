@@ -8,7 +8,7 @@ branch: exp/curation-quality-slovenian
 base_commit: a0b3306
 status: concluded
 ticket: "#2"
-pr:
+pr: "#11"
 mlflow:
 builds_on: []
 varies: []
