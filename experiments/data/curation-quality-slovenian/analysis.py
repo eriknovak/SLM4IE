@@ -826,6 +826,8 @@ def draw_figures(
     figures: Dict[str, Any] = {}
 
     # the gap between the dots is how well a stage separates bad text from good
+    # the axis ends at least half a tick past the largest share so its value label stays inside
+    xmax = math.ceil(max(max(row["drop_precision"], row["residual_bad_rate"]) for row in pooled) * 10 + 0.5) / 10
     figures["judge-rubric-drop-precision-by-stage"] = DumbbellChart(
         [{"label": row["stage"], "start": row["residual_bad_rate"], "end": row["drop_precision"]} for row in pooled],
         start_name="kept documents that are bad",
@@ -833,7 +835,7 @@ def draw_figures(
         xlabel="share judged bad",
         # room left of zero for the labels of dots that sit near it
         xmin=-0.05,
-        xmax=0.4,
+        xmax=xmax,
         show_values=True,
         value_format=VALUE_FORMAT.PERCENT_INT,
         figsize=FIG_SIZE.FULL_SHORT,
@@ -841,7 +843,7 @@ def draw_figures(
     )
 
     # DumbbellChart takes no xticks, and a share has no negative tick to show
-    figures["judge-rubric-drop-precision-by-stage"].axes[0].set_xticks([0.0, 0.1, 0.2, 0.3, 0.4])
+    figures["judge-rubric-drop-precision-by-stage"].axes[0].set_xticks([i / 10 for i in range(int(xmax * 10) + 1)])
 
     sources = sorted({row["source"] for row in per_source})
     cells = {(row["source"], row["stage"]): row["drop_precision"] for row in per_source if row["drop_precision"] != ""}
