@@ -113,6 +113,19 @@ class TestLogPretrainRun:
         assert tracking.log_pretrain_run(tmp_path, {}, enabled=False) is None
         assert tracking.log_pretrain_run(tmp_path, {}, enabled=True) is None
 
+    def test_config_output_dir_does_not_clash_with_the_resolved_path(self, store, tmp_path: Path):
+        """The run records the resolved output path, not two values for one param."""
+        import mlflow
+
+        out = tmp_path / "pretrain"
+        _build_tree(out)
+        experiment = "slm4ie/data/test-pretrain-output-dir"
+        tracking.log_pretrain_run(out, {"output_dir": "./data/pretrain"}, experiment=experiment)
+        client = mlflow.MlflowClient()
+        run = client.search_runs([client.get_experiment_by_name(experiment).experiment_id])[0]
+        assert run.data.params["output_dir"] == str(out)
+        assert run.info.status == "FINISHED"
+
     def test_logs_funnel_scalars_and_lineage(self, store, tmp_path: Path):
         """A run records the step funnel, final scalars, artifacts, and lineage."""
         import mlflow

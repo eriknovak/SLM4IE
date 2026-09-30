@@ -3,7 +3,7 @@
 Parses arguments and dispatches into `slm4ie.data.curate.runner`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Three subcommands:
+Six subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
@@ -15,6 +15,14 @@ Three subcommands:
   and rewrites no data.
 * `diagnose` samples the finished corpus and reports where foreign-language
   text survives the language stage. Read-only: it writes nothing.
+* `sample` draws a `dataset x stage x decision` sample of kept and dropped
+  documents into a JSONL file, for judging how well each stage decided.
+* `duplication` asks whether the documents the dedup stages dropped are still
+  in the corpus as another copy, which is the only thing a dedup stage can be
+  wrong about. Read-only apart from the tables it writes.
+* `describe` counts every source after exact dedup and profiles the finished
+  corpus — length, vocabulary, language confidence — for the statistics that
+  need no judge. Read-only apart from the two JSON files it writes.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -42,9 +50,15 @@ Examples:
     # Report foreign-language leakage in the finished corpus.
     uv run python scripts/curate_pretraining_corpus.py diagnose --config $CURATION \
         --candidates sl,en,de,hr,sr,it,fr
+
+    # Draw the judged sample of kept and dropped documents.
+    uv run python scripts/curate_pretraining_corpus.py sample --config $CURATION \
+        --out data/experiments/data/curation-quality-slovenian/interim/sample.jsonl \
+        --max-workers 12
 """
 
 import argparse
+import csv
 import logging
 import sys
 from pathlib import Path
@@ -53,6 +67,9 @@ from typing import List, Optional
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
 from slm4ie.data.curate.runner import curate, recount
+from slm4ie.data.curate.duplication import DEDUP_STAGES, assess_dedup
+from slm4ie.data.curate.profile import describe_corpus
+from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
 from slm4ie.data.curate.stages import CORPUS_STAGES
 from slm4ie.utils.cli import add_selection, validate_selection
 
@@ -181,7 +198,67 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ),
     )
 
+    sample_parser = subparsers.add_parser(
+        "sample",
+        help="Draw a dataset x stage x decision sample of kept and dropped documents.",
+    )
+    add_selection(sample_parser, "datasets", "Dataset keys to sample.", "Sample every dataset in the final corpus.")
+    _add_common_arguments(sample_parser)
+    sample_parser.add_argument("--out", type=Path, required=True, help="JSONL file to write the sample to.")
+    sample_parser.add_argument(
+        "--stage",
+        action="append",
+        choices=JUDGED_STAGES,
+        default=None,
+        help="Stage to sample; repeatable. Default: every stage that makes a decision.",
+    )
+    sample_parser.add_argument("--per-cell", type=int, default=40, help="Documents per dataset/stage/decision cell.")
+    sample_parser.add_argument(
+        "--shards-per-cell",
+        type=int,
+        default=3,
+        help="Input shards searched for drops per cell, or 0 for all of them.",
+    )
+    sample_parser.add_argument("--max-chars", type=int, default=2000, help="Characters of text kept per document.")
+    sample_parser.add_argument("--seed", type=int, default=20260916, help="Seed; the same seed redraws the sample.")
+    sample_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Cells sampled in parallel.")
+
+    duplication_parser = subparsers.add_parser(
+        "duplication",
+        help="Check whether the dedup stages' drops survive in the corpus as another copy.",
+    )
+    _add_common_arguments(duplication_parser)
+    duplication_parser.add_argument("--sample", type=Path, required=True, help="The stratified sample's JSONL file.")
+    duplication_parser.add_argument("--out", type=Path, required=True, help="CSV file for the per-stage summary.")
+    duplication_parser.add_argument(
+        "--unmatched", type=Path, default=None, help="JSONL file for drops with no surviving twin, for judging."
+    )
+    duplication_parser.add_argument(
+        "--stage", action="append", choices=DEDUP_STAGES, default=None, help="Dedup stage to assess; repeatable."
+    )
+    duplication_parser.add_argument(
+        "--coverage-floor",
+        type=float,
+        default=0.5,
+        help="Share of a document's sentence windows a twin must hold to count as a match.",
+    )
+    duplication_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards read at once.")
+
+    describe_parser = subparsers.add_parser(
+        "describe",
+        help="Count sources after exact dedup and profile the finished corpus.",
+    )
+    _add_common_arguments(describe_parser)
+    describe_parser.add_argument("--out-dir", type=Path, required=True, help="Folder for the two JSON files.")
+    describe_parser.add_argument(
+        "--sloleks", type=Path, default=None, help="Sloleks JSONL for the out-of-vocabulary rate; skipped if absent."
+    )
+    describe_parser.add_argument("--per-source", type=int, default=2000, help="Documents profiled per source.")
+    describe_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards counted at once.")
+
     args = parser.parse_args(argv)
+    if args.command == "sample":
+        validate_selection(parser, args, "datasets")
     if args.command == "run":
         validate_selection(parser, args, "datasets")
         if args.datasets and args.stage in CORPUS_STAGES:
@@ -206,6 +283,52 @@ def main() -> None:
                 max_paragraphs=args.max_paragraphs,
                 candidates=args.candidates.split(",") if args.candidates else None,
             )
+        )
+        return
+
+    if args.command == "duplication":
+        rows, _ = assess_dedup(
+            sample_path=args.sample,
+            pretrain_dir=resolve_output_dir(args.config, args.output_dir),
+            stages=args.stage or DEDUP_STAGES,
+            workers=args.workers,
+            coverage_floor=args.coverage_floor,
+            unmatched_path=args.unmatched,
+        )
+        if not rows:
+            raise SystemExit("no dedup drops found in the sample; nothing to assess")
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        with args.out.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+        for row in rows:
+            print(row)
+        print(f"wrote {args.out}")
+        return
+
+    if args.command == "describe":
+        for path in describe_corpus(
+            pretrain_dir=resolve_output_dir(args.config, args.output_dir),
+            destination_dir=args.out_dir,
+            sloleks_path=args.sloleks,
+            per_source=args.per_source,
+            workers=args.workers,
+        ):
+            print(f"wrote {path}")
+        return
+
+    if args.command == "sample":
+        draw_stratified_sample(
+            output_dir=resolve_output_dir(args.config, args.output_dir),
+            destination=args.out,
+            datasets=args.datasets or None,
+            stages=args.stage or JUDGED_STAGES,
+            per_cell=args.per_cell,
+            shards_per_cell=args.shards_per_cell,
+            max_chars=args.max_chars,
+            seed=args.seed,
+            workers=args.workers,
         )
         return
 

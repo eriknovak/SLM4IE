@@ -1,0 +1,4 @@
+judge_run,compared_with,documents,kappa,raw_agreement,kappa_strict,coherence_exact,coherence_within_one
+calibration pass,person,116,0.663,0.94,0.47,0.397,0.94
+full-sample pass,person,116,0.432,0.879,0.477,0.457,0.905
+full-sample pass,calibration pass,300,0.731,0.957,0.632,0.55,0.98

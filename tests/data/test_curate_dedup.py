@@ -7,6 +7,8 @@ getters and config factories.
 
 import importlib.metadata  # noqa: F401  (datatrove workaround)
 import importlib.util  # noqa: F401  (datatrove workaround)
+from pathlib import Path
+from typing import Dict
 
 import pytest
 
@@ -14,7 +16,16 @@ pytest.importorskip("datatrove")
 
 from datatrove.data import Document  # noqa: E402
 
-from slm4ie.data.curate.dedup import default_exact_config, doc_text, make_exact_config  # noqa: E402
+from datatrove.pipeline.dedup import SentDedupConfig, SentenceDedupSignature  # noqa: E402
+from datatrove.utils.typeshelper import Languages  # noqa: E402
+
+import slm4ie.data.curate.dedup as dedup_module  # noqa: E402
+from slm4ie.data.curate.dedup import (  # noqa: E402
+    CompactSentenceDedupSignature,
+    default_exact_config,
+    doc_text,
+    make_exact_config,
+)
 
 
 class TestExactDedupHelpers:
@@ -52,3 +63,32 @@ class TestExactDedupHelpers:
         """make_exact_config threads the only_dedup_in_index flag."""
         cfg = make_exact_config(only_dedup_in_index=False)
         assert cfg.only_dedup_in_index is False
+
+
+def _signature_files(folder: Path) -> Dict[str, bytes]:
+    """Map each signature file under *folder* (relative path) to its bytes."""
+    return {str(f.relative_to(folder)): f.read_bytes() for f in sorted(folder.rglob("*")) if f.is_file()}
+
+
+class TestCompactSentenceDedupSignature:
+    """The compact signature step is a byte-for-byte drop-in for datatrove's."""
+
+    def test_writes_identical_signature_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Both steps write the same files for the same documents, across flush boundaries."""
+        monkeypatch.setattr(dedup_module, "SIGNATURE_FLUSH_EVERY", 3)
+        docs = [
+            Document(
+                text=" ".join(f"Stavek {i} v dokumentu {d} govori o temi {i % 3}." for i in range(6)),
+                id=str(d),
+                metadata={},
+            )
+            for d in range(5)
+        ]
+        cfg = SentDedupConfig(n_sentences=2, split_sentences=True)
+        kwargs = {"config": cfg, "finder_workers": 2, "language": Languages.slovenian}
+        SentenceDedupSignature(output_folder=str(tmp_path / "upstream"), **kwargs).run(iter(docs), rank=1)
+        CompactSentenceDedupSignature(output_folder=str(tmp_path / "compact"), **kwargs).run(iter(docs), rank=1)
+
+        upstream = _signature_files(tmp_path / "upstream")
+        assert upstream
+        assert _signature_files(tmp_path / "compact") == upstream

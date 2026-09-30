@@ -23,10 +23,13 @@ build-backend = "hatchling.build"
 line-length = 120
 target-version = "py313"
 
+# Formatter (black-compatible): `uv run ruff format <paths>`, check only with `--check`.
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+line-ending = "lf"
 docstring-code-format = true
+docstring-code-line-length = "dynamic"
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -119,5 +122,7 @@ analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store
     "datachart>=1.0.0",               # publication figures -> figures/*.svg
+    "anthropic>=1.6.0",
+    "marimo>=0.24.2",
     "pypdf>=5",                       # PDF text for the medical sizing pass
 ]

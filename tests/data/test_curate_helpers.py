@@ -15,6 +15,7 @@ from slm4ie.data.curate.runner import (  # noqa: E402
     _convert_dataset_current,
     _convert_input_fingerprint,
     _filter_stage_subset,
+    _list_datasets,
 )
 from slm4ie.data.curate.overrides import STAGE_KNOBS, effective_stage_config
 from slm4ie.data.curate.sentinel import write_dataset_sentinel
@@ -423,3 +424,16 @@ def test_force_all_stage_all_nukes_output(tmp_path: Path) -> None:
     (out / "00_convert" / "alfa" / "000.jsonl.gz").write_bytes(b"x")
     _apply_force(out, stage="all", run_all=True, dataset_keys=["alfa"])
     assert list(out.iterdir()) == []
+
+
+def test_list_datasets_skips_benchmark_role(tmp_path: Path) -> None:
+    """`--all` resolves to pretraining sources only; benchmarks stay out of the corpus."""
+    cfg = tmp_path / "extract.yaml"
+    cfg.write_text(
+        "datasets:\n"
+        "  web:\n    extractor: jsonl\n    domain: web\n"
+        "  gated_web:\n    extractor: jsonl\n    domain: web\n    access: gated\n"
+        "  gold:\n    extractor: conllu\n    domain: mixed\n    role: benchmark\n",
+        encoding="utf-8",
+    )
+    assert _list_datasets(cfg) == ["web", "gated_web"]

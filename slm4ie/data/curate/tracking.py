@@ -270,8 +270,9 @@ def log_pretrain_run(
         tags["git_commit"] = commit
 
     with ml.mlflow_run("pretrain-build", tags=tags):
-        ml.log_params(flatten_config(config))
-        ml.log_params({"output_dir": str(output_dir)})
+        # One call, resolved path last: MLflow rejects a second value for a
+        # param, and the config's `output_dir` is the unresolved form.
+        ml.log_params({**flatten_config(config), "output_dir": str(output_dir)})
         for name, value, step in _funnel_metrics(funnel):
             ml.log_metrics({name: value}, step=step)
         if aggregate is not None:

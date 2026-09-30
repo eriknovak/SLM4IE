@@ -16,6 +16,13 @@ are inlined, so the file needs no data source. Requires `markdown` and
 
     uv run experiments/build_report.py [--out experiments/report.html]
 
+With `experiments/reference/` present the report gains the reference: one
+page per topic (`reference/<topic>/README.md`) and per entry
+(`reference/<topic>/<entry>.md`), the ideas read from the tracker (issues
+labelled `idea`, cached in `reference/ideas.yaml`; `--offline` reads the
+cache only), and the links between entries and the records that name them
+under `varies` and `uses`. Without the folder the report is unchanged.
+
 `$…$` and `$$…$$` in a record become MathML, so equations need no script or
 font at read time. Under plain `python` that needs `latex2mathml` installed
 beside `markdown` and `pyyaml`; `uv run` fetches all three itself.
@@ -37,7 +44,11 @@ CITATION_WORDS words of its own sentence before it, a Reading with more than
 READING_NUMBERS numbers beyond its Summary's, a long Reading, Rationale or
 Discussion that is not bold-lead blocks, a long How that is not numbered
 steps, a Settings key with no gloss, a minor finding with no Reading, or a
-TL;DR key-finding line not shaped `**F<n> — title.** Summary`. Standard
+TL;DR key-finding line not shaped `**F<n> — title.** Summary`, an entry past
+draft without Description, Facts, Sources or Algorithm, an algorithm block
+with a command outside the supported subset, left open or without a caption or
+Reading, a cited path or line that does not exist, or a relation, `varies` or
+`uses` naming an entry that does not exist. Standard
 methods named in prose but not in the glossary are listed alongside the
 undefined abbreviations.
 """
@@ -46,12 +57,16 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import csv
 import html
+import io
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -110,7 +125,8 @@ TLDR_STATUS = re.compile(r"^\s*(?:confirmed|refuted|inconclusive|open|leaning \w
 # lint that reads as advice on prose, not a broken record: counted per record, listed with --warnings, never fails the build
 WARNING = re.compile(
     r"\(cap \d+\)|sentence|cites \[|numbers beyond|one paragraph|TL;DR line|carries no gloss|is minor but|"
-    r"is supporting but|content outside|cites a ticket|constraints|will scroll|Predictions has no|names a topic"
+    r"is supporting but|content outside|cites a ticket|constraints|will scroll|Predictions has no|names a topic|"
+    r"names no entry under"
 )
 # a decision or method title shorter than this names a topic, not the choice or the step
 TITLE_MIN_WORDS = 4
@@ -669,7 +685,7 @@ def strip_placeholders(text: str) -> str:
 
 
 def load_records() -> list[Record]:
-    records = [Record(p) for p in sorted(EXPERIMENTS.glob("*/*/README.md"))]
+    records = [Record(p) for p in sorted(EXPERIMENTS.glob("*/*/README.md")) if p.parent.parent.name != REFERENCE]
     by_dir = {r.dir.resolve(): r for r in records}
     for r in records:
         for parent in r.builds_on:
@@ -888,6 +904,16 @@ def render_datasets(record: Record, block: str) -> str:
             f'<article class="ds" id="{record.slug}/dataset-{n}" data-title="{esc(plain(label))}"><h3>{md_inline(label)}</h3>{top}{rest}{tables}{fold}</article>'
         )
     return "".join(out)
+
+
+def kicker(path: Path) -> str:
+    """The line above a page title: the file the page is built from. What kind of
+    page it is shows in the sidebar."""
+    return f'<p class="kicker">{esc(path.relative_to(EXPERIMENTS.parent))}</p>'
+
+
+def meta_row(parts: list[str]) -> str:
+    return f'<div class="meta">{"".join(f"<span>{x}</span>" for x in parts if x)}</div>'
 
 
 def rows_html(pairs: list[tuple[str, str]]) -> str:
@@ -1530,7 +1556,9 @@ def section_count(record: Record, key: str) -> int:
     }.get(key, 0)
 
 
-def render_page(record: Record, parents: list[Record], terms: list[Term], progs: list[Programme] = ()) -> str:
+def render_page(
+    record: Record, parents: list[Record], terms: list[Term], progs: list[Programme] = (), ref: Reference | None = None
+) -> str:
     meta = [
         f'in <a href="#{g.page_id}" title="{esc(g.title)}">{esc(g.meta.get("short") or g.title)}</a>'
         for g in progs
@@ -1543,6 +1571,10 @@ def render_page(record: Record, parents: list[Record], terms: list[Term], progs:
                 f'<a href="#{p.slug}" title="{esc(p.title)}">{esc(p.meta.get("short") or p.title)}</a>' for p in parents
             )
         )
+    if ref:
+        for field in ("varies", "uses"):
+            if hits := ref.named(record, field):
+                meta.append(f"{field} " + ", ".join(entry_link(e) for e in hits))
     if mlflow := str(record.meta.get("mlflow") or ""):
         exp = re.search(r"experiments/(\d+)", mlflow)
         meta.append(f'<a href="{esc(mlflow)}">MLflow{" #" + exp.group(1) if exp else ""}</a>')
@@ -1550,9 +1582,11 @@ def render_page(record: Record, parents: list[Record], terms: list[Term], progs:
         meta.append(pr)
     if record.meta.get("concluded"):
         meta.append(f"concluded {esc(record.meta['concluded'])}")
+    if branch := str(record.meta.get("branch") or ""):
+        meta.append(f"branch <code>{esc(branch)}</code>")
     hyp = hypothesis_text(record)
     parts = [
-        f'<p class="kicker">{esc(record.category)} · {esc(record.meta.get("branch", ""))}</p><h1>{esc(record.title)}</h1>',
+        f"{kicker(record.path)}<h1>{esc(record.title)}</h1>",
         f'<div class="meta">{"".join(f"<span>{m}</span>" for m in meta)}</div>' if meta else "",
     ]
     if hyp:
@@ -1607,7 +1641,10 @@ def render_page(record: Record, parents: list[Record], terms: list[Term], progs:
         f'<div class="bar">{bar}<span class="hint"><kbd>j</kbd><kbd>k</kbd> sections · <kbd>e</kbd> folds</span></div>'
     )
     parts += [f'<h2 id="{record.slug}/{key}">{title}</h2>{body}' for key, title, body in sections]
-    return f'<section class="page" id="{record.slug}" data-title="{esc(record.meta.get("short") or record.title)}">{link_terms(link_refs(record, "".join(parts)), terms)}</section>'
+    body = link_terms(link_refs(record, "".join(parts)), terms)
+    if ref:
+        body = link_entries(body, ref)
+    return f'<section class="page" id="{record.slug}" data-title="{esc(record.meta.get("short") or record.title)}">{body}</section>'
 
 
 class Programme:
@@ -1926,9 +1963,9 @@ def toc_table(records: list[Record], by_slug: dict[str, Record], planned: list[d
 def render_programme(prog: Programme, terms: list[Term]) -> str:
     pid = prog.page_id
     n = f"{len(prog.members)} experiments" + (f", {len(prog.planned)} planned" if prog.planned else "")
-    kicker = f'programmes / {esc(prog.slug)} · <span class="badge b-{"running" if prog.status == "open" else "draft"}">{esc(prog.status)}</span> · {n}'
+    state = f'<span class="badge b-{"running" if prog.status == "open" else "draft"}">{esc(prog.status)}</span>'
     parts = [
-        f'<p class="kicker">{kicker}</p><h1>{esc(prog.title)}</h1>',
+        f'{kicker(prog.path)}<h1>{esc(prog.title)}</h1>{meta_row([state, *n.split(", ")])}',
         f'<div class="book">{md(strip_placeholders(prog.sections.get("question", "")))}</div>',
         f'<div class="bar"><a href="#{pid}/map">Map</a><a href="#{pid}/believe">What we now believe</a><a href="#{pid}/threads">Threads</a>'
         f'<a href="#{pid}/open">Open</a><a href="#{pid}/needs">Needs</a><a href="#{pid}/experiments">Experiments</a>'
@@ -1945,7 +1982,853 @@ def render_programme(prog: Programme, terms: list[Term]) -> str:
     return link_terms(link_xrefs(prog, page), terms)
 
 
-def render_overview(fams: list[list[tuple[Record, int]]], terms: list[Term], progs: list[Programme] = ()) -> str:
+# ---- reference: topics, entries and ideas (experiments/reference/<topic>/<entry>.md) ----
+REFERENCE = "reference"
+IDEAS_ONLINE = True  # --offline and the self-test read the cache only
+ENTRY_KINDS = ("algorithm", "component", "dataset", "benchmark")
+# status → (badge class, label)
+ENTRY_STATUS = {
+    "checked": ("confirmed", "checked against code"),
+    "from-paper": ("inconclusive", "from paper"),
+    "draft": ("draft", "draft"),
+}
+ENTRY_REQUIRED = {"description": "Description", "facts": "Facts", "sources": "Sources", "algorithm": "Algorithm"}
+RELATIONS = ("variant_of", "part_of", "couples_to")
+# (field, label on the entry that names it, label on the entry it names)
+RELATION_LABELS = {
+    "variant_of": ("Predecessor", "Variant"),
+    "part_of": ("Part of", "Contains"),
+    "couples_to": ("Couples to", "Coupled from"),
+}
+IDEA_RELATIONS = {"changes": "running", "already has": "confirmed", "does not apply": ""}
+IDENT = re.compile(r"(?<![\w/\[`])(arXiv|doi):([\w./()-]*\w)", re.I)
+PATH_REF = re.compile(r"`([\w./-]+\.[A-Za-z]\w*)(?::(\d+)(?:-(\d+))?)?`")
+ALG_FENCE = re.compile(r"^```algorithm[ \t]*\n(.*?)\n```[ \t]*$", re.S | re.M)
+ALG_OPEN = {"For": ("for", "do"), "ForAll": ("for all", "do"), "While": ("while", "do"), "If": ("if", "then")}
+ALG_CLOSE = {"EndFor": ("For", "ForAll"), "EndWhile": ("While",), "EndIf": ("If",)}
+ALG_COMMANDS = "\\caption \\Require \\Ensure \\State \\For \\ForAll \\While \\If \\ElsIf \\Else \\Return \\Comment"
+
+
+def as_list(value) -> list[str]:
+    if not value:
+        return []
+    return [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value)]
+
+
+def parse_rows(block: str) -> list[tuple[str, str]]:
+    """`- **Label**: value` bullets in order, a label free to repeat; the same
+    continuation rules as parse_kv."""
+    out: list[list[str]] = []
+    open_ = False
+    for line in block.splitlines():
+        m = KV.match(line)
+        if m:
+            out.append([m.group(1), m.group(2)])
+            open_ = True
+        elif line.startswith("- "):
+            open_ = False
+        elif open_ and (line.startswith("  ") or not line.strip()):
+            out[-1][1] += "\n" + line[2:].rstrip()
+    return [(k, v.strip()) for k, v in out]
+
+
+def row_values(value: str) -> list[str]:
+    """The values of one row: its sub-bullets, or the row itself."""
+    return bullets(value) or ([value] if value else [])
+
+
+def link_idents(text: str) -> str:
+    """`arXiv:<id>` and `doi:<id>` become links to the paper."""
+
+    def link(m: re.Match) -> str:
+        base = "https://arxiv.org/abs/" if m.group(1).lower() == "arxiv" else "https://doi.org/"
+        return f"[{m.group(1)}:{m.group(2)}]({base}{m.group(2)})"
+
+    return "".join(
+        p if i % 2 else IDENT.sub(link, p) for i, p in enumerate(re.split(r"(`[^`\n]*`|\[[^\]]*\]\([^)]*\))", text))
+    )
+
+
+def braced(text: str) -> tuple[str, str]:
+    """The content of a leading `{…}` and what follows it; braces inside balance."""
+    text = text.strip()
+    if not text.startswith("{"):
+        return text, ""
+    depth = 0
+    for i, ch in enumerate(text):
+        depth += (ch == "{") - (ch == "}")
+        if depth == 0:
+            return text[1:i], text[i + 1 :].strip()
+    return text[1:], ""
+
+
+class Algorithm:
+    """One fenced `algorithm` block in the supported subset of LaTeX algpseudocode,
+    read one command per line into numbered lines with a depth, and the Reading
+    that follows it."""
+
+    def __init__(self, n: int, source: str, reading: str):
+        self.n, self.caption = n, ""
+        self.require: list[str] = []
+        self.ensure: list[str] = []
+        self.lines: list[dict] = []
+        self.problems: list[str] = []
+        self.reading = parse_rows(reading)
+        stack: list[tuple[str, int]] = []
+        for i, raw in enumerate(source.splitlines(), 1):
+            line = raw.strip()
+            if not line or line.startswith("%"):
+                continue
+            changed = line.startswith("\\Changed")
+            if changed:
+                line = line[len("\\Changed") :].strip()
+            m = re.match(r"\\([A-Za-z]+)\s*(.*)$", line)
+            if not m:
+                self.problems.append(f"line {i} starts with no command: {line[:40]}")
+                continue
+            cmd, rest = m.group(1), m.group(2)
+            comment = ""
+            if (at := rest.find("\\Comment")) >= 0:
+                comment, rest = braced(rest[at + len("\\Comment") :])[0], rest[:at].strip()
+            row = {"depth": len(stack), "pre": "", "body": rest, "post": "", "comment": comment, "changed": changed}
+            if cmd == "caption":
+                self.caption = braced(rest)[0]
+            elif cmd == "Require":
+                self.require.append(rest)
+            elif cmd == "Ensure":
+                self.ensure.append(rest)
+            elif cmd == "State":
+                self.lines.append(row)
+            elif cmd == "Return":
+                self.lines.append(row | {"pre": "return"})
+            elif cmd in ALG_OPEN:
+                pre, post = ALG_OPEN[cmd]
+                self.lines.append(row | {"pre": pre, "post": post, "body": braced(rest)[0]})
+                stack.append((cmd, i))
+            elif cmd in ("ElsIf", "Else"):
+                if not stack or stack[-1][0] != "If":
+                    self.problems.append(f"line {i}: \\{cmd} outside an \\If")
+                    continue
+                self.lines.append(
+                    row
+                    | {"depth": len(stack) - 1}
+                    | (
+                        {"pre": "else if", "post": "then", "body": braced(rest)[0]}
+                        if cmd == "ElsIf"
+                        else {"pre": "else", "body": ""}
+                    )
+                )
+            elif cmd in ALG_CLOSE:
+                if not stack or stack[-1][0] not in ALG_CLOSE[cmd]:
+                    self.problems.append(f"line {i}: \\{cmd} closes nothing")
+                else:
+                    stack.pop()
+            else:
+                self.problems.append(f"line {i}: unknown command \\{cmd} (supported: {ALG_COMMANDS})")
+        self.problems += [f"line {i}: \\{cmd} is never closed" for cmd, i in stack]
+        if not self.caption:
+            self.problems.append("has no \\caption{…}")
+        if not self.reading:
+            self.problems.append("has no Reading: `- **<line or range>**: text` rows after the block")
+        for label, _ in self.reading:
+            if (ns := [int(n) for n in re.findall(r"\d+", label)]) and max(ns) > len(self.lines):
+                self.problems.append(f"Reading names line {max(ns)}, the algorithm has {len(self.lines)}")
+            elif not ns:
+                self.problems.append(f"Reading row names no line: {label}")
+
+    def code_refs(self) -> list[re.Match]:
+        return [m for l in self.lines for m in PATH_REF.finditer(l["comment"])]
+
+
+class RefEntry:
+    """One `experiments/reference/<topic>/<entry>.md`: an algorithm, component,
+    dataset or benchmark — what it is, its facts and sources, and its algorithm."""
+
+    def __init__(self, path: Path):
+        self.path, self.dir = path, path.parent
+        text = path.read_text(encoding="utf-8")
+        match = FRONTMATTER.match(text)
+        if not match:
+            raise ValueError(f"{path}: missing YAML frontmatter")
+        self.meta = yaml.safe_load(match.group(1)) or {}
+        self.sections = Record._split(text[match.end() :])
+        self.name = path.stem
+        self.key = f"{self.dir.name}/{self.name}"
+        self.slug = self.page_id = f"ref-{self.dir.name}-{self.name}"  # slug: what the asset helpers key on
+        self.title = str(self.meta.get("title") or self.name)
+        self.kind = str(self.meta.get("kind") or "")
+        self.status = str(self.meta.get("status") or "draft")
+        self.summary = str(self.meta.get("summary") or "").strip()
+        self.relations = {k: as_list(self.meta.get(k)) for k in RELATIONS}
+        self.topic: Topic | None = None
+        self.problems: list[str] = []
+        self.counts = {"Figure": 0, "Table": 0}
+        self.anchors: set[str] = set()
+        self.facts = parse_rows(self.section("facts"))
+        self.sources = parse_rows(self.section("sources"))
+        self.diff = parse_kv(self.section("difference-from-predecessor"))
+        block = self.section("algorithm")
+        parts = ALG_FENCE.split(block)
+        self.algorithms = [Algorithm(n, parts[i], parts[i + 1]) for n, i in enumerate(range(1, len(parts), 2), 1)]
+        self.check(block)
+
+    def section(self, key: str) -> str:
+        return strip_placeholders(self.sections.get(key, ""))
+
+    def fact(self, label: str) -> str:
+        return next((v for k, v in self.facts if k.lower() == label.lower()), "")
+
+    def check(self, algorithm: str) -> None:
+        if self.kind not in ENTRY_KINDS:
+            self.problems.append(f"kind is `{self.kind}`, not one of {', '.join(ENTRY_KINDS)}")
+        if self.status not in ENTRY_STATUS:
+            self.problems.append(f"status is `{self.status}`, not one of {', '.join(ENTRY_STATUS)}")
+            self.status = "draft"
+        if self.status != "draft":
+            if not self.summary:
+                self.problems.append("frontmatter has no summary")
+            for key, name in ENTRY_REQUIRED.items():
+                if not self.section(key):
+                    self.problems.append(f"{self.status} entry has no ## {name}")
+            if algorithm and not self.algorithms:
+                self.problems.append("Algorithm has no ```algorithm block")
+        for a in self.algorithms:
+            self.problems += [f"Algorithm {a.n} {p}" for p in a.problems]
+        if self.diff and not self.relations["variant_of"]:
+            self.problems.append("Difference from predecessor needs `variant_of` in the frontmatter")
+        if self.diff and not self.diff.get("Change"):
+            self.problems.append("Difference from predecessor has no Change row")
+        refs = [m for _, v in self.sources for m in PATH_REF.finditer(v)]
+        for m in refs + [m for a in self.algorithms for m in a.code_refs()]:
+            self.check_path(m)
+        if self.status == "checked":
+            if not any(PATH_REF.search(v) for k, v in self.sources if k.lower() == "code"):
+                self.problems.append("checked entry names no code path in a Sources Code row")
+            if not any(a.code_refs() for a in self.algorithms):
+                self.problems.append("checked entry cites no code in an algorithm \\Comment")
+
+    def check_path(self, m: re.Match) -> None:
+        """A cited path exists in the repository, and its line range lies in the file."""
+        path = m.group(1)
+        for base in (EXPERIMENTS.parent, EXPERIMENTS, self.dir):
+            if (found := base / path).is_file():
+                break
+        else:
+            self.problems.append(f"cites a path that does not exist: {path}")
+            return
+        if m.group(2):
+            n = len(found.read_text(encoding="utf-8", errors="replace").splitlines())
+            if int(m.group(3) or m.group(2)) > n or int(m.group(2)) < 1:
+                self.problems.append(f"cites {path}:{m.group(2)}{'-' + m.group(3) if m.group(3) else ''}, the file has {n} lines")
+
+    @property
+    def idents(self) -> list[str]:
+        return [f"{m.group(1)}:{m.group(2)}" for _, v in self.sources for m in IDENT.finditer(v)]
+
+
+class Topic:
+    """One `experiments/reference/<topic>/`: its README.md states the question and
+    names the Facts labels compared; every other `.md` in the folder is an entry."""
+
+    def __init__(self, folder: Path):
+        self.path, self.dir, self.slug = folder / "README.md", folder, folder.name
+        self.meta, self.sections, self.problems = {}, {}, []
+        if self.path.is_file():
+            text = self.path.read_text(encoding="utf-8")
+            match = FRONTMATTER.match(text)
+            if not match:
+                raise ValueError(f"{self.path}: missing YAML frontmatter")
+            self.meta = yaml.safe_load(match.group(1)) or {}
+            self.sections = Record._split(text[match.end() :])
+            if not strip_placeholders(self.sections.get("question", "")):
+                self.problems.append("topic has no ## Question")
+        else:
+            self.problems.append("topic has no README.md")
+        self.title = str(self.meta.get("title") or self.slug.replace("-", " ").capitalize())
+        self.status = str(self.meta.get("status") or "open")
+        self.compare = as_list(self.meta.get("compare"))
+        self.page_id = f"topic-{self.slug}"
+        self.entries = [RefEntry(p) for p in sorted(folder.glob("*.md")) if p.name != "README.md"]
+        for e in self.entries:
+            e.topic = self
+
+
+class Idea:
+    """One tracker issue labelled `idea`. Its `## Touches` section has one line per
+    entry: `- <topic>/<entry> | <relation> | <line touched> | <what changes> | <expected effect>`."""
+
+    def __init__(self, issue: dict):
+        self.number = int(issue.get("number") or 0)
+        self.title = str(issue.get("title") or "")
+        self.state = str(issue.get("state") or "").lower()
+        self.url = str(issue.get("url") or "")
+        sections = Record._split(str(issue.get("body") or "").replace("\r\n", "\n"))
+        self.why = " ".join(sections.get("why", "").split())
+        self.step = " ".join(sections.get("step", "").split())
+        self.rows: list[list[str]] = []
+        self.problems: list[str] = []
+        for line in bullets(sections.get("touches", "")):
+            cells = [c.strip() for c in line.split("|")]
+            cells += [""] * (5 - len(cells))
+            cells[0] = cells[0].strip("`")
+            if cells[1].lower() not in IDEA_RELATIONS:
+                self.problems.append(
+                    f"idea #{self.number} gives {cells[0]} the relation `{cells[1]}`, not one of {', '.join(IDEA_RELATIONS)}"
+                )
+            self.rows.append(cells[:5])
+        if not self.rows:
+            self.problems.append(f"idea #{self.number} has no `## Touches` lines")
+
+    def row(self, key: str) -> list[str] | None:
+        return next((r for r in self.rows if r[0] == key), None)
+
+
+class Ideas:
+    """Every idea, read from the tracker and kept in `reference/ideas.yaml` so a
+    build without tracker access shows the same ones."""
+
+    def __init__(self, folder: Path):
+        self.path = folder / "ideas.yaml"
+        self.problems: list[str] = []
+        self.source = ""
+        issues = self.fetch() if IDEAS_ONLINE else None
+        if issues is not None:
+            self.source = "tracker"
+            issues.sort(key=lambda x: x.get("number") or 0)
+            text = yaml.safe_dump(issues, sort_keys=False, allow_unicode=True, width=100)
+            if (issues or self.path.is_file()) and (
+                not self.path.is_file() or self.path.read_text(encoding="utf-8") != text
+            ):
+                self.path.write_text(text, encoding="utf-8")
+        elif self.path.is_file():
+            self.source = "cache"
+            issues = yaml.safe_load(self.path.read_text(encoding="utf-8")) or []
+        self.items = [Idea(x) for x in issues or [] if isinstance(x, dict)]
+        for idea in self.items:
+            self.problems += idea.problems
+
+    @staticmethod
+    def fetch() -> list[dict] | None:
+        try:
+            out = subprocess.run(
+                ["gh", "issue", "list", "--label", "idea", "--state", "all", "--limit", "500"]
+                + ["--json", "number,title,state,url,body"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+                cwd=EXPERIMENTS,
+            ).stdout
+            return [x for x in json.loads(out) if isinstance(x, dict)]
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
+
+class Reference:
+    """Topics, their entries and the ideas, with every relation resolved."""
+
+    def __init__(self, records: list[Record]):
+        folder = EXPERIMENTS / REFERENCE
+        self.topics = [Topic(d) for d in sorted(folder.iterdir()) if d.is_dir()] if folder.is_dir() else []
+        self.topics = [t for t in self.topics if t.entries or t.path.is_file()]
+        self.entries = [e for t in self.topics for e in t.entries]
+        self.by_key = {e.key: e for e in self.entries}
+        self.ideas = Ideas(folder) if self.topics else None
+        self.records = records
+        for e in self.entries:
+            for field, keys in e.relations.items():
+                for key in keys:
+                    if key not in self.by_key:
+                        e.problems.append(f"{field} names an entry that does not exist: {key}")
+        if not self.topics:
+            return
+        for r in records:
+            for field in ("varies", "uses"):
+                for key in as_list(r.meta.get(field)):
+                    if key not in self.by_key:
+                        r.problems.append(f"{field} names an entry that does not exist: {key}")
+            if r.status == "concluded" and not as_list(r.meta.get("varies")):
+                r.problems.append("concluded record names no entry under `varies`")
+        for idea in self.ideas.items:
+            for row in idea.rows:
+                if row[0] not in self.by_key:
+                    self.ideas.problems.append(f"idea #{idea.number} touches an entry that does not exist: {row[0]}")
+
+    def __bool__(self) -> bool:
+        return bool(self.topics)
+
+    def named(self, record: Record, field: str) -> list[RefEntry]:
+        return [self.by_key[k] for k in as_list(record.meta.get(field)) if k in self.by_key]
+
+    def related(self, e: RefEntry) -> list[tuple[str, RefEntry]]:
+        out = [
+            (RELATION_LABELS[f][0], self.by_key[k]) for f in RELATIONS for k in e.relations[f] if k in self.by_key
+        ]
+        out += [(RELATION_LABELS[f][1], o) for f in RELATIONS for o in self.entries if e.key in o.relations[f]]
+        return out
+
+    def varying(self, e: RefEntry) -> list[Record]:
+        return [r for r in self.records if e.key in as_list(r.meta.get("varies"))]
+
+    def testing(self, idea: Idea) -> list[Record]:
+        return [r for r in self.records if str(idea.number) in [s.lstrip("#") for s in as_list(r.meta.get("tests"))]]
+
+
+def entry_link(e: RefEntry, text: str = "") -> str:
+    return f'<a class="term" href="#{e.page_id}" data-tip="{tip(e.title, e.summary or e.kind)}">{esc(text or e.title)}</a>'
+
+
+def entry_badge(e: RefEntry) -> str:
+    cls, label = ENTRY_STATUS[e.status]
+    return f'<span class="badge b-{cls}">{label}</span>'
+
+
+def link_entries(html_: str, ref: Reference, skip: str = "", seen: set[str] | None = None) -> str:
+    """The first mention of an entry's title on a page becomes a link to the entry
+    with its summary as a hover card, the way a glossary term does. `seen` carries
+    the entries already linked, for a page linked one block at a time."""
+    by_title = {e.title.lower(): e for e in ref.entries if e.key != skip and len(e.title) > 3}
+    if not by_title:
+        return html_
+    pat = re.compile(
+        r"(?<![\w@\-])(" + "|".join(re.escape(t) for t in sorted(by_title, key=len, reverse=True)) + r")(?![\w@\-])",
+        re.I,
+    )
+    seen = set() if seen is None else seen
+
+    def link(m: re.Match) -> str:
+        e = by_title[m.group(1).lower()]
+        if e.key in seen:
+            return m.group(1)
+        seen.add(e.key)
+        return entry_link(e, m.group(1))
+
+    return sub_prose(html_, lambda text, _: pat.sub(link, text))
+
+
+def ref_md(e: RefEntry, ref: Reference, text: str) -> str:
+    """Entry prose: paper identifiers linked, a link to another entry's file turned
+    into a link to its page."""
+
+    def page(m: re.Match) -> str:
+        target = (e.dir / m.group(1)).resolve()
+        hit = next((o for o in ref.entries if o.path.resolve() == target), None)
+        return f'href="#{hit.page_id}"' if hit else m.group(0)
+
+    return re.sub(r'href="([^"#:]+\.md)"', page, md(link_idents(text)))
+
+
+def ref_inline(e: RefEntry, ref: Reference, text: str) -> str:
+    out = ref_md(e, ref, text).strip()
+    return re.sub(r"^<p>(.*)</p>$", r"\1", out, flags=re.S) if out.count("<p>") == 1 else out
+
+
+def short_paths(html_: str) -> str:
+    """A cited path shown as its file name, the full path on hover."""
+    return re.sub(
+        r"<code>([\w./-]+/)([\w.-]+\.[A-Za-z]\w*(?::[\d-]+)?)</code>",
+        lambda m: f'<code title="{m.group(1)}{m.group(2)}">{m.group(2)}</code>',
+        html_,
+    )
+
+
+def render_algorithm(a: Algorithm) -> str:
+    """The ruled block of a paper — caption, Require, Ensure, numbered lines with
+    bold keywords — and its Reading beside it."""
+    kw = lambda w: f"<b>{w}</b>" if w else ""
+    lines = []
+    for l in a.lines:
+        text = " ".join(x for x in (kw(l["pre"]), md_inline(l["body"]) if l["body"] else "", kw(l["post"])) if x)
+        note = f'<span class="cm">▷ {short_paths(md_inline(l["comment"]))}</span>' if l["comment"] else ""
+        cls = " ".join(x for x in (f"i{min(l['depth'], 4)}" if l["depth"] else "", "hl" if l["changed"] else "") if x)
+        attr = f' class="{cls}"' if cls else ""
+        lines.append(f"<li{attr}><span>{text}{note}</span></li>")
+    io = "".join(
+        f'<p class="io"><b>{name}:</b> {md_inline("; ".join(rows))}</p>'
+        for name, rows in (("Require", a.require), ("Ensure", a.ensure))
+        if rows
+    )
+    block = (
+        f'<div class="alg"><p class="cap"><b>Algorithm {a.n}.</b> {md_inline(a.caption)}</p>{io}'
+        f'<ol>{"".join(lines)}</ol></div>'
+    )
+    walk = "".join(
+        f'<span class="tag">{esc(k.replace("-", "–"))}</span><span>{md_inline(v)}</span>' for k, v in a.reading
+    )
+    reading = f'<div class="reading"><p class="k">Reading Algorithm {a.n}</p><div class="walk">{walk}</div></div>'
+    return f'<div class="algrow">{block}{reading if walk else ""}</div>'
+
+
+def render_block(e: RefEntry, ref: Reference, block: str) -> str:
+    """Prose with its figures and tables inlined where they stand; two figures in a
+    row sit side by side."""
+    out: list[str] = []
+    figs: list[str] = []
+    text: list[str] = []
+
+    def flush_text() -> None:
+        if "".join(text).strip():
+            out.append(f'<div class="prose">{ref_md(e, ref, chr(10).join(text))}</div>')
+        text.clear()
+
+    def flush_figs() -> None:
+        if figs:
+            out.append(f'<div class="pair">{"".join(figs)}</div>' if len(figs) > 1 else figs[0])
+        figs.clear()
+
+    for line in block.splitlines():
+        m = ASSET_LINK.fullmatch(line.strip())
+        if m and line.strip().startswith("!"):
+            flush_text()
+            figs.append(render_asset(e, m.group(2), m.group(1), "")[0])
+        elif line.strip() or not figs:
+            if line.strip():
+                flush_figs()
+            text.append(line)
+    flush_text()
+    flush_figs()
+    return "".join(out)
+
+
+def facts_table(rows: list[tuple[str, str]]) -> str:
+    body = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in rows if v)
+    return f'<div class="facts"><table class="data"><tbody>{body}</tbody></table></div>' if body else ""
+
+
+def render_difference(e: RefEntry, ref: Reference) -> str:
+    d = e.diff
+    parent = next((ref.by_key[k] for k in e.relations["variant_of"] if k in ref.by_key), None)
+    who = entry_link(parent) if parent else "predecessor"
+    line = f'<span class="ln">{esc(d["Line"])}:</span>' if d.get("Line") else '<span class="ln"></span>'
+    pair = ""
+    if d.get("Predecessor") or d.get("Here"):
+        pair = (
+            '<div class="diff">'
+            f'<div class="old"><span class="who">{esc(parent.title if parent else "Predecessor")}</span>{line}<span>{md_inline(d.get("Predecessor", "—"))}</span></div>'
+            f'<div class="new"><span class="who">{esc(e.title)}</span>{line}<span>{md_inline(d.get("Here", "—"))}</span></div></div>'
+        )
+    effect = f'<p class="effect"><b>Effect.</b> {ref_inline(e, ref, d["Effect"])}</p>' if d.get("Effect") else ""
+    return f'<p class="intro">Against {who}: {ref_inline(e, ref, d.get("Change", ""))}</p>{pair}{effect}'
+
+
+def render_evidence(e: RefEntry, ref: Reference) -> str:
+    """Key findings of every record that varies the entry, one group per experiment,
+    measured on the entry itself (Direct) or on something built with it (Downstream)."""
+    groups: dict[str, list[str]] = {"direct": [], "downstream": []}
+    for r in ref.varying(e):
+        held = ", ".join(entry_link(o) for o in ref.named(r, "uses")) or "—"
+        marks = r.meta.get("evidence") if isinstance(r.meta.get("evidence"), dict) else {}
+        for f in r.key_findings():
+            mark = marks.get(f.id) if isinstance(marks.get(f.id), dict) else {}
+            kind = "downstream" if str(mark.get("kind", "")).lower() == "downstream" else "direct"
+            on = ref.by_key.get(str(mark.get("measured_on", "")))
+            groups[kind].append(
+                f'<tr><td><a class="ref" href="#{r.slug}/{f.id.lower()}" data-tip="{tip(f"{f.id} — {f.title}", f.kv.get("Summary", ""), r.slug)}">'
+                f'<span class="tag">{f.id}</span></a> {md_inline(f.title)}</td>'
+                f'<td><a href="#{r.slug}" title="{esc(r.title)}">{esc(r.meta.get("short") or r.title)}</a></td>'
+                f'<td>{entry_link(on) if on else esc(mark.get("measured_on") or "—")}</td><td class="muted">{held}</td><td>{badge(r)}</td></tr>'
+            )
+    if not any(groups.values()):
+        return '<div class="card"><p class="muted">No experiment varies this entry yet.</p></div>'
+    head = "<thead><tr><th>Finding</th><th>Experiment</th><th>Measured on</th><th>Held fixed</th><th>Outcome</th></tr></thead>"
+    notes = {"direct": "Measured on the entry itself.", "downstream": "Measured on something built with it."}
+    return "".join(
+        f'<h3 class="ev">{kind.capitalize()}</h3><p class="muted small">{notes[kind]}</p>'
+        f'<div class="scroll"><table class="data wide">{head}<tbody>{"".join(rows)}</tbody></table></div>'
+        for kind, rows in groups.items()
+        if rows
+    )
+
+
+def render_entry(e: RefEntry, ref: Reference, terms: list[Term]) -> str:
+    meta = [entry_badge(e)]
+    if e.topic:
+        meta.append(f'in topic <a href="#{e.topic.page_id}">{esc(e.topic.title)}</a>')
+    for field, lead in (("variant_of", "variant of"), ("part_of", "part of")):
+        if hits := [ref.by_key[k] for k in e.relations[field] if k in ref.by_key]:
+            meta.append(f"{lead} " + ", ".join(entry_link(o) for o in hits))
+    meta += [md_inline(link_idents(i)) for i in dict.fromkeys(e.idents)]
+    pid = e.page_id
+    seen: set[str] = set()
+    linked = lambda html_: link_entries(link_terms(html_, terms), ref, e.key, seen)
+    left = f'<h2 id="{pid}/description">Description</h2>{ref_md(e, ref, e.section("description"))}'
+    for key, title in (("what-the-paper-adds", "What the paper adds"), ("why-it-matters-here", "Why it matters here")):
+        if block := e.section(key):
+            left += f"<h3>{title}</h3>{ref_md(e, ref, block)}"
+    facts = [(k, ref_inline(e, ref, v)) for k, v in e.facts]
+    if varied := ref.varying(e):
+        facts.append(("Varied in", ", ".join(f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a>' for r in varied)))
+    labels: dict[str, list[str]] = {}
+    for k, v in e.sources:
+        labels.setdefault(k, []).extend(row_values(v))
+    sources = [(k, "".join(f'<div class="sl">{ref_inline(e, ref, x)}</div>' for x in vs)) for k, vs in labels.items()]
+    right = f"<h2>Facts</h2>{facts_table(facts)}" if facts else ""
+    right += f'<h2 class="s">Sources</h2>{facts_table(sources)}' if sources else ""
+    sections: list[tuple[str, str, str]] = []
+    if e.diff:
+        sections.append(("difference", "Difference from predecessor", render_difference(e, ref)))
+    if block := e.section("definition"):
+        sections.append(("definition", "Definition", f'<div class="card">{linked(ref_md(e, ref, block))}</div>'))
+    if e.algorithms:
+        sections.append(("algorithm", "Algorithm", "".join(render_algorithm(a) for a in e.algorithms)))
+    for key, title in (("worked-example", "Worked example"), ("where-it-sits", "Where it sits")):
+        if block := e.section(key):
+            sections.append((key, title, linked(render_block(e, ref, block))))
+    sections.append(("evidence", "Evidence", render_evidence(e, ref)))
+    if block := e.section("limits"):
+        cards = "".join(
+            f'<div class="card"><h3>{md_inline(head)}</h3>{ref_md(e, ref, body)}</div>'
+            for head, _, body in (c.partition("\n") for c in re.split(r"^### ", block, flags=re.M)[1:])
+        )
+        sections.append(("limits", "Limits", linked(f'<div class="lim">{cards}</div>' if cards else ref_md(e, ref, block))))
+    if related := ref.related(e):
+        cards = "".join(
+            f'<a href="#{o.page_id}"><span class="r">{label}</span><span class="t">{esc(o.title)}</span><span class="m">{md_inline(o.summary)}</span></a>'
+            for label, o in related
+        )
+        sections.append(("related", "Related", f'<div class="rel three">{cards}</div>'))
+    bar = f'<a href="#{pid}/description">Description</a>' + "".join(
+        f'<a href="#{pid}/{key}">{title.split(" from ")[0]}</a>' for key, title, _ in sections
+    )
+    parts = [
+        f"{kicker(e.path)}<h1>{esc(e.title)}</h1>",
+        f'<div class="meta">{"".join(f"<span>{m}</span>" for m in meta)}</div>',
+        f'<div class="call"><span class="lbl">In one line</span>{md_inline(e.summary)}</div>' if e.summary else "",
+        f'<div class="bar">{bar}<span class="hint"><kbd>j</kbd><kbd>k</kbd> sections</span></div>',
+        f'<div class="lead2"><div class="prose">{linked(left)}</div><div class="side2">{right}</div></div>',
+    ]
+    parts += [f'<h2 id="{pid}/{key}">{title}</h2>{body}' for key, title, body in sections]
+    return f'<section class="page" id="{pid}" data-title="{esc(e.title)}">{"".join(parts)}</section>'
+
+
+def render_topic_map(t: Topic, ref: Reference) -> str:
+    """Entries in columns left to right by what each is a variant of; a variant
+    says what it changes against its predecessor."""
+    inside = {e.key: e for e in t.entries}
+    depth: dict[str, int] = {}
+
+    def d(key: str, seen: tuple = ()) -> int:
+        if key not in depth:
+            ps = [p for p in inside[key].relations["variant_of"] if p in inside and p not in seen]
+            depth[key] = 1 + max((d(p, seen + (key,)) for p in ps), default=-1)
+        return depth[key]
+
+    cols: dict[int, list[RefEntry]] = {}
+    for e in t.entries:
+        cols.setdefault(d(e.key), []).append(e)
+    out = []
+    for c in sorted(cols):
+        nodes = []
+        for e in cols[c]:
+            parents = [inside[p] for p in e.relations["variant_of"] if p in inside]
+            cls = {"checked": "confirmed", "draft": "planned"}.get(e.status, "open")
+            change = (
+                f'<div class="from">← {esc(", ".join(p.title for p in parents))}</div>'
+                f'<div class="d">{md_inline(e.diff.get("Change", ""))}</div>'
+                if parents
+                else ""
+            )
+            nodes.append(
+                f'<a class="node n-{cls}" data-slug="{esc(e.name)}" data-parents="{esc(" ".join(p.name for p in parents))}" href="#{e.page_id}" title="{esc(e.title)}">'
+                f'<div class="t">{esc(e.title)}</div><div class="m">{esc(ENTRY_STATUS[e.status][1])} · {esc(e.kind)}</div>'
+                f'<div class="f">{md_inline(e.summary)}</div>{change}</a>'
+            )
+        out.append(f'<div class="col">{"".join(nodes)}</div>')
+    return (
+        f'<figure class="map"><div class="scroll"><div class="layers"><svg class="edges"></svg>{"".join(out)}</div></div>'
+        "<figcaption>Left to right: what each entry is a variant of. A variant states only what it changes. "
+        "Green is checked against code; a dashed box is a draft.</figcaption></figure>"
+    )
+
+
+def render_compared(t: Topic, ref: Reference) -> str:
+    if not t.compare:
+        return ""
+    rows = []
+    for e in t.entries:
+        parent = next((ref.by_key[k] for k in e.relations["variant_of"] if k in ref.by_key), None)
+        cells = []
+        for label in t.compare:
+            v = e.fact(label)
+            hot = parent is not None and v and plain(v) != plain(parent.fact(label))
+            cells.append(f'<td{" class=hot" if hot else ""}>{md_inline(v) if v else "—"}</td>')
+        rows.append(
+            f'<tr><td><a href="#{e.page_id}">{esc(e.title)}</a></td>'
+            f'<td class="muted">{esc(parent.title) if parent else "—"}</td>{"".join(cells)}</tr>'
+        )
+    head = "".join(f"<th>{esc(c)}</th>" for c in t.compare)
+    return (
+        '<p class="intro">Filled from each entry\'s Facts. A tinted cell differs from the entry\'s own predecessor.</p>'
+        f'<div class="scroll"><table class="data wide compared"><thead><tr><th>Entry</th><th>Predecessor</th>{head}</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    )
+
+
+def idea_mark(relation: str) -> str:
+    cls = IDEA_RELATIONS.get(relation.lower(), "")
+    return f'<span class="badge b-{cls}">{esc(relation)}</span>' if cls else '<span class="muted">—</span>'
+
+
+def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
+    """Every idea touching an entry of the topic: an overview of which entry each
+    would change, then a card per idea saying what changes where."""
+    if ref.ideas is None or not ref.ideas.source:
+        return '<div class="card"><p class="muted">No ideas loaded: the tracker is unreachable and there is no cache.</p></div>', 0
+    keys = {e.key for e in t.entries}
+    ideas = [i for i in ref.ideas.items if any(r[0] in keys for r in i.rows)]
+    if not ideas:
+        return '<div class="card"><p class="muted">No idea touches an entry of this topic yet.</p></div>', 0
+
+    def issue(i: Idea) -> str:
+        return f'<a href="{esc(i.url)}">#{i.number}</a>' if i.url else f"#{i.number}"
+
+    def tested(i: Idea) -> str:
+        return ", ".join(f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a> {badge(r)}' for r in ref.testing(i))
+
+    head = "".join(f"<th>{esc(e.title)}</th>" for e in t.entries)
+    body = "".join(
+        f'<tr><td><a href="#{t.page_id}/idea-{i.number}"><span class="tag">#{i.number}</span></a> {md_inline(i.title)}</td>'
+        + "".join(
+            f"<td>{idea_mark(r[1]) if (r := i.row(e.key)) else '<span class=muted>not assessed</span>'}</td>"
+            for e in t.entries
+        )
+        + f'<td class="muted">{esc(i.state or "—")}</td><td>{tested(i) or "<span class=muted>—</span>"}</td></tr>'
+        for i in ideas
+    )
+    cards = []
+    for i in ideas:
+        rows = "".join(
+            f'<tr><td>{entry_link(ref.by_key[r[0]]) if r[0] in ref.by_key else esc(r[0])}</td><td>{idea_mark(r[1])}</td>'
+            f'<td class="mono">{esc(r[2]) or "—"}</td><td>{md_inline(r[3]) if r[3] else "—"}</td><td class="muted">{md_inline(r[4]) if r[4] else "—"}</td></tr>'
+            for r in i.rows
+        )
+        state = " · ".join(x for x in (esc(i.step), issue(i), esc(i.state), tested(i) and "tested in " + tested(i)) if x)
+        cards.append(
+            f'<article class="idea" id="{t.page_id}/idea-{i.number}" data-title="#{i.number} · {esc(plain(i.title))}">'
+            f'<h3><span class="tag">#{i.number}</span>{md_inline(i.title)}<span class="wt">{state}</span></h3>'
+            f'{f"<p class=why>{md_inline(i.why)}</p>" if i.why else ""}'
+            '<div class="scroll"><table class="data wide inner"><thead><tr><th>Entry</th><th>Relation</th><th>Touches</th>'
+            f'<th>What changes there</th><th>Expected effect</th></tr></thead><tbody>{rows}</tbody></table></div></article>'
+        )
+    note = ' <span class="muted">Read from the cache, not the tracker.</span>' if ref.ideas.source == "cache" else ""
+    return (
+        f'<p class="intro">Changes that could become experiments. One idea can touch several entries and changes each in its own place.{note}</p>'
+        f'<div class="scroll"><table class="data wide ideas"><thead><tr><th>Idea</th>{head}<th>Issue</th><th>Tested in</th></tr></thead>'
+        f'<tbody>{body}</tbody></table></div>{"".join(cards)}',
+        len(ideas),
+    )
+
+
+def entries_table(t: Topic) -> str:
+    rows = []
+    for e in t.entries:
+        code = next((m.group(0) for k, v in e.sources if k.lower() == "code" for m in PATH_REF.finditer(v)), "")
+        paper = next(iter(e.idents), "")
+        rows.append(
+            f'<tr><td><a href="#{e.page_id}">{esc(e.title)}</a></td><td class="muted">{esc(e.kind)}</td><td>{entry_badge(e)}</td>'
+            f'<td class="mono">{short_paths(md_inline(code)) if code else "—"}</td><td>{md_inline(link_idents(paper)) if paper else "—"}</td></tr>'
+        )
+    return (
+        '<div class="scroll"><table class="data wide entries"><thead><tr><th>Entry</th><th>Kind</th><th>Status</th><th>Code</th><th>Paper</th></tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    )
+
+
+def render_topic(t: Topic, ref: Reference, terms: list[Term]) -> str:
+    pid = t.page_id
+    checked = sum(e.status == "checked" for e in t.entries)
+    meta = [
+        f'<span class="badge b-{"running" if t.status == "open" else "draft"}">{esc(t.status)}</span>',
+        f"{len(t.entries)} entries",
+        f"{checked} checked",
+    ]
+    ideas, n = render_ideas(t, ref)
+    compared = render_compared(t, ref)
+    intro = strip_placeholders(t.sections.get("introduction", ""))
+    bar = (
+        f'<a href="#{pid}/map">Map</a>'
+        + (f'<a href="#{pid}/compared">Compared</a>' if compared else "")
+        + f'<a href="#{pid}/ideas">Ideas{f" <i>{n}</i>" if n else ""}</a><a href="#{pid}/entries">Entries <i>{len(t.entries)}</i></a>'
+    )
+    parts = [
+        f'{kicker(t.path)}<h1>{esc(t.title)}</h1>{meta_row(meta)}',
+        f'<div class="book">{link_terms(md(strip_placeholders(t.sections.get("question", ""))), terms)}</div>',
+        f'<div class="prose intro">{link_entries(link_terms(md(intro), terms), ref)}</div>' if intro else "",
+        f'<div class="bar">{bar}<span class="hint"><kbd>j</kbd><kbd>k</kbd> sections</span></div>',
+        f'<h2 id="{pid}/map">Map</h2>{render_topic_map(t, ref)}',
+        f'<h2 id="{pid}/compared">Compared</h2>{compared}' if compared else "",
+        f'<h2 id="{pid}/ideas">Ideas</h2>{ideas}',
+        f'<h2 id="{pid}/entries">Entries</h2>{entries_table(t)}',
+    ]
+    return f'<section class="page" id="{pid}" data-title="{esc(t.title)}">{"".join(parts)}</section>'
+
+
+def reference_sidebar(ref: Reference) -> str:
+    out = ['<p class="h">Topics</p>']
+    dots = {"checked": "d-confirmed", "from-paper": "d-inconclusive", "draft": "d-open"}
+    for t in ref.topics:
+        out.append(
+            f'<a class="item topic" href="#{t.page_id}" data-page="{t.page_id}" title="{esc(t.title)}">'
+            f'<span class="lab">{esc(t.title)}</span><span class="sub">{len(t.entries)}</span></a>'
+        )
+        out += [
+            f'<a class="item nest" href="#{e.page_id}" data-page="{e.page_id}" title="{esc(e.summary or e.title)}">'
+            f'<span class="dot {dots[e.status]}"></span><span class="lab">{esc(e.title)}</span><span class="sub">{esc(e.kind)}</span></a>'
+            for e in t.entries
+        ]
+    return "".join(out)
+
+
+def reference_overview(ref: Reference) -> str:
+    cards = "".join(
+        f'<div class="card prog" id="overview/topic-{esc(t.slug)}"><div class="head"><a class="t" href="#{t.page_id}">{esc(t.title)}</a>'
+        f'<span class="m">{len(t.entries)} entries</span><a class="go" href="#{t.page_id}">Topic page →</a></div>'
+        f'<p class="q">{md_inline(sentences(strip_placeholders(t.sections.get("question", "")))[0]) if sentences(strip_placeholders(t.sections.get("question", ""))) else ""}</p>'
+        f"{entries_table(t)}</div>"
+        for t in ref.topics
+    )
+    return f'<h2 id="overview/topics">Topics</h2>{cards}'
+
+
+REF_CSS = """
+/* ---- reference: topics and entries ---- */
+.item.topic{font-weight:600}.item.nest{padding-left:28px}.item.topic.on{font-weight:600}
+.call{background:var(--soft);border-radius:8px;padding:12px 16px;margin:18px 0 0;font-size:var(--t-prose);line-height:1.6}
+.lead2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:28px;align-items:start;margin-top:26px}.lead2 h2{margin-top:0}.lead2 h2.s{margin-top:24px}.lead2 h3{margin:20px 0 8px;font-size:var(--t-body)}
+.lead2 .prose{font-size:var(--t-prose);line-height:1.6}.intro{max-width:760px}.small{font-size:var(--t-sm)}
+.facts{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}.facts table.data td:first-child{position:static;font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap;width:1%;padding-top:9px}
+.facts tr:last-child td{border-bottom:0}.facts code{font-size:11.5px;overflow-wrap:anywhere}.sl+.sl{margin-top:6px}
+.alg{font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:16px;line-height:1.6;border-top:2px solid var(--fg);border-bottom:2px solid var(--fg);background:var(--fig);padding:0 14px 8px;overflow-x:auto}
+.alg .cap{border-bottom:1px solid var(--fg);padding:5px 0;margin:0 0 6px}.alg .io{margin:0}.alg ol{list-style:none;margin:4px 0 0;padding:0;counter-reset:l;min-width:max-content}
+.alg li{counter-increment:l;display:grid;grid-template-columns:26px 1fr;gap:0 10px;align-items:baseline}.alg li::before{content:counter(l) ":";font-size:13px;color:var(--muted)}
+.alg li.i1>span{padding-left:22px}.alg li.i2>span{padding-left:44px}.alg li.i3>span{padding-left:66px}.alg li.i4>span{padding-left:88px}
+.alg li.hl{background:var(--accent-soft);margin:0 -14px;padding:0 14px}.alg .cm{color:var(--muted);font-style:italic;margin-left:18px}.alg .cm code{font-style:normal;font-size:11px}.alg code{font-size:.8em}
+:root[data-theme=dark] .alg,:root[data-theme=dark] .diff{background:var(--plate)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .alg,:root:not([data-theme=light]) .diff{background:var(--plate)}}
+.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);gap:24px;align-items:start;margin:0 0 22px}
+.reading .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.walk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;font-size:var(--t-sm);line-height:1.55}.walk .tag{align-self:start;margin-top:1px;white-space:nowrap}
+.diff{font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:16px;line-height:1.6;border:1px solid var(--line);border-radius:8px;overflow-x:auto;background:var(--fig)}
+.diff>div{display:grid;grid-template-columns:150px 30px minmax(max-content,1fr);gap:0 10px;padding:4px 14px;align-items:baseline}.diff .who{font-family:var(--sans);font-size:var(--t-sm);color:var(--muted)}.diff .ln{font-size:13px;color:var(--muted)}
+.diff .old{background:var(--bad-soft)}.diff .new{background:var(--ok-soft)}.effect{margin:8px 0 0;font-size:var(--t-sm);color:var(--muted)}
+.lim{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.lim .card{padding:14px 18px}.lim h3{margin:0 0 4px;font-size:var(--t-body)}.lim p{margin:0;font-size:var(--t-sm)}
+.rel.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.rel .r{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.rel.three .t{color:var(--accent)}.rel.three .m{font-size:var(--t-sm)}
+h3.ev{margin:18px 0 2px;font-size:var(--t-body)}p.muted{margin:0 0 4px}
+.map .d{font-size:12.5px;line-height:1.45;margin-top:4px}.map .n-open{background:var(--panel)}
+.idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:60px}.idea h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--t-body)}
+.idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}table.inner tr{background:transparent}table.inner tr:last-child td{border-bottom:0}
+@media(max-width:1100px){.algrow{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:800px){.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px 26px minmax(max-content,1fr)}}
+"""
+REF_FONT = "&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400"
+
+
+def render_overview(
+    fams: list[list[tuple[Record, int]]],
+    terms: list[Term],
+    progs: list[Programme] = (),
+    ref: Reference | None = None,
+) -> str:
     """The contents page: counts, then every programme with its experiments, then experiments outside any programme."""
     book = EXPERIMENTS / "README.md"
     intro = md(book.read_text(encoding="utf-8")) if book.is_file() else ""
@@ -1960,8 +2843,10 @@ def render_overview(fams: list[list[tuple[Record, int]]], terms: list[Term], pro
     counts = [
         ("Programmes", len(progs), "#overview/programmes"),
         ("Experiments", len(records), first),
-        ("Glossary", len(terms), "#glossary"),
     ]
+    if ref:
+        counts += [("Topics", len(ref.topics), "#overview/topics"), ("Entries", len(ref.entries), "#overview/topics")]
+    counts.append(("Glossary", len(terms), "#glossary"))
     nav = (
         '<div class="toc-nav">'
         + "".join(f'<a href="{h}">{t}<span class="n">{n}</span></a>' for t, n, h in counts if n)
@@ -1980,6 +2865,8 @@ def render_overview(fams: list[list[tuple[Record, int]]], terms: list[Term], pro
         parts.append(
             f'<h2 id="overview/experiments">{"Not in a programme" if progs else "Experiments"}</h2>{toc_table(loose, by_slug)}'
         )
+    if ref:
+        parts.append(reference_overview(ref))
     return link_terms(
         f'<section class="page" id="overview" data-title="Overview"><p class="kicker">experiments/README.md</p><h1>Overview</h1>'
         f'<div class="book">{intro}</div>{nav}{"".join(parts)}</section>',
@@ -1987,7 +2874,12 @@ def render_overview(fams: list[list[tuple[Record, int]]], terms: list[Term], pro
     )
 
 
-def render_sidebar(fams: list[list[tuple[Record, int]]], terms: list[Term], progs: list[Programme] = ()) -> str:
+def render_sidebar(
+    fams: list[list[tuple[Record, int]]],
+    terms: list[Term],
+    progs: list[Programme] = (),
+    ref: Reference | None = None,
+) -> str:
     """A flat list: every experiment by its short title in family order, the full
     title on hover, the category as a tag; no indentation, the map shows lineage."""
     out = [
@@ -2008,6 +2900,8 @@ def render_sidebar(fams: list[list[tuple[Record, int]]], terms: list[Term], prog
                 f'<a class="item" href="#{r.slug}" data-page="{r.slug}" title="{esc(r.title)}">'
                 f'<span class="dot {dot}"></span><span class="lab">{esc(r.meta.get("short") or r.title)}</span><span class="sub">{esc(r.category)}</span></a>'
             )
+    if ref:
+        out.append(reference_sidebar(ref))
     if terms:
         out.append('<p class="h">Reference</p><a class="item" href="#glossary" data-page="glossary">Glossary</a>')
     out.append(
@@ -2203,35 +3097,41 @@ def build(out: Path, warnings: bool = False) -> int:
     terms = load_glossary()
     fams = families(records)
     progs = [Programme(p, records) for p in sorted((EXPERIMENTS / "programmes").glob("*.md"))]
+    ref = Reference(records)
     by_dir = {r.dir.resolve(): r for r in records}
     titled = [(g.page_id, g.meta.get("short") or g.title, render_programme(g, terms)) for g in progs] + [
         (
             r.slug,
             r.meta.get("short") or r.title,
-            render_page(r, [by_dir[p] for p in r.builds_on if p in by_dir], terms, progs),
+            render_page(r, [by_dir[p] for p in r.builds_on if p in by_dir], terms, progs, ref),
         )
         for fam in fams
         for r, _ in fam
     ]
+    for t in ref.topics:
+        titled.append((t.page_id, t.title, render_topic(t, ref, terms)))
+        titled += [(e.page_id, e.title, render_entry(e, ref, terms)) for e in t.entries]
     used: dict[str, list[tuple[str, str]]] = {}
     for pid, label, html_ in titled:
         for slug in set(re.findall(r'href="#glossary/([^"]+)"', html_)):
             used.setdefault(slug, []).append((pid, label))
-    pages = [render_overview(fams, terms, progs)] + [h for _, _, h in titled] + [render_glossary(terms, used)]
+    pages = [render_overview(fams, terms, progs, ref)] + [h for _, _, h in titled] + [render_glossary(terms, used)]
     repo = EXPERIMENTS.parent.name
     page = (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>{esc(repo)} · Findings</title>"
-        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">'
-        f'<style>{CSS}</style></head><body><div class="app">'
+        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500'
+        f'{REF_FONT if ref else ""}&display=swap">'
+        f'<style>{CSS}{REF_CSS if ref else ""}</style></head><body><div class="app">'
         f'<div class="top"><button class="nav" title="toggle experiment list">☰</button><span class="brand">{esc(repo)} · Findings</span><span class="crumb"></span><button class="theme">theme</button></div>'
-        f'<nav class="side">{render_sidebar(fams, terms, progs)}</nav>'
+        f'<nav class="side">{render_sidebar(fams, terms, progs, ref)}</nav>'
         f'<main class="main">{"".join(pages)}</main></div>'
         f"<script>{JS}</script></body></html>"
     )
     out.write_text(restore_math(relink(page, records)), encoding="utf-8")
     found = [(r, p) for r in records for p in r.problems] + [(g, p) for g in progs for p in g.problems]
+    found += [(x, p) for x in ref.topics + ref.entries + ([ref.ideas] if ref.ideas else []) for p in x.problems]
     problems = [(r, p) for r, p in found if not WARNING.search(p)]
     advice = [(r, p) for r, p in found if WARNING.search(p)]
     if MATH_HTML and latex_to_mathml is None:
@@ -2245,6 +3145,9 @@ def build(out: Path, warnings: bool = False) -> int:
         f"{out}: {len(records)} records in {len(fams)} families, {len(progs)} programmes, {len(terms)} glossary terms, "
         f"{out.stat().st_size // 1024} KiB"
     )
+    if ref:
+        ideas = f"{len(ref.ideas.items)} ideas from the {ref.ideas.source}" if ref.ideas.source else "no ideas loaded"
+        print(f"  reference: {len(ref.topics)} topics, {len(ref.entries)} entries, {ideas}")
     for r, p in problems:
         print(f"  {r.path.relative_to(EXPERIMENTS.parent)}: {p}", file=sys.stderr)
     counts: dict[Path, int] = {}
@@ -2270,14 +3173,25 @@ def build(out: Path, warnings: bool = False) -> int:
 
 def selftest() -> int:
     """Build the fixture next to this script and check the rendering invariants."""
-    global EXPERIMENTS
+    global EXPERIMENTS, IDEAS_ONLINE
+    IDEAS_ONLINE = False
     fixture = Path(__file__).resolve().parent / "fixture" / "experiments"
     if not fixture.is_dir():
         print(f"no fixture at {fixture}; --selftest runs from the labflow skill copy", file=sys.stderr)
         return 2
+    # the same fixture without its reference folder: the report a repo without one gets
+    with tempfile.TemporaryDirectory() as tmp:
+        EXPERIMENTS = Path(tmp) / "experiments"
+        shutil.copytree(fixture, EXPERIMENTS, ignore=shutil.ignore_patterns(REFERENCE, "report.html"))
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            build(EXPERIMENTS / "report.html")
+        bare = (EXPERIMENTS / "report.html").read_text(encoding="utf-8")
     EXPERIMENTS = fixture
     out = fixture / "report.html"
     code = build(out)
+    ref = Reference(load_records())
+    entry = {e.name: e for e in ref.entries}
+    broken = set(entry["broken-cut"].problems)
     problems = Record(fixture / "data" / "alpha" / "README.md").problems
     records = load_records()
     html_ = out.read_text(encoding="utf-8")
@@ -2285,7 +3199,7 @@ def selftest() -> int:
     overview = body[body.find('id="overview"') : body.find('<section class="page"', body.find('id="overview"') + 1)]
     checks = {
         "gate fires on the broken F2 heading": code == 1,
-        "no heading made from a #<ticket> line": len(re.findall(r"<h1>", body)) == 5,
+        "no heading made from a #<ticket> line": len(re.findall(r"<h1>", body)) == 10,
         "findings first, then verdict, then the question": body.find('id="alpha/findings"')
         < body.find('id="alpha/verdict"')
         < body.find('id="alpha/hypothesis"'),
@@ -2473,6 +3387,134 @@ def selftest() -> int:
         in body,
         "missing Discussion flagged": "concluded record has no Verdict Discussion"
         in Record(fixture / "methods" / "beta" / "README.md").problems,
+        "no reference folder, no reference in the report": "Topics" not in bare
+        and "ref-cutting" not in bare
+        and ".algrow" not in bare
+        and "STIX+Two+Text" not in bare
+        and "varies " not in bare[bare.find("<body") :],
+        "topics in the sidebar, entries nested under their topic": '<p class="h">Topics</p><a class="item topic" href="#topic-cutting" data-page="topic-cutting" title="Cutting methods">'
+        '<span class="lab">Cutting methods</span><span class="sub">4</span></a>'
+        '<a class="item nest" href="#ref-cutting-base-cut" data-page="ref-cutting-base-cut"' in body
+        and '<span class="dot d-confirmed"></span><span class="lab">Base cut</span>' in body
+        and '<span class="dot d-open"></span><span class="lab">Test split</span>' in body
+        and body.find('<p class="h">Topics</p>') < body.find('<p class="h">Reference</p>'),
+        "overview counts topics and entries": 'Topics<span class="n">1</span>' in overview
+        and 'Entries<span class="n">4</span>' in overview
+        and '<h2 id="overview/topics">Topics</h2>' in overview,
+        "topic README is not read as a record": len(records) == 2,
+        "entry header: status, topic, predecessor, linked paper": '<span class="badge b-inconclusive">from paper</span>'
+        in body
+        and 'in topic <a href="#topic-cutting">Cutting methods</a>' in body
+        and '<span>variant of <a class="term" href="#ref-cutting-base-cut"' in body
+        and '<span><a href="https://arxiv.org/abs/2502.00894" target="_blank" rel="noopener">arXiv:2502.00894</a></span>'
+        in body
+        and '<a href="https://doi.org/10.1000/xyz123" target="_blank" rel="noopener">doi:10.1000/xyz123</a>' in body,
+        "facts and sources as tables, one paper and one path per line": '<h2>Facts</h2><div class="facts"><table class="data"><tbody><tr><td>Base unit</td><td>characters</td></tr>'
+        in body
+        and '<tr><td>Code</td><td><div class="sl"><code>experiments/data/alpha/prep.py</code></div><div class="sl"><code>experiments/data/alpha/prep.py:1</code></div></td></tr>'
+        in body
+        and body.count('<tr><td>Paper</td>') == 2
+        and '</div><div class="sl">A second source, ' in body,
+        "paper notes under the description, sources under the facts": re.search(
+            r'<div class="lead2"><div class="prose"><h2 id="ref-cutting-base-cut/description">Description</h2>.*?<h3>What the paper adds</h3>.*?</div><div class="side2"><h2>Facts</h2>.*?<h2 class="s">Sources</h2>',
+            body,
+            re.S,
+        )
+        is not None,
+        "algorithms captioned and numbered, keywords bold, depth kept": '<p class="cap"><b>Algorithm 1.</b> Base cut training</p><p class="io"><b>Require:</b> corpus '
+        in body
+        and '<p class="cap"><b>Algorithm 2.</b> Base cut encoding</p>' in body
+        and '<li class="i1"><span><b>if</b> the pair is new <b>then</b></span></li><li class="i2"><span>record it</span></li><li class="i1"><span><b>else</b></span></li>'
+        in body
+        and "<b>for all</b> merge in" in body
+        and "\\State" not in body,
+        "algorithm comment cites code by file name, full path on hover": '<span class="cm">▷ ties by pair, <code title="experiments/data/alpha/prep.py:1">prep.py:1</code></span>'
+        in body,
+        "reading beside its algorithm": '</ol></div><div class="reading"><p class="k">Reading Algorithm 1</p><div class="walk"><span class="tag">1</span><span>Words are counted once.</span><span class="tag">2–7</span>'
+        in body
+        and '<p class="k">Reading Algorithm 2</p>' in body,
+        "changed line highlighted, difference shown as a pair": '<li class="hl"><span><span class="math">' in body
+        and re.search(
+            r'<div class="diff"><div class="old"><span class="who">Base cut</span><span class="ln">1:</span>.*?<div class="new"><span class="who">Morph cut</span>.*?<p class="effect"><b>Effect.</b> Pair counts stop',
+            body,
+            re.S,
+        )
+        is not None,
+        "entry figure inlined with a caption, link to an entry file reaches its page": '<figure id="ref-cutting-morph-cut/asset/ex"><div class="fig"><svg'
+        in body
+        and "Merges on a toy word." in body
+        and 'It reuses <a href="#ref-cutting-base-cut">the baseline</a>' in body,
+        "related generated from both sides of a relation": '<span class="r">Predecessor</span><span class="t">Base cut</span>'
+        in body
+        and '<span class="r">Variant</span><span class="t">Morph cut</span>' in body
+        and '<span class="r">Couples to</span><span class="t">Test split</span>' in body,
+        "draft entry renders without its required sections": 'id="ref-cutting-test-split"' in body
+        and not entry["test-split"].problems,
+        "entry gates fire": {
+            "checked entry has no ## Sources",
+            "Algorithm 1 line 3: unknown command \\Foo (supported: " + ALG_COMMANDS + ")",
+            "Algorithm 1 line 6: \\EndWhile closes nothing",
+            "Algorithm 1 line 4: \\For is never closed",
+            "Algorithm 1 has no \\caption{…}",
+            "Algorithm 1 Reading names line 9, the algorithm has 3",
+            "Difference from predecessor needs `variant_of` in the frontmatter",
+            "cites a path that does not exist: experiments/data/alpha/gone.py",
+            "checked entry names no code path in a Sources Code row",
+            "part_of names an entry that does not exist: cutting/nowhere",
+        }
+        <= broken
+        and not entry["base-cut"].problems
+        and not entry["morph-cut"].problems,
+        "line range checked against the file": (
+            m := PATH_REF.search("`experiments/data/alpha/prep.py:400`")
+        )
+        is not None
+        and (entry["test-split"].check_path(m) or entry["test-split"].problems.pop())
+        == "cites experiments/data/alpha/prep.py:400, the file has 11 lines",
+        "topic page: map with the difference on the variant, compared, entries": '<section class="page" id="topic-cutting" data-title="Cutting methods">'
+        in body
+        and '<a class="node n-open" data-slug="morph-cut" data-parents="base-cut" href="#ref-cutting-morph-cut"' in body
+        and '<div class="from">← Base cut</div><div class="d">chunks are marked pieces, not whole words.</div>' in body
+        and '<a class="node n-confirmed" data-slug="base-cut" data-parents=""' in body
+        and '<a class="node n-planned" data-slug="test-split"' in body
+        and '<table class="data wide entries">' in body,
+        "compared tints what differs from the predecessor": '<td class="muted">Base cut</td><td>characters</td><td class=hot>marked piece</td>'
+        in body
+        and '<td class="muted">—</td><td>characters</td><td>whole word</td>' in body,
+        "ideas from the cache: overview row, card per idea, tested in": '<table class="data wide ideas">' in body
+        and '<th>Base cut</th><th>Broken cut</th><th>Morph cut</th><th>Test split</th><th>Issue</th><th>Tested in</th>'
+        in body
+        and '<span class="badge b-confirmed">already has</span>' in body
+        and '<span class="badge b-running">changes</span>' in body
+        and "<span class=muted>not assessed</span>" in body
+        and '<article class="idea" id="topic-cutting/idea-7"' in body
+        and 'tested in <a href="#alpha">Alpha gold</a>' in body
+        and 'id="topic-cutting/idea-8"' not in body
+        and "Read from the cache, not the tracker." in body,
+        "idea gates fire": {
+            "idea #8 gives cutting/ghost the relation `rewrites`, not one of changes, already has, does not apply",
+            "idea #8 touches an entry that does not exist: cutting/ghost",
+        }
+        <= set(ref.ideas.problems),
+        "record names the entries it varies and uses": '<span>varies <a class="term" href="#ref-cutting-morph-cut"'
+        in body
+        and '<span>uses <a class="term" href="#ref-cutting-base-cut"' in body
+        and "uses names an entry that does not exist: cutting/absent" in ref.records[0].problems,
+        "record without varies is a warning": "concluded record names no entry under `varies`"
+        in ref.records[1].problems
+        and WARNING.search("concluded record names no entry under `varies`") is not None,
+        "evidence generated per experiment, downstream apart from direct": re.search(
+            r'id="ref-cutting-morph-cut/evidence">Evidence</h2><h3 class="ev">Direct</h3>.*?<h3 class="ev">Downstream</h3>.*?<a class="ref" href="#alpha/f1"[^>]*><span class="tag">F1</span></a> First thing</td><td><a href="#alpha" title="Alpha gold set">Alpha gold</a></td><td><a class="term" href="#ref-cutting-test-split"',
+            body,
+            re.S,
+        )
+        is not None
+        and "No experiment varies this entry yet." in body
+        and '<tr><td>Varied in</td><td><a href="#alpha">Alpha gold</a></td></tr>' in body,
+        "entry mention in a record linked once with a hover card": body[
+            body.find('id="alpha"') : body.find('id="beta"')
+        ].count('<a class="term" href="#ref-cutting-test-split" data-tip="Test split')
+        == 1,
     }
     for name, ok in checks.items():
         print(f"  {'ok ' if ok else 'FAIL'} {name}")
@@ -2484,8 +3526,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, default=EXPERIMENTS / "report.html")
     ap.add_argument("--selftest", action="store_true", help="build the bundled fixture and check it")
+    ap.add_argument("--offline", action="store_true", help="read ideas from the cache, never from the tracker")
     ap.add_argument(
         "--warnings", action="store_true", help="list every prose warning instead of counting them per record"
     )
     args = ap.parse_args()
+    IDEAS_ONLINE = not args.offline
     sys.exit(selftest() if args.selftest else build(args.out, args.warnings))

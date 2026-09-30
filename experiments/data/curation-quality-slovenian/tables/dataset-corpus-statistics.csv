@@ -1,0 +1,21 @@
+source,domain,kind,access,converted,finished,finished_words
+c4,web,raw web crawl,open,8507960,3316226,847632750
+cc100,web,raw web crawl,open,6240359,2424545,373481603
+classla_web_sl,web,raw web crawl,open,4790039,3201033,758198835
+classlawiki_sl,wiki,curated,open,169768,46578,11367593
+coleslaw,legal,curated,open,547888,227668,206159373
+culturax,web,raw web crawl,gated,7335377,3391533,896819201
+finepdf,web,raw web crawl,open,932097,313919,472558637
+fineweb2,web,raw web crawl,open,12091577,6106179,1119181842
+gigafida,mixed,curated,gated,736267,614835,272227770
+hplt,web,raw web crawl,open,10277173,3323131,692843455
+kas,academic,curated,gated,82303,51765,427170775
+kzb,scientific,curated,open,884,485,5300642
+legal_mc4,legal,curated,open,16297,10941,16411015
+macocu_sl,web,raw web crawl,open,6302486,3045813,472560546
+oss,scientific,curated,open,90232,18873,178607982
+parlamint_si,parliamentary,curated,open,311347,48459,8624455
+povejmo_vemo_med,medical,curated,open,23542,352,808176
+siparl,parliamentary,curated,open,1221194,592193,98882633
+slovenian_news,news,curated,open,3502079,2078794,370625132
+solar,student,curated,gated,10970,6083,909075

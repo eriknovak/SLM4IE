@@ -28,6 +28,7 @@ from datatrove.pipeline.readers import JsonlReader  # noqa: E402
 from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 from datatrove.utils.typeshelper import Languages  # noqa: E402
 
+from slm4ie.data.curate.dedup import CompactSentenceDedupSignature  # noqa: E402
 from slm4ie.data.curate.language import LinguaLanguageFilter  # noqa: E402
 from slm4ie.data.curate.pipeline import (  # noqa: E402
     CuratePaths,
@@ -41,6 +42,7 @@ from slm4ie.data.curate.pipeline import (  # noqa: E402
     build_statistics_executors,
     count_docs_per_key,
     per_key_stage_counts,
+    stage_io_counts,
 )
 from slm4ie.data.curate.spam import SpamConfig, SpamFilter  # noqa: E402
 from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce  # noqa: E402
@@ -215,7 +217,7 @@ class TestSentenceDedupStage:
         """Each internal executor carries the right datatrove block."""
         execs = build_sentence_dedup_executors(_paths(tmp_path))
         types_ = [[type(s) for s in ex.pipeline] for ex in execs]
-        assert SentenceDedupSignature in types_[0]
+        assert CompactSentenceDedupSignature in types_[0]
         assert SentenceFindDedups in types_[1]
         assert SentenceDedupFilter in types_[2]
         assert JsonlWriter in types_[2]
@@ -283,7 +285,7 @@ class TestStatisticsStage:
 
 import gzip  # noqa: E402
 import json  # noqa: E402
-from typing import List  # noqa: E402
+from typing import Any, List  # noqa: E402
 
 from datatrove.pipeline.dedup import SentDedupConfig  # noqa: E402
 
@@ -600,3 +602,52 @@ class TestPerKeyStageCounts:
         _write_shards(paths.stage_dir("convert"), "kas", [4, 2])  # out = 6
         counts = per_key_stage_counts("convert", paths, ["kas"])
         assert counts == {"kas": (7, 6)}
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [build_exact_dedup_executors, build_sentence_dedup_executors, build_statistics_executors],
+)
+class TestCorpusStageExecutors:
+    """Corpus stages resume per task, read a roster view, and decouple tasks from workers."""
+
+    def test_tasks_and_workers_are_independent(self, tmp_path: Path, builder: Any) -> None:
+        """Parallel executors take `tasks` and `workers` separately."""
+        execs = builder(_paths(tmp_path), tasks=10, workers=3)
+        parallel = [ex for ex in execs if any(isinstance(s, JsonlReader) for s in ex.pipeline)]
+        assert [(ex.tasks, ex.workers) for ex in parallel] == [(10, 3)] * len(parallel)
+
+    def test_skip_completed_tasks(self, tmp_path: Path, builder: Any) -> None:
+        """Every executor skips tasks datatrove already marked complete."""
+        assert all(ex.skip_completed for ex in builder(_paths(tmp_path)))
+
+    def test_honors_input_override(self, tmp_path: Path, builder: Any) -> None:
+        """Readers use the roster view when one is given."""
+        override = tmp_path / "view"
+        override.mkdir()
+        execs = builder(_paths(tmp_path), input_override=override)
+        readers = [s for ex in execs for s in ex.pipeline if isinstance(s, JsonlReader)]
+        assert readers
+        assert all(str(override) in r.data_folder.path for r in readers)
+
+
+def test_scoped_stage_executors_do_not_skip_completed(tmp_path: Path) -> None:
+    """Scoped buckets share a logging folder, so their executors never skip tasks."""
+    execs = build_quality_executors(_paths(tmp_path)) + build_repetition_executors(_paths(tmp_path))
+    assert not any(ex.skip_completed for ex in execs)
+
+
+def test_stage_io_counts_sums_finished_tasks(tmp_path: Path) -> None:
+    """Counts are summed over every per-task stats file, not only the last run's tasks."""
+    from datatrove.utils.stats import PipelineStats, Stats
+
+    stats_dir = tmp_path / "logs" / "stats"
+    stats_dir.mkdir(parents=True)
+    for rank, (read, written) in enumerate([(5, 3), (7, 4)]):
+        reader, writer = Stats("reader"), Stats("writer")
+        reader["documents"].update(read)
+        writer["total"].update(written)
+        with (stats_dir / f"{rank:05d}.json").open("w") as fh:
+            PipelineStats([reader, writer]).save_to_disk(fh)
+    assert stage_io_counts(tmp_path / "logs") == (12, 7)
+    assert stage_io_counts(tmp_path / "missing") == (0, 0)

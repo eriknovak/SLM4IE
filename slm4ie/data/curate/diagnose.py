@@ -31,8 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from slm4ie.data.curate.sample import resolve_output_dir
 from slm4ie.data.curate.stages import final_corpus_dir
-from slm4ie.data.io_utils import resolve_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -125,15 +125,7 @@ def resolve_corpus_dir(config_path: Path, base_dir: Optional[Path] = None) -> Pa
     """
     if base_dir is not None:
         return base_dir
-    try:
-        with config_path.open() as fh:
-            cfg = yaml.safe_load(fh) or {}
-    except OSError as exc:
-        raise FileNotFoundError(f"curation config not readable: {config_path}") from exc
-    output_dir = cfg.get("output_dir")
-    if output_dir is None:
-        raise FileNotFoundError(f"no corpus root: pass --base-dir or set output_dir in {config_path}.")
-    return resolve_project_path(output_dir) / final_corpus_dir()
+    return resolve_output_dir(config_path) / final_corpus_dir()
 
 
 def build_detector(candidates: List[str], low_accuracy: bool) -> Any:

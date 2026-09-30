@@ -180,3 +180,9 @@ site/
 .claude/runs/
 .claude/devflow/
 .claude/labflow/
+
+# Local MLflow store; the project's runs live on the server at localhost:5555.
+mlruns/
+
+# marimo's notebook cache.
+__marimo__/

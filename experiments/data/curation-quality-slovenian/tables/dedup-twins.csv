@@ -1,0 +1,3 @@
+stage,dropped_assessed,exact_twin,shares_any_window,covered_at_floor,coverage_floor,twin_survives_to_corpus,twin_match_rate,median_window_coverage,unmatched
+exact_dedup,489,486,489,489,0.5,412,0.8364,1.0,80
+sentence_dedup,689,0,640,563,0.5,458,0.5806,0.86,289

@@ -13,7 +13,10 @@ Each stage writes a durable on-disk artifact and a `.complete` sentinel under
 and editing one section of the config cascade-invalidates that stage plus every
 downstream stage. `input_dir` is the folder of `<key>.jsonl` files from the
 extract step; `output_dir` is the pretrain-owned tree. The dataset key list
-comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml).
+comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml); entries
+marked `role: benchmark` (evaluation gold such as SUK) are skipped by `--all`
+so they never enter the corpus, and `access: gated` marks licence-bound sources
+whose totals are reported separately from the open ones.
 
 The settings are a shared registry, so the corpus is built once and reused by
 every experiment. The config is still passed explicitly, since an experiment may
@@ -67,10 +70,25 @@ result.
 Internally each dedup stage chains three datatrove executors via `depends=`:
 signature → find (single-worker reducer over signatures) → filter + write. The
 sig/find scratch lives at `<output_dir>/_dedup_state/` and is purged when the
-stage's sentinel lands. The statistics stage is single-process because
-`CorpusStats` keeps global counters on its instance. The sentence-dedup blocks
+stage's sentinel lands. The statistics stage maps `CorpusStats` over the corpus
+into per-task partials and reduces them in one process. The sentence-dedup blocks
 use `Languages.slovenian` so datatrove dispatches its bundled Slovenian
-`SpaCyTokenizer` for sentence boundaries.
+`SpaCyTokenizer` for sentence boundaries; its signature step packs hashes into
+numpy chunks rather than datatrove's per-sentence Python tuples, which cuts its
+memory about tenfold and writes identical files.
+
+The corpus-wide stages read only the roster's datasets (through a symlink view
+at `<output_dir>/_inputs/<stage>/`), so folders left upstream by keys dropped
+from `extract.yaml` or marked `role: benchmark` never reach them. They run one
+datatrove task per input shard, so a task holds at most one shard in memory and
+`--max-workers` only sets how many tasks run at once.
+
+**Resuming a crashed corpus stage.** Each corpus stage records its config hash,
+task count and an input fingerprint in `<stage folder>/.in_progress.json` when it
+starts. Rerunning the same command after a crash resumes: datatrove skips the
+tasks it marked complete under `_logs/<stage>/`, and the dedup scratch is kept.
+If any of the three values changed, the stage starts fresh and first clears its
+output folder, logs and scratch, so no shard from an earlier run survives.
 
 ## Sentinels: what triggers a rebuild
 
@@ -159,7 +177,9 @@ effectively non-overridable until some are surfaced.
 │   └── .complete
 ├── _dedup_state/                           sig/find scratch (auto-purged
 │                                           when each dedup sentinel lands)
-└── _logs/<stage>/                          datatrove per-executor logs
+├── _inputs/<stage>/                        roster view a corpus stage reads
+└── _logs/<stage>/                          datatrove per-executor logs and
+                                            per-task completion markers
 ```
 
 ## Useful invocations
@@ -193,7 +213,7 @@ uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --al
 ```
 
 `--max-workers` is **whole-pipeline**, not per-dataset: every parallel datatrove
-executor inside one stage uses the same worker count, so the per-dataset log
+executor inside one stage runs that many tasks at once, so the per-dataset log
 routing of `prepare_datasets.py` does not apply here. The default is 1 (serial)
 so a casual `--all` invocation does not silently saturate the box.
 
@@ -231,3 +251,39 @@ the likely confounders is much faster than the config's full European set and
 still separates Slovenian from English. `--base-dir` points it at a stage other
 than the final corpus; `--per-dataset` and `--max-shards-per-dataset` size the
 sample.
+
+## Sampling what each stage kept and dropped
+
+Every stage writes only the documents it keeps, so its drops exist on disk only
+as the difference between its output and its input. The `sample` subcommand
+reconstructs that difference and draws a balanced sample from it, so each
+stage's decisions can be judged rather than assumed.
+
+```bash
+uv run python scripts/curate_pretraining_corpus.py sample --config "$CURATION" \
+    --out data/experiments/data/<category>/<slug>/interim/sample.jsonl \
+    --all --max-workers 12
+```
+
+The strata are `dataset x stage x decision`, where the decision is `kept` (the
+document is in the stage's output) or `dropped` (it is in the stage's input but
+not its output). `--per-cell` sets how many documents each cell holds (40),
+`--max-chars` how much of each document is written (2,000), and `--seed` makes
+the draw reproducible. One row is written per document, listing every cell it
+was drawn into, so a document kept by several stages is judged once.
+
+A stage does not keep its documents in the shard they arrived in, so no output
+shard can be set against an input shard opposite it, and position pairs them
+wrongly: `culturax` alone redistributes every document between `01_language`
+and `02_spam`. Deciding what a stage dropped therefore needs the stage's whole
+output. Each cell reads all of it once — that gives both the kept sample and an
+index of surviving ids, held as one 64-bit hash per document — and then reads
+input shards, where any document the index does not know was dropped.
+`--shards-per-cell` (3 by default, 0 for all) bounds only that second read, so
+the cost is one pass over each stage plus a few input shards.
+
+Two caveats. A source whose document ids are not unique reports fewer drops than
+it made, because a dropped document sharing an id with a surviving one reads as
+a survivor — `coleslaw` is such a source. And only datasets present in the final
+corpus are sampled: sources excluded from the build, or dropped entirely by a
+stage, are not part of the roster.

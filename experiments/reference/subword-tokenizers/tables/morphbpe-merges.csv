@@ -1,0 +1,7 @@
+Merge,Character BPE joins,hiša in Character BPE,MorphBPE joins,hiša in MorphBPE
+1,h + i,hi š a,i + š,h iš a
+2,hi + š,hiš a,h + iš,hiš a
+3,i + z,hiš a,m + i,hiš a
+4,m + iz,hiš a,mi + z,hiš a
+5,hiš + a,hiša,no pair left,hiš a
+6,hiš + e,hiša,no pair left,hiš a

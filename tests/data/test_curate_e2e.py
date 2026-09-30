@@ -486,3 +486,82 @@ def test_recount_backfills_per_source_counts(tmp_path: Path) -> None:
     assert (lang_beta.records_in, lang_beta.records_out) == (2, 1)
     # config_hash preserved, so the sentinels stay current (not re-run).
     assert conv_alfa.config_hash == "h"
+
+
+def _corpus_rows(stage_dir: Path) -> List[str]:
+    """Return every document's id and text under *stage_dir*, sorted, for output comparison.
+
+    `metadata.file_path` is left out: it names the run's input view, which differs per output root.
+    """
+    import gzip
+
+    rows: List[str] = []
+    for shard in stage_dir.glob("*/*.jsonl.gz"):
+        with gzip.open(shard, "rt", encoding="utf-8") as fh:
+            rows.extend(f"{rec['id']}\t{rec['text']}" for rec in map(json.loads, fh))
+    return sorted(rows)
+
+
+@pytest.mark.slow
+def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sentence-dedup crash after its signature step resumes without redoing it.
+
+    The first `--all` run fails once the signature tasks are done; the rerun
+    must keep their completion markers, finish the stage, clear its progress
+    file, and produce the same corpus as an uninterrupted run. Stale shards of
+    a key outside the roster must not reach the corpus either.
+    """
+    import slm4ie.data.curate.runner as curate_runner
+
+    in_dir = tmp_path / "extracted"
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS)
+    extract_cfg = tmp_path / "extract.yaml"
+    _write_extract_config(extract_cfg)
+
+    def run_all(out_dir: Path) -> None:
+        pretrain_cfg = tmp_path / f"{out_dir.name}.yaml"
+        _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+        curate(
+            datasets=[],
+            run_all=True,
+            stage="all",
+            input_dir=in_dir,
+            output_dir=out_dir,
+            force=False,
+            workers=1,
+            pretrain_config=pretrain_cfg,
+            extract_config=extract_cfg,
+        )
+
+    clean_dir = tmp_path / "clean"
+    run_all(clean_dir)
+
+    crash_dir = tmp_path / "crash"
+    (crash_dir / "04_repetition" / "benchmark").mkdir(parents=True)
+    (crash_dir / "04_repetition" / "benchmark" / "00000.jsonl.gz").write_bytes(
+        (clean_dir / "04_repetition" / "alfa" / "00000.jsonl.gz").read_bytes()
+    )
+    real_builder = curate_runner.build_sentence_dedup_executors
+
+    def crashing_builder(*args, **kwargs):
+        execs = real_builder(*args, **kwargs)
+        execs[0].run()
+        raise RuntimeError("simulated crash after the signature step")
+
+    monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", crashing_builder)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        run_all(crash_dir)
+    completions = crash_dir / "_logs" / "sentence_dedup" / "1_sig" / "completions"
+    markers = sorted(completions.iterdir())
+    assert markers
+    assert (crash_dir / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).is_file()
+
+    monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", real_builder)
+    marker_mtimes = {m: m.stat().st_mtime_ns for m in markers}
+    run_all(crash_dir)
+    assert {m: m.stat().st_mtime_ns for m in markers} == marker_mtimes
+    assert not (crash_dir / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).exists()
+    assert (crash_dir / "07_statistics" / ".complete").exists()
+    assert _dataset_dirs(crash_dir / "05_exact_dedup") == {"alfa", "beta"}
+    assert _corpus_rows(crash_dir / "06_sentence_dedup") == _corpus_rows(clean_dir / "06_sentence_dedup")

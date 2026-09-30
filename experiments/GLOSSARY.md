@@ -19,10 +19,42 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Recall@k** (R@k): the share of correct items found within the top k.
 - **Accuracy**: the share of all decisions that are correct; misleading when classes are imbalanced.
 - **Cohen's κ** (κ, kappa): agreement between two raters beyond what chance would give; 1 is full agreement, 0 chance level, below 0 worse than chance.
+- **Quadratic-weighted κ** (weighted kappa): Cohen's κ for an ordered scale such as 1-5, where a disagreement costs the square of its distance, so a one-point miss counts far less than a three-point one.
+- **Wilson interval** (Wilson score interval): a confidence interval for a share that, unlike the textbook one, never runs below 0 or above 1, which matters for shares near either end.
+- **Drop precision**: of the documents a curation stage dropped, the share judged bad text; high means the stage removes what it should.
+- **Residual bad rate**: of the documents a curation stage kept, the share judged bad text; what the stage failed to catch.
+- **Kept win rate**: of the pairs of one kept and one dropped document from the same source and stage, the share where the judge prefers the kept one in both presentation orders.
+- **Order disagreement**: the share of pairs whose answer changes when the two documents swap places; it measures the judge's position bias.
+- **Side-with-judge share**: of the cases where the judge and the pipeline conflict, the share where a person labelling blind agrees with the judge.
+- **Twin match rate**: of a dedup stage's dropped documents, the share whose content survives in the finished corpus as another copy — byte-identical for exact dedup, sharing at least half its three-sentence windows for sentence dedup.
+- **Window coverage**: the share of a document's three-sentence windows that another document also contains.
+- **Retention**: the share of a source's converted documents that reach the finished corpus.
+- **Type-token ratio** (TTR): distinct tokens divided by tokens; it falls as a sample grows, so it is only compared at one fixed token budget.
+- **Out-of-vocabulary rate** (OOV rate): the share of alphabetic tokens a lexicon does not list; names, foreign words, code and encoding damage all count as out of vocabulary.
+- **CPU hours**: processor time a step consumed, summed over its tasks; comparable between steps and machines.
+- **Wall hours** (wall clock): elapsed time a step took on the machine that ran it, at the worker count it was given.
 
 ## Terms
 
 - **q05, q50, q95** (q05, q50, q95): the 5th, 50th (median) and 95th percentiles of a distribution.
+- **Curation pipeline**: the eight stages that turn extracted text into the pretraining corpus, in order convert, language, spam, quality, repetition, exact dedup, sentence dedup and statistics; the six from language to sentence dedup each keep or drop every document.
+- **Content filter**: one of the four curation stages that judge a document's content — the language, spam, quality and repetition filters — as opposed to the two dedup stages, which remove copies.
+- **Gopher heuristics** (Gopher-style): the rule-based quality and repetition filters published with DeepMind's Gopher model — thresholds on document length, word length, symbol ratios and repeated n-grams, tuned on English web text.
+- **Raw web crawl**: a source scraped from the open web with little editing — here c4, cc100, culturax, fineweb2, hplt, macocu_sl, classla_web_sl and finepdf.
+- **Curated source**: a source assembled or edited by people for a purpose — here the parliamentary, medical, legal, scientific, news, wiki and reference corpora.
+- **Sloleks**: the reference lexicon of Slovene word forms, used here to check whether a token is an ordinary Slovene word.
+- **LLM judge** (judge): a language model given a fixed rubric and asked to label documents, standing in for a human annotator once its agreement with one is measured.
+- **Bad text** (lenient bar, strict bar): at the lenient bar, a document the judge scores coherence 2 or lower, labels garbage or boilerplate, or flags as adult or spam; the strict bar also counts coherence 3.
+- **Coherence**: the rubric's 1-5 score of whether a document reads as connected, sensible text, from unreadable (1) to fluent, well-formed prose (5).
+- **Boilerplate**: text furniture rather than written content — menus, footers, cookie notices, navigation, templated disclaimers.
+- **Calibration set**: documents labelled by both a person and the judge, so their agreement is known before the judge's labels are used as evidence.
+- **Adjudication set**: documents drawn where the judge and the pipeline flatly disagree, labelled by a person to settle which of the two is right.
+- **Stratified sample**: a fixed number of documents from every source, stage and decision, so small sources are represented; its rates describe each cell, not the corpus as a whole.
+- **Pairwise comparison**: the judge is shown two documents and asked which is better, or whether they tie; each pair is asked twice with the documents swapped.
+- **Position bias**: a judge's tendency to prefer whichever document it is shown first (or second), regardless of content.
+- **Grill** (grill round): a structured design interview that questions a plan one decision at a time; a history line's `Q15` names its fifteenth question.
+- **SLING**: the Slovenian national supercomputing network, whose clusters the project can use for jobs that do not fit on one machine.
+- **Gated source**: a dataset whose licence restricts redistribution, so it is counted separately from what a public release could hold.
 - **KPI** (KPI 2, KPI 3, KPI 4): a key performance indicator the ARIS proposal (Z2-70067) commits the project to. KPI 2 asks for more than 10,000 examples in each of at least two domains, medicine and science; KPI 3 for more than 5B tokens per language; KPI 4 for more than 500,000 tokens per domain.
 - **Access filter** (open, open+login, all): which datasets a total counts. `open` is what anyone can download, `open+login` adds what a registered user can, `all` adds gated and not-downloadable sources — what exists rather than what is reachable.
 - **Provenance** (native, translated, generated): how a dataset's Slovene text came to exist. `native` is written in Slovene, `translated` is carried into Slovene from another language, `generated` is machine-written or automatically annotated.

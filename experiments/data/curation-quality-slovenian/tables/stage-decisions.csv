@@ -1,0 +1,7 @@
+stage,drop_precision,drop_precision_n,drop_precision_low,drop_precision_high,drop_precision_bad,drop_precision_strict,drop_precision_strict_low,drop_precision_strict_high,drop_precision_strict_bad,residual_bad_rate,residual_bad_rate_n,residual_bad_rate_low,residual_bad_rate_high,residual_bad_rate_bad,residual_bad_rate_strict,residual_bad_rate_strict_low,residual_bad_rate_strict_high,residual_bad_rate_strict_bad
+language,0.4374,695,0.401,0.4745,304,0.5353,0.4981,0.572,372,0.0875,800,0.0698,0.1091,70,0.2437,0.2153,0.2747,195
+spam,0.1975,800,0.1714,0.2265,158,0.3613,0.3287,0.3951,289,0.0625,800,0.0477,0.0815,50,0.235,0.2069,0.2656,188
+quality,0.1237,800,0.1027,0.1484,99,0.29,0.2596,0.3224,232,0.03,800,0.0202,0.0443,24,0.1862,0.1608,0.2147,149
+repetition,0.1085,774,0.0885,0.1324,84,0.314,0.2822,0.3475,243,0.0338,800,0.0233,0.0487,27,0.175,0.1502,0.2029,140
+exact_dedup,0.0342,497,0.0215,0.0541,17,0.1469,0.1185,0.1807,73,0.0387,800,0.0274,0.0545,31,0.1963,0.1702,0.2252,157
+sentence_dedup,0.0203,689,0.0121,0.0338,14,0.1234,0.1009,0.15,85,0.0575,800,0.0434,0.0758,46,0.2512,0.2224,0.2824,201
