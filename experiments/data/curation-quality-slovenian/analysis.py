@@ -34,6 +34,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import yaml
 
 from slm4ie.data.curate.profile import iter_stage_sentinels
+from slm4ie.data.judge import interleave
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -49,6 +50,9 @@ STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_d
 
 #: How a pair can come out once both orders are read, in the order reported.
 PAIRWISE_CALLS: Tuple[str, ...] = ("kept", "dropped", "tie", "orders_differ")
+
+#: Stages that remove duplicates rather than bad text (D9).
+DEDUP_STAGES = frozenset({"exact_dedup", "sentence_dedup"})
 
 #: Text shapes that are bad whatever the coherence score says.
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
@@ -785,6 +789,99 @@ def draw_figures(
     return written
 
 
+def draw_adjudications(
+    sample: List[Dict[str, Any]],
+    verdicts: Dict[str, Dict[str, Any]],
+    labelled_sources: Iterable[str],
+    size: int = 30,
+    seed: int = 20260930,
+) -> List[Dict[str, Any]]:
+    """Choose the documents where the judge and the pipeline flatly conflict.
+
+    A flat conflict is a content filter dropping text the judge calls clean
+    even at the strict bar, or keeping text it calls bad at the lenient one;
+    the dedup stages are left out because a duplicate is not bad text (D9).
+    Only sources the calibration labels never reached are drawn from, since
+    agreement there is what D5 leaves untested. The draw is stratified by
+    source and conflict direction and interleaved, so stopping early still
+    covers every source.
+
+    Args:
+        sample: Sample rows, each carrying the `cells` it was drawn into.
+        verdicts: The judge's verdicts, keyed by document id.
+        labelled_sources: Sources the calibration labels already cover.
+        size: How many documents to draw.
+        seed: Seed fixing the draw and its order.
+
+    Returns:
+        The chosen rows in labelling order, each with the conflicting cells
+        under `conflicts`.
+    """
+    skip = set(labelled_sources)
+    strata: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for document in sample:
+        verdict = verdicts.get(document["id"])
+        if verdict is None or document["dataset"] in skip:
+            continue
+        conflicts = [
+            cell
+            for cell in document["cells"]
+            if cell["stage"] not in DEDUP_STAGES
+            and (
+                (cell["decision"] == "dropped" and not is_bad(verdict, strict=True))
+                or (cell["decision"] == "kept" and is_bad(verdict))
+            )
+        ]
+        if conflicts:
+            direction = "dropped_clean" if conflicts[0]["decision"] == "dropped" else "kept_bad"
+            strata[(document["dataset"], direction)].append({**document, "conflicts": conflicts})
+    return interleave(strata, size, seed)
+
+
+def adjudication_rows(adjudications: List[Dict[str, Any]], labels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Report how often a person sides with the judge where it and the pipeline conflict.
+
+    Every document here was drawn because the two disagree, so agreement
+    statistics such as kappa mean nothing on it; the question is simply which
+    side the person takes. The person's keep-or-drop call uses the D8 bar.
+
+    Args:
+        adjudications: Rows from `draw_adjudications`, with their `conflicts`.
+        labels: The person's labels on them; the last label for an id wins.
+
+    Returns:
+        One row per conflict direction and a pooled row, each with the share
+        of labelled documents where the person sided with the judge and its
+        Wilson interval.
+    """
+    by_id = {label["id"]: label for label in labels}
+    sided: Dict[str, List[bool]] = defaultdict(list)
+    for document in adjudications:
+        label = by_id.get(document["id"])
+        if label is None:
+            continue
+        dropped = document["conflicts"][0]["decision"] == "dropped"
+        direction = "pipeline dropped, judge clean" if dropped else "pipeline kept, judge bad"
+        with_judge = not is_bad(label) if dropped else is_bad(label)
+        sided[direction].append(with_judge)
+        sided["all"].append(with_judge)
+
+    rows: List[Dict[str, Any]] = []
+    for direction, calls in sorted(sided.items(), key=lambda item: item[0] == "all"):
+        low, high = wilson(sum(calls), len(calls))
+        rows.append(
+            {
+                "conflict": direction,
+                "labelled": len(calls),
+                "sides_with_judge": sum(calls),
+                "share": round(sum(calls) / len(calls), 4),
+                "share_low": round(low, 4),
+                "share_high": round(high, 4),
+            }
+        )
+    return rows
+
+
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     """Write rows to a CSV, creating the directory if needed.
 
@@ -879,6 +976,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--extract-config", type=Path, default=Path("configs/data/extract.yaml"), help="Read for each source's access."
     )
+    parser.add_argument(
+        "--draw-adjudications",
+        type=int,
+        metavar="N",
+        help="Draw N judge-vs-pipeline conflicts to interim/adjudication.jsonl for hand labelling, then stop.",
+    )
     return parser.parse_args(argv)
 
 
@@ -888,6 +991,16 @@ def main() -> None:
     sample = read_jsonl(args.data_root / "interim" / "sample.jsonl")
     verdicts = {row["id"]: row for row in read_jsonl(args.data_root / "interim" / args.verdicts)}
     print(f"{len(verdicts)} verdicts over {len(sample)} sampled documents")
+
+    if args.draw_adjudications:
+        destination = args.data_root / "interim" / "adjudication.jsonl"
+        if destination.exists():
+            raise FileExistsError(f"{destination} exists; labels may already refer to it")
+        meta = json.loads((args.data_root / "final" / "human-labels-calibration.meta.json").read_text())
+        drawn = draw_adjudications(sample, verdicts, meta["sources"], size=args.draw_adjudications)
+        destination.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in drawn), encoding="utf-8")
+        print(f"wrote {len(drawn)} conflicts to {destination}")
+        return
 
     grouped = _cells(sample, verdicts)
     pooled = stage_rows(grouped, by_source=False)
@@ -938,6 +1051,19 @@ def main() -> None:
 
     losses = loss_rows(funnel)
     written.append(write_csv(args.tables / "source-losses.csv", losses))
+    # Labelled by hand in label.py (--set adjudication), then frozen to final/.
+    adjudicated_path = args.data_root / "final" / "human-labels-adjudication.jsonl"
+    if adjudicated_path.is_file():
+        adjudicated = adjudication_rows(
+            read_jsonl(args.data_root / "interim" / "adjudication.jsonl"), read_jsonl(adjudicated_path)
+        )
+        for row in adjudicated:
+            print(
+                f"{row['conflict']:32s}{row['sides_with_judge']:3d} of {row['labelled']:2d} side with the judge "
+                f"({row['share']:.0%} [{row['share_low']:.0%}-{row['share_high']:.0%}])"
+            )
+        written.append(write_csv(args.tables / "adjudication.csv", adjudicated))
+
     written += draw_figures(args.figures, pooled, per_source, pairwise, losses, throughput)
     for path in written:
         print(f"wrote {path}")

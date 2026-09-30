@@ -218,6 +218,38 @@ def judged_ids(destination: Path) -> Set[str]:
     return ids
 
 
+def interleave(strata: Dict[Any, List[Dict[str, Any]]], size: int, seed: int) -> List[Dict[str, Any]]:
+    """Take documents round-robin across strata, in a seeded order.
+
+    A labeller may stop before the end, so the order matters as much as the
+    choice: taking one document from each stratum in turn keeps any prefix of
+    the result spread over every stratum.
+
+    Args:
+        strata: Documents grouped by stratum; the lists are shuffled in place.
+        size: How many documents to take; fewer if the strata run out.
+        seed: Seed fixing the order of the strata and the pick within one.
+
+    Returns:
+        The chosen documents, in the order they were taken.
+    """
+    rng = random.Random(seed)
+    order = sorted(strata)
+    rng.shuffle(order)
+    for key in order:
+        rng.shuffle(strata[key])
+
+    chosen: List[Dict[str, Any]] = []
+    while len(chosen) < size and any(strata[key] for key in order):
+        for key in order:
+            if not strata[key]:
+                continue
+            chosen.append(strata[key].pop())
+            if len(chosen) == size:
+                break
+    return chosen
+
+
 def draw_calibration_set(documents: Sequence[Dict[str, Any]], size: int, seed: int = 20260916) -> List[Dict[str, Any]]:
     """Choose the documents a person labels by hand, spread across the strata.
 
@@ -239,22 +271,7 @@ def draw_calibration_set(documents: Sequence[Dict[str, Any]], size: int, seed: i
     for document in documents:
         cell = sorted(document["cells"], key=lambda c: (c["stage"], c["decision"]))[0]
         strata.setdefault((document["dataset"], cell["stage"], cell["decision"]), []).append(document)
-
-    rng = random.Random(seed)
-    order = sorted(strata)
-    rng.shuffle(order)
-    for key in order:
-        rng.shuffle(strata[key])
-
-    chosen: List[Dict[str, Any]] = []
-    while len(chosen) < size and any(strata[key] for key in order):
-        for key in order:
-            if not strata[key]:
-                continue
-            chosen.append(strata[key].pop())
-            if len(chosen) == size:
-                break
-    return sorted(chosen, key=lambda document: document["id"])
+    return sorted(interleave(strata, size, seed), key=lambda document: document["id"])
 
 
 def _batches(documents: Sequence[Dict[str, Any]], size: int) -> List[List[Dict[str, Any]]]:

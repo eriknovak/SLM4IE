@@ -1,8 +1,13 @@
-"""Hand-label the calibration set for the curation-quality experiment.
+"""Hand-label documents for the curation-quality experiment.
 
 Run it with:
 
     uv run marimo edit experiments/data/curation-quality-slovenian/label.py
+
+and label the adjudication set, the cases where the judge and the pipeline
+conflict, with:
+
+    uv run marimo edit experiments/data/curation-quality-slovenian/label.py -- --set adjudication
 
 The judge's labels only become evidence once their agreement with a person is
 known, so this notebook collects that person's labels on the same rubric. The
@@ -26,8 +31,14 @@ app = marimo.App(width="full")
 def imports():
     """Load the libraries and the files this notebook reads and writes.
 
+    The set is chosen on the command line; each has its own documents, its
+    own label file and the judge pass its documents were judged in.
+
     Returns:
         The marimo module, the json and html modules, and the three paths.
+
+    Raises:
+        ValueError: If `--set` names no known set.
     """
     import html
     import json
@@ -36,9 +47,14 @@ def imports():
     import marimo as mo
 
     interim = Path("data/experiments/data/curation-quality-slovenian/interim")
-    calibration_path = interim / "calibration.jsonl"
-    labels_path = interim / "human-labels.jsonl"
-    verdicts_path = interim / "verdicts-sonnet.jsonl"
+    sets = {
+        "calibration": ("calibration.jsonl", "human-labels.jsonl", "verdicts-sonnet.jsonl"),
+        "adjudication": ("adjudication.jsonl", "human-labels-adjudication.jsonl", "verdicts-full-sonnet.jsonl"),
+    }
+    chosen = mo.cli_args().get("set", "calibration")
+    if chosen not in sets:
+        raise ValueError(f"unknown --set {chosen!r}; choose one of {sorted(sets)}")
+    calibration_path, labels_path, verdicts_path = (interim / name for name in sets[chosen])
     return calibration_path, html, json, labels_path, mo, verdicts_path
 
 

@@ -1,0 +1,4 @@
+conflict,labelled,sides_with_judge,share,share_low,share_high
+"pipeline dropped, judge clean",18,14,0.7778,0.5478,0.91
+"pipeline kept, judge bad",11,5,0.4545,0.2127,0.7199
+all,29,19,0.6552,0.4734,0.8006
