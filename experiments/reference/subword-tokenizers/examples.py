@@ -153,5 +153,76 @@ def morphbpe() -> None:
     )
 
 
+def pair_counts(words: Dict[str, int], merges: List[Tuple[str, str]]) -> Dict[Tuple[str, str], int]:
+    """Count adjacent symbol pairs over `words` after replaying `merges`.
+
+    Args:
+        words (Dict[str, int]): Word to corpus count.
+        merges (List[Tuple[str, str]]): Merges applied before counting.
+
+    Returns:
+        Dict[Tuple[str, str], int]: Pair to weighted count.
+    """
+    ranks = merge_ranks(merges)
+    counts: Dict[Tuple[str, str], int] = {}
+    for word, freq in words.items():
+        symbols = encode_bpe(word, ranks)
+        for pair in zip(symbols, symbols[1:]):
+            counts[pair] = counts.get(pair, 0) + freq
+    return counts
+
+
+def character_bpe() -> None:
+    """Write the merge trace and the encodings for the Character BPE entry.
+
+    The trainer runs inside the HuggingFace `tokenizers` library, so the merge
+    rule is checked here instead: every learned pair must be the most frequent
+    one at its step, and a tie must go to the pair whose symbols entered the
+    vocabulary first.
+
+    Raises:
+        AssertionError: If a learned merge is not a most frequent pair, if a tie
+            is broken another way, or if replaying the merges disagrees with the
+            backend's own encoder.
+    """
+    sentences = [form for form, count in CORPUS.items() for _ in range(count)]
+    context = TrainContext(special_tokens=SPECIAL_TOKENS)
+    char = CharBpeTokenizer()
+    char.train(sentences, VOCAB_SIZE, config=context)
+    merges = learned_merges(char)
+    vocab = char.vocab
+
+    rows: List[List[str]] = []
+    for k, pair in enumerate(merges):
+        counts = pair_counts(CORPUS, merges[:k])
+        top = max(counts.values())
+        tied = sorted(p for p, n in counts.items() if n == top)
+        assert counts[pair] == top, (k, pair, counts)
+        assert pair == min(tied, key=lambda p: (vocab[p[0]], vocab[p[1]])), (k, pair, tied)
+        rows.append(
+            [
+                str(k + 1),
+                " + ".join(pair),
+                str(top),
+                ", ".join(a + b for a, b in tied if (a, b) != pair) or "none",
+                " ".join(encode_bpe(TRACED_WORD, merge_ranks(merges[: k + 1]))),
+            ]
+        )
+    write_csv("character-bpe-merges", ["Merge", "Joins", "Count", "Tied pairs left", f"{TRACED_WORD} after it"], rows)
+
+    ranks = merge_ranks(merges)
+    for word in [*CORPUS, *HELD_OUT]:
+        assert encode_bpe(word, ranks) == char.encode(word), (word, encode_bpe(word, ranks), char.encode(word))
+    write_csv(
+        "character-bpe-encoding",
+        ["Form", "In the corpus", "Tokens", "Token count"],
+        [
+            [word, "yes" if word in CORPUS else "no", " ".join(char.encode(word)), str(len(char.encode(word)))]
+            for word in ["hiša", "mize", *HELD_OUT, "hišaq"]
+        ],
+    )
+
+
 if __name__ == "__main__":
+    character_bpe()
     morphbpe()
