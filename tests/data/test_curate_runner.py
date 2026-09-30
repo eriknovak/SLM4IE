@@ -27,6 +27,7 @@ from slm4ie.data.curate import (  # noqa: E402
 )
 from slm4ie.data.curate.sentinel import (  # noqa: E402
     CONFIG_CHANGED,
+    NOT_BUILT,
     INPUT_CHANGED,
     LEGACY,
     OUTPUT_CHANGED,
@@ -82,12 +83,14 @@ class _Stub:
     Attributes:
         ran: `(stage, dataset keys)` per executed stage run.
         duplicate: Stage whose next run writes one document twice.
+        drop: Stage whose next run keeps no documents.
     """
 
     def __init__(self) -> None:
         """Start with no recorded runs."""
         self.ran: List[Tuple[str, Tuple[str, ...]]] = []
         self.duplicate: Optional[str] = None
+        self.drop: Optional[str] = None
 
     @property
     def stages(self) -> List[str]:
@@ -128,6 +131,8 @@ class _Stub:
                 docs = [{**d, "text": f"{d['text']}|{stage}:{tag}"} for d in docs]
                 if self.duplicate == stage:
                     docs.append(docs[0])
+                if self.drop == stage:
+                    docs = []
                 _write_docs(output_folder / key, docs, shards=workers)
                 total += len(docs)
             return total, total
@@ -522,13 +527,59 @@ class TestPrepareCorpusStage:
         assert list(staging.glob("*/*.jsonl.gz")) == []
 
 
-def test_input_fingerprint_tracks_shard_layout_not_mtime(tmp_path: Path) -> None:
+def test_shard_layout_tracks_shard_layout_not_mtime(tmp_path: Path) -> None:
     """The resume fingerprint counts shards and follows their sizes, not their mtimes."""
     view = tmp_path / "view"
     _write_stage_shards(view, "d1", 2)
-    count, digest = curate_runner._input_fingerprint(view)
+    count, digest = curate_runner._shard_layout(view)
     assert count == 2
     os.utime(view / "d1" / "00001.jsonl.gz", ns=(1, 1))
-    assert curate_runner._input_fingerprint(view) == (2, digest)
+    assert curate_runner._shard_layout(view) == (2, digest)
     (view / "d1" / "00001.jsonl.gz").write_bytes(b"\x1f\x8b\x08")
-    assert curate_runner._input_fingerprint(view)[1] != digest
+    assert curate_runner._shard_layout(view)[1] != digest
+
+
+def test_fully_filtered_dataset_empties_downstream(env: _Env) -> None:
+    """A dataset an upstream stage now drops entirely leaves no old documents downstream."""
+    env.run("--all")
+    env.cfg["quality"]["min_doc_words"] = 100
+    env.stub.drop = "quality"
+    env.run("--all")
+    assert _read_docs(env.unit("repetition")) == []
+    assert read_sentinel(env.unit("repetition")).records_out == 0  # type: ignore[union-attr]
+    assert not (env.unit("exact_dedup") / _DATASET).exists()
+    env.stub.drop = None
+    assert env.run("--all") == []
+
+
+def test_legacy_sentinel_with_changed_config_is_rebuilt(env: _Env) -> None:
+    """A legacy unit whose config changed is rebuilt rather than blocking the run."""
+    env.run("--all")
+    _make_legacy(env.output_dir)
+    env.status("--adopt")
+    for path in env.unit("quality").glob(SENTINEL_NAME):
+        payload = json.loads(path.read_text())
+        path.write_text(json.dumps({k: payload[k] for k in ("completed_at", "config_hash", "config_slice")}))
+    env.cfg["quality"]["min_doc_words"] = 100
+    assert env.run("--all")[0] == "quality"
+
+
+def test_interrupted_swap_is_finished_not_rebuilt(env: _Env) -> None:
+    """A checked unit left in staging by a crash between the swap's renames is promoted."""
+    env.run("--all")
+    staged = env.output_dir / "_partial" / STAGE_DIRS["quality"] / _DATASET
+    staged.parent.mkdir(parents=True)
+    os.rename(env.unit("quality"), staged)
+    assert env.run("--all") == []
+    assert (env.unit("quality") / SENTINEL_NAME).is_file()
+
+
+def test_status_keeps_unit_whose_input_is_gone(env: _Env) -> None:
+    """A built unit whose extracted file vanished is reported, not stale, matching what run does."""
+    env.run("--all")
+    (env.root / "in" / f"{_DATASET}.jsonl").unlink()
+    code, units = env.status()
+    assert code == 0
+    assert units[("convert", _DATASET)] == ("missing", curate_runner.NO_INPUT)
+    assert env.run("--all") == []
+    assert NOT_BUILT

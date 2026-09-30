@@ -89,6 +89,7 @@ from slm4ie.data.io_utils import (
 )
 from slm4ie.data.stopwords import load_stopwords
 from slm4ie.data.versioning import (
+    EMPTY_DIGEST,
     UnitScan,
     check_integrity,
     combine_named_digests,
@@ -280,12 +281,30 @@ def _has_stage_output(stage_dir: Path, key: str) -> bool:
     return folder.is_dir() and any(folder.glob("*.jsonl.gz"))
 
 
+def _has_input(paths: CuratePaths, stage: str, key: str) -> bool:
+    """Return True if the unit (*stage*, *key*) has an input to be built from.
+
+    Args:
+        paths: Resolved curation paths.
+        stage: Scoped stage name.
+        key: Dataset key.
+
+    Returns:
+        For `convert`, whether `<key>.jsonl` exists; otherwise whether the
+        upstream unit was built, even if it kept no documents.
+    """
+    upstream = upstream_stage(stage)
+    if upstream is None:
+        return (paths.input_folder / f"{key}.jsonl").is_file()
+    return read_sentinel(paths.stage_dir(upstream) / key) is not None
+
+
 #: File in a corpus stage folder recording what an unfinished run started with.
 PROGRESS_NAME: str = ".in_progress.json"
 
 
-def _input_fingerprint(view: Path) -> Tuple[int, str]:
-    """Count and fingerprint the shards a corpus stage will read.
+def _shard_layout(view: Path) -> Tuple[int, str]:
+    """Count and hash the layout of the shards a corpus stage will read.
 
     Args:
         view: Symlink view of the stage's input, one folder per dataset.
@@ -326,12 +345,29 @@ def _swap_into_place(new: Path, final: Path) -> None:
         final: The unit's canonical output folder.
     """
     old = new.with_name(new.name + ".old")
-    shutil.rmtree(old, ignore_errors=True)
+    if old.exists():
+        shutil.rmtree(old)
     final.parent.mkdir(parents=True, exist_ok=True)
     if final.exists():
         os.rename(final, old)
     os.rename(new, final)
-    shutil.rmtree(old, ignore_errors=True)
+    if old.exists():
+        shutil.rmtree(old)
+
+
+def _recover_promotion(new: Path, final: Path) -> None:
+    """Finish a swap that a crash interrupted between its two renames.
+
+    A staged folder carries a sentinel only once it passed its check, so a
+    missing *final* beside a sentinel-bearing *new* is a finished build.
+
+    Args:
+        new: The unit's staging folder.
+        final: The unit's canonical output folder.
+    """
+    if not final.exists() and (new / SENTINEL_NAME).is_file():
+        logger.warning("promoting %s, finished before an interrupted swap", new)
+        _swap_into_place(new, final)
 
 
 def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str, tasks: int, inputs: str) -> bool:
@@ -350,7 +386,7 @@ def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str
         stage: Corpus stage name.
         config_hash_value: Hash of the stage's config slice and roster.
         tasks: Task count this run uses.
-        inputs: The stage's input digest and shard fingerprint.
+        inputs: The stage's input digest and shard layout.
 
     Returns:
         True when resuming, False when the staging folder was cleared.
@@ -1132,6 +1168,9 @@ _LOCK_HEADER = (
 #: Status reason for a unit whose sentinel disagrees with the committed lock file.
 LOCK_DIFFERS = "differs from lock"
 
+#: Status reason for a built unit whose input is gone; a run leaves it as it is.
+NO_INPUT = "no input; output kept"
+
 
 @dataclass
 class _Setup:
@@ -1305,6 +1344,23 @@ def _corpus_inputs(setup: _Setup, stage: str) -> List[str]:
     return [key for key in setup.roster if _has_stage_output(up_dir, key)]
 
 
+def _corpus_has_input(setup: _Setup, stage: str) -> bool:
+    """Return True if a corpus stage's upstream has been built, even if empty.
+
+    Args:
+        setup: The loaded setup.
+        stage: Corpus stage name.
+
+    Returns:
+        Whether any roster unit of the upstream scoped stage, or the upstream
+        corpus stage, has a sentinel.
+    """
+    upstream = cast(str, upstream_stage(stage))
+    if is_scoped(upstream):
+        return any(_has_input(setup.paths, stage, key) for key in setup.roster)
+    return read_sentinel(setup.paths.stage_dir(upstream)) is not None
+
+
 def _corpus_input_digest(paths: CuratePaths, stage: str, input_keys: List[str]) -> Optional[str]:
     """Return a corpus stage's input digest.
 
@@ -1349,30 +1405,53 @@ def _corpus_reason(setup: _Setup, stage: str, input_keys: List[str]) -> Tuple[Op
     return reason, digest
 
 
-def _legacy_units(paths: CuratePaths, keys: List[str], corpus: bool) -> List[str]:
-    """List units whose sentinel predates lineage tracking.
+def _legacy_units(setup: _Setup, keys: List[str], corpus: bool) -> List[str]:
+    """List units whose sentinel predates lineage tracking but still matches its config.
+
+    Such units must be adopted before a run; a legacy unit whose config has
+    changed is stale anyway and is simply rebuilt.
 
     Args:
-        paths: Resolved curation paths.
+        setup: The loaded setup.
         keys: Dataset keys whose scoped units to check.
         corpus: Also check the corpus stages.
 
     Returns:
-        `<stage folder>/<key>` (or `<stage folder>`) of every legacy sentinel.
+        `<stage folder>/<key>` (or `<stage folder>`) of every such unit.
     """
     found = []
     for stage in STAGE_NAMES:
+        units: List[Tuple[str, Path, Optional[str]]]
         if is_scoped(stage):
-            folders = [(f"{STAGE_DIRS[stage]}/{key}", paths.stage_dir(stage) / key) for key in keys]
+            units = [(f"{STAGE_DIRS[stage]}/{key}", setup.paths.stage_dir(stage) / key, key) for key in keys]
         elif corpus:
-            folders = [(STAGE_DIRS[stage], paths.stage_dir(stage))]
+            units = [(STAGE_DIRS[stage], setup.paths.stage_dir(stage), None)]
         else:
             continue
-        for name, folder in folders:
+        for name, folder, key in units:
             sentinel = read_sentinel(folder)
-            if sentinel is not None and sentinel.is_legacy:
+            if sentinel is not None and sentinel.is_legacy and sentinel.config_hash == setup.expected_hash(stage, key):
                 found.append(name)
     return found
+
+
+def _check_unit(
+    in_files: List[Path], out_files: List[Path], workers: int, id_key: str = "id"
+) -> Tuple[UnitScan, UnitScan, Optional[str]]:
+    """Scan a unit's input and output once and run the integrity check.
+
+    Args:
+        in_files: The unit's input files.
+        out_files: The unit's output shards.
+        workers: Processes to scan with.
+        id_key: Id field of the input documents.
+
+    Returns:
+        Tuple `(input scan, output scan, integrity error or None)`.
+    """
+    in_scan = scan_files(in_files, id_key=id_key, digest=False, workers=workers)
+    out_scan = scan_files(out_files, workers=workers)
+    return in_scan, out_scan, check_integrity(in_scan, out_scan)
 
 
 def _integrity_failure(stage: str, errors: Dict[str, str]) -> RuntimeError:
@@ -1428,7 +1507,11 @@ def _run_scoped_bucket(
     staging.mkdir(parents=True)
     upstream = upstream_stage(stage)
     up_dir = paths.stage_dir(upstream) if upstream is not None else None
-    view = _filter_stage_subset(up_dir, bucket_keys) if up_dir is not None else None
+    # A key whose upstream unit kept no documents is promoted empty, not skipped.
+    with_docs = [k for k in bucket_keys if up_dir is None or _has_stage_output(up_dir, k)]
+    if not with_docs:
+        counts = (0, 0)
+    view = _filter_stage_subset(up_dir, with_docs) if up_dir is not None and with_docs else None
     # _stage_runner reads cfg[stage], so hand it the bucket's effective slice.
     bucket_cfg = {**setup.cfg, stage: effective}
     try:
@@ -1439,12 +1522,13 @@ def _run_scoped_bucket(
             workers,
             setup.stopwords,
             setup.spam_assets,
-            dataset_keys=bucket_keys,
+            dataset_keys=with_docs,
             input_view=view,
             log_dir=log_dir,
             output_folder=staging,
         )
-        counts = runner()
+        if with_docs:
+            counts = runner()
     finally:
         if view is not None:
             shutil.rmtree(view, ignore_errors=True)
@@ -1452,11 +1536,11 @@ def _run_scoped_bucket(
     errors: Dict[str, str] = {}
     for key in bucket_keys:
         if up_dir is None:
-            in_scan = scan_files([paths.input_folder / f"{key}.jsonl"], id_key="uid", digest=False)
+            in_scan, out_scan, error = _check_unit(
+                [paths.input_folder / f"{key}.jsonl"], shard_files(staging / key), workers, id_key="uid"
+            )
         else:
-            in_scan = scan_files(shard_files(up_dir / key), digest=False, workers=workers)
-        out_scan = scan_files(shard_files(staging / key), workers=workers)
-        error = check_integrity(in_scan, out_scan)
+            in_scan, out_scan, error = _check_unit(shard_files(up_dir / key), shard_files(staging / key), workers)
         if error:
             errors[key] = error
             continue
@@ -1496,18 +1580,13 @@ def _curate_scoped(
         info: Informational sentinel fields.
     """
     paths = setup.paths
-    upstream = upstream_stage(stage)
-    up_dir = paths.stage_dir(upstream) if upstream is not None else None
     todo: List[str] = []
     inputs: Dict[str, Tuple[Optional[str], Optional[Dict[str, Any]]]] = {}
     no_input: List[str] = []
     for key in dataset_keys:
-        # Keys with no input (never extracted, or filtered out upstream) keep
-        # whatever they have: an unmounted extracted tier must not wipe output.
-        has_input = (
-            (paths.input_folder / f"{key}.jsonl").is_file() if up_dir is None else _has_stage_output(up_dir, key)
-        )
-        if not has_input:
+        _recover_promotion(_staging_dir(paths, stage) / key, paths.stage_dir(stage) / key)
+        # An unmounted extracted tier or an unbuilt upstream must not wipe output.
+        if not _has_input(paths, stage, key):
             no_input.append(key)
             continue
         reason, digest, files = _scoped_reason(setup, stage, key)
@@ -1568,21 +1647,38 @@ def _curate_corpus(setup: _Setup, stage: str, workers: int, info: Dict[str, Any]
         RuntimeError: If a dataset's output fails its integrity check.
     """
     paths = setup.paths
-    input_keys = _corpus_inputs(setup, stage)
-    if not input_keys:
-        logger.info("[%s] no datasets with upstream output; skipping.", stage)
+    _recover_promotion(_staging_dir(paths, stage), paths.stage_dir(stage))
+    if not _corpus_has_input(setup, stage):
+        logger.info("[%s] upstream not built; skipping.", stage)
         return
+    input_keys = _corpus_inputs(setup, stage)
     reason, input_digest = _corpus_reason(setup, stage, input_keys)
     if reason is None:
         logger.info("[%s] sentinel current; skipping.", stage)
         return
     logger.info("[%s] %s", stage, reason)
+    expected_hash = setup.expected_hash(stage)
+    if not input_keys:
+        # Every dataset was filtered out upstream: the stage's output is empty.
+        staging = _staging_dir(paths, stage)
+        shutil.rmtree(staging, ignore_errors=True)
+        write_sentinel(
+            staging,
+            config_slice=_stage_slice(stage, setup.cfg),
+            config_hash_value=expected_hash,
+            records_in=0,
+            records_out=0,
+            stage_version=STAGE_VERSIONS[stage],
+            input_digest=input_digest,
+            document_digest=None if stage == "statistics" else EMPTY_DIGEST,
+            info=info,
+        )
+        _swap_into_place(staging, paths.stage_dir(stage))
+        return
     up_dir = paths.stage_dir(cast(str, upstream_stage(stage)))
     view = _filter_stage_subset(up_dir, input_keys, holder=paths.output_dir / "_inputs" / stage)
-    # One task per input shard caps a task's memory at one shard,
-    # and fixes the task count across reruns so a crash can resume.
-    tasks, shards = _input_fingerprint(view)
-    expected_hash = setup.expected_hash(stage)
+    # One task per shard caps task memory and keeps a crashed run resumable.
+    tasks, shards = _shard_layout(view)
     resumed = _prepare_corpus_stage(paths, stage, expected_hash, tasks, f"{input_digest}|{shards}")
     logger.info(
         "[%s] %s%s (tasks=%d, workers=%d)",
@@ -1612,9 +1708,7 @@ def _curate_corpus(setup: _Setup, stage: str, workers: int, info: Dict[str, Any]
         errors: Dict[str, str] = {}
         digests: List[str] = []
         for key in input_keys:
-            in_scan = scan_files(shard_files(up_dir / key), digest=False, workers=workers)
-            out_scan = scan_files(shard_files(staging / key), workers=workers)
-            error = check_integrity(in_scan, out_scan)
+            _, out_scan, error = _check_unit(shard_files(up_dir / key), shard_files(staging / key), workers)
             if error:
                 errors[key] = error
             digests.append(cast(str, out_scan.document_digest))
@@ -1726,8 +1820,7 @@ def curate(
     cfg = setup.cfg
     paths = setup.paths
     output_dir = paths.output_dir
-    # Validate overrides against the full roster up front so a typo or
-    # out-of-bounds section fails before any stage runs.
+    # Validate overrides up front so a typo fails before any stage runs.
     validate_overrides(setup.overrides, setup.roster)
 
     dataset_keys = list(setup.roster) if run_all else list(datasets)
@@ -1751,7 +1844,7 @@ def curate(
     if force:
         _apply_force(output_dir, stage=stage, run_all=run_all, dataset_keys=dataset_keys)
 
-    legacy = _legacy_units(paths, dataset_keys, corpus=run_all)
+    legacy = _legacy_units(setup, dataset_keys, corpus=run_all)
     if legacy:
         raise RuntimeError(
             f"{len(legacy)} unit(s) carry a sentinel from before lineage tracking (e.g. {legacy[0]}). "
@@ -1829,8 +1922,10 @@ def _unit_status(
     Returns:
         The unit's `UnitStatus`.
     """
+    if not has_input:
+        return UnitStatus(stage, dataset, "missing", NO_INPUT if sentinel is not None else None)
     if sentinel is None:
-        return UnitStatus(stage, dataset, "stale", NOT_BUILT) if has_input else UnitStatus(stage, dataset, "missing")
+        return UnitStatus(stage, dataset, "stale", NOT_BUILT)
     if reason is None and lock_exists and locked != _lock_entry(sentinel):
         reason = LOCK_DIFFERS
     return UnitStatus(stage, dataset, "stale" if reason else "current", reason)
@@ -1873,21 +1968,17 @@ def status(
     results: List[UnitStatus] = []
     for stage in STAGE_NAMES:
         if is_scoped(stage):
-            upstream = upstream_stage(stage)
             for key in setup.roster:
                 sentinel = read_sentinel(paths.stage_dir(stage) / key)
-                if upstream is None:
-                    has_input = (paths.input_folder / f"{key}.jsonl").is_file()
-                else:
-                    has_input = _has_stage_output(paths.stage_dir(upstream), key)
+                has_input = _has_input(paths, stage, key)
                 reason = _scoped_reason(setup, stage, key)[0] if sentinel is not None else None
                 locked = (lock.get(stage) or {}).get(key)
                 results.append(_unit_status(stage, key, sentinel, reason, has_input, locked, lock_exists))
         else:
-            input_keys = _corpus_inputs(setup, stage)
             sentinel = read_sentinel(paths.stage_dir(stage))
-            reason = _corpus_reason(setup, stage, input_keys)[0] if sentinel is not None else None
-            results.append(_unit_status(stage, None, sentinel, reason, bool(input_keys), lock.get(stage), lock_exists))
+            reason = _corpus_reason(setup, stage, _corpus_inputs(setup, stage))[0] if sentinel is not None else None
+            has_input = _corpus_has_input(setup, stage)
+            results.append(_unit_status(stage, None, sentinel, reason, has_input, lock.get(stage), lock_exists))
     return results
 
 
@@ -1943,10 +2034,14 @@ def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
     def adoptable(sentinel: Optional[Sentinel], expected: str) -> bool:
         return sentinel is not None and sentinel.is_legacy and sentinel.config_hash == expected
 
+    # Keys outside the roster (e.g. benchmarks run by name) are adopted too.
+    convert_dir = paths.stage_dir("convert")
+    on_disk = sorted(d.name for d in convert_dir.iterdir() if d.is_dir()) if convert_dir.is_dir() else []
+    keys = setup.roster + [k for k in on_disk if k not in setup.roster and not k.startswith((".", "_"))]
     scoped = [
         (stage, key)
         for stage in SCOPED_STAGES
-        for key in setup.roster
+        for key in keys
         if adoptable(read_sentinel(paths.stage_dir(stage) / key), setup.expected_hash(stage, key))
     ]
     corpus = [s for s in CORPUS_STAGES if adoptable(read_sentinel(paths.stage_dir(s)), setup.expected_hash(s))]
