@@ -97,7 +97,6 @@ from slm4ie.data.versioning import (
     merge_digests,
     read_lock,
     scan_units,
-    scan_files,
     shard_files,
     write_lock,
 )
@@ -1437,7 +1436,7 @@ def _legacy_units(setup: _Setup, keys: List[str], corpus: bool) -> List[str]:
 def _check_unit(
     in_files: List[Path], out_files: List[Path], workers: int, id_key: str = "id"
 ) -> Tuple[UnitScan, UnitScan, Optional[str]]:
-    """Scan a unit's input and output once and run the integrity check.
+    """Scan a unit's input and output in one pass and run the integrity check.
 
     Args:
         in_files: The unit's input files.
@@ -1448,8 +1447,8 @@ def _check_unit(
     Returns:
         Tuple `(input scan, output scan, integrity error or None)`.
     """
-    in_scan = scan_files(in_files, id_key=id_key, digest=False, workers=workers)
-    out_scan = scan_files(out_files, workers=workers)
+    scans = scan_units({"in": ScanRequest(in_files, id_key, digest=False), "out": ScanRequest(out_files)}, workers)
+    in_scan, out_scan = scans["in"], scans["out"]
     return in_scan, out_scan, check_integrity(in_scan, out_scan)
 
 

@@ -202,3 +202,15 @@ def test_scan_units_matches_per_file_scan(tmp_path: Path, monkeypatch: pytest.Mo
     assert (scans["shards"].id_hashes == expected.id_hashes).all()
     assert scans["empty"].records == 0 and scans["empty"].document_digest == EMPTY_DIGEST
     assert seen == ["k.jsonl", "00000.jsonl.gz", "00001.jsonl.gz"]
+
+
+def test_scan_units_keeps_lines_longer_than_a_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A line spanning several read blocks is scanned once, whole."""
+    import slm4ie.data.versioning as versioning
+
+    monkeypatch.setattr(versioning, "_READ_BYTES", 16)
+    path = tmp_path / "k.jsonl"
+    path.write_text(json.dumps({"uid": "k:long", "text": "y" * 200}) + "\n" + json.dumps({"uid": "k:short"}))
+    scan = versioning.scan_units({"k": versioning.ScanRequest([path], id_key="uid", raw_sha256=True)}, 2)["k"]
+    assert scan.records == 2
+    assert scan.raw_sha256 == file_sha256(path)
