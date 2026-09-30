@@ -267,7 +267,7 @@ class TestDrawStratifiedSample:
         destination = tmp_path / "out" / "sample.jsonl"
         draw_stratified_sample(corpus, destination, stages=("spam",), per_cell=10, shards_per_cell=0)
 
-        # Remove the stage's output: a cell that had to be redrawn would now find nothing.
+        # Output removed: a cell drawn again would now find nothing.
         shutil.rmtree(corpus / STAGE_DIRS["spam"])
         counts = draw_stratified_sample(corpus, destination, stages=("spam",), per_cell=10, shards_per_cell=0)
 

@@ -85,6 +85,22 @@ class TestBars:
         assert low == 0.0 and 0.0 < high < 0.35
         assert analysis.wilson(0, 0) == (0.0, 0.0)
 
+    def test_stage_rows_give_known_rates_pooled_and_per_source(self) -> None:
+        """Drop precision and residual rate come out as counted, per source and pooled."""
+        grouped = {
+            ("a", "quality", "dropped"): [_verdict(1), _verdict(1), _verdict(5), _verdict(5)],
+            ("a", "quality", "kept"): [_verdict(5)] * 9 + [_verdict(1)],
+            ("b", "quality", "dropped"): [_verdict(5)] * 4,
+            ("b", "quality", "kept"): [_verdict(5)] * 10,
+        }
+        (pooled,) = analysis.stage_rows(grouped, by_source=False)
+        per_source = {row["source"]: row for row in analysis.stage_rows(grouped, by_source=True)}
+
+        assert (pooled["drop_precision"], pooled["drop_precision_n"]) == (0.25, 8)
+        assert (pooled["residual_bad_rate"], pooled["residual_bad_rate_n"]) == (0.05, 20)
+        assert per_source["a"]["drop_precision"] == 0.5 and per_source["a"]["residual_bad_rate"] == 0.1
+        assert per_source["b"]["drop_precision"] == 0.0
+
     def test_empty_cell_is_blank_not_zero(self) -> None:
         """A stage with drops but no kept documents reports no residual rate."""
         grouped = {("demo", "spam", "dropped"): [_verdict(1), _verdict(5)]}

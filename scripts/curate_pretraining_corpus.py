@@ -295,6 +295,8 @@ def main() -> None:
             coverage_floor=args.coverage_floor,
             unmatched_path=args.unmatched,
         )
+        if not rows:
+            raise SystemExit("no dedup drops found in the sample; nothing to assess")
         args.out.parent.mkdir(parents=True, exist_ok=True)
         with args.out.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")

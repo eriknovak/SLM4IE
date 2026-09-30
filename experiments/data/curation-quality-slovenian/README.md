@@ -6,7 +6,7 @@ category: data
 line: main-line
 branch: exp/curation-quality-slovenian
 base_commit: a0b3306
-status: running
+status: concluded
 ticket: "#2"
 pr:
 mlflow:
@@ -16,18 +16,18 @@ uses: []
 tests: []
 evidence: {}
 types: [assessment]
-concluded:
+concluded: 2026-09-30
 ---
 # Curation pipeline quality — Slovenian
 
 ## TL;DR
 
-- **Hypothesis**: provisionally refuted, with the outcome open until the verdict — the pipeline keeps clean text, but every content filter drops mostly good text, and curated domain sources lose most of theirs to filters built for web crawls. Every judged number comes from a judge run that agrees with a person less closely than the record's gate asks ([F12], the two judge runs).
+- **Hypothesis**: refuted (concluded 2026-09-30) — the pipeline keeps clean text, but every content filter drops mostly good text, and the medical and scientific sources lose most of theirs to a quality filter built for web crawls. Every judged number comes from a judge run that agrees with a person less closely than the record's gate asks ([F12], the two judge runs).
 - **F1 — Every content filter drops mostly text worth keeping.** More than half of what each content filter drops is text the judge would keep.
 - **F2 — A filter's precision depends heavily on the source.** The spam filter drops mostly real spam on the fineweb2 web crawl and almost nothing but good text on every curated source.
 - **F3 — What the stages keep is clean.** Fewer than one in ten documents that any stage keeps is bad text at the lenient bar.
 - **F7 — Curated domain sources lose most of their text to a filter the judge does not confirm.** The quality filter removes most of the medical source, and the judge calls none of the sampled drops bad text.
-- **Next**: write the verdict; the repairs these findings call for belong to the planned threshold experiment, curation-thresholds-slovenian.
+- **Next**: the planned threshold experiment, curation-thresholds-slovenian, tunes the filters per source and validates on a fresh, held-back draw.
 
 ## Hypothesis
 
@@ -41,8 +41,8 @@ concluded:
   - **H2 — No source is mistreated by a stage**: confirmed if no source has a stage precision below 0.6; refuted otherwise — the filters would suit some sources and not others.
   - **H3 — What survives is clean**: confirmed if the residual bad rate among kept documents is below 0.1 on every judged dimension; refuted otherwise — bad text would pass the filters.
   - **H4 — Curated domain text survives**: confirmed if no curated domain source (medical, scientific, legal) loses more than half its documents to a stage whose drops the judge does not confirm; refuted otherwise — domain text would be lost to filters not built for it.
-  - **Verdict rule**: confirmed when all four clauses hold; refuted when H1 or H4 is refuted; inconclusive otherwise.
-- **Outcome**: open
+  - **Verdict rule**: confirmed when all four clauses hold; refuted when any clause is refuted; inconclusive otherwise.
+- **Outcome**: refuted
 
 ## Design
 
@@ -68,8 +68,8 @@ concluded:
 
 ## Datasets
 
-- **Curated corpus**: the pretraining corpus the pipeline builds from 20 Slovene sources, one row per source with its domain, kind, licence and size before and after curation. Built 2026-09-16 at commit 72248eb. [Sources of the curated corpus, before and after curation](tables/dataset-corpus-statistics.csv)
-- **Judged sample**: kept and dropped documents drawn per source, stage and decision, each cut to its opening characters for the judge ([D2], the judged unit). [The judged sample per stage and decision](tables/dataset-sample-statistics.csv)
+- **Curated corpus**: the pretraining corpus the pipeline builds from 20 Slovene sources, one row per source with its domain, kind, licence and size before and after curation. Built 2026-09-16, finishing at commit a63399d. [Sources of the curated corpus, before and after curation](tables/dataset-corpus-statistics.csv)
+- **Judged sample**: kept and dropped documents drawn per source, stage and decision, each cut to its opening characters for the judge ([D2], the judged unit). Its verdicts, with their domain labels, are frozen under `final/`. [The judged sample per stage and decision](tables/dataset-sample-statistics.csv)
 - **Pairwise drawing**: pairs of one kept and one dropped document from the same source and content filter, each asked in both orders. [The pairwise drawing per stage](tables/dataset-pairs-statistics.csv)
 - **Hand labels**: the calibration labels, on the first part of a calibration set drawn round-robin from the sample and labelled in id order, and the adjudication labels, on conflicts from the sources the calibration missed. Both use the judge's rubric and are frozen under `final/`. [The two sets of hand labels](tables/dataset-labels-statistics.csv)
 
@@ -97,14 +97,14 @@ concluded:
 - **Output**: `interim/sample.jsonl`, one row per document with its source, the stage-and-decision cells it was drawn into, and its opening characters.
 - **How**:
   1. For each source and stage, read the stage's output once, keeping a seeded sample of kept documents and an index of every surviving id.
-  2. Search the first few of the stage's input shards, the compressed files a stage writes its documents into, for documents the index lacks. Those are the drops, and a sample of them is kept. Drops are therefore drawn from the start of each source's files, not uniformly across it.
+  2. Search a seeded random subset of the stage's input shards, the compressed files a stage writes its documents into, for documents the index lacks. Those are the drops, and a sample of them is kept. Drops are therefore drawn from a few files per source, not from all of them.
   3. Merge rows by document id, so a document kept by one stage and dropped by the next counts in both cells.
 - **Code**: `slm4ie/data/curate/sample.py::draw_stratified_sample`
 - **Settings**: `--per-cell` (documents per source, stage and decision, 40), `--shards-per-cell` (input shards searched for drops, 3), `--max-chars` (characters kept per document, 2,000), `--seed` (fixes the draw, 20260916), flags of the sample subcommand of curate_pretraining_corpus.py
 
 ### M3 — Judge each drawn document on a seven-property rubric
 
-- **Input**: the drawn documents ([M2]) and the rubric prompt `configs/judge-rubric.md`.
+- **Input**: the drawn documents ([M2]) and the rubric prompt `experiments/data/curation-quality-slovenian/configs/judge-rubric.md`.
 - **Output**: `interim/verdicts-full-sonnet.jsonl`, one verdict per document: language, text type, coherence from 1 to 5, domain, and yes-or-no flags for adult or spam, machine translation and personal data.
 - **How**: documents go to the judge in groups, each shown by id and text only, never with its stage or decision. Every reply is checked against a schema, and a group whose reply fails is judged again. Documents already judged are skipped on a rerun.
 - **Code**: `slm4ie/data/judge.py::judge_documents`
@@ -135,7 +135,7 @@ concluded:
 
 ### M6 — Ask the judge to choose between a kept and a dropped document
 
-- **Input**: the drawn documents ([M2]) and the pairwise prompt `configs/judge-pairwise.md`.
+- **Input**: the drawn documents ([M2]) and the pairwise prompt `experiments/data/curation-quality-slovenian/configs/judge-pairwise.md`.
 - **Output**: the drawing `interim/pairwise-opus.pairs.jsonl`, the answers `interim/pairwise-opus.jsonl`, and `tables/pairwise-outcomes.csv`.
 - **How**:
   1. Pair kept and dropped documents of the same source and stage at random, with a fixed seed.
@@ -151,7 +151,7 @@ concluded:
 - **How**:
   1. Hash each drop's whole text and every window of three sentences.
   2. Scan the exact-dedup output for documents sharing the text hash or any window; the best twin shares the most windows.
-  3. An exact-dedup drop is matched when an identical twin exists, a sentence-dedup drop when a twin holds at least the coverage floor of its windows. Either way the twin must reach the finished corpus.
+  3. An exact-dedup drop is matched when an identical twin exists, a sentence-dedup drop when a twin holds at least the coverage floor of its windows. Either way the twin must reach the finished corpus. Only the best twin is checked, so a drop whose other copies survive is counted as lost.
   4. Score the unmatched drops against their judge verdicts.
 - **Code**: `slm4ie/data/curate/duplication.py::assess_dedup`
 - **Settings**: `--coverage-floor` (share of windows a twin must hold, one half), flags of the duplication subcommand of curate_pretraining_corpus.py
@@ -161,7 +161,7 @@ concluded:
 - **Input**: the drawn documents ([M2]), their verdicts ([M3]), and the sources the calibration labels already reach.
 - **Output**: the drawn conflicts `interim/adjudication.jsonl`, the person's labels frozen in `final/human-labels-adjudication.jsonl`, and `tables/adjudication.csv`.
 - **How**:
-  1. A conflict is a content filter dropping text the judge calls clean at the strict bar, or keeping text it calls bad at the lenient bar. Dedup drops are left out, because a duplicate is not bad text ([D9]).
+  1. A conflict is a content filter dropping text the judge calls clean even at the strict bar, or keeping text it calls bad at the lenient bar. Dedup drops are left out, because a duplicate is not bad text ([D9]). The person's call is then read at the lenient bar, the one the findings use.
   2. Draw only from sources the calibration labels never reached, round-robin by source and conflict direction with a fixed seed.
   3. The person labels them blind to judge and pipeline, and the share siding with the judge is reported with a Wilson interval.
 - **Code**: `experiments/data/curation-quality-slovenian/analysis.py::draw_adjudications`
@@ -227,7 +227,7 @@ concluded:
 
 ### D4 — Label seven properties per document, blind to its stage
 
-- **Decision**: Per document: language, text type (prose, boilerplate, list, code, garbage), adult or spam, coherence from 1 to 5, machine-translated, personal data, and domain from the catalogue's taxonomy. The judge sees the id and text only, never the stage or decision. The rubric is `configs/judge-rubric.md`.
+- **Decision**: Per document: language, text type (prose, boilerplate, list, code, garbage), adult or spam, coherence from 1 to 5, machine-translated, personal data, and domain from the catalogue's taxonomy. The judge sees the id and text only, never the stage or decision. The rubric is `experiments/data/curation-quality-slovenian/configs/judge-rubric.md`.
 - **Why**: Each stage targets one of these properties, so each stage can be scored on its own. The domain label doubles as gold for a planned domain classifier. For the stage metrics the properties collapse to keep or drop by the bad-text bar ([D8]).
 - **History**:
   - 2026-09-14 first version, grill Q12/Q16
@@ -295,7 +295,7 @@ concluded:
 - **Reading**:
   - **Drop precision is low at every content filter.** It falls from under half of drops at the language filter, where text in other languages counts as a correct drop, to about a tenth at the repetition filter. The strict bar, one coherence point stricter, raises every stage but leaves each short of the clause's bar.
   - **[H1] is refuted.** The clause fails if any stage's drop precision, pooled over sources, is below 0.6, and every content filter is below it at both bars. The dedup stages are lower still, but they remove copies rather than bad text, so they are read by whether a copy survives ([F6]).
-  - **Only a judge that calls bad text good would overturn this.** The run behind these numbers agrees with the person less closely than the calibration run did ([F12], the two judge runs). But it calls slightly more text bad, which raises drop precision, and on the sources the calibration missed the person sides with it on most drops ([F5]).
+  - **Only a judge that calls bad text good would overturn this.** The run behind these numbers agrees with the person less closely than the calibration run did. Even correcting for its errors at their worst, three of the four filters stay below the clause's bar ([F12], the two judge runs).
 - **Implication**: Both the thresholds and the filters' design need changing: the spam filter's counting rule is a design fault ([F2]). The planned threshold experiment, curation-thresholds-slovenian, tests the changes and confirms them on a fresh, held-back draw ([D10]).
 - **History**:
   - 2026-09-29 first result, rubric pass over 8,930 documents at both bars
@@ -359,7 +359,7 @@ concluded:
 - **Reading**:
   - **The two dedup stages compound.** Exact dedup drops byte-identical copies, but sentence dedup later removes some of the copies it kept. A document dropped as a duplicate can so end with no copy at all, which neither stage's own counts show.
   - **The lost text is good text, so dedup adds to the loss behind [F1].** Of the 369 sampled dedup drops with no surviving twin, from both stages, almost all pass the judge's bar. They fall hardest on the parliamentary sources, where speeches legitimately repeat procedural phrases.
-  - **Part of the exact-dedup loss is the pipeline's own artefact.** Five sources left the language filter doubled (kzb, legal_mc4, oss, povejmo_vemo_med, solar), because a rerun left old output files beside new ones. Some of their exact-dedup drops are copies the pipeline made, which inflates the share of drops with a twin.
+  - **Two effects may overstate the loss.** Only each drop's best twin is checked for survival, so a drop whose other copies survive counts as lost. Also, five sources left the language filter doubled (kzb, legal_mc4, oss, povejmo_vemo_med, solar), because a rerun left old output files beside new ones. Some of their exact-dedup drops are copies the pipeline made, which inflates the share of drops with a twin.
 - **Implication**: The two dedup stages must be assessed together. A threshold experiment that tunes one alone misses the text the other removes afterwards.
 - **History**:
   - 2026-09-30 first result, all 1,178 sampled dedup drops matched against the corpus
@@ -421,15 +421,77 @@ concluded:
 - **Result**: [Agreement of each judge run with the person, and of the two runs with each other](tables/calibration-agreement.csv) Both runs used the same model and rubric; the calibration run went through the Batch API and the full-sample run, judged later, through the command line.
 - **Reading**:
   - **The gate was passed by one run and the findings use another.** Only the calibration run meets the κ gate against the person's labels ([D5], the calibration gate). The two runs still agree with each other on the keep-or-drop call for most of the calibration set.
-  - **This weakens, but does not reverse, the drop-precision result ([F1]).** The full-sample run calls slightly more text bad than the calibration run, which raises drop precision rather than lowering it. Its departures are mostly prose read as a list and coherence one point apart.
-  - **Re-judging the sample the calibration run's way would settle it.** The reading would reverse only if that run found far more bad text among the drops.
+  - **This weakens, but does not reverse, the drop-precision result ([F1]).** Against the person, the run errs about as often toward bad as toward good. Suppose every drop it calls bad is truly bad, and the person's bad-text rate among its clean drops sits at the top of its interval ([F5]). The spam, quality and repetition filters still stay below the clause's bar.
+  - **Re-judging the sample the calibration run's way would settle it.** The reading would reverse only if far more of the drops the judge calls clean were bad text than the person found.
 - **Implication**: The tuning experiment should read its gate on the same judge run its findings use, with the backend and settings fixed for both.
 - **History**:
   - 2026-09-30 first result, found while writing the agreement table; kept as a stated limitation rather than re-judging, at the project lead's call
 
 ## Verdict
 
+- **Outcome**: refuted
+- **Evidence**: Three of four clauses fail. Every content filter drops mostly text worth keeping ([F1]), precision swings with the source ([F2]), and the quality filter removes most of the medical source unconfirmed ([F7]). Only the clean-keeps clause holds, and only at the lenient bar pooled over sources ([F3]).
+- **Discussion**:
+  - **What the pipeline keeps can be used as is; what it drops cannot be discarded unchecked.** Most of what it drops is good Slovene text. The loss falls hardest on the curated domain sources the hypothesis set out to protect.
+  - **Two results were not expected.** The two dedup stages compound, so a document dropped as a copy can leave no copy behind ([F6]). And the filters are not uniformly wrong: on raw web crawls several of them work, which points to per-source settings rather than removal.
+  - **The design trusted a gate it read on the wrong run.** The judge's agreement gate was met by a calibration run, while every finding uses a later run below it ([F12]). The outcome is therefore a judgement: the refutation holds because three filters stay below the bar even with that run's errors corrected at their worst. A follow-up must read its gate on the run its findings use.
+  - **Equal weights per source answer a per-source question.** The sample gives every source the same weight, which suits clauses about sources and stages. Corpus-wide volumes need the counts in the funnel tables instead.
+- **Adoption candidate**: a per-source switch to skip a stage, so curated sources can bypass filters built for web crawls. A spam filter that counts distinct lexicon words rather than occurrences is an untested proposal for the threshold experiment. Code to promote into `slm4ie/` on merge: the metric functions in `analysis.py`; `duplication.py`, `profile.describe_corpus` and the pairwise judge task are already there.
+- **Next**:
+  - Run curation-thresholds-slovenian: tune the filters per source against this sample, validate on the held-back draw ([D10]), and read its agreement gate on the same judge run as its findings.
+  - Measure the near-duplicate rate among kept documents and sentence-dedup drops by reason there, as that experiment's baseline.
+  - Repair the pipeline defects this audit found: the spam counting rule, repeated document ids in one legal source, stale output files that doubled five sources, and stage logs overwritten per group of sources.
+  - Settle how many tokens a word of this corpus becomes, which converts its word totals ([F10]) into the token counts the project's corpus-size targets use; that belongs to the planned domain-coverage experiment, kpi-coverage-slovenian.
+- **Limitations**:
+  - The judge run behind every judged number agrees with the person at κ 0.43, below the record's own gate ([F12]).
+  - The calibration labels reach only web-derived sources, and the adjudication covers 29 documents ([F5]).
+  - Pooled rates weigh every source equally, so they are not corpus-weighted volumes.
+  - Five sources reached the later stages doubled by stale output files, inflating their dedup drops.
+  - Filter timings survive for one group of sources only ([F11]).
+  - Dedup survival is checked for each drop's best twin only, which can overstate the text dedup loses ([F6]).
+  - The judge script logs no token use per request, so the judging cost is known only from the bill.
+  - The near-duplicate rate among kept documents and sentence-dedup drops by reason were not measured.
 
 ## Reproduce
 
-_Written at conclusion._
+The corpus build logs to the project's MLflow server. The judge runs through the Claude Code command line on the project lead's subscription, and the calibration run through the Batch API with `ANTHROPIC_API_KEY` set. Data lives under `data/`, a symlink to `/vault/data/SLM4IE/`.
+
+```bash
+export MLFLOW_TRACKING_URI=http://localhost:5555
+export CURATION=configs/data/curate.yaml
+export EXP=experiments/data/curation-quality-slovenian
+export OUT=data/experiments/data/curation-quality-slovenian/interim
+
+# Curated corpus behind every finding: exact dedup forced first, then the rest (commit 72248eb, resumed at a63399d)
+uv run python scripts/curate_pretraining_corpus.py run --config $CURATION --all --force --stage exact_dedup --max-workers 12
+uv run python scripts/curate_pretraining_corpus.py run --config $CURATION --all --mlflow --max-workers 32
+
+# Judged sample for F1-F7 (commit 0bf57fd)
+uv run python scripts/curate_pretraining_corpus.py sample --config $CURATION --all --out $OUT/sample.jsonl --per-cell 40 --seed 20260916 --max-workers 12
+
+# Full-sample judge run for F1-F3, F5, F7 and F12 (commit 276be08)
+uv run python scripts/judge_documents.py --source $OUT/sample.jsonl --out $OUT/verdicts-full-sonnet.jsonl --rubric $EXP/configs/judge-rubric.md --backend cli --model claude-sonnet-5 --batch-size 10
+
+# Calibration set, a deterministic draw fixed by the sample's seed, and its judge run for F12 (commit 276be08)
+uv run python -c "import json; from pathlib import Path; from slm4ie.data.judge import draw_calibration_set, read_documents; out = Path('$OUT'); rows = draw_calibration_set(read_documents(out / 'sample.jsonl'), 300); (out / 'calibration.jsonl').write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows))"
+uv run python scripts/judge_documents.py --source $OUT/calibration.jsonl --out $OUT/verdicts-sonnet.jsonl --rubric $EXP/configs/judge-rubric.md --backend api --model claude-sonnet-5
+
+# Calibration labels for F12, by hand, frozen to final/human-labels-calibration.jsonl (commit 5246ee3)
+uv run marimo edit $EXP/label.py
+
+# Pairwise pass for F4 (commit 5e0ef59)
+uv run python scripts/judge_documents.py --task pairwise --source $OUT/sample.jsonl --out $OUT/pairwise-opus.jsonl --rubric $EXP/configs/judge-pairwise.md --backend cli --model claude-opus-5 --concurrency 4
+
+# Dedup twins for F6 (commit 48d129d)
+uv run python scripts/curate_pretraining_corpus.py duplication --config $CURATION --sample $OUT/sample.jsonl --out $EXP/tables/dedup-twins.csv --unmatched $OUT/dedup-unmatched.jsonl --max-workers 12
+
+# Corpus counts and profile, JSON files that analysis.py turns into the tables of F7-F10 (commit daeba94)
+uv run python scripts/curate_pretraining_corpus.py describe --config $CURATION --out-dir $OUT --sloleks data/tokenization/sloleks.jsonl.gz
+
+# Adjudication for F5: draw, then label by hand, frozen to final/ (commit d860e3d)
+uv run python $EXP/analysis.py --draw-adjudications 30
+uv run marimo edit $EXP/label.py -- --set adjudication
+
+# Every table and figure, reading the full-sample and calibration judge runs by default (commit daeba94)
+uv run python $EXP/analysis.py
+```
