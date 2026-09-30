@@ -121,7 +121,7 @@ docs = [
 analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store
-    "datachart>=0.9.1",               # publication figures -> figures/*.svg
+    "datachart>=1.0.0",               # publication figures -> figures/*.svg
     "anthropic>=1.6.0",
     "marimo>=0.24.2",
 ]

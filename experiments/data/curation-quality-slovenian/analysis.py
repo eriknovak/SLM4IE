@@ -26,7 +26,7 @@ import argparse
 import csv
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -41,8 +41,14 @@ DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
 #: Where the committed tables go, beside this script.
 TABLES_DIR = Path(__file__).resolve().parent / "tables"
 
+#: Where the committed figures go, beside this script.
+FIGURES_DIR = Path(__file__).resolve().parent / "figures"
+
 #: The stages whose decisions are scored against the judge, in pipeline order.
 STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_dedup", "sentence_dedup")
+
+#: How a pair can come out once both orders are read, in the order reported.
+PAIRWISE_CALLS: Tuple[str, ...] = ("kept", "dropped", "tie", "orders_differ")
 
 #: Text shapes that are bad whatever the coherence score says.
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
@@ -574,6 +580,211 @@ def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def pairwise_rows(pairs: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Report how often the judge preferred what each stage kept over what it dropped.
+
+    Every pair was asked twice with the documents swapped, and a pair counts
+    for one side only when both orders agree: the kept document won both, the
+    dropped document won both, or both were called a tie. Anything else is a
+    pair whose answer depended on the order, which is the position bias the
+    swap exists to expose.
+
+    Args:
+        pairs: The drawing, one row per comparison, naming the slot that held
+            the kept document.
+        verdicts: The judge's answers, keyed by comparison id.
+
+    Returns:
+        One row per stage pooled over sources (source `ALL`), then one per
+        stage and source.
+    """
+    outcomes: Dict[Tuple[str, str, int], List[str]] = defaultdict(list)
+    for comparison in pairs:
+        verdict = verdicts.get(comparison["id"])
+        if verdict is None:
+            continue
+        better = verdict["better"]
+        side = "tie" if better == "tie" else ("kept" if better == comparison["kept"] else "dropped")
+        outcomes[(comparison["stage"], comparison["dataset"], comparison["pair"])].append(side)
+
+    grouped: Dict[Tuple[str, str], Counter] = defaultdict(Counter)
+    for (stage, source, _), sides in outcomes.items():
+        call = sides[0] if len(sides) == 2 and sides[0] == sides[1] else "orders_differ"
+        grouped[(stage, "ALL")][call] += 1
+        grouped[(stage, source)][call] += 1
+
+    rows: List[Dict[str, Any]] = []
+    for (stage, source), calls in sorted(
+        grouped.items(), key=lambda item: (item[0][1] != "ALL", item[0][1], STAGES.index(item[0][0]))
+    ):
+        total = sum(calls.values())
+        row: Dict[str, Any] = {"stage": stage, "source": source, "pairs": total}
+        row.update({call: round(calls[call] / total, 4) for call in PAIRWISE_CALLS})
+        rows.append(row)
+    return rows
+
+
+def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Split each source's converted documents by the stage that dropped them.
+
+    A source the stale-shard defect inflated (issue #9) leaves the language
+    stage with more documents than it entered with, so its shares are taken
+    over that stage's output instead: the language loss reads zero and the
+    duplicates surface as exact_dedup loss, which is where they are removed.
+
+    Args:
+        funnel: Rows from `funnel_rows`, holding the exact_dedup count.
+
+    Returns:
+        One row per source, in the funnel's order, with one share per stage and
+        the share kept, summing to one.
+    """
+    rows: List[Dict[str, Any]] = []
+    for row in funnel:
+        if row["source"] == "TOTAL":
+            continue
+        inflated = row["duplicated_input"] is True
+        base = row["language"] if inflated else row["convert"]
+        loss: Dict[str, Any] = {"source": row["source"], "base": base, "inflated_input": inflated}
+        previous = base
+        for stage in STAGES:
+            current = row["final"] if stage == "sentence_dedup" else row[stage]
+            if stage == "language" and inflated:
+                current = base
+            loss[stage] = round((previous - current) / base, 4)
+            previous = current
+        loss["kept"] = round(row["final"] / base, 4)
+        rows.append(loss)
+    return rows
+
+
+def draw_figures(
+    figures_dir: Path,
+    pooled: List[Dict[str, Any]],
+    per_source: List[Dict[str, Any]],
+    pairwise: List[Dict[str, Any]],
+    losses: List[Dict[str, Any]],
+    throughput: List[Dict[str, Any]],
+) -> List[Path]:
+    """Draw the record's figures from the tables `main` has already built.
+
+    Each figure carries one finding and is drawn from a table that is also
+    written to `tables/`, so a number read off a figure can be checked there.
+
+    Args:
+        figures_dir: Where the SVGs go.
+        pooled: Rows from `stage_rows` pooled over sources.
+        per_source: Rows from `stage_rows` per source.
+        pairwise: Rows from `pairwise_rows`.
+        losses: Rows from `loss_rows`.
+        throughput: Rows from `throughput_rows`.
+
+    Returns:
+        The paths written.
+    """
+    import matplotlib.pyplot as plt
+    from datachart.charts import BarChart, DumbbellChart, Heatmap
+    from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, VALUE_FORMAT
+
+    plt.rcParams["svg.hashsalt"] = "curation-quality-slovenian"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    horizontal = {"orientation": ORIENTATION.HORIZONTAL, "show_values": True}
+    # a legend inside the axes would sit on marks that reach their edge
+    beside = {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_RIGHT}}
+    figures: Dict[str, Any] = {}
+
+    # the gap between the dots is how well a stage separates bad text from good
+    figures["judge-rubric-drop-precision-by-stage"] = DumbbellChart(
+        [{"label": row["stage"], "start": row["residual_bad_rate"], "end": row["drop_precision"]} for row in pooled],
+        start_name="kept documents that are bad",
+        end_name="dropped documents that are bad",
+        xlabel="share judged bad",
+        # room left of zero for the labels of dots that sit near it
+        xmin=-0.05,
+        xmax=0.4,
+        show_values=True,
+        value_format=VALUE_FORMAT.PERCENT_INT,
+        figsize=FIG_SIZE.FULL_SHORT,
+        **beside,
+    )
+
+    # DumbbellChart takes no xticks, and a share has no negative tick to show
+    figures["judge-rubric-drop-precision-by-stage"].axes[0].set_xticks([0.0, 0.1, 0.2, 0.3, 0.4])
+
+    sources = sorted({row["source"] for row in per_source})
+    cells = {(row["source"], row["stage"]): row["drop_precision"] for row in per_source if row["drop_precision"] != ""}
+    figures["judge-rubric-drop-precision-by-source"] = Heatmap(
+        {
+            "x": list(STAGES),
+            "y": sources,
+            "z": [[cells.get((source, stage)) for stage in STAGES] for source in sources],
+        },
+        xlabel="stage",
+        vmin=0.0,
+        vmax=1.0,
+        value_format=VALUE_FORMAT.PERCENT_INT,
+        show_values=True,
+        show_colorbar=True,
+        xtickrotate=30,
+        figsize=FIG_SIZE.FULL_TALL,
+    )
+
+    pooled_pairs = [row for row in reversed(pairwise) if row["source"] == "ALL"]
+    figures["judge-pairwise-outcome-by-stage"] = BarChart(
+        [[{"label": row["stage"], "y": row[call]} for row in pooled_pairs] for call in PAIRWISE_CALLS],
+        subtitle=["kept document better", "dropped document better", "tie", "orders disagree"],
+        xlabel="share of pairs",
+        xmax=1.0,
+        bar_mode=BAR_MODE.STACK,
+        figsize=FIG_SIZE.FULL_SHORT,
+        orientation=ORIENTATION.HORIZONTAL,
+        **beside,
+    )
+
+    parts = (*STAGES, "kept")
+    figures["curate-losses-by-source"] = BarChart(
+        [
+            [
+                {"label": row["source"] + (" *" if row["inflated_input"] else ""), "y": row[part]}
+                for row in reversed(losses)
+            ]
+            for part in parts
+        ],
+        subtitle=[f"dropped by {stage}" for stage in STAGES] + ["kept"],
+        xlabel="share of converted documents (* of language output, issue #9)",
+        xmax=1.0,
+        bar_mode=BAR_MODE.STACK,
+        orientation=ORIENTATION.HORIZONTAL,
+        # the palette holds six colours, so the seventh part gets a neutral one
+        style=[None] * len(STAGES) + [{"plot_bar_color": "#b8b8b8"}],
+        figsize=FIG_SIZE.FULL_MEDIUM,
+        **beside,
+    )
+
+    steps = [row for row in throughput if row["stage"] != "TOTAL"]
+    figures["curate-cpu-hours-by-step"] = BarChart(
+        [
+            {
+                "label": f"{row['stage']}/{row['step']}" if row["step"] else f"{row['stage']} (one bucket)",
+                "y": row["cpu_hours"],
+            }
+            for row in reversed(steps)
+        ],
+        xlabel="CPU hours",
+        value_format=VALUE_FORMAT.DECIMAL,
+        figsize=FIG_SIZE.FULL_MEDIUM,
+        **horizontal,
+    )
+
+    written = []
+    for name, figure in figures.items():
+        path = figures_dir / f"{name}.svg"
+        # no date, so a rerun on unchanged tables leaves the committed SVG untouched
+        figure.savefig(path, bbox_inches="tight", metadata={"Date": None})
+        written.append(path)
+    return written
+
+
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     """Write rows to a CSV, creating the directory if needed.
 
@@ -658,6 +869,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT, help="This experiment's derived-data folder.")
     parser.add_argument("--verdicts", default="verdicts-full-sonnet.jsonl", help="Judge verdicts under interim/.")
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
+    parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
+    parser.add_argument(
+        "--pairwise", default="pairwise-opus.jsonl", help="Pairwise answers under interim/; the drawing sits beside it."
+    )
     parser.add_argument(
         "--pretrain-dir", type=Path, default=Path("data/pretrain"), help="The curation output_dir holding the stages."
     )
@@ -668,7 +883,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 
 def main() -> None:
-    """Write the stage-metric tables and print the pooled one."""
+    """Write the record's tables and figures and print the headline ones."""
     args = parse_args()
     sample = read_jsonl(args.data_root / "interim" / "sample.jsonl")
     verdicts = {row["id"]: row for row in read_jsonl(args.data_root / "interim" / args.verdicts)}
@@ -682,6 +897,11 @@ def main() -> None:
         write_csv(args.tables / "stage-decisions.csv", pooled),
         write_csv(args.tables / "source-stage-decisions.csv", per_source),
     ]
+
+    answers_path = args.data_root / "interim" / args.pairwise
+    answers = {row["id"]: row for row in read_jsonl(answers_path)}
+    pairwise = pairwise_rows(read_jsonl(answers_path.with_suffix(".pairs.jsonl")), answers)
+    written.append(write_csv(args.tables / "pairwise-outcomes.csv", pairwise))
 
     # Written by the counting job for the stages that keep no per-source
     # sentinel; the funnel simply leaves their column out when it is absent.
@@ -716,6 +936,9 @@ def main() -> None:
             )
         written.append(write_csv(args.tables / "dedup-lost-text.csv", lost))
 
+    losses = loss_rows(funnel)
+    written.append(write_csv(args.tables / "source-losses.csv", losses))
+    written += draw_figures(args.figures, pooled, per_source, pairwise, losses, throughput)
     for path in written:
         print(f"wrote {path}")
 
