@@ -30,7 +30,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -90,14 +89,14 @@ from slm4ie.data.io_utils import (
 from slm4ie.data.stopwords import load_stopwords
 from slm4ie.data.versioning import (
     EMPTY_DIGEST,
+    ScanRequest,
     UnitScan,
     check_integrity,
     combine_named_digests,
     file_sha256,
     merge_digests,
-    merge_scans,
     read_lock,
-    scan_documents,
+    scan_units,
     scan_files,
     shard_files,
     write_lock,
@@ -1982,55 +1981,41 @@ def status(
     return results
 
 
-def _scan_all(
-    requests: Dict[Tuple[str, str], Tuple[List[Path], str, bool]], workers: int
-) -> Dict[Tuple[str, str], UnitScan]:
-    """Scan many units at once, one file per worker task, largest files first.
-
-    Units under the pseudo-stage `extracted` are single source files; their
-    scan also hashes the raw bytes, so each is read only once.
+def _scan_all(requests: Dict[Tuple[str, str], ScanRequest], workers: int) -> Dict[Tuple[str, str], UnitScan]:
+    """Scan every adoption unit with `scan_units`, logging progress by bytes read.
 
     Args:
-        requests: Per unit id, its files, id field and whether to digest.
-        workers: Worker processes; keep this low on spinning disks, where
-            parallel readers thrash.
+        requests: What to scan per `(stage, key)` unit; the pseudo-stage
+            `extracted` names a source file.
+        workers: Worker processes for parsing and hashing.
 
     Returns:
-        The merged `UnitScan` per unit id.
+        The `UnitScan` per unit.
     """
-    jobs = [(unit, f, id_key, digest) for unit, (files, id_key, digest) in requests.items() for f in files]
-    jobs.sort(key=lambda job: job[1].stat().st_size, reverse=True)
-    total_bytes = sum(job[1].stat().st_size for job in jobs)
+    files = [f for request in requests.values() for f in request.files]
+    total = sum(f.stat().st_size for f in files)
     logger.info(
         "[adopt] scanning %d file(s), %s, across %d unit(s) (workers=%d)",
-        len(jobs),
-        _human_bytes(total_bytes),
+        len(files),
+        _human_bytes(total),
         len(requests),
         workers,
     )
-    parts: Dict[Tuple[str, str], List[UnitScan]] = {unit: [] for unit in requests}
-    done_bytes = 0
-    with ProcessPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures: Dict[Future, Tuple[Tuple[str, str], Path]] = {
-            pool.submit(scan_documents, [f], id_key=id_key, digest=digest, raw_sha256=unit[0] == "extracted"): (
-                unit,
-                f,
-            )
-            for unit, f, id_key, digest in jobs
-        }
-        for n, future in enumerate(as_completed(futures), start=1):
-            unit, path = futures[future]
-            parts[unit].append(future.result())
-            done_bytes += path.stat().st_size
-            logger.info(
-                "[adopt] %d/%d files, %s/%s: %s",
-                n,
-                len(jobs),
-                _human_bytes(done_bytes),
-                _human_bytes(total_bytes),
-                path,
-            )
-    return {unit: scans[0] if len(scans) == 1 else merge_scans(scans) for unit, scans in parts.items()}
+    done = {"files": 0, "bytes": 0}
+
+    def progress(path: Path, size: int) -> None:
+        done["files"] += 1
+        done["bytes"] += size
+        logger.info(
+            "[adopt] %d/%d files, %s/%s: %s",
+            done["files"],
+            len(files),
+            _human_bytes(done["bytes"]),
+            _human_bytes(total),
+            path,
+        )
+
+    return scan_units(requests, workers, progress)
 
 
 def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
@@ -2068,16 +2053,18 @@ def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
         logger.info("[adopt] no legacy sentinels to adopt")
         return
 
-    requests: Dict[Tuple[str, str], Tuple[List[Path], str, bool]] = {}
+    requests: Dict[Tuple[str, str], ScanRequest] = {}
 
     def need(stage: str, key: str, digest: bool) -> None:
         if stage == "extracted":
             source = paths.input_folder / f"{key}.jsonl"
-            files, id_key = ([source] if source.is_file() else []), "uid"
+            request = ScanRequest([source] if source.is_file() else [], "uid", digest, raw_sha256=True)
         else:
-            files, id_key = shard_files(paths.stage_dir(stage) / key), "id"
+            request = ScanRequest(shard_files(paths.stage_dir(stage) / key), "id", digest)
         known = requests.get((stage, key))
-        requests[(stage, key)] = (files, id_key, digest or (known is not None and known[2]))
+        if known is not None and known.digest:
+            request = known
+        requests[(stage, key)] = request
 
     for stage, key in scoped:
         need(stage, key, True)
@@ -2112,7 +2099,7 @@ def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
             files = input_files[key]
             input_digest: Optional[str] = _input_files_digest(files)
             # Without its source file there is nothing to check the output against.
-            error = check_integrity(in_scan, out_scan) if requests[("extracted", key)][0] else None
+            error = check_integrity(in_scan, out_scan) if requests[("extracted", key)].files else None
         else:
             input_digest = _upstream_digest(paths, stage, key)
             error = check_integrity(in_scan, out_scan)

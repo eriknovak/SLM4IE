@@ -19,15 +19,19 @@ JSONL documents can adopt them; the curation runner is the first consumer.
 
 import gzip
 import hashlib
+import io
+import os
 from array import array
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 import orjson
 import yaml
+
+K = TypeVar("K", bound=Hashable)
 
 #: Metadata keys that record where a document was read from, not what it is.
 VOLATILE_METADATA_KEYS = frozenset({"file_path"})
@@ -155,28 +159,168 @@ def merge_scans(scans: Sequence[UnitScan]) -> UnitScan:
     return UnitScan(records=sum(s.records for s in scans), document_digest=merged, id_hashes=ids)
 
 
+@dataclass(frozen=True)
+class ScanRequest:
+    """What to read for one unit and what to compute from it.
+
+    Attributes:
+        files: Plain or gzipped JSONL files.
+        id_key: Top-level field holding each document's id.
+        digest: Compute the document digest.
+        raw_sha256: Also hash the raw bytes (meaningful for one plain file).
+    """
+
+    files: Sequence[Path]
+    id_key: str = "id"
+    digest: bool = True
+    raw_sha256: bool = False
+
+
+#: Bytes per sequential read, and per chunk handed to a worker for plain files.
+_READ_BYTES = 64 << 20
+
+#: Upper bound on bytes read ahead of the workers, to cap memory.
+_MAX_IN_FLIGHT_BYTES = 8 << 30
+
+
+def _read_blobs(path: Path) -> Iterator[bytes]:
+    """Read *path* sequentially in large blocks, yielding workable pieces.
+
+    A gzipped file cannot be split, so it is yielded whole (still compressed).
+    A plain file is yielded in blocks cut after the last newline, so every
+    piece holds whole lines and the pieces concatenate to the file's bytes.
+
+    Args:
+        path: File to read.
+
+    Yields:
+        Byte pieces in file order.
+    """
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        # A larger kernel readahead keeps the disk head on this file.
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_SEQUENTIAL)
+        if path.suffix == ".gz":
+            yield b"".join(iter(lambda: os.read(fd, _READ_BYTES), b""))
+            return
+        carry = b""
+        for block in iter(lambda: os.read(fd, _READ_BYTES), b""):
+            cut = block.rfind(b"\n") + 1
+            if cut == 0:
+                carry += block
+                continue
+            yield carry + block[:cut]
+            carry = block[cut:]
+        if carry:
+            yield carry
+    finally:
+        os.close(fd)
+
+
+def _scan_blob(blob: bytes, gz: bool, id_key: str, digest: bool) -> UnitScan:
+    """Scan the documents in one piece from `_read_blobs`; runs in a worker.
+
+    Args:
+        blob: Whole lines of JSONL, or a whole gzipped file.
+        gz: Whether *blob* is gzip-compressed.
+        id_key: Top-level field holding each document's id.
+        digest: Compute the document digest.
+
+    Returns:
+        The `UnitScan` of the piece.
+    """
+    stream = gzip.GzipFile(fileobj=io.BytesIO(blob)) if gz else io.BytesIO(blob)
+    total = 0
+    records = 0
+    ids = array("Q")
+    for line in stream:
+        if not line.strip():
+            continue
+        record = orjson.loads(line)
+        records += 1
+        ids.append(_id_hash(record.get(id_key)))
+        if digest:
+            total += _document_hash(record)
+    id_hashes = np.sort(np.frombuffer(ids, dtype=np.uint64)) if records else np.empty(0, dtype=np.uint64)
+    return UnitScan(records=records, document_digest=_format_digest(total) if digest else None, id_hashes=id_hashes)
+
+
+def scan_units(
+    requests: Mapping[K, ScanRequest], workers: int = 1, progress: Optional[Callable[[Path, int], None]] = None
+) -> Dict[K, UnitScan]:
+    """Scan many units with one sequential reader feeding a pool of workers.
+
+    On a spinning disk, parallel readers make the head seek between files and
+    throughput collapses; one reader streaming each file in large blocks keeps
+    the disk sequential while the parsing and hashing run on *workers* cores.
+
+    Args:
+        requests: What to scan per unit key.
+        workers: Worker processes for parsing and hashing; 1 runs in-process.
+        progress: Called with each file and its size once it has been read.
+
+    Returns:
+        The `UnitScan` per unit key; `raw_sha256` is set where requested.
+    """
+    parts: Dict[K, List[UnitScan]] = {key: [] for key in requests}
+    raw: Dict[K, str] = {}
+    pool = ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
+    pending: Dict[Future, Tuple[K, int]] = {}
+    in_flight = 0
+
+    def collect(done: Iterable[Future]) -> None:
+        nonlocal in_flight
+        for future in done:
+            key, size = pending.pop(future)
+            parts[key].append(future.result())
+            in_flight -= size
+
+    try:
+        for key, request in requests.items():
+            for path in request.files:
+                gz = path.suffix == ".gz"
+                sha = hashlib.sha256() if request.raw_sha256 else None
+                for blob in _read_blobs(path):
+                    if sha is not None:
+                        sha.update(blob)
+                    if pool is None:
+                        parts[key].append(_scan_blob(blob, gz, request.id_key, request.digest))
+                        continue
+                    while pending and (len(pending) >= 2 * workers or in_flight >= _MAX_IN_FLIGHT_BYTES):
+                        collect(wait(pending, return_when=FIRST_COMPLETED).done)
+                    future = pool.submit(_scan_blob, blob, gz, request.id_key, request.digest)
+                    pending[future] = (key, len(blob))
+                    in_flight += len(blob)
+                if sha is not None:
+                    raw[key] = sha.hexdigest()
+                if progress is not None:
+                    progress(path, path.stat().st_size)
+        collect(wait(pending).done)
+    finally:
+        if pool is not None:
+            pool.shutdown(cancel_futures=True)
+
+    scans: Dict[K, UnitScan] = {}
+    for key, request in requests.items():
+        merged = merge_scans(parts[key])
+        document_digest = (merged.document_digest or EMPTY_DIGEST) if request.digest else None
+        scans[key] = UnitScan(merged.records, document_digest, merged.id_hashes, raw.get(key))
+    return scans
+
+
 def scan_files(files: Sequence[Path], *, id_key: str = "id", digest: bool = True, workers: int = 1) -> UnitScan:
-    """Scan *files* like `scan_documents`, one file per worker process.
+    """Scan *files* as one unit; see `scan_units`.
 
     Args:
         files: Plain or gzipped JSONL files.
         id_key: Top-level field holding each document's id.
         digest: Compute the document digest.
-        workers: Processes to spread the files over; 1 scans in-process.
+        workers: Worker processes for parsing and hashing.
 
     Returns:
         The `UnitScan` of every document across *files*.
     """
-    if workers <= 1 or len(files) <= 1:
-        return scan_documents(files, id_key=id_key, digest=digest)
-    with ProcessPoolExecutor(max_workers=min(workers, len(files))) as pool:
-        scans: List[UnitScan] = list(pool.map(_scan_one, files, [id_key] * len(files), [digest] * len(files)))
-    return merge_scans(scans)
-
-
-def _scan_one(path: Path, id_key: str, digest: bool) -> UnitScan:
-    """Scan a single file; a picklable entry point for `scan_files`."""
-    return scan_documents([path], id_key=id_key, digest=digest)
+    return scan_units({0: ScanRequest(files, id_key, digest)}, workers)[0]
 
 
 def shard_files(folder: Path) -> List[Path]:

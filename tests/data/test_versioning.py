@@ -175,3 +175,30 @@ def test_scan_can_hash_raw_bytes_in_the_same_pass(tmp_path: Path) -> None:
     scan = scan_documents([path], id_key="uid", digest=False, raw_sha256=True)
     assert scan.raw_sha256 == file_sha256(path)
     assert scan.records == 2
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+def test_scan_units_matches_per_file_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: int) -> None:
+    """Chunked sequential reading gives the same scans as reading each file whole."""
+    import slm4ie.data.versioning as versioning
+
+    monkeypatch.setattr(versioning, "_READ_BYTES", 97)
+    plain = tmp_path / "k.jsonl"
+    plain.write_text("".join(json.dumps({"uid": f"k:{i}", "text": "x" * i}) + "\n" for i in range(40)))
+    for n in range(2):
+        _write_shard(tmp_path / "s" / f"{n:05d}.jsonl.gz", [_doc(n * 10 + i) for i in range(5)])
+    requests = {
+        "plain": versioning.ScanRequest([plain], id_key="uid", digest=False, raw_sha256=True),
+        "shards": versioning.ScanRequest(shard_files(tmp_path / "s")),
+        "empty": versioning.ScanRequest([]),
+    }
+    seen = []
+    scans = versioning.scan_units(requests, workers, progress=lambda path, size: seen.append(path.name))
+    assert scans["plain"].records == 40
+    assert scans["plain"].raw_sha256 == file_sha256(plain)
+    assert scans["plain"].document_digest is None
+    expected = scan_documents(shard_files(tmp_path / "s"))
+    assert scans["shards"].document_digest == expected.document_digest
+    assert (scans["shards"].id_hashes == expected.id_hashes).all()
+    assert scans["empty"].records == 0 and scans["empty"].document_digest == EMPTY_DIGEST
+    assert seen == ["k.jsonl", "00000.jsonl.gz", "00001.jsonl.gz"]
