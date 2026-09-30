@@ -1,0 +1,14 @@
+stage,step,scope,finished,tasks,workers,documents,cpu_hours,wall_hours,docs_per_second,docs_per_cpu_second,worker_use,pacing_block
+language,,one bucket,2026-06-14,12,12,3502079,6.26,0.85,1144.2,155.4,0.614,LANGUAGE: Lingua-py
+spam,,one bucket,2026-06-14,12,12,3494088,0.35,0.06,15468.2,2772.3,0.465,FILTER: Spam/Adult
+quality,,one bucket,2026-06-18,12,12,3484737,7.81,1.03,941.4,123.9,0.633,FILTER: Gopher Quality
+repetition,,one bucket,2026-06-18,12,12,2445732,8.52,1.12,608.5,79.8,0.636,FILTER: Gopher Repetition
+exact_dedup,1_sig,corpus,2026-09-15,243,12,42623493,0.37,0.26,45247.5,32084.4,0.118,READER: Jsonl
+exact_dedup,2_find,corpus,2026-09-15,1,1,,0.04,0.04,,,1.0,DEDUPS: exact-deduplication stage 2
+exact_dedup,3_filter,corpus,2026-09-15,243,12,42623493,4.33,0.45,26141.5,2732.9,0.797,DEDUPS: exact-deduplication stage 3
+sentence_dedup,1_sig,corpus,2026-09-16,243,32,38363230,236.94,10.54,1010.9,45.0,0.702,DEDUPS: sentence-deduplication stage 1
+sentence_dedup,2_find,corpus,2026-09-16,1,1,,1.51,1.51,,,1.0,DEDUPS: sentence-deduplication stage 2
+sentence_dedup,3_filter,corpus,2026-09-16,243,32,38363230,151.53,8.02,1328.4,70.3,0.59,DEDUPS: sentence-deduplication stage 3
+statistics,1_map,corpus,2026-09-16,243,32,28819405,134.18,4.76,1683.3,59.7,0.882,STATS: Corpus stats
+statistics,2_reduce,corpus,2026-09-16,1,1,,0.05,0.05,,,1.0,STATS: Corpus stats reduce
+TOTAL,,corpus,,,,,528.95,25.63,,,,

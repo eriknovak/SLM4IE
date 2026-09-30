@@ -27,6 +27,7 @@ import csv
 import json
 import math
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -45,6 +46,28 @@ STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_d
 
 #: Text shapes that are bad whatever the coherence score says.
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
+
+
+#: Every datatrove executor the curation run launches, in pipeline order. The
+#: scoped stages launch one per config bucket but all of them log into the same
+#: folder, so only the bucket that ran last leaves its timings (issue #10).
+LOG_STEPS: Tuple[Tuple[str, str], ...] = (
+    ("language", ""),
+    ("spam", ""),
+    ("quality", ""),
+    ("repetition", ""),
+    ("exact_dedup", "1_sig"),
+    ("exact_dedup", "2_find"),
+    ("exact_dedup", "3_filter"),
+    ("sentence_dedup", "1_sig"),
+    ("sentence_dedup", "2_find"),
+    ("sentence_dedup", "3_filter"),
+    ("statistics", "1_map"),
+    ("statistics", "2_reduce"),
+)
+
+#: Stages that run once over the whole corpus rather than once per bucket.
+CORPUS_STAGES = frozenset({"exact_dedup", "sentence_dedup", "statistics"})
 
 #: The curated corpus, as folders, from conversion to the finished text.
 FUNNEL_STAGES: Tuple[str, ...] = (
@@ -422,6 +445,135 @@ def profile_rows(profiles: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(rows, key=lambda row: -row["words_p50"])
 
 
+def _block_label(name: str) -> str:
+    """Reduce a datatrove block name to the part worth reading.
+
+    Args:
+        name: The block's name as datatrove writes it, with its emoji.
+
+    Returns:
+        The role and implementation, such as `FILTER: Gopher Quality`.
+    """
+    return " ".join("".join(char for char in name.split(" - ", 1)[-1] if char.isascii()).split())
+
+
+def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
+    """Read one executor's task timings out of its log folder.
+
+    A task's end is its stats file's modification time, which is the only
+    trustworthy clock here: the task logs are rewritten by whichever executor
+    used the folder last, so their opening timestamps can belong to a different
+    run than the stats beside them. Its duration is its slowest block rather
+    than the sum of its blocks, because a block's timer stays open while the
+    blocks downstream of it consume what it yields — the filter's total already
+    contains the writer's, so summing them double-counts. Subtracting the
+    duration from the end recovers when the executor began.
+
+    datatrove never removes a stats file, so a folder reused by a smaller
+    executor still holds the higher ranks of the larger one before it. Those
+    ranks are skipped, which is what keeps a scoped stage's numbers to the one
+    bucket that ran last rather than silently mixing buckets.
+
+    Args:
+        logging_dir: An executor's `logging_dir` under `_logs/`.
+
+    Returns:
+        Task and worker counts, documents read, CPU and wall seconds, the day
+        it finished and CPU seconds per pipeline block; None if the executor
+        never ran or finished no task. The CPU seconds are the pacing block's,
+        so they are the step's compute and not the blocks' sum.
+    """
+    executor_path = logging_dir / "executor.json"
+    if not executor_path.is_file():
+        return None
+    executor = json.loads(executor_path.read_text(encoding="utf-8"))
+    ends: List[float] = []
+    durations: List[float] = []
+    blocks: Dict[str, float] = defaultdict(float)
+    documents = 0
+    for path in sorted((logging_dir / "stats").glob("*.json")):
+        if int(path.stem) >= executor["tasks"]:
+            continue
+        stats = json.loads(path.read_text(encoding="utf-8"))
+        durations.append(max(block["time_stats"]["total"] for block in stats))
+        ends.append(path.stat().st_mtime)
+        for block in stats:
+            blocks[_block_label(block["name"])] += block["time_stats"]["total"]
+        documents += int(stats[0]["stats"].get("documents", {}).get("total", 0))
+    if not ends:
+        return None
+    start = min(end - duration for end, duration in zip(ends, durations))
+    return {
+        "tasks": executor["tasks"],
+        "workers": executor["workers"],
+        "documents": documents,
+        "cpu_seconds": sum(durations),
+        "wall_seconds": max(ends) - start,
+        "finished": datetime.fromtimestamp(max(ends)).strftime("%Y-%m-%d"),
+        "blocks": dict(blocks),
+    }
+
+
+def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
+    """Report what every pipeline step cost in machine time.
+
+    Two numbers say different things. CPU hours is what the step consumed and
+    is comparable between steps; wall hours is what it took on this machine at
+    the worker count it was given, so it changes with the machine. The two
+    divided give how many workers the step kept busy on average, which is well
+    under the pool wherever tasks finish at uneven speeds and the last few run
+    alone.
+
+    The scoped stages are reported for one config bucket only, because every
+    bucket logs into the same folder and the last one overwrites the rest
+    (issue #10). The corpus stages run once over everything, so theirs are
+    complete and only those are totalled.
+
+    Args:
+        pretrain_dir: The curation `output_dir`, holding `_logs/`.
+
+    Returns:
+        One row per executor step in pipeline order, each naming the block
+        that set its pace, with a totals row over the corpus-wide steps last.
+    """
+    rows: List[Dict[str, Any]] = []
+    for stage, step in LOG_STEPS:
+        timings = _step_timings(pretrain_dir / "_logs" / stage / step)
+        if timings is None:
+            continue
+        wall, cpu, documents = timings["wall_seconds"], timings["cpu_seconds"], timings["documents"]
+        slowest = max(timings["blocks"], key=lambda block: timings["blocks"][block])
+        rows.append(
+            {
+                "stage": stage,
+                "step": step,
+                "scope": "corpus" if stage in CORPUS_STAGES else "one bucket",
+                "finished": timings["finished"],
+                "tasks": timings["tasks"],
+                "workers": timings["workers"],
+                "documents": documents or "",
+                "cpu_hours": round(cpu / 3600, 2),
+                "wall_hours": round(wall / 3600, 2),
+                "docs_per_second": round(documents / wall, 1) if documents and wall else "",
+                "docs_per_cpu_second": round(documents / cpu, 1) if documents and cpu else "",
+                "worker_use": round(cpu / (wall * timings["workers"]), 3) if wall else "",
+                "pacing_block": slowest,
+            }
+        )
+    corpus = [row for row in rows if row["scope"] == "corpus"]
+    total = {key: "" for key in rows[0]}
+    total.update(
+        {
+            "stage": "TOTAL",
+            "scope": "corpus",
+            "cpu_hours": round(sum(row["cpu_hours"] for row in corpus), 2),
+            "wall_hours": round(sum(row["wall_hours"] for row in corpus), 2),
+        }
+    )
+    rows.append(total)
+    return rows
+
+
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     """Write rows to a CSV, creating the directory if needed.
 
@@ -477,6 +629,22 @@ def print_funnel(rows: List[Dict[str, Any]]) -> None:
         print(f"{row['source']:18s}{row['convert']:12,}{row['final']:12,}{retained:>10s}{row['final_words']:16,}{flag}")
 
 
+def print_throughput(rows: List[Dict[str, Any]]) -> None:
+    """Print the machine cost of each step the way the record quotes it.
+
+    Args:
+        rows: Rows from `throughput_rows`.
+    """
+    print(f"\n{'step':26s}{'docs':>12s}{'cpu h':>9s}{'wall h':>8s}{'docs/core s':>13s}{'workers used':>14s}")
+    for row in rows:
+        name = f"{row['stage']}/{row['step']}" if row["step"] else row["stage"]
+        docs = f"{row['documents']:,}" if row["documents"] != "" else ""
+        rate = f"{row['docs_per_cpu_second']:,.1f}" if row["docs_per_cpu_second"] != "" else ""
+        used = f"{row['worker_use'] * row['workers']:.1f} of {row['workers']}" if row["worker_use"] != "" else ""
+        flag = "  (one bucket only)" if row["scope"] == "one bucket" else ""
+        print(f"{name:26s}{docs:>12s}{row['cpu_hours']:>9.2f}{row['wall_hours']:>8.2f}{rate:>13s}{used:>14s}{flag}")
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
@@ -521,10 +689,13 @@ def main() -> None:
     extra_counts = json.loads(counts_path.read_text(encoding="utf-8")) if counts_path.is_file() else None
     funnel = funnel_rows(args.pretrain_dir, extra_counts)
     print_funnel(funnel)
+    throughput = throughput_rows(args.pretrain_dir)
+    print_throughput(throughput)
     written += [
         write_csv(args.tables / "source-funnel.csv", funnel),
         write_csv(args.tables / "domain-mix.csv", domain_rows(args.pretrain_dir)),
         write_csv(args.tables / "gated-totals.csv", gated_rows(args.pretrain_dir, args.extract_config)),
+        write_csv(args.tables / "throughput.csv", throughput),
     ]
 
     profile_path = args.data_root / "interim" / "corpus-profile.json"
