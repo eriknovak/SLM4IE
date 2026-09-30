@@ -153,9 +153,39 @@ or `missing` (nothing to build it from), compares the lock file too, and exits
 while legacy sentinels remain. `status --adopt` reads each legacy unit once,
 checks it, computes its document digest and rewrites its sentinel, so a corpus
 built earlier becomes current without a rebuild. Units failing the check are
-recorded as such and are the only ones the next run rebuilds. Adoption reads the whole corpus and every extracted file once,
-with one sequential reader feeding `--max-workers` parsing processes, so a
-spinning disk streams instead of seeking between files.
+recorded as such and are the only ones the next run rebuilds. Adoption reads
+the whole corpus and every extracted file once (see
+[Reading performance](#reading-performance)).
+
+### Reading performance
+
+The integrity check and the document digest read every unit a run rebuilds
+(its input and its output), and adoption reads the whole corpus. On `/vault`,
+a single spinning disk, that reading — not the CPU — sets the pace. Measured
+on 2026-09-30:
+
+| Setup                                          | Throughput            |
+| ---------------------------------------------- | --------------------- |
+| one sequential reader, 64 MiB reads            | ~190 MB/s             |
+| 4 processes reading different files at once    | ~25 MB/s combined     |
+| one core parsing gzip shards (decompress, parse, hash) | ~26 MB/s of `.gz` |
+| one core parsing plain JSONL from memory       | ~270 MB/s             |
+
+Parallel readers make the disk head seek between files, so throughput
+collapses as readers are added, while one core cannot keep up with the disk
+on gzip. The scanner (`scan_units` in `slm4ie/data/versioning.py`) therefore
+has one reader stream each file in disk order, with `POSIX_FADV_SEQUENTIAL`,
+into a reused buffer — which pulls it into the page cache — and hands byte
+ranges to `--max-workers` processes that reread them from memory and do the
+parsing and hashing. A gzipped shard cannot be split, so it is one range. The
+bytes read ahead of the workers are capped at 8 GiB of page cache; process
+memory stays at one 64 MiB buffer plus the per-document id hashes.
+
+Use enough workers to cover the disk (16–24 here: 24 × 26 MB/s exceeds
+~190 MB/s). With this design full adoption ran at ~187 MB/s, about 70 minutes
+for 743 GiB. Profile the reader with `py-spy` if throughput drops: time in
+`readinto` means the disk is the limit, time waiting on futures means more
+workers would help.
 
 ## Per-dataset overrides
 
