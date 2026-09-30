@@ -30,7 +30,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -1269,10 +1269,13 @@ def _scoped_reason(
     folder = setup.paths.stage_dir(stage) / key
     sentinel = read_sentinel(folder)
     files: Optional[Dict[str, Any]] = None
+    digest: Optional[str] = None
     if stage == "convert":
-        previous = sentinel.input_files if sentinel is not None else None
-        files = _convert_input_files(setup.paths.input_folder, key, setup.include_annotations(key), previous)
-        digest: Optional[str] = _input_files_digest(files)
+        # A legacy sentinel is stale whatever its input, so skip hashing the source.
+        if sentinel is None or not sentinel.is_legacy:
+            previous = sentinel.input_files if sentinel is not None else None
+            files = _convert_input_files(setup.paths.input_folder, key, setup.include_annotations(key), previous)
+            digest = _input_files_digest(files)
     else:
         digest = _upstream_digest(setup.paths, stage, key)
     reason = stale_reason(
@@ -1971,6 +1974,13 @@ def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
                 need(stage, key, True)
                 need(cast(str, upstream_stage(stage)), key, False)
     scans = _scan_all(requests, workers)
+    # hashlib releases the GIL on large reads, so threads hash files in parallel.
+    convert_keys = [key for stage, key in scoped if stage == "convert"]
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        hashed = pool.map(
+            lambda k: _convert_input_files(paths.input_folder, k, setup.include_annotations(k)), convert_keys
+        )
+        input_files = dict(zip(convert_keys, hashed))
     info = {**_run_info(setup.project_root), "adopted_at": datetime.now(timezone.utc).isoformat()}
 
     for stage, key in scoped:
@@ -1981,7 +1991,7 @@ def adopt_legacy(setup: _Setup, workers: int = 1) -> None:
         in_scan = scans[(upstream or "extracted", key)]
         files: Optional[Dict[str, Any]] = None
         if upstream is None:
-            files = _convert_input_files(paths.input_folder, key, setup.include_annotations(key))
+            files = input_files[key]
             input_digest: Optional[str] = _input_files_digest(files)
             # Without its source file there is nothing to check the output against.
             error = check_integrity(in_scan, out_scan) if requests[("extracted", key)][0] else None

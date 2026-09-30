@@ -12,9 +12,10 @@
 #   overrides    Optional per-dataset patches over the scoped-stage config.
 #
 # Notes:
-#   sentinels    Each stage writes a durable artifact + a `.complete` sentinel;
-#     on rerun a stage is skipped when its config-slice hash is unchanged.
-#     Editing one section cascade-invalidates that stage and every downstream stage.
+#   sentinels    Each unit (stage x dataset, or corpus stage) writes a `.complete`
+#     sentinel with its lineage; a rerun rebuilds a unit only when its section,
+#     stage version or input documents changed. Runs rewrite curate.lock.yaml;
+#     `status` lists stale units and why (docs/pretraining-corpus.md).
 #   mlflow       When enabled, one run per build is upserted to `experiment`
 #     (keyed by a content digest of the final 06_sentence_dedup corpus): a step-indexed
 #     per-stage survival funnel + per-source variants as metrics, final per-dataset

@@ -9,9 +9,10 @@ heuristics, cross-corpus exact and sentence deduplication, and corpus
 statistics.
 
 Each stage writes a durable on-disk artifact and a `.complete` sentinel under
-`output_dir`. On rerun, a stage whose config slice hash is unchanged is skipped,
-and editing one section of the config cascade-invalidates that stage plus every
-downstream stage. `input_dir` is the folder of `<key>.jsonl` files from the
+`output_dir`, one per dataset for the scoped stages. A rerun rebuilds only what
+something output-affecting changed for — config, code, or input documents — and
+stops as soon as a rebuilt stage reproduces the same documents (see
+[Versioning](#versioning-what-triggers-a-rebuild)). `input_dir` is the folder of `<key>.jsonl` files from the
 extract step; `output_dir` is the pretrain-owned tree. The dataset key list
 comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml); entries
 marked `role: benchmark` (evaluation gold such as SUK) are skipped by `--all`
@@ -44,8 +45,8 @@ CURATION=configs/data/curate.yaml
 uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --all
 ```
 
-This iterates all eight stages in order, skipping any whose sentinel hash
-matches the current config. The final corpus lands at
+This iterates all eight stages in order, skipping every unit that is current,
+and rewrites the lock file `configs/data/curate.lock.yaml`. The final corpus lands at
 `<output_dir>/06_sentence_dedup/<dataset>/<rank>.jsonl.gz`; statistics at
 `<output_dir>/07_statistics/`.
 
@@ -83,38 +84,76 @@ from `extract.yaml` or marked `role: benchmark` never reach them. They run one
 datatrove task per input shard, so a task holds at most one shard in memory and
 `--max-workers` only sets how many tasks run at once.
 
-**Resuming a crashed corpus stage.** Each corpus stage records its config hash,
-task count and an input fingerprint in `<stage folder>/.in_progress.json` when it
-starts. Rerunning the same command after a crash resumes: datatrove skips the
-tasks it marked complete under `_logs/<stage>/`, and the dedup scratch is kept.
-If any of the three values changed, the stage starts fresh and first clears its
-output folder, logs and scratch, so no shard from an earlier run survives.
+**Resuming a crashed corpus stage.** A corpus stage builds in
+`<output_dir>/_partial/<stage folder>/` and records its config hash, stage
+version, task count and inputs in `.in_progress.json` there when it starts.
+Rerunning the same command after a crash resumes: datatrove skips the tasks it
+marked complete under `_logs/<stage>/`, and the dedup scratch is kept. If any of
+those values changed, the stage starts fresh and first clears its staging
+folder, logs and scratch. The previously promoted output stays in place until
+the new one is finished and checked.
 
-## Sentinels: what triggers a rebuild
+## Versioning: what triggers a rebuild
 
-Each stage's sentinel hash covers its own top-level config section. The
-`quality` and `statistics` hashes additionally fold in the contents of the
-stopword file, the `spam` hash folds in the spam lexicon and domain-list
-contents, and every stage's hash folds in the sorted list of dataset keys this
-run will process — so editing `stopwords/sl.txt`, editing a `spam/<code>/*.txt`
-list, switching between `--all` and a positional subset, or adding a dataset to
-`extract.yaml` all correctly trigger rebuilds.
+A **unit** is one scoped stage for one dataset (`03_quality/kzb/`) or one corpus
+stage (`05_exact_dedup/`). Each unit's sentinel records its lineage:
 
-> **Note — refreshed inputs auto-rebuild.** `convert` is the only stage that
-> reads the `extracted/` tier, so it also tracks a **size + modification-time
-> fingerprint** of each source `<key>.jsonl` (and its `.annotations.jsonl.gz`
-> sidecar when `include_annotations` is on). Re-extracting a dataset — e.g.
-> folding new weekly windows into a living corpus with `prepare_datasets.py
-> extract <key> --force` — changes that fingerprint, which marks `convert` stale
-> for that key and cascades through every downstream scoped and corpus stage. So
-> a plain `curate_pretraining_corpus.py run --all` after re-extraction re-folds
-> the updated data with no `--force` needed. The fingerprint is **size and time
-> only, never the file contents** (hashing the whole multi-hundred-GB tier on
-> every run would be prohibitive): an in-place edit that somehow preserved both
-> byte size and mtime would go undetected, and a content-preserving copy/`touch`
-> that bumps mtime triggers a harmless rebuild. A sentinel carrying no
-> fingerprint is grandfathered — its key is rebuilt only if the source file is
-> newer than the recorded completion time.
+| Field             | What it is                                                                                         |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `config_hash`     | hash of the stage's (override-merged) config section, plus the files it names — see below          |
+| `stage_version`   | the stage's entry in `STAGE_VERSIONS` (`slm4ie/data/curate/stages.py`), raised by hand when its code changes what it writes |
+| `input_digest`    | the upstream unit's recorded document digest; for `convert`, the size and SHA-256 of the extracted source file(s) |
+| `document_digest` | order-independent hash of the documents the unit wrote                                             |
+| `shards`          | every file the unit wrote, by relative path and byte size                                          |
+| `info`            | git commit, datatrove version, completion time — for reference only, never compared               |
+
+A unit is rebuilt when its config hash, stage version or input digest differs,
+when its files on disk no longer match `shards` ("output changed on disk"), or
+when it failed its integrity check. Nothing else triggers a rebuild:
+
+- **Worker count, shard layout, compression and mtimes never count.** The
+  document digest sums a SHA-256 per document over its canonical JSON, ignoring
+  the reader-stamped `metadata.file_path`, so the same documents give the same
+  digest however they are split. Copying, `rsync`-ing or `touch`-ing shards or
+  extracted files changes nothing; a touched extracted file is rehashed once.
+- **Early cutoff.** A stage that reruns — say after a `stage_version` bump for a
+  refactor that turned out not to change its output — and reproduces the same
+  documents leaves every downstream unit current.
+
+The config hash covers the stage's own top-level section. `quality` and
+`statistics` also fold in the stopword file, `spam` folds in its lexicon and
+domain lists, and the corpus stages fold in the sorted roster, so editing
+`stopwords/sl.txt` or a `spam/<code>/*.txt` list, or adding a dataset to
+`extract.yaml`, rebuilds what it should. Scoped stages exclude the roster, so a
+new dataset leaves the others' scoped work alone.
+
+**Atomic swap and integrity check.** A unit is written to
+`<output_dir>/_partial/<stage folder>/`, then checked: every document id may
+appear in the output at most as often as in the input, and the output may hold
+no more records than the input. Only then does it replace its old folder by
+rename, sentinel included. A failed check raises and keeps the old output and
+sentinel; a crash mid-run leaves them intact too. Stray shards from an earlier,
+wider run can therefore never survive into a rebuilt unit.
+
+**Re-extracted inputs rebuild automatically.** Re-extracting a dataset (e.g.
+`prepare_datasets.py extract <key> --force`) changes its content hash, so a
+plain `run --all` refolds it — and whatever downstream it actually changes. A
+dataset whose extracted file is absent is skipped, never emptied.
+
+**Lock file.** Every successful run rewrites
+[`configs/data/curate.lock.yaml`](../configs/data/curate.lock.yaml) (beside
+whichever config was passed), one entry per unit with its lineage and counts.
+Committed, it names the corpus each commit expects.
+
+**Status.** `status` reports every unit as `current`, `stale` with the reason,
+or `missing` (nothing to build it from), compares the lock file too, and exits
+1 when any unit is stale. It reads no shards and rebuilds nothing.
+
+**Adopting sentinels from before lineage tracking.** `run` refuses to start
+while legacy sentinels remain. `status --adopt` reads each legacy unit once,
+checks it, computes its document digest and rewrites its sentinel, so a corpus
+built earlier becomes current without a rebuild. Units failing the check are
+recorded as such and are the only ones the next run rebuilds.
 
 ## Per-dataset overrides
 
@@ -151,20 +190,17 @@ effectively non-overridable until some are surfaced.
 
 <output_dir>/                               curate_pretraining_corpus.py owns this entire tree
 ├── 00_convert/
-│   ├── <key>/<rank>.jsonl.gz               ← datatrove `Document` shards
-│   └── .complete                           sentinel: stage hash + counts
+│   └── <key>/
+│       ├── <rank>.jsonl.gz                 ← datatrove `Document` shards
+│       └── .complete                       sentinel: lineage + counts
 ├── 01_language/
-│   ├── <key>/<rank>.jsonl.gz               ← post-language-filter shards
-│   └── .complete
+│   └── <key>/{<rank>.jsonl.gz, .complete}  ← post-language-filter shards
 ├── 02_spam/
-│   ├── <key>/<rank>.jsonl.gz               ← post-spam-filter shards
-│   └── .complete
+│   └── <key>/{<rank>.jsonl.gz, .complete}  ← post-spam-filter shards
 ├── 03_quality/
-│   ├── <key>/<rank>.jsonl.gz
-│   └── .complete
+│   └── <key>/{<rank>.jsonl.gz, .complete}
 ├── 04_repetition/
-│   ├── <key>/<rank>.jsonl.gz
-│   └── .complete
+│   └── <key>/{<rank>.jsonl.gz, .complete}
 ├── 05_exact_dedup/
 │   ├── <key>/<rank>.jsonl.gz               ← post-exact-dedup shards
 │   └── .complete
@@ -175,6 +211,8 @@ effectively non-overridable until some are surfaced.
 │   ├── aggregate.json                      corpus-wide totals + tables
 │   ├── per_dataset/<key>.json              per-dataset doc/word breakdowns
 │   └── .complete
+├── _partial/<stage>/                       staging: a unit builds here, then
+│                                           replaces its old folder by rename
 ├── _dedup_state/                           sig/find scratch (auto-purged
 │                                           when each dedup sentinel lands)
 ├── _inputs/<stage>/                        roster view a corpus stage reads
@@ -187,20 +225,24 @@ effectively non-overridable until some are surfaced.
 ```bash
 CURATION=configs/data/curate.yaml
 
-# Run all eight stages, skipping any whose config slice hash is unchanged.
+# Run all eight stages, rebuilding only stale units.
 uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --all
 
-# Run only one stage. If its hash diverges from the recorded sentinel,
-# downstream sentinels are dropped so the next --all picks them up.
+# What would the next run rebuild, and why? Exits 1 when anything is stale.
+uv run python scripts/curate_pretraining_corpus.py status --config "$CURATION"
+
+# One-off: adopt sentinels written before lineage tracking, without a rebuild.
+uv run python scripts/curate_pretraining_corpus.py status --config "$CURATION" --adopt --max-workers 16
+
+# Run only one stage. Downstream units see its new document digest and
+# rebuild on the next --all, unless its documents came out the same.
 uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --all --stage quality
 
 # Force-rebuild a stage and every downstream stage. Removes their data
 # folders AND sentinels; --force without --stage clears <output_dir>.
 uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --all --force --stage quality
 
-# Single dataset, or a subset. The dataset key list folds into every
-# stage's hash, so a subset rerun will not silently reuse a previous
-# full-corpus output. (Switching between subsets / --all triggers rebuilds.)
+# Single dataset, or a subset: runs the scoped stages for those keys only.
 uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" kzb solar
 
 # Parallelism. Default is 1 (serial). 0 = cpu_count // 2. --tasks is an alias.
@@ -224,8 +266,8 @@ has one top-level section per stage (`convert:`, `language:`, `spam:`,
 `quality:`, `repetition:`, `exact_dedup:`, `sentence_dedup:`, `statistics:`)
 plus shared `input_dir`, `output_dir`, and a `stopwords:` path used by both
 `quality` and `statistics`. Each section is the **exclusive input** to that
-stage's sentinel hash slice, so edits propagate as far downstream as needed and
-no further. Defaults match the Gopher paper for the heuristic filters, 64-bit
+stage's config hash, so edits propagate as far downstream as the documents
+actually change and no further. Defaults match the Gopher paper for the heuristic filters, 64-bit
 xxhash for exact dedup, 3-sentence windows for sentence dedup, and top-5000
 word / bigram / trigram + top-200 TF-IDF keyword tables for statistics. The slow
 classla-lemmatized keyword pass is toggled in the YAML with
