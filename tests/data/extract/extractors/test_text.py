@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 
 from slm4ie.data.extract.extractors.text import TextExtractor
-from slm4ie.data.extract.driver import _chunk_files
+from slm4ie.data.extract.run import _chunk_files
 
 _TWO_BLOCKS = "Prvi dokument.\nDruga vrstica.\n\nDrugi dokument.\n"
 

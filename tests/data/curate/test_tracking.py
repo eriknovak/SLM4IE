@@ -75,7 +75,7 @@ class TestFunnel:
     def test_scoped_and_corpus_counts(self, tmp_path: Path):
         """Scoped stages aggregate per-dataset; corpus stages read one sentinel."""
         _build_tree(tmp_path)
-        funnel = tracking.build_pretrain_funnel(tmp_path)
+        funnel = tracking.build_curate_funnel(tmp_path)
         assert [e["stage"] for e in funnel] == list(STAGE_NAMES)
 
         convert = funnel[0]
@@ -91,7 +91,7 @@ class TestFunnel:
     def test_missing_stage_has_null_counts(self, tmp_path: Path):
         """A stage with no sentinel reports null counts."""
         (tmp_path / STAGE_DIRS["convert"]).mkdir(parents=True)
-        funnel = tracking.build_pretrain_funnel(tmp_path)
+        funnel = tracking.build_curate_funnel(tmp_path)
         assert all(e["records_out"] is None for e in funnel)
 
 
@@ -117,8 +117,8 @@ class TestLogPretrainRun:
 
     def test_disabled_and_missing_corpus_return_none(self, tmp_path: Path):
         """Disabled tracking and an absent final corpus are no-ops."""
-        assert tracking.log_pretrain_run(tmp_path, {}, enabled=False) is None
-        assert tracking.log_pretrain_run(tmp_path, {}, enabled=True) is None
+        assert tracking.log_curate_run(tmp_path, {}, enabled=False) is None
+        assert tracking.log_curate_run(tmp_path, {}, enabled=True) is None
 
     def test_config_output_dir_does_not_clash_with_the_resolved_path(self, store, tmp_path: Path):
         """The run records the resolved output path, not two values for one param."""
@@ -127,7 +127,7 @@ class TestLogPretrainRun:
         out = tmp_path / "pretrain"
         _build_tree(out)
         experiment = "slm4ie/data/test-pretrain-output-dir"
-        tracking.log_pretrain_run(out, {"output_dir": "./data/pretrain"}, experiment=experiment)
+        tracking.log_curate_run(out, {"output_dir": "./data/pretrain"}, experiment=experiment)
         client = mlflow.MlflowClient()
         run = client.search_runs([client.get_experiment_by_name(experiment).experiment_id])[0]
         assert run.data.params["output_dir"] == str(out)
@@ -140,7 +140,7 @@ class TestLogPretrainRun:
         out = tmp_path / "pretrain"
         _build_tree(out)
         experiment = "slm4ie/data/test-pretrain"
-        digest = tracking.log_pretrain_run(out, {"language": {"k": 1}}, experiment=experiment)
+        digest = tracking.log_curate_run(out, {"language": {"k": 1}}, experiment=experiment)
         assert digest and digest.startswith("sha256:")
 
         client = mlflow.MlflowClient()
@@ -163,12 +163,12 @@ class TestLogPretrainRun:
         out = tmp_path / "pretrain"
         _build_tree(out)
         experiment = "slm4ie/data/test-pretrain"
-        tracking.log_pretrain_run(out, {}, experiment=experiment)
-        tracking.log_pretrain_run(out, {}, experiment=experiment)
+        tracking.log_curate_run(out, {}, experiment=experiment)
+        tracking.log_curate_run(out, {}, experiment=experiment)
 
         client = mlflow.MlflowClient()
         exp = client.get_experiment_by_name(experiment)
         assert len(client.search_runs([exp.experiment_id])) == 1
 
-        tracking.log_pretrain_run(out, {}, experiment=experiment, force=True)
+        tracking.log_curate_run(out, {}, experiment=experiment, force=True)
         assert len(client.search_runs([exp.experiment_id])) == 1

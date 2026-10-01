@@ -8,8 +8,8 @@ task converters.
 Configuration is read from `configs/data/tokenization.yaml`, which declares
 `input_dir`, `output_dir`, and the dataset keys to convert. Each key must be
 declared in `configs/data/download.yaml` (so its raw subdirectory resolves) and
-have a reader registered in `readers/`. Sloleks 3.1 is the seed dataset;
-new lexicons are added by registering a reader and listing the key in the
+have a module registered in `lexicons/`. Sloleks 3.1 is the seed dataset;
+new lexicons are added by registering a module there and listing the key in the
 config.
 
 Each output line has this shape:
@@ -37,7 +37,7 @@ from typing import Any, Dict, IO, Iterable, List, Optional
 
 from tqdm import tqdm
 
-from slm4ie.data.download.config import DatasetConfig, load_config
+from slm4ie.data.download.config import DatasetConfig, load_download_config
 from slm4ie.utils.io import open_output
 from slm4ie.utils.parallel import (
     configure_script_logging,
@@ -47,19 +47,19 @@ from slm4ie.utils.parallel import (
     workers_quiet,
 )
 from slm4ie.data.tokenization.config import load_tokenization_config
-from slm4ie.data.tokenization.readers import READERS
+from slm4ie.data.tokenization.lexicons import LEXICONS
 from slm4ie.utils.cli import stamped_log_dir
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ConversionSummary:
+class TokenizationSummary:
     """Outcome of a tokenization conversion run.
 
     Attributes:
         records: Records written per converted dataset key.
-        skipped: Keys with no registered reader or no raw directory on disk.
+        skipped: Keys with no registered lexicon or no raw directory on disk.
         failed: Keys whose conversion raised.
     """
 
@@ -95,23 +95,23 @@ def convert_dataset(
     """Convert one tokenizer-eval dataset to `<output_dir>/<key>.jsonl.gz`.
 
     Args:
-        key: Dataset key (must be registered in `READERS`).
+        key: Dataset key (must be registered in `LEXICONS`).
         raw_dir: Directory holding the raw download for `key`.
         output_dir: Directory to write the JSONL output into. Created if missing.
         force: When True, overwrite an existing output file.
 
     Returns:
-        Number of records written, or None when no reader is registered for
+        Number of records written, or None when no lexicon is registered for
         `key` or the raw directory is absent. Returns 0 when the output already
         exists and `force` is False.
 
     Raises:
         ValueError: If the conversion ran but produced zero records, which
-            signals a reader/format mismatch rather than success.
+            signals a lexicon/format mismatch rather than success.
     """
-    reader = READERS.get(key)
-    if reader is None:
-        logger.warning("No tokenizer-eval reader registered for dataset %r; skipping.", key)
+    read_lexicon = LEXICONS.get(key)
+    if read_lexicon is None:
+        logger.warning("No lexicon registered for dataset %r; skipping.", key)
         return None
 
     if not raw_dir.exists():
@@ -126,7 +126,7 @@ def convert_dataset(
         return 0
 
     logger.info("Converting %s -> %s", raw_dir, out_path)
-    progress = tqdm(reader(raw_dir), desc=key, unit="entry", disable=workers_quiet())
+    progress = tqdm(read_lexicon(raw_dir), desc=key, unit="entry", disable=workers_quiet())
     with open_output(out_path) as out_stream:
         try:
             count = write_records(progress, out_stream)
@@ -134,12 +134,12 @@ def convert_dataset(
             progress.close()
 
     if count == 0:
-        # An empty output almost always means a reader/format mismatch;
+        # An empty output almost always means a lexicon/format mismatch;
         # remove the bogus file and fail loudly instead of exiting 0.
         out_path.unlink(missing_ok=True)
         raise ValueError(
             f"Conversion of {key!r} produced 0 records from {raw_dir}; "
-            "likely a reader/format mismatch. No output written."
+            "likely a lexicon/format mismatch. No output written."
         )
 
     logger.info("Wrote %d records to %s", count, out_path)
@@ -157,8 +157,7 @@ def _resolve_dataset_subdir(download_config_path: Path, key: str) -> str:
         The `output_dir` value declared for `key` in download.yaml, or `key`
         itself if no per-dataset override exists.
     """
-    _, datasets = load_config(download_config_path)
-    cfg: Optional[DatasetConfig] = datasets.get(key)
+    cfg: Optional[DatasetConfig] = load_download_config(download_config_path).datasets.get(key)
     return cfg.output_dir if cfg and cfg.output_dir else key
 
 
@@ -168,7 +167,7 @@ def convert_tokenization_datasets(
     dataset_keys: Optional[List[str]] = None,
     force: bool = False,
     max_workers: int = 0,
-) -> ConversionSummary:
+) -> TokenizationSummary:
     """Convert the selected tokenizer-eval datasets to JSONL.
 
     Args:
@@ -188,7 +187,7 @@ def convert_tokenization_datasets(
         keys = list(config.datasets)
         if not keys:
             logger.warning("No datasets declared in %s; nothing to do.", config_path)
-            return ConversionSummary()
+            return TokenizationSummary()
     else:
         keys = list(dataset_keys)
         unknown = [k for k in keys if k not in config.datasets]
@@ -223,7 +222,7 @@ def convert_tokenization_datasets(
         log_dir=stamped_log_dir("tokenization"),
     )
 
-    summary = ConversionSummary(
+    summary = TokenizationSummary(
         records={k: v for k, v in results.items() if v is not None},
         skipped=[k for k, v in results.items() if v is None],
         failed=[k for k, _ in failures],

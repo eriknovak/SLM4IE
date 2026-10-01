@@ -80,8 +80,8 @@ class FileBasedExtractor(BaseExtractor):
             files (List[Path]): Files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root, used to resolve sidecar
-                metadata that lives alongside the input files.
+            input_dir (Path): Dataset root, used to resolve a metadata
+                table that lives alongside the input files.
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block; consumed by extractors that support it.
 

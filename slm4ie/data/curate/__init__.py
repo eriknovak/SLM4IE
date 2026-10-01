@@ -19,7 +19,7 @@ Layout of the package:
 
 * `stages/` — the registry (`stages/__init__.py`) and one module per stage
   holding everything that runs it; a stage's version is its module's hash.
-* `driver.py` — the run loop (`curate`); `status.py` — reporting and adoption.
+* `run.py` — the run loop (`curate`); `status.py` — reporting and adoption.
 * `config.py` — the curation config, overrides and config hashes;
   `lineage.py` — sentinels, currency, atomic swap, lock file;
   `paths.py` — the output tree and shard helpers; `tracking.py` — MLflow.

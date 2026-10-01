@@ -9,7 +9,7 @@ from typing import List, Tuple
 from datasets import load_dataset
 
 from slm4ie.data.download.config import DatasetConfig
-from slm4ie.data.download.driver import DownloaderResult, _augment_with_note
+from slm4ie.data.download.run import DownloaderResult, _augment_with_note
 
 logger = logging.getLogger(__name__)
 

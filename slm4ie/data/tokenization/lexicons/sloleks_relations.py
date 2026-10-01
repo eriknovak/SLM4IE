@@ -10,7 +10,7 @@ silver.
 
 This module reads that TSV and yields per-derived-lemma morpheme segmentations,
 deduplicated by lemma (a verified segmentation wins over an unverified one).
-Unlike `slm4ie.data.tokenization.readers.sloleks`, no heuristic alignment happens here: the morpheme
+Unlike `slm4ie.data.tokenization.lexicons.sloleks`, no heuristic alignment happens here: the morpheme
 boundaries are read straight from the underscore decomposition.
 
 The exact column layout is taken from the resource's documentation rather than a
@@ -20,7 +20,7 @@ related-lemma column. That single check rejects a header line and any malformed
 row regardless of small column-order drift, and is the contract to confirm
 against the real download.
 
-Used by `slm4ie/data/tokenization/driver.py` to materialize a derivational
+Used by `slm4ie/data/tokenization/run.py` to materialize a derivational
 tokenizer/morphology evaluation JSONL. Like Sloleks, this resource is absent
 from `configs/data/extract.yaml` and never enters the pretraining corpus.
 """

@@ -10,7 +10,7 @@ import requests
 from tqdm import tqdm
 
 from slm4ie.data.download.config import DatasetConfig
-from slm4ie.data.download.driver import DownloaderResult, _augment_with_note
+from slm4ie.data.download.run import DownloaderResult, _augment_with_note
 from slm4ie.utils.parallel import workers_quiet
 
 logger = logging.getLogger(__name__)

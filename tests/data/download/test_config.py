@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from slm4ie.data.download.config import ConfigError, DatasetConfig, load_config
+from slm4ie.data.download.config import ConfigError, DatasetConfig, load_download_config
 
 
 class TestDatasetConfig:
@@ -134,20 +134,20 @@ class TestDatasetConfig:
         assert "role" in msg
 
     def test_provider_field_round_trips(self):
-        """The optional `provider` field round-trips through from_dict."""
+        """The optional `publisher` field round-trips through from_dict."""
         data = {
             "enabled": True,
             "source": "http",
             "name": "Test",
             "urls": ["https://example.com/x.gz"],
             "output_dir": "test",
-            "provider": "clarin.si",
+            "publisher": "clarin.si",
         }
         config = DatasetConfig.from_dict("test", data)
-        assert config.provider == "clarin.si"
+        assert config.publisher == "clarin.si"
 
     def test_provider_field_default_none(self):
-        """The `provider` field defaults to None when omitted."""
+        """The `publisher` field defaults to None when omitted."""
         data = {
             "enabled": True,
             "source": "http",
@@ -156,7 +156,7 @@ class TestDatasetConfig:
             "output_dir": "test",
         }
         config = DatasetConfig.from_dict("test", data)
-        assert config.provider is None
+        assert config.publisher is None
 
     def test_enabled_non_manual_requires_output_dir(self):
         """An enabled non-manual entry without output_dir is rejected."""
@@ -222,10 +222,10 @@ class TestConfigError:
 
 
 class TestLoadConfig:
-    """Tests for load_config function."""
+    """Tests for load_download_config."""
 
     def test_load_valid_config(self, tmp_path: Path):
-        """`load_config` parses output_dir and the datasets mapping."""
+        """`load_download_config` parses output_dir and the datasets mapping."""
         config_data = {
             "output_dir": "data/raw",
             "datasets": {
@@ -240,8 +240,9 @@ class TestLoadConfig:
         }
         config_file = tmp_path / "download.yaml"
         config_file.write_text(yaml.dump(config_data))
-        output_dir, datasets = load_config(config_file)
-        assert output_dir == "data/raw"
+        catalog = load_download_config(config_file)
+        datasets = catalog.datasets
+        assert catalog.output_dir == "data/raw"
         assert len(datasets) == 1
         assert "test_ds" in datasets
         assert datasets["test_ds"].name == "Test"
@@ -249,7 +250,7 @@ class TestLoadConfig:
     def test_load_config_file_not_found(self):
         """A missing config path raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            load_config(Path("/nonexistent/config.yaml"))
+            load_download_config(Path("/nonexistent/config.yaml"))
 
     def test_load_config_multiple_datasets(self, tmp_path: Path):
         """Multiple datasets keep their individual enabled flags."""
@@ -272,7 +273,7 @@ class TestLoadConfig:
         }
         config_file = tmp_path / "download.yaml"
         config_file.write_text(yaml.dump(config_data))
-        _output_dir, datasets = load_config(config_file)
+        datasets = load_download_config(config_file).datasets
         assert len(datasets) == 2
         assert datasets["ds1"].enabled is True
         assert datasets["ds2"].enabled is False
@@ -307,7 +308,7 @@ class TestLoadConfigOverlay:
         config_file.write_text(yaml.dump(base))
         (tmp_path / "download.local.yaml").write_text(yaml.dump(overlay))
 
-        _output_dir, datasets = load_config(config_file)
+        datasets = load_download_config(config_file).datasets
         gigafida = datasets["gigafida"]
         # Overlay wins on patched fields.
         assert gigafida.enabled is True
@@ -336,7 +337,7 @@ class TestLoadConfigOverlay:
         config_file.write_text(yaml.dump(base))
         (tmp_path / "download.local.yaml").write_text(yaml.dump(overlay))
 
-        _output_dir, datasets = load_config(config_file)
+        datasets = load_download_config(config_file).datasets
         assert "secret_ds" in datasets
         assert datasets["secret_ds"].urls == ["https://example.com/s.gz"]
 
@@ -355,6 +356,6 @@ class TestLoadConfigOverlay:
         config_file = tmp_path / "download.yaml"
         config_file.write_text(yaml.dump(base))
 
-        _output_dir, datasets = load_config(config_file)
+        datasets = load_download_config(config_file).datasets
         assert datasets["gigafida"].enabled is False
         assert datasets["gigafida"].urls == []

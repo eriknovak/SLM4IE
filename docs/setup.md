@@ -71,7 +71,7 @@ uv run rumdl fmt <paths>     # Markdown formatting and lint
 from ruff so it stays byte-identical to upstream.
 
 Secrets and ephemeral values (such as presigned download URLs) belong in a
-gitignored `*.local.yaml` sibling overlay, which `load_config` deep-merges
+gitignored `*.local.yaml` sibling overlay, which `load_yaml` deep-merges
 over the matching base config — never in the committed YAML.
 
 ## HuggingFace authentication

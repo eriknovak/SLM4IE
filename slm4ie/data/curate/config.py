@@ -1,7 +1,7 @@
 """Loading the curation config: paths, roster, per-dataset overrides, config hashes.
 
 The pipeline is driven by a single curation config (`configs/data/curate.yaml`
-or an experiment's own variant). `load_setup` reads it once into a `Setup`
+or an experiment's own variant). `load_curate_config` reads it once into a `CurateConfig`
 holding everything a run, a status check or an adoption derives from it: the
 resolved paths, the dataset roster from `extract.yaml`, the stopword and spam
 assets, the lock file's location, and each unit's expected config hash.
@@ -365,7 +365,7 @@ def _stage_extra(stage: str, stopwords_bytes: bytes, spam_bytes: bytes, dataset_
 
 
 @dataclass
-class Setup:
+class CurateConfig:
     """Everything a run, a status check or an adoption derives from the config.
 
     Attributes:
@@ -435,9 +435,9 @@ def lock_path_for(pretrain_config: Path) -> Path:
     return pretrain_config.with_name(f"{pretrain_config.stem}.lock.yaml")
 
 
-def load_setup(
+def load_curate_config(
     input_dir: Optional[Path], output_dir: Optional[Path], pretrain_config: Path, extract_config: Optional[Path]
-) -> Setup:
+) -> CurateConfig:
     """Load the config and everything derived from it.
 
     Args:
@@ -447,14 +447,14 @@ def load_setup(
         extract_config: Path to extract.yaml, or None for the default.
 
     Returns:
-        The loaded `Setup`.
+        The loaded `CurateConfig`.
     """
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_config)
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
-    return Setup(
+    return CurateConfig(
         cfg=cfg,
         overrides=cfg.get("overrides") or {},
         paths=CuratePaths(input_folder=resolved_input, output_dir=resolved_output),

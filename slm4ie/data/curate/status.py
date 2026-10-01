@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from slm4ie.data.curate.config import Setup, load_setup
+from slm4ie.data.curate.config import CurateConfig, load_curate_config
 from slm4ie.data.curate.lineage import (
     NOT_BUILT,
     Sentinel,
@@ -141,7 +141,7 @@ def status(
     Returns:
         One `UnitStatus` per roster unit, in pipeline order.
     """
-    setup = load_setup(input_dir, output_dir, pretrain_config, extract_config)
+    setup = load_curate_config(input_dir, output_dir, pretrain_config, extract_config)
     if adopt:
         adopt_legacy(setup, workers)
     lock = read_lock(setup.lock_path)
@@ -201,7 +201,7 @@ def _scan_all(requests: Dict[Tuple[str, str], ScanRequest], workers: int) -> Dic
     return scan_units(requests, workers, progress)
 
 
-def adopt_legacy(setup: Setup, workers: int = 1) -> None:
+def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
     """Give legacy sentinels full lineage by reading their outputs once, without a rebuild.
 
     A legacy unit whose config hash still matches is read once: its document

@@ -1,4 +1,4 @@
-"""Tests for slm4ie.data.extract.driver module."""
+"""Tests for slm4ie.data.extract.run module."""
 
 import gzip
 import json
@@ -10,11 +10,11 @@ import yaml
 
 from slm4ie.data.extract.extractors import register_extractor, BaseExtractor
 from slm4ie.data.schema import Annotations, Document, Token
-from slm4ie.data.extract.driver import (
+from slm4ie.data.extract.run import (
     _chunk_files,
     _extract_one,
     extract_datasets,
-    load_extraction_config,
+    load_extract_config,
 )
 
 _STUB_DOC = Document(
@@ -290,7 +290,7 @@ def _write_config(tmp_path: Path, datasets: dict) -> Path:
 
 
 class TestLoadExtractionConfig:
-    """Tests for load_extraction_config."""
+    """Tests for load_extract_config."""
 
     def test_loads_config(self, tmp_path: Path):
         """Verify all fields are parsed correctly."""
@@ -300,7 +300,7 @@ class TestLoadExtractionConfig:
                 "ds1": {"extractor": "stub", "domain": "web"},
             },
         )
-        cfg = load_extraction_config(config_file)
+        cfg = load_extract_config(config_file)
         assert cfg.input_dir == str(tmp_path / "raw")
         assert cfg.output_dir == str(tmp_path / "processed")
         assert "ds1" in cfg.datasets
@@ -310,7 +310,7 @@ class TestLoadExtractionConfig:
     def test_missing_file_raises(self):
         """FileNotFoundError raised for non-existent config."""
         with pytest.raises(FileNotFoundError):
-            load_extraction_config(Path("/nonexistent/extract.yaml"))
+            load_extract_config(Path("/nonexistent/extract.yaml"))
 
 
 class TestExtractDatasets:

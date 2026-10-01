@@ -35,18 +35,18 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from slm4ie.data.download.driver import download_datasets
-from slm4ie.data.extract.driver import extract_datasets
+from slm4ie.data.download.run import download_datasets
+from slm4ie.data.extract.run import extract_datasets
 from slm4ie.utils.parallel import configure_script_logging
-from slm4ie.data.tasks.driver import convert_tasks
+from slm4ie.data.tasks.run import convert_tasks
 from slm4ie.data.tasks.converters.superglue import DEFAULT_VARIANT, VARIANT_DIRS
-from slm4ie.data.tokenization.driver import convert_tokenization_datasets
+from slm4ie.data.tokenization.run import convert_tokenization_datasets
 from slm4ie.utils.cli import (
-    add_selection,
+    add_keys,
     add_workers,
     resolve_config,
     stamped_log_dir,
-    validate_selection,
+    validate_keys,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _add_download_parser(subparsers: argparse._SubParsersAction) -> None:
         subparsers: The subparser registry to extend.
     """
     parser = subparsers.add_parser("download", help="Download raw datasets from their sources.")
-    add_selection(
+    add_keys(
         parser,
         "datasets",
         "Dataset keys to download. Use --all for the full catalog.",
@@ -97,7 +97,7 @@ def _add_extract_parser(subparsers: argparse._SubParsersAction) -> None:
         subparsers: The subparser registry to extend.
     """
     parser = subparsers.add_parser("extract", help="Normalize raw downloads into unified JSONL.")
-    add_selection(
+    add_keys(
         parser,
         "datasets",
         "Dataset keys to extract (e.g. 'kzb gigafida').",
@@ -135,7 +135,7 @@ def _add_tasks_parser(subparsers: argparse._SubParsersAction) -> None:
         subparsers: The subparser registry to extend.
     """
     parser = subparsers.add_parser("tasks", help="Convert task datasets into per-split JSONL.")
-    add_selection(
+    add_keys(
         parser,
         "entries",
         "Entry keys to process, e.g. 'ner/ssj500k'.",
@@ -165,7 +165,7 @@ def _add_tokenization_parser(subparsers: argparse._SubParsersAction) -> None:
         subparsers: The subparser registry to extend.
     """
     parser = subparsers.add_parser("tokenization", help="Convert tokenizer-evaluation lexicons into JSONL.")
-    add_selection(
+    add_keys(
         parser,
         "datasets",
         "Dataset keys to convert (subset of tokenization.yaml's `datasets`).",
@@ -205,7 +205,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     args = parser.parse_args(argv)
     dest = "entries" if args.command == "tasks" else "datasets"
-    validate_selection(parser, args, dest)
+    validate_keys(parser, args, dest)
     return args
 
 

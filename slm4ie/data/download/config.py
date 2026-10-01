@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from slm4ie.utils.config import load_yaml
 
@@ -57,7 +57,7 @@ class DatasetConfig:
             task-split isolation.
         tasks: Supported NLP tasks (e.g., POS, NER, SA, NLI). Empty
             list for pretraining corpora.
-        provider: Optional source/host provider name for attribution
+        publisher: Optional host the dataset is published on, for attribution
             (e.g., 'clarin.si'). Purely descriptive; carries no
             dispatch behaviour.
     """
@@ -74,7 +74,7 @@ class DatasetConfig:
     note: Optional[str] = None
     role: str = "pretrain"
     tasks: List[str] = field(default_factory=list)
-    provider: Optional[str] = None
+    publisher: Optional[str] = None
 
     @classmethod
     def from_dict(cls, key: str, data: Dict) -> "DatasetConfig":
@@ -115,14 +115,25 @@ class DatasetConfig:
             note=data.get("note"),
             role=role,
             tasks=data.get("tasks", []),
-            provider=data.get("provider"),
+            publisher=data.get("publisher"),
         )
 
 
-def load_config(
-    config_path: Path,
-) -> Tuple[str, Dict[str, DatasetConfig]]:
-    """Load dataset download configuration from YAML file.
+@dataclass
+class DownloadConfig:
+    """Resolved contents of `configs/data/download.yaml`.
+
+    Attributes:
+        output_dir: Root the per-dataset raw subdirectories are created under.
+        datasets: Every declared dataset keyed by its dataset key.
+    """
+
+    output_dir: str
+    datasets: Dict[str, DatasetConfig] = field(default_factory=dict)
+
+
+def load_download_config(config_path: Path) -> DownloadConfig:
+    """Load the dataset catalog from YAML.
 
     If a sibling `*.local.yaml` overlay exists (e.g. `download.local.yaml`
     next to `download.yaml`), it is deep-merged over the base config. The
@@ -133,7 +144,7 @@ def load_config(
         config_path: Path to the YAML config file.
 
     Returns:
-        Tuple of (output_dir, dict of dataset key to DatasetConfig).
+        The catalog with every dataset parsed into a `DatasetConfig`.
 
     Raises:
         FileNotFoundError: If config file does not exist.
@@ -146,4 +157,4 @@ def load_config(
     for key, data in raw.get("datasets", {}).items():
         datasets[key] = DatasetConfig.from_dict(key, data)
 
-    return output_dir, datasets
+    return DownloadConfig(output_dir=output_dir, datasets=datasets)

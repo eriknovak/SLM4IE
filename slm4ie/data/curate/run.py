@@ -28,7 +28,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from slm4ie.data.curate.config import Setup, bucket_keys_by_effective_hash, effective_stage_config, load_setup
+from slm4ie.data.curate.config import (
+    CurateConfig,
+    bucket_keys_by_effective_hash,
+    effective_stage_config,
+    load_curate_config,
+)
 from slm4ie.data.curate.config import stage_slice, validate_overrides
 from slm4ie.data.curate.lineage import (
     SENTINEL_NAME,
@@ -62,7 +67,7 @@ from slm4ie.data.curate.stages import (
     SCOPED_STAGES,
     STAGE_NAMES,
     STAGE_VERSIONS,
-    StageJob,
+    StageRun,
     cascade_from,
     is_scoped,
     run_stage,
@@ -247,7 +252,7 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
 
 
 def _run_scoped_bucket(
-    setup: Setup,
+    setup: CurateConfig,
     stage: str,
     bucket_keys: List[str],
     effective: Dict[str, Any],
@@ -295,7 +300,7 @@ def _run_scoped_bucket(
     if not with_docs:
         counts = (0, 0)
     view = filter_stage_subset(up_dir, with_docs) if up_dir is not None and with_docs else None
-    job = StageJob(
+    job = StageRun(
         paths=paths,
         config=effective,
         workers=workers,
@@ -347,7 +352,7 @@ def _run_scoped_bucket(
 
 
 def _curate_scoped(
-    setup: Setup, stage: str, dataset_keys: List[str], workers: int, log_dir: Path, info: Dict[str, Any]
+    setup: CurateConfig, stage: str, dataset_keys: List[str], workers: int, log_dir: Path, info: Dict[str, Any]
 ) -> None:
     """Rebuild every stale unit of one scoped stage.
 
@@ -414,7 +419,7 @@ def _curate_scoped(
         )
 
 
-def _curate_corpus(setup: Setup, stage: str, workers: int, info: Dict[str, Any]) -> None:
+def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str, Any]) -> None:
     """Rebuild a corpus stage when it is stale, resuming an unfinished build.
 
     Args:
@@ -469,7 +474,7 @@ def _curate_corpus(setup: Setup, stage: str, workers: int, info: Dict[str, Any])
         workers,
     )
     staging = paths.staging_dir(stage)
-    job = StageJob(
+    job = StageRun(
         paths=paths,
         config=stage_slice(stage, setup.cfg),
         workers=workers,
@@ -555,7 +560,7 @@ def curate(
     """
     if run_all and datasets:
         raise ValueError("datasets must be empty when run_all is True")
-    setup = load_setup(input_dir, output_dir, pretrain_config, extract_config)
+    setup = load_curate_config(input_dir, output_dir, pretrain_config, extract_config)
     cfg = setup.cfg
     paths = setup.paths
     output_dir = paths.output_dir
@@ -608,9 +613,9 @@ def curate(
         mlflow_cfg = cfg.get("mlflow") or {}
         enabled = bool(mlflow_cfg.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled
         if enabled:
-            from slm4ie.data.curate.tracking import DEFAULT_EXPERIMENT, log_pretrain_run
+            from slm4ie.data.curate.tracking import DEFAULT_EXPERIMENT, log_curate_run
 
-            log_pretrain_run(
+            log_curate_run(
                 output_dir,
                 cfg,
                 enabled=True,

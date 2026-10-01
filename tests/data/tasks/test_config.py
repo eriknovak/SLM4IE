@@ -6,7 +6,7 @@ import pytest
 
 from slm4ie.data.tasks.config import (
     TasksConfig,
-    load_tasks,
+    load_tasks_config,
     resolve_output_dir,
     resolve_source_paths,
 )
@@ -23,11 +23,11 @@ def tasks_config() -> TasksConfig:
     Returns:
         Parsed `TasksConfig`.
     """
-    return load_tasks(TASKS_YAML)
+    return load_tasks_config(TASKS_YAML)
 
 
 def test_loads_successfully(tasks_config: TasksConfig) -> None:
-    """`load_tasks` accepts the shipped registry without raising."""
+    """`load_tasks_config` accepts the shipped registry without raising."""
     assert isinstance(tasks_config, TasksConfig)
 
 

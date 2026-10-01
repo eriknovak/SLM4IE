@@ -108,7 +108,7 @@ class TestMainExits:
     def test_exit_code_comes_from_the_handler(self, monkeypatch, tmp_path: Path):
         """A failing subcommand exits with the code its handler returned."""
         cfg = SimpleNamespace(output_root=tmp_path / "out")
-        monkeypatch.setattr(sweep, "load_tokenizer_config", lambda _path: cfg)
+        monkeypatch.setattr(sweep, "load_sweep_config", lambda _path: cfg)
         monkeypatch.setattr(sweep, "_run_export", lambda _cfg, _args: 2)
         monkeypatch.setattr(sys, "argv", ["sweep_tokenizers.py", "export", "--config", "sweep.yaml", "--all"])
 

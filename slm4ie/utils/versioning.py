@@ -558,7 +558,7 @@ def _count_rows(path: Path) -> int:
     return count
 
 
-def shard_manifest(
+def shard_listing(
     root: Path,
     *,
     globs: Tuple[str, ...] = DEFAULT_SHARD_GLOBS,
@@ -612,7 +612,7 @@ def corpus_digest(
 ) -> str:
     """Compute a stable content digest for a corpus directory.
 
-    Hashes the shard manifest (see `shard_manifest`) as canonical
+    Hashes the shard manifest (see `shard_listing`) as canonical
     tab-separated lines so the digest changes if and only if a shard's path,
     size, or -- when `with_rows` is True -- row count changes. Stable across
     reruns that reproduce identical shards. An existing root with no matching
@@ -631,7 +631,7 @@ def corpus_digest(
     Raises:
         FileNotFoundError: If `root` does not exist.
     """
-    manifest = shard_manifest(root, globs=globs, with_rows=with_rows)
+    manifest = shard_listing(root, globs=globs, with_rows=with_rows)
     h = hashlib.sha256()
     for rel, size, rows in manifest:
         h.update(f"{rel}\t{size}\t{rows}\n".encode("utf-8"))

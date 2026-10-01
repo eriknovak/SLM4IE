@@ -1,7 +1,7 @@
 """Tests for slm4ie.data.curate.stages.convert (the curate stage-0 module).
 
 The convert stage is stage 0 of the curation pipeline. These tests cover
-`convert_record`, `convert_dataset`, and `run_convert_stage`.
+`convert_record`, `lift_dataset`, and `run_convert_stage`.
 """
 
 import gzip
@@ -12,7 +12,7 @@ from typing import Dict, List
 import pytest
 
 from slm4ie.data.curate.stages.convert import (
-    convert_dataset,
+    lift_dataset,
     convert_record,
     run_convert_stage,
 )
@@ -203,7 +203,7 @@ class TestConvertDataset:
     """Tests for end-to-end per-dataset conversion."""
 
     def test_writes_shard_when_input_present(self, tmp_path: Path) -> None:
-        """`convert_dataset` produces a sharded folder of gzipped JSONL."""
+        """`lift_dataset` produces a sharded folder of gzipped JSONL."""
         input_dir = tmp_path / "extracted"
         output_dir = tmp_path / "out"
         _write_jsonl(
@@ -219,7 +219,7 @@ class TestConvertDataset:
             ],
         )
 
-        n = convert_dataset("kzb", input_dir=input_dir, output_dir=output_dir)
+        n = lift_dataset("kzb", input_dir=input_dir, output_dir=output_dir)
         assert n == 1
 
         shard_folder = output_dir / "kzb"
@@ -259,7 +259,7 @@ class TestConvertDataset:
             ],
         )
 
-        n = convert_dataset(
+        n = lift_dataset(
             "kzb",
             input_dir=input_dir,
             output_dir=output_dir,
@@ -270,10 +270,10 @@ class TestConvertDataset:
         assert rows[0]["annotations"]["forms"] == ["Lepa", "beseda", "."]
 
     def test_missing_input_returns_none(self, tmp_path: Path) -> None:
-        """No `<key>.jsonl` -> convert_dataset returns None (skip)."""
+        """No `<key>.jsonl` -> lift_dataset returns None (skip)."""
         input_dir = tmp_path / "extracted"
         input_dir.mkdir()
-        result = convert_dataset("ghost", input_dir=input_dir, output_dir=tmp_path / "out")
+        result = lift_dataset("ghost", input_dir=input_dir, output_dir=tmp_path / "out")
         assert result is None
 
 

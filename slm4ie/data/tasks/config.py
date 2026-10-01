@@ -37,7 +37,7 @@ class TasksRoots:
 
 
 @dataclasses.dataclass
-class TaskSource:
+class EntrySource:
     """Source descriptor for a single task entry.
 
     Attributes:
@@ -77,7 +77,7 @@ class TaskEntry:
     task: str
     dataset: str
     role: Literal["finetune_and_eval", "held_out"]
-    source: TaskSource
+    source: EntrySource
     splits: Dict[str, str]
     labels: Optional[List[Any]]
     suite: Optional[str]
@@ -104,7 +104,7 @@ class TasksConfig:
     mlflow: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-def load_tasks(yaml_path: Path) -> TasksConfig:
+def load_tasks_config(yaml_path: Path) -> TasksConfig:
     """Loads and validates `configs/data/tasks.yaml`.
 
     Args:
@@ -310,7 +310,7 @@ def _parse_entry(key: Any, value: Any, converter_defaults: Dict[str, str]) -> Ta
     )
 
 
-def _parse_source(key: str, raw: Any) -> TaskSource:
+def _parse_source(key: str, raw: Any) -> EntrySource:
     """Parses and validates an entry's `source:` block.
 
     Args:
@@ -318,7 +318,7 @@ def _parse_source(key: str, raw: Any) -> TaskSource:
         raw: Raw `source` mapping.
 
     Returns:
-        Parsed `TaskSource`.
+        Parsed `EntrySource`.
 
     Raises:
         ValueError: If kind is unknown or keys are missing/invalid.
@@ -334,7 +334,7 @@ def _parse_source(key: str, raw: Any) -> TaskSource:
     for k in keys:
         if not isinstance(k, str) or not k:
             raise ValueError(f"Entry {key!r} `source.keys` entries must be non-empty strings.")
-    return TaskSource(kind=kind, keys=list(keys))
+    return EntrySource(kind=kind, keys=list(keys))
 
 
 def _parse_splits(key: str, raw: Any) -> Dict[str, str]:

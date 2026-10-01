@@ -54,7 +54,7 @@ Example:
                      when hierarchical; otherwise the file's stem.
         metadata:    empty by default; populated per-file when the
                      `metadata:` config block is supplied (see
-                     `MetadataSidecar`).
+                     `MetadataTable`).
         annotations:
             tokens:    flat concatenation of every sentence's tokens.
             sentences: one inclusive `[start, end]` index pair per
@@ -65,7 +65,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
-from slm4ie.data.extract.sidecar import MetadataSidecar
+from slm4ie.data.extract.metadata_table import MetadataTable
 from slm4ie.data.schema import Annotations, Document, Token, render_sentence
 
 
@@ -206,7 +206,7 @@ def _build_document(
         domain (str): Domain label.
         extra_metadata (Optional[Dict[str, Any]]): Per-document
             fields copied verbatim into `Document.metadata` (e.g.
-            from `MetadataSidecar`). Empty when no sidecar TSV is
+            from `MetadataTable`). Empty when no sidecar TSV is
             configured.
 
     Returns:
@@ -277,7 +277,7 @@ class ConlluExtractor(FileBasedExtractor):
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
             input_dir (Path): Dataset root, used to locate an optional
-                `MetadataSidecar` TSV.
+                `MetadataTable` TSV.
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
 
@@ -286,9 +286,9 @@ class ConlluExtractor(FileBasedExtractor):
                 markers are present; otherwise one per leading
                 `# sent_id` prefix; otherwise one per file.
         """
-        sidecar: Optional[MetadataSidecar] = MetadataSidecar.from_config(input_dir, metadata) if metadata else None
+        table: Optional[MetadataTable] = MetadataTable.from_config(input_dir, metadata) if metadata else None
         for filepath in files:
-            extra = sidecar.get_for_path(filepath) if sidecar else {}
+            extra = table.get_for_path(filepath) if table else {}
             yield from self._parse_file(filepath, source, domain, extra)
 
     def _parse_file(

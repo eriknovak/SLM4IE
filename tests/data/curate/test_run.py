@@ -23,7 +23,7 @@ import slm4ie.data.curate.config as curate_config  # noqa: E402
 import slm4ie.data.curate.paths as curate_paths  # noqa: E402
 import slm4ie.data.curate.stages as curate_stages  # noqa: E402
 import slm4ie.data.curate.status as curate_status  # noqa: E402
-import slm4ie.data.curate.driver as curate_runner  # noqa: E402
+import slm4ie.data.curate.run as curate_runner  # noqa: E402
 from slm4ie.utils.versioning import read_lock, write_lock  # noqa: E402
 from slm4ie.data.curate import (
     STAGE_DIRS,

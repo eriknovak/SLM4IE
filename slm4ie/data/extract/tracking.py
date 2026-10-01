@@ -51,7 +51,7 @@ REQUIRED_FIELDS = ("text", "source", "domain", "doc_id", "metadata")
 
 
 @dataclass
-class SourceProfile:
+class DatasetProfile:
     """Per-source quality profile derived from the extracted text JSONL.
 
     Attributes:
@@ -108,7 +108,9 @@ def _count_gz_rows(path: Path) -> int:
     return count
 
 
-def profile_source(key: str, text_path: Path, annotations_path: Optional[Path], domain: Optional[str]) -> SourceProfile:
+def profile_dataset(
+    key: str, text_path: Path, annotations_path: Optional[Path], domain: Optional[str]
+) -> DatasetProfile:
     """Profile one extracted source by a single pass over its text JSONL.
 
     Args:
@@ -118,9 +120,9 @@ def profile_source(key: str, text_path: Path, annotations_path: Optional[Path], 
         domain: Configured provenance tag for the source, or None.
 
     Returns:
-        The populated `SourceProfile`.
+        The populated `DatasetProfile`.
     """
-    profile = SourceProfile(key=key, domain=domain, present=True)
+    profile = DatasetProfile(key=key, domain=domain, present=True)
     profile.missing_fields = {f: 0 for f in REQUIRED_FIELDS}
 
     with text_path.open(encoding="utf-8") as fh:
@@ -149,7 +151,7 @@ def profile_source(key: str, text_path: Path, annotations_path: Optional[Path], 
     return profile
 
 
-def build_extraction_profile(output_base: Path, datasets: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def build_extract_profile(output_base: Path, datasets: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Build the full per-source extraction profile from disk.
 
     Profiles every configured dataset that has a `<key>.jsonl` under
@@ -175,10 +177,10 @@ def build_extraction_profile(output_base: Path, datasets: Dict[str, Dict[str, An
         domain = datasets[key].get("domain")
         found = find_dataset_files(output_base, key)
         if found is None:
-            by_source[key] = asdict(SourceProfile(key=key, domain=domain, present=False))
+            by_source[key] = asdict(DatasetProfile(key=key, domain=domain, present=False))
             continue
         text_path, annotations_path = found
-        profile = profile_source(key, text_path, annotations_path, domain)
+        profile = profile_dataset(key, text_path, annotations_path, domain)
         by_source[key] = asdict(profile)
         total_rows += profile.rows
         total_empty += profile.empty_text
@@ -194,7 +196,7 @@ def build_extraction_profile(output_base: Path, datasets: Dict[str, Dict[str, An
     return {"by_source": by_source, "totals": totals}
 
 
-def log_extraction_run(
+def log_extract_run(
     output_base: Path,
     datasets: Dict[str, Dict[str, Any]],
     *,
@@ -240,7 +242,7 @@ def log_extraction_run(
     if existing is not None:
         ml.delete_run(existing, tracking_uri=tracking_uri)
 
-    profile = build_extraction_profile(output_base, datasets)
+    profile = build_extract_profile(output_base, datasets)
 
     artifact_root = artifact_dir if artifact_dir is not None else Path(tempfile.mkdtemp(prefix="extract-profile-"))
     artifact_root.mkdir(parents=True, exist_ok=True)

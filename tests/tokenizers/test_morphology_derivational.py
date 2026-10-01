@@ -12,7 +12,7 @@ from slm4ie.tokenizers.morphology import (
     save_lexicon,
 )
 
-#: Derivational records as emitted by the sloleks_relations reader.
+#: Derivational records as emitted by the sloleks_relations lexicon module.
 _DERIV = [
     {"lemma": "pisatelj", "morphemes": ["pis", "at", "elj"], "msd": "Som", "verified": True},
     {"lemma": "hiša", "morphemes": ["hiš", "a"], "msd": "Sozei", "verified": False},

@@ -19,7 +19,7 @@ from typing import Optional
 from slm4ie.utils.io import find_project_root
 
 
-def add_selection(
+def add_keys(
     parser: argparse.ArgumentParser,
     dest: str,
     item_help: str,
@@ -38,7 +38,7 @@ def add_selection(
     target.add_argument("--all", action="store_true", help=all_help)
 
 
-def validate_selection(
+def validate_keys(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     dest: str,
@@ -51,7 +51,7 @@ def validate_selection(
     Args:
         parser: Parser used to report the error.
         args: Parsed arguments to validate.
-        dest: Name of the positional argument added by `add_selection`.
+        dest: Name of the positional argument added by `add_keys`.
 
     Raises:
         SystemExit: If both or neither selection form was provided.

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.data.extract.sidecar import MetadataSidecar
+from slm4ie.data.extract.metadata_table import MetadataTable
 
 
 # ---------------------------------------------------------------------------
@@ -47,32 +47,32 @@ class TestMetadataSidecarBasics:
     def test_lookup_hit_renames_fields(self, tmp_path: Path) -> None:
         """Configured fields are renamed via the mapping."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"title": "title", "udc": "udc_code"},
         )
-        assert sidecar.get("kas-10000") == {"title": "First", "udc_code": "005"}
+        assert table.get("kas-10000") == {"title": "First", "udc_code": "005"}
 
     def test_lookup_miss_returns_empty(self, tmp_path: Path) -> None:
         """An unknown key yields an empty dict, not None."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"title": "title"},
         )
-        assert sidecar.get("does-not-exist") == {}
+        assert table.get("does-not-exist") == {}
 
     def test_unconfigured_columns_dropped(self, tmp_path: Path) -> None:
         """Columns not listed in ``fields`` never appear in the output."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"title": "title"},
         )
-        assert "cerif" not in sidecar.get("kas-10000")
+        assert "cerif" not in table.get("kas-10000")
 
 
 class TestMetadataSidecarNa:
@@ -81,23 +81,23 @@ class TestMetadataSidecarNa:
     def test_dash_treated_as_na(self, tmp_path: Path) -> None:
         """A literal ``-`` value is filtered out as NA."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"note": "note"},
         )
-        assert sidecar.get("kas-10000") == {}
+        assert table.get("kas-10000") == {}
 
     def test_empty_string_treated_as_na(self, tmp_path: Path) -> None:
         """An empty cell is filtered out as NA."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"keywords": "keywords"},
         )
         # kas-10001 has an empty 'keywords' cell.
-        assert sidecar.get("kas-10001") == {}
+        assert table.get("kas-10001") == {}
 
 
 class TestMetadataSidecarSplits:
@@ -106,13 +106,13 @@ class TestMetadataSidecarSplits:
     def test_pipe_split_produces_list(self, tmp_path: Path) -> None:
         """A configured separator turns the value into a list."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"cerif": "cerif"},
             splits={"cerif": "|"},
         )
-        assert sidecar.get("kas-10000") == {"cerif": ["P000", "T270"]}
+        assert table.get("kas-10000") == {"cerif": ["P000", "T270"]}
 
     def test_split_drops_na_parts(self, tmp_path: Path) -> None:
         """``-`` parts inside a split list are filtered out."""
@@ -121,53 +121,53 @@ class TestMetadataSidecarSplits:
             x\ta|-|b
         """)
         path = _write_tsv(tmp_path, content=content, name="t.tsv")
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"foo": "foo"},
             splits={"foo": "|"},
         )
-        assert sidecar.get("x") == {"foo": ["a", "b"]}
+        assert table.get("x") == {"foo": ["a", "b"]}
 
 
 class TestMetadataSidecarKeyDerivation:
-    """Mapping file paths to sidecar keys."""
+    """Mapping file paths to table keys."""
 
     def test_filename_stem_default(self, tmp_path: Path) -> None:
         """With no pattern, the file stem is used verbatim."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"title": "title"},
         )
-        assert sidecar.get_for_path(Path("kas-10000.xml")) == {"title": "First"}
+        assert table.get_for_path(Path("kas-10000.xml")) == {"title": "First"}
 
     def test_regex_extracts_group_one(self, tmp_path: Path) -> None:
-        """``key_pattern`` group 1 becomes the actual sidecar key."""
+        """``key_pattern`` group 1 becomes the actual table key."""
         content = textwrap.dedent("""\
             id\tfield
             10000\tphysics
         """)
         path = _write_tsv(tmp_path, content=content, name="oss.tsv")
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"field": "field"},
             key_pattern=r"^oss-(\d+)$",
         )
-        assert sidecar.get_for_path(Path("oss-10000.conllu")) == {"field": "physics"}
+        assert table.get_for_path(Path("oss-10000.conllu")) == {"field": "physics"}
 
     def test_regex_no_match_returns_empty(self, tmp_path: Path) -> None:
-        """When the regex doesn't match, sidecar returns ``{}``."""
+        """When the regex doesn't match, table returns ``{}``."""
         path = _write_tsv(tmp_path)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"title": "title"},
             key_pattern=r"^oss-(\d+)$",
         )
-        assert sidecar.get_for_path(Path("kas-10000.xml")) == {}
+        assert table.get_for_path(Path("kas-10000.xml")) == {}
 
 
 class TestMetadataSidecarGzip:
@@ -178,12 +178,12 @@ class TestMetadataSidecarGzip:
         path = tmp_path / "meta.tsv.gz"
         with gzip.open(path, "wt", encoding="utf-8") as fh:
             fh.write(_SAMPLE_TSV)
-        sidecar = MetadataSidecar(
+        table = MetadataTable(
             path=path,
             key_column="id",
             fields={"title": "title"},
         )
-        assert sidecar.get("kas-10001") == {"title": "Second"}
+        assert table.get("kas-10001") == {"title": "Second"}
 
 
 class TestMetadataSidecarErrors:
@@ -192,7 +192,7 @@ class TestMetadataSidecarErrors:
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """A path that doesn't exist raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            MetadataSidecar(
+            MetadataTable(
                 path=tmp_path / "nope.tsv",
                 key_column="id",
                 fields={"x": "x"},
@@ -202,7 +202,7 @@ class TestMetadataSidecarErrors:
         """A key_column not in the header raises ValueError."""
         path = _write_tsv(tmp_path)
         with pytest.raises(ValueError, match="missing key column"):
-            MetadataSidecar(
+            MetadataTable(
                 path=path,
                 key_column="not_there",
                 fields={"title": "title"},
@@ -212,7 +212,7 @@ class TestMetadataSidecarErrors:
         """Unknown key_from strategy fails fast."""
         path = _write_tsv(tmp_path)
         with pytest.raises(ValueError, match="Unsupported key_from"):
-            MetadataSidecar(
+            MetadataTable(
                 path=path,
                 key_column="id",
                 fields={"title": "title"},
@@ -223,7 +223,7 @@ class TestMetadataSidecarErrors:
         """key_pattern without a capture group is rejected."""
         path = _write_tsv(tmp_path)
         with pytest.raises(ValueError, match="capture group"):
-            MetadataSidecar(
+            MetadataTable(
                 path=path,
                 key_column="id",
                 fields={"title": "title"},
@@ -239,7 +239,7 @@ class TestMetadataSidecarFromConfig:
         nested = tmp_path / "sub"
         nested.mkdir()
         _write_tsv(nested, name="meta.tsv")
-        sidecar = MetadataSidecar.from_config(
+        table = MetadataTable.from_config(
             input_dir=tmp_path,
             cfg={
                 "path": "sub/meta.tsv",
@@ -247,4 +247,4 @@ class TestMetadataSidecarFromConfig:
                 "fields": {"title": "title"},
             },
         )
-        assert sidecar.get("kas-10000") == {"title": "First"}
+        assert table.get("kas-10000") == {"title": "First"}

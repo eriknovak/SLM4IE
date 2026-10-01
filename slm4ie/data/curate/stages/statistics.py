@@ -41,7 +41,7 @@ from datatrove.utils.typeshelper import Languages
 from datatrove.utils.word_tokenizers import load_word_tokenizer
 
 from slm4ie.data.curate.paths import CuratePaths
-from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, stage_io_counts
 
 logger = logging.getLogger(__name__)
@@ -563,7 +563,7 @@ def build_statistics_executors(
         input_override: Optional folder to read from instead of the
             sentence-dedup stage's output (a symlinked roster view).
         output_override: Optional folder to write to instead of the
-            stage's output folder (the driver's staging folder).
+            stage's output folder (the run loop's staging folder).
 
     Returns:
         A list `[map_executor, reduce_executor]`. The reduce executor
@@ -609,7 +609,7 @@ def build_statistics_executors(
     return [map_exec, reduce_exec]
 
 
-def run(job: StageJob) -> Tuple[int, int]:
+def run(job: StageRun) -> Tuple[int, int]:
     """Compute corpus statistics over the job's input view.
 
     Args:

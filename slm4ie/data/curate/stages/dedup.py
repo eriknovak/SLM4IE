@@ -31,7 +31,7 @@ from datatrove.utils.hashing import HashConfig
 from datatrove.utils.typeshelper import Languages, StatHints
 
 from slm4ie.data.curate.paths import CuratePaths
-from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, stage_io_counts
 
 #: Signatures buffered as Python tuples before packing into a numpy chunk.
@@ -170,7 +170,7 @@ def build_exact_dedup_executors(
             repetition stage's output, used to restrict the stage to the
             roster's datasets through a symlinked view.
         output_override: Optional folder to write to instead of the
-            stage's output folder (the driver's staging folder).
+            stage's output folder (the run loop's staging folder).
 
     Returns:
         Three chained `LocalPipelineExecutor`s.
@@ -245,7 +245,7 @@ def build_sentence_dedup_executors(
             exact-dedup stage's output, used to restrict the stage to the
             roster's datasets through a symlinked view.
         output_override: Optional folder to write to instead of the
-            stage's output folder (the driver's staging folder).
+            stage's output folder (the run loop's staging folder).
 
     Returns:
         Three chained `LocalPipelineExecutor`s.
@@ -295,7 +295,7 @@ def build_sentence_dedup_executors(
     return [sig, find, filt]
 
 
-def run_exact_dedup(job: StageJob) -> Tuple[int, int]:
+def run_exact_dedup(job: StageRun) -> Tuple[int, int]:
     """Run whole-document exact dedup over the job's input view.
 
     Args:
@@ -330,7 +330,7 @@ def run_exact_dedup(job: StageJob) -> Tuple[int, int]:
     return stage_io_counts(job.paths.logs_dir("exact_dedup") / "3_filter")
 
 
-def run_sentence_dedup(job: StageJob) -> Tuple[int, int]:
+def run_sentence_dedup(job: StageRun) -> Tuple[int, int]:
     """Run N-sentence window dedup over the job's input view.
 
     Args:

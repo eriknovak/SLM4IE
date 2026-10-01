@@ -1,8 +1,8 @@
 """Task-family converter backends.
 
-Importing this package registers every converter with the driver's registry
+Importing this package registers every converter with the run loop's registry
 through the `@register_converter` decorator. Import it for its side effects
-before calling `slm4ie.data.tasks.driver.get_converter`.
+before calling `slm4ie.data.tasks.run.get_converter`.
 """
 
 from slm4ie.data.tasks.converters import (  # noqa: F401

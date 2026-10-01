@@ -62,7 +62,7 @@ Example:
         metadata:    `who` / `ana` from the `<u>` element (utterance
                      path) layered on top of any per-file fields
                      from a `metadata:` config block (see
-                     `MetadataSidecar`); empty when neither applies.
+                     `MetadataTable`); empty when neither applies.
         annotations:
             tokens:    flat concatenation across every contained `<s>`.
             sentences: one inclusive `[start, end]` per sentence,
@@ -79,7 +79,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from lxml import etree
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
-from slm4ie.data.extract.sidecar import MetadataSidecar
+from slm4ie.data.extract.metadata_table import MetadataTable
 from slm4ie.data.schema import Annotations, Document, Token, render_sentence
 
 _TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -311,7 +311,7 @@ def _build_document(
         domain (str): Domain label.
         metadata (Optional[Dict[str, Any]]): Optional metadata to
             attach to the Document. For utterance-level docs this
-            typically merges per-file `MetadataSidecar` fields with
+            typically merges per-file `MetadataTable` fields with
             the utterance's `who` / `ana` attributes.
 
     Returns:
@@ -373,7 +373,7 @@ def _stream_per_file_document(
         doc_id (str): Identifier for the produced Document.
         source (str): Dataset key.
         domain (str): Domain label.
-        metadata (Optional[Dict[str, Any]]): Per-file sidecar fields.
+        metadata (Optional[Dict[str, Any]]): Per-file metadata table fields.
 
     Returns:
         Tuple[Optional[Document], bool]: `(document, handled)`. When
@@ -470,7 +470,7 @@ def _parse_annotated_with_utterances(
         source (str): Dataset key.
         domain (str): Domain label.
         extra_metadata (Optional[Dict[str, Any]]): Per-file fields
-            from `MetadataSidecar`. Utterance attributes (`who`,
+            from `MetadataTable`. Utterance attributes (`who`,
             `ana`) take precedence on key collision since they are
             more specific.
 
@@ -512,7 +512,7 @@ def _parse_annotated_per_file(
         domain (str): Domain label.
         doc_id (str): Identifier for the single produced Document.
         extra_metadata (Optional[Dict[str, Any]]): Per-file fields
-            from `MetadataSidecar`, copied onto the produced Document.
+            from `MetadataTable`, copied onto the produced Document.
 
     Yields:
         Document: One document per file, or nothing if the file had
@@ -616,17 +616,17 @@ class TeiExtractor(FileBasedExtractor):
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
             input_dir (Path): Dataset root, used to locate an optional
-                `MetadataSidecar` TSV.
+                `MetadataTable` TSV.
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block describing an external per-document TSV.
 
         Yields:
             Document: Extracted documents in unified schema format.
         """
-        sidecar: Optional[MetadataSidecar] = MetadataSidecar.from_config(input_dir, metadata) if metadata else None
+        table: Optional[MetadataTable] = MetadataTable.from_config(input_dir, metadata) if metadata else None
 
         for filepath in files:
-            extra = sidecar.get_for_path(filepath) if sidecar else {}
+            extra = table.get_for_path(filepath) if table else {}
 
             # Large files would build a multi-GB DOM under etree.parse,
             # OOMing the extractor under parallel sharding. Stream them

@@ -1,4 +1,4 @@
-"""Tests for slm4ie/data/tokenization/readers/sloleks.py and slm4ie/data/tokenization/driver.py."""
+"""Tests for slm4ie/data/tokenization/lexicons/sloleks.py and slm4ie/data/tokenization/run.py."""
 
 import gzip
 import json
@@ -9,8 +9,8 @@ from textwrap import dedent
 
 import pytest
 
-from slm4ie.data.tokenization import driver as tokenization, readers
-from slm4ie.data.tokenization.readers import sloleks
+from slm4ie.data.tokenization import lexicons, run as tokenization
+from slm4ie.data.tokenization.lexicons import sloleks
 
 
 #: A minimal sample mirroring the real Sloleks 3.1 `<lexicon>` schema: lemma at
@@ -223,7 +223,7 @@ class TestIterSloleksDir:
 
 
 class TestToTokenizerEvalConverter:
-    """Integration tests for slm4ie/data/tokenization/driver.py."""
+    """Integration tests for slm4ie/data/tokenization/run.py."""
 
     def test_convert_sloleks_writes_tagged_records(self, tmp_path: Path):
         """The converter produces JSONL with dataset/task tags."""
@@ -294,26 +294,26 @@ class TestToTokenizerEvalConverter:
         assert result is None
 
     def test_missing_xml_raises(self, tmp_path: Path):
-        """The Sloleks reader fails fast when no XML files are found."""
+        """The Sloleks lexicon fails fast when no XML files are found."""
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
         with pytest.raises(FileNotFoundError):
-            list(readers._read_sloleks(empty_dir))
+            list(lexicons._read_sloleks(empty_dir))
 
     def test_read_sloleks_auto_unzips(self, tmp_path: Path):
-        """The Sloleks reader unpacks a zip in raw_dir when no XML is present."""
+        """The Sloleks lexicon unpacks a zip in raw_dir when no XML is present."""
         raw_dir = tmp_path / "raw" / "sloleks"
         raw_dir.mkdir(parents=True)
         with zipfile.ZipFile(raw_dir / "Sloleks.zip", "w") as zf:
             zf.writestr("sloleks_3.1_001.xml", SAMPLE_LEXICON)
 
-        records = list(readers._read_sloleks(raw_dir))
+        records = list(lexicons._read_sloleks(raw_dir))
 
         assert len(records) == 2
         assert all(r["dataset"] == "sloleks" for r in records)
 
     def test_read_sloleks_relations_auto_unzips(self, tmp_path: Path):
-        """The relations reader unpacks a zip in raw_dir when no TSV is present."""
+        """The relations lexicon unpacks a zip in raw_dir when no TSV is present."""
         raw_dir = tmp_path / "raw" / "sloleks_relations"
         raw_dir.mkdir(parents=True)
         rows = [
@@ -323,7 +323,7 @@ class TestToTokenizerEvalConverter:
         with zipfile.ZipFile(raw_dir / "relations.zip", "w") as zf:
             zf.writestr("nssss_sloleks_word_relations_1.1.tsv", "\n".join(rows) + "\n")
 
-        records = list(readers._read_sloleks_relations(raw_dir))
+        records = list(lexicons._read_sloleks_relations(raw_dir))
 
         assert len(records) == 1
         assert records[0]["lemma"] == "pisatelj"

@@ -12,7 +12,7 @@ from slm4ie.data.curate.inspect.sample import (
     JUDGED_STAGES,
     SurvivorIndex,
     draw_stratified_sample,
-    resolve_output_dir,
+    resolve_sample_dir,
     roster,
     sample_cell,
 )
@@ -320,11 +320,11 @@ class TestResolveOutputDir:
         config = tmp_path / "curate.yaml"
         config.write_text(f"output_dir: {tmp_path / 'pretrain'}\n", encoding="utf-8")
 
-        assert resolve_output_dir(config) == tmp_path / "pretrain"
+        assert resolve_sample_dir(config) == tmp_path / "pretrain"
 
     def test_an_override_wins(self, tmp_path: Path) -> None:
         """An explicit folder is used without reading the config."""
-        assert resolve_output_dir(tmp_path / "missing.yaml", tmp_path / "elsewhere") == tmp_path / "elsewhere"
+        assert resolve_sample_dir(tmp_path / "missing.yaml", tmp_path / "elsewhere") == tmp_path / "elsewhere"
 
     def test_a_config_without_an_output_dir_is_an_error(self, tmp_path: Path) -> None:
         """A config that sets no `output_dir` cannot locate the corpus."""
@@ -332,4 +332,4 @@ class TestResolveOutputDir:
         config.write_text("input_dir: data/extracted\n", encoding="utf-8")
 
         with pytest.raises(FileNotFoundError, match="no corpus root"):
-            resolve_output_dir(config)
+            resolve_sample_dir(config)

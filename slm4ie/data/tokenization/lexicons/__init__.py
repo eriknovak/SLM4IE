@@ -1,7 +1,7 @@
 """Reader backends for the tokenizer-quality datasets.
 
-Each reader turns one raw lexicon download into tagged JSONL records; the
-`READERS` map is the backend registry the driver resolves dataset keys
+Each module turns one raw lexicon download into tagged JSONL records; the
+`LEXICONS` map is the backend registry the run loop resolves dataset keys
 against. A new lexicon is a new module here plus one entry in that map.
 """
 
@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator
 
 from slm4ie.data.archives import unpack_archives
-from slm4ie.data.tokenization.readers.sloleks import iter_sloleks_dir
-from slm4ie.data.tokenization.readers.sloleks_relations import (
+from slm4ie.data.tokenization.lexicons.sloleks import iter_sloleks_dir
+from slm4ie.data.tokenization.lexicons.sloleks_relations import (
     find_word_relations_tsv,
     iter_word_relation_segmentations,
 )
@@ -83,8 +83,8 @@ def _read_sloleks_relations(raw_dir: Path) -> Iterator[Dict[str, Any]]:
         yield record
 
 
-#: Registry mapping dataset key to a reader callable.
-READERS: Dict[str, Callable[[Path], Iterator[Dict[str, Any]]]] = {
+#: Registry mapping dataset key to the callable that reads its lexicon.
+LEXICONS: Dict[str, Callable[[Path], Iterator[Dict[str, Any]]]] = {
     "sloleks": _read_sloleks,
     "sloleks_relations": _read_sloleks_relations,
 }

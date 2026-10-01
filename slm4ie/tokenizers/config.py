@@ -2,7 +2,7 @@
 
 Parses the sweep config passed to it (with the same sibling
 `*.local.yaml` deep-merge overlay used elsewhere in the project) into a single
-`TokenizerSweepConfig` consumed by both the training and analysis scripts.
+`SweepConfig` consumed by both the training and analysis scripts.
 Owning the config object here keeps `train.py` and `analysis.py` free of a
 shared import cycle.
 """
@@ -19,7 +19,7 @@ from slm4ie.tokenizers.corpus import SampleBudget
 
 
 @dataclass
-class TokenizerSweepConfig:
+class SweepConfig:
     """Resolved settings for the tokenizer training + evaluation sweep.
 
     Attributes:
@@ -154,14 +154,14 @@ def _budget_from_dict(raw: Dict[str, Any]) -> SampleBudget:
     )
 
 
-def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
+def load_sweep_config(config_path: Path) -> SweepConfig:
     """Load the tokenizer-sweep config, applying any local overlay.
 
     Args:
         config_path (Path): Path to a sweep config YAML.
 
     Returns:
-        TokenizerSweepConfig: The resolved sweep configuration.
+        SweepConfig: The resolved sweep configuration.
 
     Raises:
         FileNotFoundError: If `config_path` does not exist.
@@ -199,7 +199,7 @@ def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
     output_root = Path(output["root"])
     report_dir = Path(output.get("report_dir") or output_root / "_reports")
 
-    return TokenizerSweepConfig(
+    return SweepConfig(
         corpus_root=Path(corpus["root"]),
         corpus_datasets=list(corpus.get("datasets") or []),
         train_budget=_budget_from_dict(corpus.get("budget") or {}),

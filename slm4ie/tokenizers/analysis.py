@@ -6,7 +6,7 @@ persists per-unit sufficient statistics to an `eval_units.npz` sidecar.
 `augment_with_statistics` reads those sidecars to attach bootstrap confidence
 intervals and paired significance tests (per vocab) to the five decomposable
 metrics. `build_report` aggregates the per-run metrics into a Markdown table and
-a JSON payload, and `log_results_to_mlflow` records the sweep as a parent run
+a JSON payload, and `log_evaluate_runs` records the sweep as a parent run
 with one nested child per tokenizer x vocab-size run. `evaluate_sweep` ties
 those together: it materializes the shared evaluation inputs, runs the metrics
 over every selected artifact in parallel, and writes the report.
@@ -30,7 +30,7 @@ from slm4ie.utils.parallel import (
     run_parallel,
 )
 from slm4ie.tokenizers import stats as st
-from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sample_cache
+from slm4ie.tokenizers.corpus import iter_sample, sample_corpus, write_sample
 from slm4ie.tokenizers.metrics import (
     METRIC_DIRECTIONS,
     corpus_doc_stats,
@@ -48,10 +48,10 @@ from slm4ie.tokenizers.morphology import (
     save_lexicon,
 )
 from slm4ie.tokenizers.registry import get_tokenizer
-from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, parse_run_key
+from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, parse_sweep_run_key
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
-from slm4ie.tokenizers.config import TokenizerSweepConfig
+from slm4ie.tokenizers.config import SweepConfig
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +237,7 @@ def evaluate_artifact(
         logger.warning("No artifact for %s; skipping.", key)
         return None
 
-    name, vocab_size = parse_run_key(key)
+    name, vocab_size = parse_sweep_run_key(key)
     tokenizer = load_tokenizer_artifact(artifact_dir)
 
     corpus = corpus_doc_stats(tokenizer, eval_docs)
@@ -709,9 +709,9 @@ def _train_link_tags(artifact_dir: Path) -> Dict[str, str]:
     }
 
 
-def log_results_to_mlflow(
+def log_evaluate_runs(
     results: List[Dict[str, Any]],
-    cfg: TokenizerSweepConfig,
+    cfg: SweepConfig,
     report_paths: Tuple[Path, Path],
 ) -> None:
     """Log the sweep to MLflow as a parent run with nested per-run children.
@@ -724,7 +724,7 @@ def log_results_to_mlflow(
 
     Args:
         results (List[Dict[str, Any]]): Per-run metric records.
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         report_paths (Tuple[Path, Path]): The Markdown and JSON report paths.
     """
     if not cfg.mlflow_enabled:
@@ -784,7 +784,7 @@ def log_results_to_mlflow(
 
 
 @dataclass
-class EvaluationSummary:
+class EvaluateSummary:
     """Outcome of an evaluation sweep.
 
     Attributes:
@@ -826,7 +826,7 @@ def _evaluate_worker(key: str, *, output_root: Path, alpha: float) -> Optional[D
 
 
 def prepare_eval_inputs(
-    cfg: TokenizerSweepConfig,
+    cfg: SweepConfig,
     force: bool,
     morph_form_sample: int,
 ) -> Tuple[List[List[str]], List[MorphemeSegmentation], List[MorphemeSegmentation]]:
@@ -838,7 +838,7 @@ def prepare_eval_inputs(
     statistics align by index for the paired tests.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         force (bool): Rebuild the eval sample and lexicons even if present.
         morph_form_sample (int): Size of the shared morph form sample.
 
@@ -851,8 +851,8 @@ def prepare_eval_inputs(
     eval_path = cfg.eval_sample_path
     if force or not eval_path.exists():
         logger.info("Sampling held-out evaluation corpus -> %s", eval_path)
-        write_sample_cache(sample_corpus(cfg.corpus_root, cfg.eval_budget), eval_path)
-    eval_docs = [iter_words(line) for line in iter_sample_cache(eval_path)]
+        write_sample(sample_corpus(cfg.corpus_root, cfg.eval_budget), eval_path)
+    eval_docs = [iter_words(line) for line in iter_sample(eval_path)]
     logger.info("Evaluation sample: %d documents, %d word tokens", len(eval_docs), sum(len(d) for d in eval_docs))
 
     infl_path = cfg.infl_lexicon_path
@@ -879,13 +879,13 @@ def prepare_eval_inputs(
 
 
 def evaluate_sweep(
-    cfg: TokenizerSweepConfig,
+    cfg: SweepConfig,
     keys: List[str],
     force: bool = False,
     morph_form_sample: Optional[int] = None,
     n_resamples: Optional[int] = None,
     max_workers: int = 0,
-) -> EvaluationSummary:
+) -> EvaluateSummary:
     """Evaluate trained tokenizer artifacts and write the comparison report.
 
     Materializes the shared evaluation inputs, scores every selected artifact in
@@ -893,7 +893,7 @@ def evaluate_sweep(
     Markdown and JSON reports, and logs the sweep to MLflow.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         keys (List[str]): Run keys (`<name>-<vocab>`) with trained artifacts.
         force (bool): Rebuild the evaluation sample and gold lexicons.
         morph_form_sample (Optional[int]): Override for the config's morph
@@ -903,7 +903,7 @@ def evaluate_sweep(
         max_workers (int): Parallel evaluations. 0=auto, 1=serial, N=N workers.
 
     Returns:
-        EvaluationSummary: The metric records, failed keys, and report paths.
+        EvaluateSummary: The metric records, failed keys, and report paths.
     """
     # CPU-bound metrics: cap the auto default conservatively so a many-core box
     # is not saturated by default.
@@ -943,7 +943,7 @@ def evaluate_sweep(
     )
 
     records = [r for r in results.values() if r is not None]
-    summary = EvaluationSummary(records=records, failed=[k for k, _ in failures])
+    summary = EvaluateSummary(records=records, failed=[k for k, _ in failures])
     if records:
         logger.info("Computing bootstrap CIs + paired significance (B=%d) ...", resamples)
         significance, stats_config = augment_with_statistics(
@@ -956,7 +956,7 @@ def evaluate_sweep(
         )
         summary.report_paths = write_report(records, cfg.report_dir, significance, stats_config)
         logger.info("Wrote report: %s", summary.report_paths[0])
-        log_results_to_mlflow(records, cfg, summary.report_paths)
+        log_evaluate_runs(records, cfg, summary.report_paths)
 
     logger.info("Done. Evaluated %d, failed %s.", len(records), summary.failed or "none")
     return summary

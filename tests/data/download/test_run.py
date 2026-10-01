@@ -1,4 +1,4 @@
-"""Tests for slm4ie.data.download.driver module."""
+"""Tests for slm4ie.data.download.run module."""
 
 import logging
 import subprocess
@@ -12,7 +12,7 @@ import yaml
 from unittest.mock import MagicMock, patch
 
 from slm4ie.data.download.config import ConfigError, DatasetConfig
-from slm4ie.data.download.driver import (
+from slm4ie.data.download.run import (
     DatasetDownloadError,
     DownloaderResult,
     download_datasets,

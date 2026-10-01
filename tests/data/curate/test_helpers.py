@@ -1,4 +1,4 @@
-"""Tests for the curation driver, config and stage parameter helpers."""
+"""Tests for the curation run loop, config and stage parameter helpers."""
 
 import os
 from pathlib import Path
@@ -166,7 +166,7 @@ def test_curate_rejects_bad_override(tmp_path: Path) -> None:
     import yaml
 
     from slm4ie.data.curate.config import OverrideConfigError
-    from slm4ie.data.curate.driver import curate
+    from slm4ie.data.curate.run import curate
 
     cfgs = tmp_path / "configs" / "data"
     cfgs.mkdir(parents=True)
@@ -284,7 +284,7 @@ def test_stage_extra_folds_roster_only_for_corpus_stages() -> None:
 
 def test_resolve_requested_stages() -> None:
     """Subset 'all' = scoped stages; --all 'all' = every stage."""
-    from slm4ie.data.curate.driver import _resolve_requested_stages
+    from slm4ie.data.curate.run import _resolve_requested_stages
     from slm4ie.data.curate.stages import (
         SCOPED_STAGES,
         STAGE_NAMES,
@@ -302,7 +302,7 @@ def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
         dataset_sentinel_path,
         write_dataset_sentinel,
     )
-    from slm4ie.data.curate.driver import _apply_force
+    from slm4ie.data.curate.run import _apply_force
 
     out = tmp_path / "pretrain"
     q = out / "03_quality"
@@ -316,7 +316,7 @@ def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
 def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
     """--force --all --stage exact_dedup removes dedup data + sentinel and dedup state."""
     from slm4ie.data.curate.lineage import write_sentinel
-    from slm4ie.data.curate.driver import _apply_force
+    from slm4ie.data.curate.run import _apply_force
 
     out = tmp_path / "pretrain"
     dedup = out / "05_exact_dedup"
@@ -332,7 +332,7 @@ def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
 
 def test_force_all_stage_all_nukes_output(tmp_path: Path) -> None:
     """--force --all (default stage all) clears the whole output dir."""
-    from slm4ie.data.curate.driver import _apply_force
+    from slm4ie.data.curate.run import _apply_force
 
     out = tmp_path / "pretrain"
     (out / "00_convert" / "alfa").mkdir(parents=True)

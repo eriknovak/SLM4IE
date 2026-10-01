@@ -1,4 +1,4 @@
-"""Shared driver, ABC, and registry for the task-family converters.
+"""Shared run loop, ABC, and registry for the task-family converters.
 
 The task converters (`spans`, `sentiment`, `superglue`) all read the
 same `configs/data/tasks.yaml` registry and share one output convention -- one
@@ -48,11 +48,11 @@ from slm4ie.utils.parallel import (
 from slm4ie.data.tasks.config import (
     TaskEntry,
     TasksRoots,
-    load_tasks,
+    load_tasks_config,
     resolve_output_dir,
 )
-from slm4ie.data.tasks.tracking import log_task_runs
-from slm4ie.data.tasks.writer import (
+from slm4ie.data.tasks.tracking import log_tasks_runs
+from slm4ie.data.tasks.splits import (
     SPLIT_TRAIN,
     all_outputs_exist,
     hash_split,
@@ -81,10 +81,10 @@ class SplitPolicy(enum.Enum):
     """How a converter's yielded split key maps to an output split.
 
     Attributes:
-        HASH: The converter yields `(stable_id, example)`; the driver assigns
+        HASH: The converter yields `(stable_id, example)`; the run loop assigns
             the split by hashing the id across the entry's target splits.
         SOURCE: The converter yields `(source_split_name, example)`; the
-            driver keeps that split verbatim.
+            run loop keeps that split verbatim.
     """
 
     HASH = "hash"
@@ -94,7 +94,7 @@ class SplitPolicy(enum.Enum):
 class ConvertContext:
     """Per-run options handed to every `iter_examples` call.
 
-    The driver builds one context per run and passes it to every entry's
+    The run loop builds one context per run and passes it to every entry's
     conversion. It must be picklable because it crosses the process pool, so it
     holds only plain data.
 
@@ -288,7 +288,7 @@ class TaskConverter(abc.ABC):
     ) -> Iterator[Tuple[str, Dict[str, Any]]]:
         """Yield `(split_key, example)` pairs for one entry.
 
-        For `SplitPolicy.HASH`, `split_key` is a stable id the driver hashes
+        For `SplitPolicy.HASH`, `split_key` is a stable id the run loop hashes
         into one of `splits`. For `SplitPolicy.SOURCE`, `split_key` is the
         output split name itself, and the converter must read only the source
         files for the splits in `splits` (so a `held_out` entry never reads its
@@ -306,7 +306,7 @@ class TaskConverter(abc.ABC):
         """
 
 
-# --- Split assignment and the conversion driver ---
+# --- Split assignment and the conversion run loop ---
 
 
 def target_splits(entry: TaskEntry) -> List[str]:
@@ -426,7 +426,7 @@ def resolve_keys(entries: List[TaskEntry], requested: Optional[List[str]] = None
 
 
 @dataclass
-class TaskConversionSummary:
+class TasksSummary:
     """Outcome of a task-conversion run.
 
     Attributes:
@@ -447,7 +447,7 @@ def convert_tasks(
     mlflow_enabled: Optional[bool] = None,
     max_workers: int = 0,
     options: Optional[Dict[str, Any]] = None,
-) -> TaskConversionSummary:
+) -> TasksSummary:
     """Convert the selected task-registry entries to per-split JSONL.
 
     Each entry is routed to the converter its registry entry names, so one call
@@ -472,12 +472,12 @@ def convert_tasks(
     """
     import slm4ie.data.tasks.converters  # noqa: F401  (registers converters on import)
 
-    tasks_config = load_tasks(config_path)
+    tasks_config = load_tasks_config(config_path)
     by_key = {f"{e.task}/{e.dataset}": e for e in tasks_config.entries}
     keys = resolve_keys(tasks_config.entries, entry_keys)
     if not keys:
         logger.warning("No entries to process in %s.", config_path)
-        return TaskConversionSummary()
+        return TasksSummary()
 
     ctx = ConvertContext(options=options)
     converters = {key: get_converter(by_key[key].converter) for key in keys}
@@ -512,7 +512,7 @@ def convert_tasks(
         log_dir=stamped_log_dir("tasks"),
     )
 
-    summary = TaskConversionSummary(
+    summary = TasksSummary(
         records={k: sum(v.values()) for k, v in results.items() if v is not None},
         skipped=[k for k, v in results.items() if v is None],
         failed=[k for k, _ in failures],
@@ -525,5 +525,5 @@ def convert_tasks(
         summary.failed or "none",
     )
     processed = [k for k in keys if k not in set(summary.failed)]
-    log_task_runs(tasks_config, by_key, processed, mlflow_enabled=mlflow_enabled, force=force)
+    log_tasks_runs(tasks_config, by_key, processed, mlflow_enabled=mlflow_enabled, force=force)
     return summary

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from slm4ie.data.download.config import ConfigError, DatasetConfig, load_config
+from slm4ie.data.download.config import ConfigError, DatasetConfig, load_download_config
 from slm4ie.utils.io import resolve_project_path
 from slm4ie.utils.parallel import io_default, resolve_workers, run_parallel
 
@@ -110,7 +110,7 @@ __all__ = [
     "DatasetDownloadError",
     "DownloaderResult",
     "download_datasets",
-    "load_config",
+    "load_download_config",
 ]
 
 
@@ -267,7 +267,8 @@ def download_datasets(
     if only_benchmarks and exclude_benchmarks:
         raise ValueError("only_benchmarks and exclude_benchmarks are mutually exclusive")
 
-    base_output_dir, datasets = load_config(config_path)
+    catalog = load_download_config(config_path)
+    base_output_dir, datasets = catalog.output_dir, catalog.datasets
     if output_dir_override:
         base_output_dir = output_dir_override
     else:

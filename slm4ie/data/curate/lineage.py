@@ -33,7 +33,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from slm4ie.data.curate.config import Setup
+from slm4ie.data.curate.config import CurateConfig
 from slm4ie.data.curate.paths import CuratePaths, has_stage_output
 from slm4ie.data.curate.stages import STAGE_DIRS, STAGE_NAMES, STAGE_VERSIONS, is_scoped, upstream_stage
 from slm4ie.data.curate.stages.convert import convert_input_files, input_files_digest
@@ -392,7 +392,9 @@ def upstream_digest(paths: CuratePaths, stage: str, key: str) -> Optional[str]:
     return sentinel.document_digest if sentinel is not None else None
 
 
-def scoped_reason(setup: Setup, stage: str, key: str) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+def scoped_reason(
+    setup: CurateConfig, stage: str, key: str
+) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
     """Judge whether the unit (*stage*, *key*) is current.
 
     Args:
@@ -427,7 +429,7 @@ def scoped_reason(setup: Setup, stage: str, key: str) -> Tuple[Optional[str], Op
     return reason, digest, files
 
 
-def corpus_inputs(setup: Setup, stage: str) -> List[str]:
+def corpus_inputs(setup: CurateConfig, stage: str) -> List[str]:
     """Return the roster keys with upstream output that a corpus stage reads.
 
     Folders left upstream by keys outside the roster (e.g. benchmarks) are
@@ -444,7 +446,7 @@ def corpus_inputs(setup: Setup, stage: str) -> List[str]:
     return [key for key in setup.roster if has_stage_output(up_dir, key)]
 
 
-def corpus_has_input(setup: Setup, stage: str) -> bool:
+def corpus_has_input(setup: CurateConfig, stage: str) -> bool:
     """Return True if a corpus stage's upstream has been built, even if empty.
 
     Args:
@@ -481,7 +483,7 @@ def corpus_input_digest(paths: CuratePaths, stage: str, input_keys: List[str]) -
     return sentinel.document_digest if sentinel is not None else None
 
 
-def corpus_reason(setup: Setup, stage: str, input_keys: List[str]) -> Tuple[Optional[str], Optional[str]]:
+def corpus_reason(setup: CurateConfig, stage: str, input_keys: List[str]) -> Tuple[Optional[str], Optional[str]]:
     """Judge whether a corpus stage is current.
 
     Args:
@@ -505,7 +507,7 @@ def corpus_reason(setup: Setup, stage: str, input_keys: List[str]) -> Tuple[Opti
     return reason, digest
 
 
-def legacy_units(setup: Setup, keys: List[str], corpus: bool) -> List[str]:
+def legacy_units(setup: CurateConfig, keys: List[str], corpus: bool) -> List[str]:
     """List units whose sentinel predates lineage tracking but still matches its config.
 
     Such units must be adopted before a run; a legacy unit whose config has
@@ -589,7 +591,7 @@ def lock_entry(sentinel: Sentinel) -> Dict[str, Any]:
     }
 
 
-def dataset_keys_on_disk(setup: Setup) -> List[str]:
+def dataset_keys_on_disk(setup: CurateConfig) -> List[str]:
     """Return the roster plus any other dataset converted on disk (e.g. benchmarks run by name).
 
     Args:
@@ -603,7 +605,7 @@ def dataset_keys_on_disk(setup: Setup) -> List[str]:
     return setup.roster + [k for k in on_disk if k not in setup.roster and not k.startswith((".", "_"))]
 
 
-def refresh_lock(setup: Setup) -> None:
+def refresh_lock(setup: CurateConfig) -> None:
     """Rewrite the lock file from every unit's sentinel on disk, if anything changed.
 
     The lock mirrors the sentinels, so any run — a dataset subset, a single

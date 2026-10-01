@@ -1,8 +1,8 @@
-"""Tests for slm4ie/data/tokenization/readers/sloleks_relations.py."""
+"""Tests for slm4ie/data/tokenization/lexicons/sloleks_relations.py."""
 
 from pathlib import Path
 
-from slm4ie.data.tokenization.readers.sloleks_relations import (
+from slm4ie.data.tokenization.lexicons.sloleks_relations import (
     find_word_relations_tsv,
     iter_word_relation_segmentations,
     iter_word_relations,

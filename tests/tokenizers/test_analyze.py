@@ -12,14 +12,14 @@ from slm4ie.tokenizers.analysis import (
     augment_with_statistics,
     build_report,
     evaluate_artifact,
-    log_results_to_mlflow,
+    log_evaluate_runs,
     write_report,
 )
 from slm4ie.tokenizers.corpus import SampleBudget
 from slm4ie.tokenizers.metrics import iter_words
 from slm4ie.tokenizers.morphology import MorphemeSegmentation, build_morph_lexicon
-from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, log_training_to_mlflow, prepare_inputs, train_one
-from slm4ie.tokenizers.config import TokenizerSweepConfig
+from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, log_train_runs, prepare_inputs, train_one
+from slm4ie.tokenizers.config import SweepConfig
 
 _CORPUS = [
     "hiša ob cesti",
@@ -48,14 +48,14 @@ _SLOLEKS = [
 ]
 
 
-def _make_config(tmp_path: Path) -> TokenizerSweepConfig:
+def _make_config(tmp_path: Path) -> SweepConfig:
     """Build a tiny sweep config with a fake corpus and Sloleks file.
 
     Args:
         tmp_path (Path): Temp directory root.
 
     Returns:
-        TokenizerSweepConfig: Config over the fake inputs.
+        SweepConfig: Config over the fake inputs.
     """
     sub = tmp_path / "dd" / "macocu_sl"
     sub.mkdir(parents=True)
@@ -68,7 +68,7 @@ def _make_config(tmp_path: Path) -> TokenizerSweepConfig:
         for record in _SLOLEKS:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    return TokenizerSweepConfig(
+    return SweepConfig(
         corpus_root=tmp_path / "dd",
         corpus_datasets=[],
         train_budget=SampleBudget(max_docs=300, seed=1),
@@ -316,7 +316,7 @@ def test_eval_run_links_to_training_run(tmp_path: Path, monkeypatch):
     cfg = dataclasses.replace(base, mlflow_enabled=True, mlflow_tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
     sample_path, lexicon_path = prepare_inputs(cfg)
     train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=lexicon_path)
-    log_training_to_mlflow(["bpe-90"], cfg)
+    log_train_runs(["bpe-90"], cfg)
 
     lexicon = build_morph_lexicon(cfg.sloleks_path)
     record = evaluate_artifact(
@@ -327,7 +327,7 @@ def test_eval_run_links_to_training_run(tmp_path: Path, monkeypatch):
     )
     assert record is not None
     md_path, json_path = write_report([record], cfg.report_dir)
-    log_results_to_mlflow([record], cfg, (md_path, json_path))
+    log_evaluate_runs([record], cfg, (md_path, json_path))
 
     link = json.loads((cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).read_text(encoding="utf-8"))
     client = mlflow.MlflowClient(tracking_uri=cfg.mlflow_tracking_uri)

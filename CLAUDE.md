@@ -160,7 +160,7 @@ Downstream consumers fork after extraction. There are three routes, and
 they own disjoint output trees:
 
 1. **Pretraining (`curate_pretraining_corpus.py run`):** a thin CLI over
-   `slm4ie/data/curate/driver.py`, which runs eight sentinel-skippable stages
+   `slm4ie/data/curate/run.py`, which runs eight sentinel-skippable stages
    (0–7) on top of [datatrove](https://github.com/huggingface/datatrove).
    Each stage is one module under `slm4ie/data/curate/stages/` (both dedup
    stages share `dedup.py`), registered in `stages/__init__.py`; read-only
@@ -309,7 +309,7 @@ checks structure but not semantic agreement with the code.
   `configs/data/extract.yaml` and `curate_pretraining_corpus.py run` reads
   `configs/data/curate.yaml`.
 - Secrets and ephemeral values (presigned download URLs, machine-local paths) go
-  in a gitignored `*.local.yaml` sibling, which `load_config` deep-merges over
+  in a gitignored `*.local.yaml` sibling, which `load_yaml` deep-merges over
   the base config. The `.githooks/pre-commit` hook blocks presigned-URL
   credentials; enable it with `git config core.hooksPath .githooks`.
 - Scripts in `scripts/` should stay thin: parse args, load config, dispatch
@@ -319,10 +319,10 @@ checks structure but not semantic agreement with the code.
   `slm4ie/utils/cli.py`.
 - Every data step is one package under `slm4ie/data/` with the same shape:
   `config.py` loads the step's registry from `configs/data/` into a `*Config`
-  dataclass, `driver.py` is the argv-free entry point the script calls,
+  dataclass, `run.py` is the argv-free entry point the script calls,
   `tracking.py` logs to MLflow where the step tracks, and a backend-registry
   subpackage holds the pluggable implementations (`download/sources/`,
-  `extract/extractors/`, `tokenization/readers/`, `tasks/converters/`,
+  `extract/extractors/`, `tokenization/lexicons/`, `tasks/converters/`,
   `curate/stages/`). `config.py` is always the YAML loader; `registry` names
   only in-code backend registries. Plumbing that knows nothing of the data
   tiers (`io`, `parallel`, `versioning`, `config`) lives in `slm4ie/utils/`,

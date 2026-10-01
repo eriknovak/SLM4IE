@@ -7,7 +7,7 @@ survives every stage.
 
 Within a stage, the corpus builders (exact dedup, sentence dedup, statistics)
 set `skip_completed=True`, so a rerun after a crash skips the tasks datatrove
-already marked complete; the driver clears the stage's staging folder before
+already marked complete; the run loop clears the stage's staging folder before
 a fresh start so stale markers never apply. The scoped builders keep
 `skip_completed=False`: their buckets share one logging folder, so a marker
 from one bucket would skip another's task. Builders are pure factories — they

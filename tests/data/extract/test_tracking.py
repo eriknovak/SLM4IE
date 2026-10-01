@@ -26,7 +26,7 @@ def _good_record(i: int) -> dict:
     return {"text": f"doc {i}", "source": "x", "domain": "web", "doc_id": str(i), "metadata": {"a": 1}}
 
 
-class TestProfileSource:
+class TestProfileDataset:
     """Tests for single-source profiling."""
 
     def test_counts_rows_empty_and_missing(self, tmp_path: Path):
@@ -40,7 +40,7 @@ class TestProfileSource:
                 {"text": "ok", "source": "x", "domain": "web", "metadata": {}},  # missing doc_id
             ],
         )
-        profile = et.profile_source("k", text, None, "web")
+        profile = et.profile_dataset("k", text, None, "web")
         assert profile.rows == 3
         assert profile.empty_text == 1
         assert profile.missing_fields["doc_id"] == 1
@@ -52,11 +52,11 @@ class TestProfileSource:
         _write_jsonl(text, [_good_record(i) for i in range(3)])
         sidecar = tmp_path / "k.annotations.jsonl.gz"
         _write_sidecar(sidecar, 3)
-        aligned = et.profile_source("k", text, sidecar, "web")
+        aligned = et.profile_dataset("k", text, sidecar, "web")
         assert aligned.has_annotations and aligned.sidecar_aligned is True
 
         _write_sidecar(sidecar, 2)
-        misaligned = et.profile_source("k", text, sidecar, "web")
+        misaligned = et.profile_dataset("k", text, sidecar, "web")
         assert misaligned.sidecar_aligned is False
 
 
@@ -67,7 +67,7 @@ class TestBuildProfile:
         """Configured sources without output are marked absent."""
         _write_jsonl(tmp_path / "a.jsonl", [_good_record(0), _good_record(1)])
         datasets = {"a": {"domain": "web"}, "b": {"domain": "wiki"}}
-        profile = et.build_extraction_profile(tmp_path, datasets)
+        profile = et.build_extract_profile(tmp_path, datasets)
         assert profile["by_source"]["a"]["present"] is True
         assert profile["by_source"]["b"]["present"] is False
         assert profile["totals"]["rows"] == 2
@@ -92,14 +92,14 @@ class TestLogExtractionRun:
 
     def test_disabled_returns_none(self, extracted: Path):
         """Disabled tracking is a no-op."""
-        assert et.log_extraction_run(extracted, {"a": {"domain": "web"}}, enabled=False) is None
+        assert et.log_extract_run(extracted, {"a": {"domain": "web"}}, enabled=False) is None
 
     def test_logs_metrics_artifact_and_lineage(self, store, extracted: Path, tmp_path: Path):
         """A run records per-source metrics, profile artifact, and lineage."""
         import mlflow
 
         experiment = "slm4ie/data/test-extract"
-        digest = et.log_extraction_run(
+        digest = et.log_extract_run(
             extracted,
             {"a": {"domain": "web"}},
             experiment=experiment,
@@ -123,12 +123,12 @@ class TestLogExtractionRun:
 
         experiment = "slm4ie/data/test-extract"
         datasets = {"a": {"domain": "web"}}
-        et.log_extraction_run(extracted, datasets, experiment=experiment, artifact_dir=tmp_path / "a1")
-        et.log_extraction_run(extracted, datasets, experiment=experiment, artifact_dir=tmp_path / "a2")
+        et.log_extract_run(extracted, datasets, experiment=experiment, artifact_dir=tmp_path / "a1")
+        et.log_extract_run(extracted, datasets, experiment=experiment, artifact_dir=tmp_path / "a2")
 
         client = mlflow.MlflowClient()
         exp = client.get_experiment_by_name(experiment)
         assert len(client.search_runs([exp.experiment_id])) == 1
 
-        et.log_extraction_run(extracted, datasets, experiment=experiment, force=True, artifact_dir=tmp_path / "a3")
+        et.log_extract_run(extracted, datasets, experiment=experiment, force=True, artifact_dir=tmp_path / "a3")
         assert len(client.search_runs([exp.experiment_id])) == 1

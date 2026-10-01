@@ -10,7 +10,7 @@ import yaml
 pytest.importorskip("datatrove")
 pytest.importorskip("lingua")
 
-from slm4ie.data.curate.driver import curate  # noqa: E402
+from slm4ie.data.curate.run import curate  # noqa: E402
 
 # Several clearly-Slovenian sentences per dataset. Distinct topics keep
 # the cross-dataset exact/sentence dedup from collapsing them, and the
@@ -462,7 +462,7 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     promote it, and produce the same corpus as an uninterrupted run. Stale shards of
     a key outside the roster must not reach the corpus either.
     """
-    import slm4ie.data.curate.driver as curate_runner
+    import slm4ie.data.curate.run as curate_runner
 
     in_dir = tmp_path / "extracted"
     _write_extracted(in_dir, "alfa", ALFA_DOCS)
@@ -530,7 +530,7 @@ def test_real_stages_rebuild_only_what_changed(tmp_path: Path, monkeypatch: pyte
     reader stamps a different `file_path` into every document, so downstream
     sentinels stay untouched (early cutoff).
     """
-    import slm4ie.data.curate.driver as curate_runner
+    import slm4ie.data.curate.run as curate_runner
 
     in_dir = tmp_path / "extracted"
     out_dir = tmp_path / "pretrain"

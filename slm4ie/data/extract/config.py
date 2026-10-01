@@ -1,4 +1,4 @@
-"""The extraction registry `configs/data/extract.yaml` loaded into `ExtractionConfig`."""
+"""The extraction registry `configs/data/extract.yaml` loaded into `ExtractConfig`."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,12 +8,12 @@ import yaml
 
 
 @dataclass
-class ExtractionConfig:
+class ExtractConfig:
     """Configuration for dataset extraction pipeline.
 
     Attributes:
         input_dir: Base directory for raw datasets.
-        output_dir: Base directory for processed output.
+        output_dir: Base directory for the extracted datasets.
         datasets: Dict mapping dataset key to config dict with 'extractor' and 'domain' keys.
         mlflow: MLflow tracking settings (`enabled`, `experiment`,
             `tracking_uri`) for post-hoc extraction-build logging.
@@ -25,14 +25,14 @@ class ExtractionConfig:
     mlflow: Dict[str, Any] = field(default_factory=dict)
 
 
-def load_extraction_config(config_path: Path) -> ExtractionConfig:
+def load_extract_config(config_path: Path) -> ExtractConfig:
     """Load extraction config from YAML file.
 
     Args:
         config_path: Path to the YAML config file.
 
     Returns:
-        ExtractionConfig: Parsed config.
+        ExtractConfig: Parsed config.
 
     Raises:
         FileNotFoundError: If config file does not exist.
@@ -43,9 +43,9 @@ def load_extraction_config(config_path: Path) -> ExtractionConfig:
     with open(config_path) as f:
         raw = yaml.safe_load(f)
 
-    return ExtractionConfig(
+    return ExtractConfig(
         input_dir=raw.get("input_dir", "data/raw"),
-        output_dir=raw.get("output_dir", "data/processed"),
+        output_dir=raw.get("output_dir", "data/extracted"),
         datasets=raw.get("datasets", {}),
         mlflow=raw.get("mlflow") or {},
     )

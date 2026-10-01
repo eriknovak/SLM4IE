@@ -22,26 +22,26 @@ class TestShardManifest:
         """Shards are listed by sorted root-relative POSIX path."""
         _write_shard(tmp_path / "b" / "000.jsonl.gz", 1)
         _write_shard(tmp_path / "a" / "000.jsonl.gz", 1)
-        rels = [rel for rel, _, _ in manifest.shard_manifest(tmp_path)]
+        rels = [rel for rel, _, _ in manifest.shard_listing(tmp_path)]
         assert rels == ["a/000.jsonl.gz", "b/000.jsonl.gz"]
 
     def test_rows_unset_by_default(self, tmp_path: Path):
         """Row counts are left unset unless explicitly requested."""
         _write_shard(tmp_path / "000.jsonl.gz", 3)
-        (_rel, size, rows) = manifest.shard_manifest(tmp_path)[0]
+        (_rel, size, rows) = manifest.shard_listing(tmp_path)[0]
         assert size > 0
         assert rows == manifest.ROWS_NOT_COUNTED
 
     def test_rows_counted_when_requested(self, tmp_path: Path):
         """with_rows decompresses each shard and counts its records."""
         _write_shard(tmp_path / "000.jsonl.gz", 3)
-        (_, _, rows) = manifest.shard_manifest(tmp_path, with_rows=True)[0]
+        (_, _, rows) = manifest.shard_listing(tmp_path, with_rows=True)[0]
         assert rows == 3
 
     def test_missing_root_raises(self, tmp_path: Path):
         """A non-existent root is an explicit error."""
         with pytest.raises(FileNotFoundError):
-            manifest.shard_manifest(tmp_path / "nope")
+            manifest.shard_listing(tmp_path / "nope")
 
 
 class TestCorpusDigest:

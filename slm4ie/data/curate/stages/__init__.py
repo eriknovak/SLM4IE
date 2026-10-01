@@ -3,7 +3,7 @@
 The curation pipeline runs eight sequential stages, each producing a durable
 on-disk artifact under `<output_dir>/<folder>/`. Each stage's code lives in one
 module in this package (`convert.py`, `language.py`, ..., with both dedup
-stages in `dedup.py`), which exposes a runner taking a `StageJob`. This module
+stages in `dedup.py`), which exposes a runner taking a `StageRun`. This module
 ties together the user-facing CLI name of each stage (`--stage <name>`), the
 folder it writes to, the config section that drives it, the module that runs
 it, and its version — a hash of that module's source. It imports no stage
@@ -107,7 +107,7 @@ STAGE_VERSIONS: Dict[str, str] = {name: code_version(name) for name in STAGE_NAM
 
 
 @dataclass
-class StageJob:
+class StageRun:
     """Everything one run of a stage needs.
 
     Attributes:
@@ -136,7 +136,7 @@ class StageJob:
     spam_assets: Optional[SpamAssets] = None
 
 
-def run_stage(stage: str, job: StageJob) -> Tuple[int, int]:
+def run_stage(stage: str, job: StageRun) -> Tuple[int, int]:
     """Run *stage* on *job*, importing its module only now.
 
     Args:
@@ -147,7 +147,7 @@ def run_stage(stage: str, job: StageJob) -> Tuple[int, int]:
         The stage's `(records_in, records_out)` document counts.
     """
     module, function = STAGE_RUNNERS[stage]
-    runner: Callable[[StageJob], Tuple[int, int]] = getattr(
+    runner: Callable[[StageRun], Tuple[int, int]] = getattr(
         importlib.import_module(f"slm4ie.data.curate.stages.{module}"), function
     )
     return runner(job)

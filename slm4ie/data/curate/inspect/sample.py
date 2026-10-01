@@ -131,7 +131,7 @@ def _reservoir_add(reservoir: List[Any], item: Any, seen: int, size: int, rng: r
         reservoir[index] = item
 
 
-def resolve_output_dir(config_path: Path, override: Optional[Path] = None) -> Path:
+def resolve_sample_dir(config_path: Path, override: Optional[Path] = None) -> Path:
     """Resolve the folder holding the stage outputs.
 
     Args:

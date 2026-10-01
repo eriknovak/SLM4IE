@@ -1,6 +1,6 @@
 """CLI over the pretraining-corpus curation pipeline.
 
-Parses arguments and dispatches into `slm4ie.data.curate.driver`, which owns the
+Parses arguments and dispatches into `slm4ie.data.curate.run`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
 Six subcommands:
@@ -72,7 +72,7 @@ from typing import List, Optional
 
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.inspect.diagnose import diagnose_language_leakage
-from slm4ie.data.curate.driver import curate
+from slm4ie.data.curate.run import curate
 from slm4ie.data.curate.status import status
 from slm4ie.data.curate.inspect.duplication import (
     DEDUP_STAGES,
@@ -82,10 +82,10 @@ from slm4ie.data.curate.inspect.profile import describe_corpus
 from slm4ie.data.curate.inspect.sample import (
     JUDGED_STAGES,
     draw_stratified_sample,
-    resolve_output_dir,
+    resolve_sample_dir,
 )
 from slm4ie.data.curate.stages import CORPUS_STAGES
-from slm4ie.utils.cli import add_selection, validate_selection
+from slm4ie.utils.cli import add_keys, validate_keys
 
 
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -133,7 +133,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="Build (or resume) the corpus.")
-    add_selection(run_parser, "datasets", "Dataset keys to process.", "Process every dataset.")
+    add_keys(run_parser, "datasets", "Dataset keys to process.", "Process every dataset.")
     _add_common_arguments(run_parser)
     run_parser.add_argument(
         "--stage",
@@ -227,7 +227,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "sample",
         help="Draw a dataset x stage x decision sample of kept and dropped documents.",
     )
-    add_selection(sample_parser, "datasets", "Dataset keys to sample.", "Sample every dataset in the final corpus.")
+    add_keys(sample_parser, "datasets", "Dataset keys to sample.", "Sample every dataset in the final corpus.")
     _add_common_arguments(sample_parser)
     sample_parser.add_argument("--out", type=Path, required=True, help="JSONL file to write the sample to.")
     sample_parser.add_argument(
@@ -283,9 +283,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     args = parser.parse_args(argv)
     if args.command == "sample":
-        validate_selection(parser, args, "datasets")
+        validate_keys(parser, args, "datasets")
     if args.command == "run":
-        validate_selection(parser, args, "datasets")
+        validate_keys(parser, args, "datasets")
         if args.datasets and args.stage in CORPUS_STAGES:
             parser.error(f"--stage {args.stage} is corpus-wide; run it with --all, not with positional dataset keys.")
     return args
@@ -314,7 +314,7 @@ def main() -> None:
     if args.command == "duplication":
         rows, _ = assess_dedup(
             sample_path=args.sample,
-            pretrain_dir=resolve_output_dir(args.config, args.output_dir),
+            pretrain_dir=resolve_sample_dir(args.config, args.output_dir),
             stages=args.stage or DEDUP_STAGES,
             workers=args.workers,
             coverage_floor=args.coverage_floor,
@@ -334,7 +334,7 @@ def main() -> None:
 
     if args.command == "describe":
         for path in describe_corpus(
-            pretrain_dir=resolve_output_dir(args.config, args.output_dir),
+            pretrain_dir=resolve_sample_dir(args.config, args.output_dir),
             destination_dir=args.out_dir,
             sloleks_path=args.sloleks,
             per_source=args.per_source,
@@ -345,7 +345,7 @@ def main() -> None:
 
     if args.command == "sample":
         draw_stratified_sample(
-            output_dir=resolve_output_dir(args.config, args.output_dir),
+            output_dir=resolve_sample_dir(args.config, args.output_dir),
             destination=args.out,
             datasets=args.datasets or None,
             stages=args.stage or JUDGED_STAGES,

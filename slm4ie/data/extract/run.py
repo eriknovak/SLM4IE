@@ -22,7 +22,7 @@ import slm4ie.data.extract.extractors.macocu  # noqa: F401
 import slm4ie.data.extract.extractors.tei  # noqa: F401
 import slm4ie.data.extract.extractors.text  # noqa: F401
 from slm4ie.data.archives import extract_archive
-from slm4ie.data.extract.config import load_extraction_config
+from slm4ie.data.extract.config import load_extract_config
 from slm4ie.data.extract.extractors import BaseExtractor, FileBasedExtractor, get_extractor
 from slm4ie.utils.io import resolve_project_path
 from slm4ie.utils.parallel import (
@@ -140,7 +140,7 @@ def _extract_shard(
         domain (str): Domain label assigned to every Document.
         metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
             config block forwarded to the extractor.
-        input_dir (Path): Dataset root, for sidecar resolution.
+        input_dir (Path): Dataset root, for metadata table resolution.
         tmp_dir (Path): Directory to write this shard's temp files into.
 
     Returns:
@@ -295,7 +295,7 @@ def _extract_sharded(
         domain (str): Domain label assigned to every Document.
         metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
             config block forwarded to the extractor.
-        input_dir (Path): Dataset root, for sidecar resolution.
+        input_dir (Path): Dataset root, for metadata table resolution.
         files (List[Path]): All input files for this dataset, sorted.
         text_file (Path): Final destination for the text JSONL.
         ann_file (Path): Final destination for the gzipped annotations.
@@ -530,7 +530,7 @@ def extract_datasets(
         ValueError: If any requested key is unknown.
         RuntimeError: If one or more dataset extractions failed.
     """
-    cfg = load_extraction_config(config_path)
+    cfg = load_extract_config(config_path)
 
     if dataset_keys:
         unknown = set(dataset_keys) - set(cfg.datasets.keys())
@@ -582,9 +582,9 @@ def extract_datasets(
 
     enabled = bool(cfg.mlflow.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled
     if enabled:
-        from slm4ie.data.extract.tracking import DEFAULT_EXPERIMENT, log_extraction_run
+        from slm4ie.data.extract.tracking import DEFAULT_EXPERIMENT, log_extract_run
 
-        log_extraction_run(
+        log_extract_run(
             output_base,
             cfg.datasets,
             enabled=True,

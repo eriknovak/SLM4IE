@@ -4,21 +4,21 @@ Everything downstream of extraction that produces benchmark data lives here:
 
 * `registry`: the `configs/data/tasks.yaml` loader and the `<task>/<dataset>`
   entries it declares, with their roles, sources, splits and labels.
-* `driver`: the argv-free `convert_tasks` entry point, the `TaskConverter` ABC
+* `run`: the argv-free `convert_tasks` entry point, the `TaskConverter` ABC
   and its `@register_converter` registry, the role gate and the split policies.
 * `converters`: one backend per task family (`spans`, `sentiment`, `superglue`),
   registered on import.
-* `writer`: the per-split output convention shared by every family.
+* `splits`: the per-split output convention shared by every family.
 * `tracking`: post-hoc MLflow logging of what each conversion produced.
 
 Every entry names the converter that reads it, so one `convert_tasks` call can
 span every family and `tasks.yaml` stays the only place that mapping lives.
 """
 
-from slm4ie.data.tasks.driver import (
+from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
-    TaskConversionSummary,
+    TasksSummary,
     TaskConverter,
     assign_hash_split,
     convert_entry,
@@ -33,10 +33,10 @@ from slm4ie.data.tasks.driver import (
 )
 from slm4ie.data.tasks.config import (
     TaskEntry,
-    TaskSource,
+    EntrySource,
     TasksConfig,
     TasksRoots,
-    load_tasks,
+    load_tasks_config,
     resolve_output_dir,
     resolve_source_paths,
 )
@@ -44,10 +44,10 @@ from slm4ie.data.tasks.config import (
 __all__ = [
     "ConvertContext",
     "SplitPolicy",
-    "TaskConversionSummary",
+    "TasksSummary",
     "TaskConverter",
     "TaskEntry",
-    "TaskSource",
+    "EntrySource",
     "TasksConfig",
     "TasksRoots",
     "assign_hash_split",
@@ -56,7 +56,7 @@ __all__ = [
     "get_converter",
     "iter_extracted_records",
     "label_allow_set",
-    "load_tasks",
+    "load_tasks_config",
     "register_converter",
     "resolve_keys",
     "resolve_output_dir",

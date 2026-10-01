@@ -18,7 +18,7 @@ are deliberately ignored — only orthographic forms are emitted.
 The parser is namespace-agnostic (it matches on local element names) so
 it tolerates either a namespaced or bare `<lexicon>` root.
 
-Used by `slm4ie/data/tokenization/driver.py` to materialize a
+Used by `slm4ie/data/tokenization/run.py` to materialize a
 tokenizer/morphology evaluation JSONL. Sloleks is intentionally absent
 from `configs/data/extract.yaml`, so it never enters the
 extract/datatrove/curate pipelines.

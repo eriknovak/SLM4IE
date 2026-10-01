@@ -37,9 +37,9 @@ from typing import List, Optional
 
 from slm4ie.utils.parallel import configure_script_logging
 from slm4ie.tokenizers.analysis import evaluate_sweep
-from slm4ie.tokenizers.config import TokenizerSweepConfig, load_tokenizer_config
-from slm4ie.tokenizers.hf_export import export_runs
-from slm4ie.tokenizers.train import prepare_inputs, resolve_run_selection, train_sweep
+from slm4ie.tokenizers.config import SweepConfig, load_sweep_config
+from slm4ie.tokenizers.hf_export import export_sweep_runs
+from slm4ie.tokenizers.train import prepare_inputs, resolve_sweep_runs, train_sweep
 from slm4ie.utils.cli import add_workers
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _select_runs(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> List[str]:
+def _select_runs(cfg: SweepConfig, args: argparse.Namespace) -> List[str]:
     """Resolve the run keys named by the CLI selection.
 
     Args:
@@ -147,13 +147,13 @@ def _select_runs(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> List[st
         SystemExit: If the selection is invalid.
     """
     try:
-        return resolve_run_selection(cfg, all_runs=args.all, tokenizer=args.tokenizer, vocab_size=args.vocab_size)
+        return resolve_sweep_runs(cfg, all_runs=args.all, tokenizer=args.tokenizer, vocab_size=args.vocab_size)
     except ValueError as exc:
         logger.error("%s", exc)
         sys.exit(2)
 
 
-def _trained_runs(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> List[str]:
+def _trained_runs(cfg: SweepConfig, args: argparse.Namespace) -> List[str]:
     """Resolve the selection down to runs that have a trained artifact.
 
     Args:
@@ -190,7 +190,7 @@ def _describe(path: Path) -> str:
     return f"{path} ({mib:.1f} MiB)"
 
 
-def _run_sample(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
+def _run_sample(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """Materialize the persistent training sample and morpheme lexicon.
 
     Args:
@@ -216,7 +216,7 @@ def _run_sample(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_train(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
+def _run_train(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """Train the selected runs.
 
     Args:
@@ -234,7 +234,7 @@ def _run_train(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
     return 2 if summary.failed else 0
 
 
-def _run_evaluate(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
+def _run_evaluate(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """Evaluate the selected trained runs and write the report.
 
     Args:
@@ -255,7 +255,7 @@ def _run_evaluate(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
     return 2 if summary.failed else 0
 
 
-def _run_export(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
+def _run_export(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """Export the selected trained runs as HuggingFace tokenizer directories.
 
     Args:
@@ -266,14 +266,14 @@ def _run_export(cfg: TokenizerSweepConfig, args: argparse.Namespace) -> int:
         Process exit code.
     """
     configure_script_logging(parallel=False, console_level=logging.INFO)
-    summary = export_runs(cfg.output_root, _trained_runs(cfg, args))
+    summary = export_sweep_runs(cfg.output_root, _trained_runs(cfg, args))
     return 2 if summary.failed else 0
 
 
 def main() -> None:
     """Dispatch the selected subcommand."""
     args = parse_args()
-    cfg = load_tokenizer_config(args.config)
+    cfg = load_sweep_config(args.config)
     handlers = {
         "sample": _run_sample,
         "train": _run_train,

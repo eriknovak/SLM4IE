@@ -1,6 +1,6 @@
-"""Tests for the shared task-converter driver (slm4ie/data/tasks/driver.py).
+"""Tests for the shared task-converter run loop (slm4ie/data/tasks/run.py).
 
-Covers the driver primitives (id synthesis, role gate, hash re-bucketing, entry
+Covers the run loop primitives (id synthesis, role gate, hash re-bucketing, entry
 selection) and the role-gating acceptance criterion: a `held_out` entry writes
 the same records as a `finetune_and_eval` entry but with the `train` split
 dropped.
@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from slm4ie.data.tasks.driver import (
+from slm4ie.data.tasks.run import (
     SplitPolicy,
     assign_hash_split,
     convert_tasks,
@@ -23,7 +23,7 @@ from slm4ie.data.tasks.driver import (
     synthesize_id,
     target_splits,
 )
-from slm4ie.data.tasks.config import load_tasks
+from slm4ie.data.tasks.config import load_tasks_config
 
 
 def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
@@ -176,13 +176,13 @@ class TestTargetSplits:
 
     def test_finetune_keeps_all(self, tmp_path: Path) -> None:
         """A finetune_and_eval entry keeps every declared split."""
-        cfg = load_tasks(_make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(3)))
+        cfg = load_tasks_config(_make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(3)))
         entry = cfg.entries[0]
         assert set(target_splits(entry)) == {"train", "val", "test"}
 
     def test_held_out_drops_train(self, tmp_path: Path) -> None:
         """A held_out entry drops the train split, keeping the rest."""
-        cfg = load_tasks(_make_ner_layout(tmp_path, "kzb", "held_out", _ner_records(3)))
+        cfg = load_tasks_config(_make_ner_layout(tmp_path, "kzb", "held_out", _ner_records(3)))
         entry = cfg.entries[0]
         assert "train" not in target_splits(entry)
         assert set(target_splits(entry)) == {"val", "test"}
@@ -214,19 +214,19 @@ class TestResolveKeys:
     def test_requested_keys_are_kept(self, tmp_path: Path) -> None:
         """Requested entry keys come back in the order asked for."""
         cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(2))
-        entries = load_tasks(cfg_path).entries
+        entries = load_tasks_config(cfg_path).entries
         assert resolve_keys(entries, ["ner/kzb"]) == ["ner/kzb"]
 
     def test_none_selects_every_entry(self, tmp_path: Path) -> None:
         """Passing None selects every declared entry, in registry order."""
         cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(2))
-        entries = load_tasks(cfg_path).entries
+        entries = load_tasks_config(cfg_path).entries
         assert resolve_keys(entries, None) == ["ner/kzb"]
 
     def test_unknown_key_raises(self, tmp_path: Path) -> None:
         """An entry key absent from the registry is rejected."""
         cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(2))
-        entries = load_tasks(cfg_path).entries
+        entries = load_tasks_config(cfg_path).entries
         with pytest.raises(KeyError):
             resolve_keys(entries, ["ner/missing"])
 
