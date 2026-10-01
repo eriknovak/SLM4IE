@@ -205,13 +205,13 @@ def _build_document(
         doc_id (str): Identifier for the resulting Document.
         source (str): Dataset key.
         domain (str): Domain label.
-        native_id (Optional[str]): The file's own document id
-            (`# newdoc id` or the `sent_id` prefix); None when the
-            document is the whole file and `doc_id` is the filename.
         extra_metadata (Optional[Dict[str, Any]]): Per-document
             fields copied verbatim into `Document.metadata` (e.g.
             from `MetadataTable`). Empty when no sidecar TSV is
             configured.
+        native_id (Optional[str]): The file's own document id
+            (`# newdoc id` or the `sent_id` prefix); None when the
+            document is the whole file and `doc_id` is the filename.
 
     Returns:
         Document: One Document whose `text` is the sentence texts

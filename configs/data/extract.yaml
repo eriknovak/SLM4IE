@@ -158,8 +158,7 @@ datasets:
     extractor: conllu
     domain: student
     access: gated
-    # Teacher-corrected essays only: solar-orig.conllu carries the same
-    # document ids with the students' uncorrected text.
+    # Corrected essays only: solar-orig.conllu repeats every id with raw text.
     include: ["*/solar-corr.conllu"]
 
   finepdf:
@@ -212,8 +211,7 @@ datasets:
     extractor: conllu
     domain: mixed
     role: benchmark
-    # One tagset layer: the .jos.conllu files repeat every document with
-    # JOS tags. UD matches the ssj500k files.
+    # UD layer only (as ssj500k): .jos.conllu repeats every document.
     include: ["*.ud.conllu"]
 
   ssj500k:

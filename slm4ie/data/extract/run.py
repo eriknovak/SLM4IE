@@ -115,23 +115,19 @@ class DuplicateDocumentIdError(ValueError):
 class _IdLedger:
     """Hashes of every written document's id and text, in write order.
 
-    Sixteen bytes per document, so a dataset of tens of millions of
-    documents is checked for repeated ids without holding the ids
-    themselves. Shards build one each and the parent concatenates them
-    in shard order, which is also the order of the merged output.
+    Two `array("Q")` of 64-bit hashes, sixteen bytes per document while
+    writing, so the ids themselves are never held. `resolve` sorts an
+    index list on top of that, roughly eighty bytes per document for
+    the duration of the check. Two distinct ids share a hash with
+    probability about n^2 / 2^65, below 1e-4 for the largest source.
+    Shards build one each and the parent concatenates them in shard
+    order, which is also the order of the merged output.
     """
 
-    def __init__(self, ids: bytes = b"", texts: bytes = b"") -> None:
-        """Start a ledger, optionally from another ledger's serialized arrays.
-
-        Args:
-            ids: `array("Q")` bytes of id hashes.
-            texts: `array("Q")` bytes of text hashes, parallel to `ids`.
-        """
+    def __init__(self) -> None:
+        """Start an empty ledger."""
         self.ids = array("Q")
-        self.ids.frombytes(ids)
         self.texts = array("Q")
-        self.texts.frombytes(texts)
 
     def __len__(self) -> int:
         """Return the number of documents recorded."""
@@ -141,7 +137,7 @@ class _IdLedger:
         """Record one written document.
 
         Args:
-            doc_id: The document's id, after any fallback was applied.
+            doc_id: The document's id as written to the output.
             text: The document's text.
         """
         self.ids.append(_hash64(doc_id))
@@ -156,14 +152,6 @@ class _IdLedger:
         self.ids.extend(other.ids)
         self.texts.extend(other.texts)
 
-    def serialized(self) -> Tuple[bytes, bytes]:
-        """Return the two arrays as bytes, for crossing a process boundary.
-
-        Returns:
-            Tuple[bytes, bytes]: Id hashes and text hashes.
-        """
-        return self.ids.tobytes(), self.texts.tobytes()
-
     def resolve(self) -> Tuple[bytearray, List[int]]:
         """Decide what to do with every repeated id.
 
@@ -175,13 +163,14 @@ class _IdLedger:
         Returns:
             Tuple[bytearray, List[int]]: One keep flag (1/0) per
                 document in write order, and the write-order indices
-                of the conflicting documents.
+                of the conflicting documents. Flags are a bytearray,
+                one byte per document, since the keep set is as large
+                as the dataset.
         """
         n = len(self.ids)
         keep = bytearray(b"\x01") * n
         conflicts: List[int] = []
-        # Stable sort: within one id, write order survives, so the first
-        # element of a group is the earliest written document.
+        # Stable sort keeps write order within an id: a group's head is its earliest.
         order = sorted(range(n), key=self.ids.__getitem__)
         group_start = 0
         for pos in range(1, n + 1):
@@ -230,18 +219,59 @@ def _doc_ids_at(text_files: List[Tuple[Path, int]], indices: List[int]) -> List[
     Returns:
         List[str]: The ids found, in index order.
     """
-    wanted = list(indices)
     found: List[str] = []
     offset = 0
     for path, count in text_files:
-        local = [i - offset for i in wanted if offset <= i < offset + count]
-        if local:
-            with open(path, encoding="utf-8") as fh:
-                for line_idx, line in enumerate(fh):
-                    if line_idx in local:
-                        found.append(str(json.loads(line).get("doc_id")))
+        local = {i - offset for i in indices if offset <= i < offset + count}
         offset += count
+        if not local:
+            continue
+        with open(path, encoding="utf-8") as fh:
+            for line_idx, line in enumerate(fh):
+                if line_idx in local:
+                    found.append(str(json.loads(line).get("doc_id")))
+                    if len(found) == len(indices):
+                        return found
     return found
+
+
+def _enforce_unique_ids(key: str, ledger: _IdLedger, parts: List[Tuple[Path, Optional[Path], int]]) -> int:
+    """Apply the id contract to a dataset's written files before promotion.
+
+    Repeats of an id with identical text are removed from the text file
+    and its annotation file alike, so the two stay aligned line for
+    line. A repeat with different text aborts the dataset; the files
+    are left in place for the caller to discard.
+
+    Args:
+        key: Dataset key, for messages.
+        ledger: The ledger covering every line of `parts`, in order.
+        parts: Per written part in output order: its text file, its
+            annotation file (None when the dataset writes none) and its
+            document count.
+
+    Returns:
+        int: Documents dropped as identical repeats.
+
+    Raises:
+        DuplicateDocumentIdError: If a `doc_id` repeats with different text.
+    """
+    keep, conflicts = ledger.resolve()
+    if conflicts:
+        examples = _doc_ids_at([(text_path, count) for text_path, _, count in parts], conflicts[:3])
+        raise DuplicateDocumentIdError(key, len(conflicts), examples)
+    dropped = len(keep) - sum(keep)
+    if dropped:
+        offset = 0
+        for text_path, ann_path, count in parts:
+            part_keep = keep[offset : offset + count]
+            offset += count
+            if 0 in part_keep:
+                _drop_lines(text_path, part_keep, gz=False)
+                if ann_path is not None:
+                    _drop_lines(ann_path, part_keep, gz=True)
+        logger.info("Dropped %d repeated documents (same doc_id, same text) from '%s'", dropped, key)
+    return dropped
 
 
 def _select_files(files: List[Path], input_dir: Path, include: Optional[List[str]]) -> List[Path]:
@@ -309,8 +339,8 @@ class ShardResult:
         count (int): Documents written by this shard.
         had_real_ann (bool): True if any document carried a real
             annotation line (not just a stub).
-        id_hashes (bytes): The shard's `_IdLedger` id array, serialized.
-        text_hashes (bytes): The shard's `_IdLedger` text array, serialized.
+        ledger (_IdLedger): Id and text hashes of the shard's documents,
+            in write order.
     """
 
     index: int
@@ -318,8 +348,7 @@ class ShardResult:
     ann_path: Path
     count: int
     had_real_ann: bool
-    id_hashes: bytes
-    text_hashes: bytes
+    ledger: _IdLedger
 
 
 def _extract_shard(
@@ -381,8 +410,7 @@ def _extract_shard(
             af.write("\n")
             count += 1
 
-    id_hashes, text_hashes = ledger.serialized()
-    return ShardResult(index, text_path, ann_path, count, had_real_ann, id_hashes, text_hashes)
+    return ShardResult(index, text_path, ann_path, count, had_real_ann, ledger)
 
 
 def _extract_serial(
@@ -473,20 +501,13 @@ def _extract_serial(
             if ann_fh is not None:
                 ann_fh.close()
 
-    keep, conflicts = ledger.resolve()
-    if conflicts:
-        examples = _doc_ids_at([(text_partial, count)], conflicts[:3])
+    try:
+        count -= _enforce_unique_ids(key, ledger, [(text_partial, ann_partial if has_annotations else None, count)])
+    except DuplicateDocumentIdError:
         text_partial.unlink()
         if has_annotations:
             ann_partial.unlink()
-        raise DuplicateDocumentIdError(key, len(conflicts), examples)
-    dropped = count - sum(keep)
-    if dropped:
-        _drop_lines(text_partial, keep, gz=False)
-        if has_annotations:
-            _drop_lines(ann_partial, keep, gz=True)
-        count -= dropped
-        logger.info("Dropped %d repeated documents (same doc_id, same text) from '%s'", dropped, key)
+        raise
 
     os.replace(text_partial, text_file)
     if has_annotations:
@@ -583,22 +604,9 @@ def _extract_sharded(
 
         ledger = _IdLedger()
         for r in ordered:
-            ledger.extend(_IdLedger(r.id_hashes, r.text_hashes))
-        keep, conflicts = ledger.resolve()
-        if conflicts:
-            examples = _doc_ids_at([(r.text_path, r.count) for r in ordered], conflicts[:3])
-            raise DuplicateDocumentIdError(key, len(conflicts), examples)
-        dropped = len(keep) - sum(keep)
-        if dropped:
-            offset = 0
-            for r in ordered:
-                shard_keep = keep[offset : offset + r.count]
-                offset += r.count
-                if 0 in shard_keep:
-                    _drop_lines(r.text_path, shard_keep, gz=False)
-                    _drop_lines(r.ann_path, shard_keep, gz=True)
-            logger.info("Dropped %d repeated documents (same doc_id, same text) from '%s'", dropped, key)
-        total = len(keep) - dropped
+            ledger.extend(r.ledger)
+        dropped = _enforce_unique_ids(key, ledger, [(r.text_path, r.ann_path, r.count) for r in ordered])
+        total = len(ledger) - dropped
 
         text_partial = text_file.parent / f"{text_file.name}.partial"
         with open(text_partial, "wb") as out:

@@ -71,7 +71,7 @@ from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
 
-_RESERVED_FIELDS = {"text", "fullText"}
+_RESERVED_FIELDS = {"text", "fullText", "doc_id"}
 
 # Order matters: jedro (essence) → izrek (operative part) → obrazlozitev
 # (reasoning) mirrors the structure of Slovenian court decisions.
@@ -174,9 +174,7 @@ class ColeslawExtractor(BaseExtractor):
         del metadata
         files = sorted(p for p in input_dir.rglob("*.jsonl") if p.is_file())
 
-        # Unit = subcorpus dir + file stem, not the full relative path: the
-        # archive unpacks into "COLESLAW 1.0/", which would put a space in
-        # every id.
+        # Subcorpus dir + stem, not the full path: "COLESLAW 1.0/" has a space.
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, f"{filepath.parent.name}/{filepath.stem}")
 

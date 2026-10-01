@@ -485,15 +485,15 @@ def _parse_annotated_with_utterances(
     base: Dict[str, Any] = dict(extra_metadata) if extra_metadata else {}
     for u_elem in root.iter(_U_TAG):
         s_elems = list(u_elem.iter(_S_TAG))
-        doc_id = u_elem.get(_XML_ID) or ""
+        native_id = u_elem.get(_XML_ID)
         merged = {**base, **_utterance_metadata(u_elem)}
         doc = _build_document(
             s_elems=s_elems,
-            doc_id=doc_id,
+            doc_id=native_id or "",
             source=source,
             domain=domain,
             metadata=merged,
-            native_id=doc_id,
+            native_id=native_id,
         )
         if doc is not None:
             yield doc

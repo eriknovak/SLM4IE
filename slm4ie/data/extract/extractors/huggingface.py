@@ -41,7 +41,7 @@ Document ids:
     order; the first present, non-empty value becomes `doc_id` and
     `native_id`, coerced to `str`. The column is also kept in
     `metadata`, so nothing is lost by using it as the id. Rows with no
-    natural key fall back to the positional id of
+    natural key get the positional id of
     `assembly.positional_doc_id` with the unit `<config>:<split>` (the
     config subdirectory name and the split name, the latter omitted
     for a bare `Dataset`) and the 0-based row index within that split,

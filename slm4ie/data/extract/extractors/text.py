@@ -48,8 +48,7 @@ from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
 
-# Six digits: the CC100 ids were minted at this width and the shared
-# corpus keys on them; widening would renumber every one of its documents.
+# Six digits: the shared corpus keys on CC100 ids minted at this width.
 _BLOCK_WIDTH = 6
 
 

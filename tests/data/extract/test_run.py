@@ -982,14 +982,16 @@ class TestIdLedger:
         assert list(keep) == [1, 1, 0]
         assert conflicts == [1]
 
-    def test_round_trips_through_bytes(self) -> None:
-        """A shard's serialized ledger rebuilds identically in the parent."""
-        ledger = _IdLedger()
-        ledger.add("a", "x")
-        ids, texts = ledger.serialized()
-        copy = _IdLedger(ids, texts)
-        assert list(copy.ids) == list(ledger.ids)
-        assert list(copy.texts) == list(ledger.texts)
+    def test_extend_keeps_shard_order(self) -> None:
+        """Concatenated shard ledgers resolve as one, in output order."""
+        first, second = _IdLedger(), _IdLedger()
+        first.add("a", "x")
+        second.add("b", "y")
+        second.add("a", "x")
+        first.extend(second)
+        keep, conflicts = first.resolve()
+        assert list(keep) == [1, 1, 0]
+        assert conflicts == []
 
 
 class TestSerialUniqueness:
