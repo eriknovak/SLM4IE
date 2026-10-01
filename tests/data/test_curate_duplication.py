@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from slm4ie.data.curate.duplication import (
+from slm4ie.data.curate.inspect.duplication import (
     assess_dedup,
     dropped_documents,
     sentences,

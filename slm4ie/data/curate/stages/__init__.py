@@ -1,18 +1,25 @@
-"""Stage names, folder mapping, and config-slice helpers for the curate pipeline.
+"""The stage registry: names, folders, code versions and how to run each stage.
 
-The curation pipeline runs eight sequential stages, each producing a
-durable on-disk artifact under `<output_dir>/<folder>/`. This module is
-the single source of truth that ties together the user-facing CLI name
-of each stage (`--stage <name>`), the folder it writes to, and the
-top-level pretrain-config key(s) whose contents determine its sentinel
-hash. Consumers should import from here rather than hard-coding stage
-names or folder paths.
+The curation pipeline runs eight sequential stages, each producing a durable
+on-disk artifact under `<output_dir>/<folder>/`. Each stage's code lives in one
+module in this package (`convert.py`, `language.py`, ..., with both dedup
+stages in `dedup.py`), which exposes a runner taking a `StageJob`. This module
+ties together the user-facing CLI name of each stage (`--stage <name>`), the
+folder it writes to, the config section that drives it, the module that runs
+it, and its version — a hash of that module's source. It imports no stage
+module, so it stays cheap for consumers that only need names and folders.
 """
 
-import ast
+from __future__ import annotations
+
 import hashlib
+import importlib
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
+
+if TYPE_CHECKING:
+    from slm4ie.data.curate.paths import CuratePaths
 
 
 #: Stage names in pipeline execution order. `convert` is stage 0: it
@@ -59,69 +66,90 @@ STAGE_DIRS: Dict[str, str] = {
 }
 
 
-#: The code that runs each stage, as `<module>.py` (the whole file) or
-#: `<module>.py:<name>` (one top-level function or class in a shared module).
-#: Imports are not followed: a stage's version covers only these sources.
-STAGE_SOURCES: Dict[str, Tuple[str, ...]] = {
-    "convert": ("convert.py", "runner.py:_build_convert_params"),
-    "language": ("language.py", "pipeline.py:build_language_executors", "runner.py:_build_language_params"),
-    "spam": ("spam.py", "pipeline.py:build_spam_executors", "runner.py:_build_spam_config"),
-    "quality": ("pipeline.py:QualityConfig", "pipeline.py:build_quality_executors", "runner.py:_build_quality_config"),
-    "repetition": ("pipeline.py:build_repetition_executors",),
-    "exact_dedup": ("dedup.py", "pipeline.py:build_exact_dedup_executors"),
-    "sentence_dedup": ("dedup.py", "pipeline.py:build_sentence_dedup_executors"),
-    "statistics": ("stats.py", "pipeline.py:build_statistics_executors"),
+#: The module and function that run each stage. A stage's version is the hash
+#: of its module's source; imports are not followed.
+STAGE_RUNNERS: Dict[str, Tuple[str, str]] = {
+    "convert": ("convert", "run"),
+    "language": ("language", "run"),
+    "spam": ("spam", "run"),
+    "quality": ("quality", "run"),
+    "repetition": ("repetition", "run"),
+    "exact_dedup": ("dedup", "run_exact_dedup"),
+    "sentence_dedup": ("dedup", "run_sentence_dedup"),
+    "statistics": ("statistics", "run"),
 }
 
-#: Folder holding the modules `STAGE_SOURCES` names.
+#: Folder holding the stage modules.
 _PACKAGE_DIR = Path(__file__).parent
 
 
-def _source_text(package_dir: Path, source: str) -> str:
-    """Return the text of one `STAGE_SOURCES` entry.
-
-    Args:
-        package_dir: Folder holding the curate modules.
-        source: `<module>.py` or `<module>.py:<name>`.
-
-    Returns:
-        The whole file, or the named top-level definition's source.
-
-    Raises:
-        KeyError: If the named definition is not in the module.
-    """
-    filename, _, name = source.partition(":")
-    text = (package_dir / filename).read_text(encoding="utf-8")
-    if not name:
-        return text
-    for node in ast.parse(text).body:
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == name:
-            return ast.get_source_segment(text, node) or ""
-    raise KeyError(f"{name} not found in {filename}")
-
-
 def code_version(stage: str, package_dir: Path = _PACKAGE_DIR) -> str:
-    """Return a stage's version: a hash of the code that runs it.
+    """Return a stage's version: a hash of the module that runs it.
 
-    Any edit to that code — a fix, a refactor, a comment — changes the version
-    and reruns the stage; a rerun that reproduces the same documents leaves
-    downstream stages current.
+    Any edit to that module — a fix, a refactor, a comment — changes the
+    version and reruns the stage; a rerun that reproduces the same documents
+    leaves downstream stages current.
 
     Args:
         stage: One of the values in `STAGE_NAMES`.
-        package_dir: Folder holding the curate modules.
+        package_dir: Folder holding the stage modules.
 
     Returns:
-        `sha256:` hex digest over the stage's sources, in `STAGE_SOURCES` order.
+        `sha256:` hex digest of the stage module's source.
     """
-    h = hashlib.sha256()
-    for source in STAGE_SOURCES[stage]:
-        h.update(source.encode("utf-8") + b"\x00" + _source_text(package_dir, source).encode("utf-8") + b"\x00")
-    return "sha256:" + h.hexdigest()
+    module, _ = STAGE_RUNNERS[stage]
+    return "sha256:" + hashlib.sha256((package_dir / f"{module}.py").read_bytes()).hexdigest()
 
 
 #: Current version of every stage, computed from its code when imported.
 STAGE_VERSIONS: Dict[str, str] = {name: code_version(name) for name in STAGE_NAMES}
+
+
+@dataclass
+class StageJob:
+    """Everything one run of a stage needs.
+
+    Attributes:
+        paths: Resolved curation paths.
+        config: The stage's effective config section.
+        workers: Worker count.
+        dataset_keys: Datasets to process (convert reads their `<key>.jsonl`).
+        output_folder: Folder to write into (the stage's staging folder).
+        input_view: Symlink view of the upstream output restricted to the
+            datasets being run; `None` for convert.
+        tasks: Task count for the corpus stages; defaults to `workers`.
+        log_dir: Per-task log folder (convert only).
+        stopwords: Stopword set (quality and statistics).
+        spam_assets: Spam lexicons and domain blocklist (spam only).
+    """
+
+    paths: CuratePaths
+    config: Dict[str, Any]
+    workers: int
+    dataset_keys: List[str]
+    output_folder: Path
+    input_view: Optional[Path] = None
+    tasks: Optional[int] = None
+    log_dir: Optional[Path] = None
+    stopwords: Set[str] = field(default_factory=set)
+    spam_assets: Any = None
+
+
+def run_stage(stage: str, job: StageJob) -> Tuple[int, int]:
+    """Run *stage* on *job*, importing its module only now.
+
+    Args:
+        stage: One of the values in `STAGE_NAMES`.
+        job: What to run it on.
+
+    Returns:
+        The stage's `(records_in, records_out)` document counts.
+    """
+    module, function = STAGE_RUNNERS[stage]
+    runner: Callable[[StageJob], Tuple[int, int]] = getattr(
+        importlib.import_module(f"slm4ie.data.curate.stages.{module}"), function
+    )
+    return runner(job)
 
 
 #: Per-stage top-level YAML keys that go into the sentinel config hash.
@@ -165,8 +193,8 @@ def config_slice_keys(stage: str) -> Tuple[str, ...]:
     Returns:
         Tuple of `curate.yaml` top-level keys whose values are included
         in the stage's config hash slice. Stopword *file contents* are
-        also included for `quality` and `stats`, but that's handled by
-        the sentinel module — those keys live outside `curate.yaml`.
+        also included for `quality` and `statistics`, but that is handled
+        in `config.py` — those files live outside `curate.yaml`.
 
     Raises:
         KeyError: If *stage* is not a known stage name.
@@ -177,8 +205,7 @@ def config_slice_keys(stage: str) -> Tuple[str, ...]:
 def cascade_from(stage: str) -> Tuple[str, ...]:
     """Return *stage* followed by every downstream stage, in execution order.
 
-    Used by the sentinel runner to cascade-invalidate downstream stages
-    when *stage*'s config has changed.
+    Used by `--force` to reset a stage and every stage downstream of it.
 
     Args:
         stage: One of the values in `STAGE_NAMES`.

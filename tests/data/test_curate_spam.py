@@ -1,4 +1,4 @@
-"""Tests for the adult/SEO-spam filter stage (`slm4ie.data.curate.spam`)."""
+"""Tests for the adult/SEO-spam filter stage (`slm4ie.data.curate.stages.spam`)."""
 
 from typing import Optional
 
@@ -8,7 +8,7 @@ pytest.importorskip("datatrove")
 
 from datatrove.data import Document  # noqa: E402
 
-from slm4ie.data.curate.spam import (  # noqa: E402
+from slm4ie.data.curate.stages.spam import (
     SpamConfig,
     SpamFilter,
     load_spam_assets,

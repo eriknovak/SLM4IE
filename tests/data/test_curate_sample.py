@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from slm4ie.data.curate.sample import (
+from slm4ie.data.curate.inspect.sample import (
     JUDGED_STAGES,
     SurvivorIndex,
     draw_stratified_sample,

@@ -102,7 +102,7 @@ stage (`05_exact_dedup/`). Each unit's sentinel records its lineage:
 | Field             | What it is                                                                                         |
 | ----------------- | -------------------------------------------------------------------------------------------------- |
 | `config_hash`     | hash of the stage's (override-merged) config section, plus the files it names — see below          |
-| `stage_version`   | a hash of the code that runs the stage — the files and functions `STAGE_SOURCES` in `slm4ie/data/curate/stages.py` lists for it; imports are not followed |
+| `stage_version`   | a hash of the stage's module in `slm4ie/data/curate/stages/` (both dedup stages share `dedup.py`); imports are not followed |
 | `input_digest`    | the upstream unit's recorded document digest; for `convert`, the size and SHA-256 of the extracted source file(s) |
 | `document_digest` | order-independent hash of the documents the unit wrote                                             |
 | `shards`          | every file the unit wrote, by relative path and byte size                                          |

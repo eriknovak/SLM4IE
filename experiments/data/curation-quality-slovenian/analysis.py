@@ -33,8 +33,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
-from slm4ie.data.curate.profile import iter_stage_sentinels
-from slm4ie.data.judge import interleave
+from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
+from slm4ie.data.curate.inspect.judge import interleave
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -551,7 +551,7 @@ def profile_rows(profiles: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Flatten the corpus profile into one row per source.
 
     Args:
-        profiles: Output of `slm4ie.data.curate.profile.profile_corpus`, read
+        profiles: Output of `slm4ie.data.curate.inspect.profile.profile_corpus`, read
             from the JSON it was written to.
 
     Returns:

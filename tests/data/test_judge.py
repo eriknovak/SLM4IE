@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pytest
 
-from slm4ie.data.judge import (
+from slm4ie.data.curate.inspect.judge import (
     DOCUMENTS_PLACEHOLDER,
     PAIRWISE_STAGES,
     PAIRWISE_TASK,

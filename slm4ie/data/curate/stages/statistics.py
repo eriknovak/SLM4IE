@@ -32,12 +32,17 @@ import pickle
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from datatrove.data import DocumentsPipeline
+from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.base import PipelineStep
 from datatrove.utils.typeshelper import Languages
 from datatrove.utils.word_tokenizers import load_word_tokenizer
+
+from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages.common import jsonl_reader, stage_io_counts
 
 logger = logging.getLogger(__name__)
 
@@ -525,3 +530,105 @@ class CorpusStatsReduce(PipelineStep):
             "word_freq": word_freq,
             "dataset_to_domain": dataset_to_domain,
         }
+
+
+def build_statistics_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    workers: Optional[int] = None,
+    language: str = Languages.slovenian,
+    stopwords: Optional[Set[str]] = None,
+    top_k_words: int = 5_000,
+    input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
+) -> List[LocalPipelineExecutor]:
+    """Build the statistics stage: map → reduce → 07_statistics/.
+
+    Two executors are returned. The map executor fans `CorpusStats`
+    out across `tasks` workers; each rank writes a per-shard partial
+    pickle to `07_statistics/_partials/`. The reduce executor runs
+    single-process, sums the partials, derives the top-K
+    word-frequency table, and writes the final `aggregate.json` plus
+    per-dataset breakdowns.
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Number of map tasks. The reduce executor is always
+            single-process.
+        workers: Map tasks run at once; defaults to `tasks`.
+        language: ISO-3 code for the tokenizer.
+        stopwords: Stopword set used by `CorpusStats`.
+        top_k_words: Word-frequency table size.
+        input_override: Optional folder to read from instead of the
+            sentence-dedup stage's output (a symlinked roster view).
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the driver's staging folder).
+
+    Returns:
+        A list `[map_executor, reduce_executor]`. The reduce executor
+        depends on the map executor, so callers can run the stage by
+        invoking `executors[-1].run()`.
+    """
+    workers = workers or tasks
+    in_ = input_override if input_override is not None else paths.stage_dir("sentence_dedup")
+    out = output_override if output_override is not None else paths.stage_dir("statistics")
+    out.mkdir(parents=True, exist_ok=True)
+    partials_dir = out / "_partials"
+
+    map_exec = LocalPipelineExecutor(
+        pipeline=[
+            jsonl_reader(in_),
+            CorpusStats(
+                partials_dir=partials_dir,
+                language=language,
+                stopwords=stopwords or set(),
+                top_k_words=top_k_words,
+            ),
+        ],
+        tasks=tasks,
+        workers=workers,
+        logging_dir=str(paths.logs_dir("statistics") / "1_map"),
+        skip_completed=True,
+    )
+    reduce_exec = LocalPipelineExecutor(
+        pipeline=[
+            CorpusStatsReduce(
+                partials_dir=partials_dir,
+                output_path=out / "aggregate.json",
+                per_dataset_dir=out / "per_dataset",
+                top_k_words=top_k_words,
+            ),
+        ],
+        tasks=1,
+        workers=1,
+        logging_dir=str(paths.logs_dir("statistics") / "2_reduce"),
+        depends=map_exec,
+        skip_completed=True,
+    )
+    return [map_exec, reduce_exec]
+
+
+def run(job: StageJob) -> Tuple[int, int]:
+    """Compute corpus statistics over the job's input view.
+
+    Args:
+        job: What to describe, and where to write the bundle; `job.stopwords`
+            filters the word tables.
+
+    Returns:
+        `(records_in, 0)`: the documents the map tasks read, and zero output
+        records, since the stage writes a JSON bundle rather than shards.
+    """
+    execs = build_statistics_executors(
+        job.paths,
+        tasks=job.tasks or job.workers,
+        workers=job.workers,
+        stopwords=job.stopwords,
+        top_k_words=int(job.config.get("top_k_words", 5_000)),
+        input_override=job.input_view,
+        output_override=job.output_folder,
+    )
+    execs[-1].run()
+    records_in, _ = stage_io_counts(job.paths.logs_dir("statistics") / "1_map")
+    return records_in, 0

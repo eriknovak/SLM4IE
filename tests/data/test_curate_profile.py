@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Sequence, Tuple
 
-from slm4ie.data.curate.profile import (
+from slm4ie.data.curate.inspect.profile import (
     count_source_documents,
     iter_stage_sentinels,
     language_confidence,

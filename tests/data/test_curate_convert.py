@@ -1,4 +1,4 @@
-"""Tests for slm4ie.data.curate.convert (the curate stage-0 module).
+"""Tests for slm4ie.data.curate.stages.convert (the curate stage-0 module).
 
 The convert stage is stage 0 of the curation pipeline. These tests cover
 `convert_record`, `convert_dataset`, and `run_convert_stage`.
@@ -11,7 +11,7 @@ from typing import Dict, List
 
 import pytest
 
-from slm4ie.data.curate.convert import (
+from slm4ie.data.curate.stages.convert import (
     convert_dataset,
     convert_record,
     run_convert_stage,

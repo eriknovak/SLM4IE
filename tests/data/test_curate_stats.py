@@ -12,7 +12,7 @@ pytest.importorskip("datatrove")
 
 from datatrove.data import Document  # noqa: E402
 
-from slm4ie.data.curate.stats import CorpusStats  # noqa: E402
+from slm4ie.data.curate.stages.statistics import CorpusStats  # noqa: E402
 
 
 def _doc(text: str, *, dataset: str, domain: str, doc_id: str) -> Document:

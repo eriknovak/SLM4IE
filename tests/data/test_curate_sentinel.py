@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from slm4ie.data.versioning import config_hash
-from slm4ie.data.curate.sentinel import (
+from slm4ie.data.curate.lineage import (
     CONFIG_CHANGED,
     INPUT_CHANGED,
     INTEGRITY_FAILED,
@@ -265,7 +265,7 @@ def test_write_sentinel_does_not_leave_tmp_artifact(tmp_path: Path) -> None:
 
 def test_invalidate_dataset_sentinels(tmp_path: Path) -> None:
     """Invalidating removes only the named datasets' sentinels."""
-    from slm4ie.data.curate.sentinel import (
+    from slm4ie.data.curate.lineage import (
         dataset_sentinel_path,
         invalidate_dataset_sentinels,
         write_dataset_sentinel,

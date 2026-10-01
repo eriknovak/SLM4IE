@@ -1,4 +1,4 @@
-"""Tests for the curation runner helpers (slm4ie/data/curate/runner.py)."""
+"""Tests for the curation driver, config and stage parameter helpers."""
 
 import os
 from pathlib import Path
@@ -7,17 +7,20 @@ import pytest
 
 pytest.importorskip("datatrove")
 
-from slm4ie.data.curate.runner import (  # noqa: E402
+from slm4ie.data.curate.stages.convert import (
     _build_convert_params,
-    _build_language_params,
-    _build_quality_config,
-    _build_spam_config,
-    _convert_input_files,
-    _input_files_digest,
-    _filter_stage_subset,
-    _list_datasets,
+    convert_input_files,
+    input_files_digest,
 )
-from slm4ie.data.curate.overrides import STAGE_KNOBS, effective_stage_config
+from slm4ie.data.curate.stages.language import _build_language_params
+from slm4ie.data.curate.stages.quality import _build_quality_config
+from slm4ie.data.curate.stages.spam import _build_spam_config
+from slm4ie.data.curate.paths import filter_stage_subset
+from slm4ie.data.curate.config import _list_datasets
+from slm4ie.data.curate.config import (
+    STAGE_KNOBS,
+    effective_stage_config,
+)
 
 
 def _write_extracted(input_dir: Path, key: str, text: str = "x") -> Path:
@@ -129,13 +132,13 @@ def test_repetition_has_no_overridable_knobs() -> None:
 
 def test_bucket_keys_by_effective_hash_groups_shared_configs() -> None:
     """Datasets sharing an effective config land in one bucket; overrides split out."""
-    from slm4ie.data.curate.runner import _bucket_keys_by_effective_hash
+    from slm4ie.data.curate.config import bucket_keys_by_effective_hash
     from slm4ie.data.versioning import config_hash
 
     cfg = {"quality": {"min_doc_words": 20, "max_ellipsis_lines_ratio": 0.3}}
     overrides = {"news": {"quality": {"max_ellipsis_lines_ratio": 0.9}}}
     extra = b""
-    buckets = _bucket_keys_by_effective_hash(["a", "b", "news"], "quality", cfg, overrides, extra)
+    buckets = bucket_keys_by_effective_hash(["a", "b", "news"], "quality", cfg, overrides, extra)
     groups = sorted(sorted(v) for v in buckets.values())
     assert groups == [["a", "b"], ["news"]]
     # The default bucket's hash equals the plain global-slice hash (rollout-safe).
@@ -146,14 +149,14 @@ def test_bucket_keys_by_effective_hash_groups_shared_configs() -> None:
 
 def test_bucket_keys_two_datasets_sharing_one_override_group_together() -> None:
     """Two datasets with the SAME override share a single bucket."""
-    from slm4ie.data.curate.runner import _bucket_keys_by_effective_hash
+    from slm4ie.data.curate.config import bucket_keys_by_effective_hash
 
     cfg = {"quality": {"min_doc_words": 20}}
     overrides = {
         "x": {"quality": {"min_doc_words": 5}},
         "y": {"quality": {"min_doc_words": 5}},
     }
-    buckets = _bucket_keys_by_effective_hash(["x", "y"], "quality", cfg, overrides, b"")
+    buckets = bucket_keys_by_effective_hash(["x", "y"], "quality", cfg, overrides, b"")
     assert len(buckets) == 1
     assert sorted(next(iter(buckets.values()))) == ["x", "y"]
 
@@ -162,8 +165,8 @@ def test_curate_rejects_bad_override(tmp_path: Path) -> None:
     """_curate fails fast (before any stage) on an invalid override block."""
     import yaml
 
-    from slm4ie.data.curate.overrides import OverrideConfigError
-    from slm4ie.data.curate.runner import curate
+    from slm4ie.data.curate.config import OverrideConfigError
+    from slm4ie.data.curate.driver import curate
 
     cfgs = tmp_path / "configs" / "data"
     cfgs.mkdir(parents=True)
@@ -194,7 +197,7 @@ def test_curate_rejects_bad_override(tmp_path: Path) -> None:
 
 def _digest(input_dir: Path, key: str, annotations: bool = False, previous: object = None) -> str:
     """Return the convert input digest of *key* under *input_dir*."""
-    return _input_files_digest(_convert_input_files(input_dir, key, annotations, previous))  # type: ignore[arg-type]
+    return input_files_digest(convert_input_files(input_dir, key, annotations, previous))  # type: ignore[arg-type]
 
 
 def test_convert_input_digest_changes_with_content(tmp_path: Path) -> None:
@@ -218,14 +221,14 @@ def test_convert_input_digest_ignores_mtime(tmp_path: Path) -> None:
 def test_convert_input_files_reuse_hash_when_size_and_mtime_match(tmp_path: Path) -> None:
     """An untouched file keeps its recorded hash instead of being reread."""
     _write_extracted(tmp_path, "news", "abcde")
-    files = _convert_input_files(tmp_path, "news", False)
+    files = convert_input_files(tmp_path, "news", False)
     recorded = {"news.jsonl": {**files["news.jsonl"], "sha256": "recorded"}}  # type: ignore[dict-item]
-    assert _convert_input_files(tmp_path, "news", False, recorded)["news.jsonl"]["sha256"] == "recorded"  # type: ignore[index]
+    assert convert_input_files(tmp_path, "news", False, recorded)["news.jsonl"]["sha256"] == "recorded"  # type: ignore[index]
 
 
 def test_convert_input_files_mark_absent(tmp_path: Path) -> None:
     """A missing source file is recorded as absent, not raised."""
-    assert _convert_input_files(tmp_path, "missing", False) == {"missing.jsonl": None}
+    assert convert_input_files(tmp_path, "missing", False) == {"missing.jsonl": None}
 
 
 def test_convert_input_digest_folds_annotations(tmp_path: Path) -> None:
@@ -237,12 +240,12 @@ def test_convert_input_digest_folds_annotations(tmp_path: Path) -> None:
 
 
 def test_filter_stage_subset_links_requested_keys(tmp_path: Path) -> None:
-    """_filter_stage_subset mirrors only the requested keys via symlinks."""
+    """filter_stage_subset mirrors only the requested keys via symlinks."""
     stage = tmp_path / "01_language"
     for key in ("a", "b"):
         (stage / key).mkdir(parents=True)
         (stage / key / "000.jsonl.gz").write_bytes(b"x")
-    view = _filter_stage_subset(stage, ["a"])
+    view = filter_stage_subset(stage, ["a"])
     try:
         assert (view / "a" / "000.jsonl.gz").is_symlink()
         assert not (view / "b").exists()
@@ -253,17 +256,17 @@ def test_filter_stage_subset_links_requested_keys(tmp_path: Path) -> None:
 
 
 def test_filter_stage_subset_missing_key_raises(tmp_path: Path) -> None:
-    """_filter_stage_subset raises when a key has no shards."""
+    """filter_stage_subset raises when a key has no shards."""
     stage = tmp_path / "01_language"
     (stage / "a").mkdir(parents=True)
     (stage / "a" / "000.jsonl.gz").write_bytes(b"x")
     with pytest.raises(FileNotFoundError):
-        _filter_stage_subset(stage, ["a", "missing"])
+        filter_stage_subset(stage, ["a", "missing"])
 
 
 def test_stage_extra_folds_roster_only_for_corpus_stages() -> None:
     """Scoped stages exclude the roster; corpus stages include it."""
-    from slm4ie.data.curate.runner import _stage_extra
+    from slm4ie.data.curate.config import _stage_extra
 
     roster = b'["a","b"]'
     sw = b"stopwords"
@@ -281,8 +284,11 @@ def test_stage_extra_folds_roster_only_for_corpus_stages() -> None:
 
 def test_resolve_requested_stages() -> None:
     """Subset 'all' = scoped stages; --all 'all' = every stage."""
-    from slm4ie.data.curate.runner import _resolve_requested_stages
-    from slm4ie.data.curate.stages import SCOPED_STAGES, STAGE_NAMES
+    from slm4ie.data.curate.driver import _resolve_requested_stages
+    from slm4ie.data.curate.stages import (
+        SCOPED_STAGES,
+        STAGE_NAMES,
+    )
 
     assert _resolve_requested_stages(stage="all", run_all=False) == SCOPED_STAGES
     assert _resolve_requested_stages(stage="all", run_all=True) == STAGE_NAMES
@@ -292,8 +298,11 @@ def test_resolve_requested_stages() -> None:
 
 def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
     """--force gigafida --stage quality drops gigafida's quality sentinel, keeps others."""
-    from slm4ie.data.curate.sentinel import dataset_sentinel_path, write_dataset_sentinel
-    from slm4ie.data.curate.runner import _apply_force
+    from slm4ie.data.curate.lineage import (
+        dataset_sentinel_path,
+        write_dataset_sentinel,
+    )
+    from slm4ie.data.curate.driver import _apply_force
 
     out = tmp_path / "pretrain"
     q = out / "03_quality"
@@ -306,8 +315,8 @@ def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
 
 def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
     """--force --all --stage exact_dedup removes dedup data + sentinel and dedup state."""
-    from slm4ie.data.curate.sentinel import write_sentinel
-    from slm4ie.data.curate.runner import _apply_force
+    from slm4ie.data.curate.lineage import write_sentinel
+    from slm4ie.data.curate.driver import _apply_force
 
     out = tmp_path / "pretrain"
     dedup = out / "05_exact_dedup"
@@ -323,7 +332,7 @@ def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
 
 def test_force_all_stage_all_nukes_output(tmp_path: Path) -> None:
     """--force --all (default stage all) clears the whole output dir."""
-    from slm4ie.data.curate.runner import _apply_force
+    from slm4ie.data.curate.driver import _apply_force
 
     out = tmp_path / "pretrain"
     (out / "00_convert" / "alfa").mkdir(parents=True)

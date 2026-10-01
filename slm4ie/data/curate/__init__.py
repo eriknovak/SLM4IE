@@ -11,17 +11,26 @@ sentinel-tracked artifacts under `<output_dir>/`:
   blocklist, and an optional pluggable model scorer.
 * `quality`, `repetition`: per-document Gopher heuristics.
 * `exact_dedup`, `sentence_dedup`: corpus-wide whole-document and
-  N-sentence dedup (datatrove's six-block ladder).
+  N-sentence dedup.
 * `statistics`: corpus-wide totals plus per-domain and per-dataset
   breakdowns and a global top-K word-frequency table.
 
-`diagnose` reads a finished corpus without writing to it, reporting where
-foreign-language text survives the `language` stage.
+Layout of the package:
 
-The package eagerly imports `importlib.metadata` and `importlib.util`
-at module load so that `datatrove`'s lazy dependency probing
-(which uses `importlib.metadata.distributions` without an explicit
-submodule import) works under Python 3.13.
+* `stages/` — the registry (`stages/__init__.py`) and one module per stage
+  holding everything that runs it; a stage's version is its module's hash.
+* `driver.py` — the run loop (`curate`); `status.py` — reporting and adoption.
+* `config.py` — the curation config, overrides and config hashes;
+  `lineage.py` — sentinels, currency, atomic swap, lock file;
+  `paths.py` — the output tree and shard helpers; `tracking.py` — MLflow.
+* `inspect/` — read-only tools over a finished corpus (leakage diagnosis,
+  stratified sampling, the LM judge, dedup assessment, profiling).
+
+This module re-exports only the stage registry, so importing it stays cheap.
+It eagerly imports `importlib.metadata` and `importlib.util` so that
+datatrove's lazy dependency probing (which uses
+`importlib.metadata.distributions` without an explicit submodule import)
+works under Python 3.13.
 """
 
 import importlib.metadata  # noqa: F401  (eager import; see module docstring)
@@ -29,6 +38,8 @@ import importlib.util  # noqa: F401  (eager import; see module docstring)
 
 from slm4ie.data.curate.stages import (
     ALL_STAGE_NAMES,
+    CORPUS_STAGES,
+    SCOPED_STAGES,
     STAGE_DIRS,
     STAGE_NAMES,
     STAGE_VERSIONS,
@@ -38,24 +49,11 @@ from slm4ie.data.curate.stages import (
     statistics_dir,
     upstream_stage,
 )
-from slm4ie.data.curate.sentinel import (
-    Sentinel,
-    SENTINEL_NAME,
-    read_sentinel,
-    stale_reason,
-    write_sentinel,
-)
-from slm4ie.data.curate.overrides import (
-    STAGE_KNOBS,
-    OverrideConfigError,
-    effective_stage_config,
-    validate_overrides,
-)
-from slm4ie.data.curate.diagnose import diagnose_language_leakage
 
 __all__ = [
-    # stages
     "ALL_STAGE_NAMES",
+    "CORPUS_STAGES",
+    "SCOPED_STAGES",
     "STAGE_DIRS",
     "STAGE_NAMES",
     "STAGE_VERSIONS",
@@ -64,17 +62,4 @@ __all__ = [
     "final_corpus_dir",
     "statistics_dir",
     "upstream_stage",
-    # sentinel
-    "Sentinel",
-    "SENTINEL_NAME",
-    "read_sentinel",
-    "stale_reason",
-    "write_sentinel",
-    # overrides
-    "STAGE_KNOBS",
-    "OverrideConfigError",
-    "effective_stage_config",
-    "validate_overrides",
-    # diagnostics
-    "diagnose_language_leakage",
 ]

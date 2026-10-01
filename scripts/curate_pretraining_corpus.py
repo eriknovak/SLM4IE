@@ -1,6 +1,6 @@
 """CLI over the pretraining-corpus curation pipeline.
 
-Parses arguments and dispatches into `slm4ie.data.curate.runner`, which owns the
+Parses arguments and dispatches into `slm4ie.data.curate.driver`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
 Six subcommands:
@@ -72,11 +72,19 @@ from pathlib import Path
 from typing import List, Optional
 
 from slm4ie.data.curate import ALL_STAGE_NAMES
-from slm4ie.data.curate.diagnose import diagnose_language_leakage
-from slm4ie.data.curate.runner import curate, status
-from slm4ie.data.curate.duplication import DEDUP_STAGES, assess_dedup
-from slm4ie.data.curate.profile import describe_corpus
-from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
+from slm4ie.data.curate.inspect.diagnose import diagnose_language_leakage
+from slm4ie.data.curate.driver import curate
+from slm4ie.data.curate.status import status
+from slm4ie.data.curate.inspect.duplication import (
+    DEDUP_STAGES,
+    assess_dedup,
+)
+from slm4ie.data.curate.inspect.profile import describe_corpus
+from slm4ie.data.curate.inspect.sample import (
+    JUDGED_STAGES,
+    draw_stratified_sample,
+    resolve_output_dir,
+)
 from slm4ie.data.curate.stages import CORPUS_STAGES
 from slm4ie.utils.cli import add_selection, validate_selection
 

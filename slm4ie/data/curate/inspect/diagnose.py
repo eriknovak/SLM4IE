@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from slm4ie.data.curate.sample import resolve_output_dir
+from slm4ie.data.curate.inspect.sample import resolve_output_dir
 from slm4ie.data.curate.stages import final_corpus_dir
 
 logger = logging.getLogger(__name__)

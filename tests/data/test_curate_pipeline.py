@@ -28,22 +28,30 @@ from datatrove.pipeline.readers import JsonlReader  # noqa: E402
 from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 from datatrove.utils.typeshelper import Languages  # noqa: E402
 
-from slm4ie.data.curate.dedup import CompactSentenceDedupSignature  # noqa: E402
-from slm4ie.data.curate.language import LinguaLanguageFilter  # noqa: E402
-from slm4ie.data.curate.pipeline import (  # noqa: E402
-    CuratePaths,
+from slm4ie.data.curate.stages.dedup import CompactSentenceDedupSignature  # noqa: E402
+from slm4ie.data.curate.stages.language import LinguaLanguageFilter  # noqa: E402
+from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.stages.quality import (
     QualityConfig,
-    build_exact_dedup_executors,
-    build_language_executors,
     build_quality_executors,
-    build_repetition_executors,
-    build_sentence_dedup_executors,
-    build_spam_executors,
-    build_statistics_executors,
-    stage_io_counts,
 )
-from slm4ie.data.curate.spam import SpamConfig, SpamFilter  # noqa: E402
-from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce  # noqa: E402
+from slm4ie.data.curate.stages.dedup import (
+    build_exact_dedup_executors,
+    build_sentence_dedup_executors,
+)
+from slm4ie.data.curate.stages.language import build_language_executors
+from slm4ie.data.curate.stages.repetition import build_repetition_executors
+from slm4ie.data.curate.stages.spam import build_spam_executors
+from slm4ie.data.curate.stages.statistics import build_statistics_executors
+from slm4ie.data.curate.stages.common import stage_io_counts
+from slm4ie.data.curate.stages.spam import (  # noqa: E402
+    SpamConfig,
+    SpamFilter,
+)
+from slm4ie.data.curate.stages.statistics import (  # noqa: E402
+    CorpusStats,
+    CorpusStatsReduce,
+)
 
 
 def _paths(tmp_path: Path) -> CuratePaths:
@@ -438,7 +446,7 @@ def test_pipeline_io_counts_reports_reader_and_writer_totals(tmp_path: Path) -> 
     `min_doc_words` and one too short — so the reader sees 3 documents
     and the writer sees 2, and asserts the helper reports `(3, 2)`.
     """
-    from slm4ie.data.curate.pipeline import pipeline_io_counts
+    from slm4ie.data.curate.stages.common import pipeline_io_counts
 
     paths = CuratePaths(input_folder=tmp_path / "extracted", output_dir=tmp_path / "curated")
     _write_shard(
@@ -462,21 +470,21 @@ def test_pipeline_io_counts_reports_reader_and_writer_totals(tmp_path: Path) -> 
     assert pipeline_io_counts(stats) == (3, 2)
 
 
-from slm4ie.data.curate import runner as curate_runner  # noqa: E402
+from slm4ie.data.curate import paths as curate_paths  # noqa: E402
 
 
 class TestStageSubsetFiltering:
-    """`_filter_stage_subset` mirrors the requested keys into a scratch view."""
+    """`filter_stage_subset` mirrors the requested keys into a scratch view."""
 
     def test_filter_stage_subset_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
-        """`_filter_stage_subset` builds symlinks for every requested key."""
+        """`filter_stage_subset` builds symlinks for every requested key."""
         convert_dir = tmp_path / "00_convert"
         for key in ("kzb", "solar"):
             shard_dir = convert_dir / key
             shard_dir.mkdir(parents=True)
             (shard_dir / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
-        holder = curate_runner._filter_stage_subset(convert_dir, ["kzb", "solar"])
+        holder = curate_paths.filter_stage_subset(convert_dir, ["kzb", "solar"])
         try:
             assert (holder / "kzb" / "00000.jsonl.gz").is_symlink()
             assert (holder / "solar" / "00000.jsonl.gz").is_symlink()
@@ -492,7 +500,7 @@ class TestStageSubsetFiltering:
         (convert_dir / "kzb" / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
         with pytest.raises(FileNotFoundError) as excinfo:
-            curate_runner._filter_stage_subset(convert_dir, ["kzb", "missing1", "missing2"])
+            curate_paths.filter_stage_subset(convert_dir, ["kzb", "missing1", "missing2"])
         msg = str(excinfo.value)
         assert "missing1" in msg
         assert "missing2" in msg
@@ -501,7 +509,8 @@ class TestStageSubsetFiltering:
 
 def test_quality_executor_honors_input_override(tmp_path: Path) -> None:
     """build_quality_executors reads from input_override when provided."""
-    from slm4ie.data.curate.pipeline import CuratePaths, build_quality_executors
+    from slm4ie.data.curate.paths import CuratePaths
+    from slm4ie.data.curate.stages.quality import build_quality_executors
 
     paths = CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
     override = tmp_path / "view"
@@ -513,7 +522,8 @@ def test_quality_executor_honors_input_override(tmp_path: Path) -> None:
 
 def test_repetition_executor_honors_input_override(tmp_path: Path) -> None:
     """build_repetition_executors reads from input_override when provided."""
-    from slm4ie.data.curate.pipeline import CuratePaths, build_repetition_executors
+    from slm4ie.data.curate.paths import CuratePaths
+    from slm4ie.data.curate.stages.repetition import build_repetition_executors
 
     paths = CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
     override = tmp_path / "view"

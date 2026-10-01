@@ -160,8 +160,11 @@ Downstream consumers fork after extraction. There are three routes, and
 they own disjoint output trees:
 
 1. **Pretraining (`curate_pretraining_corpus.py run`):** a thin CLI over
-   `slm4ie/data/curate/runner.py`, which runs eight sentinel-skippable stages
+   `slm4ie/data/curate/driver.py`, which runs eight sentinel-skippable stages
    (0–7) on top of [datatrove](https://github.com/huggingface/datatrove).
+   Each stage is one module under `slm4ie/data/curate/stages/` (both dedup
+   stages share `dedup.py`), registered in `stages/__init__.py`; read-only
+   tools over a built corpus live in `curate/inspect/`.
    Stage 0 (`convert`) lifts `extracted/<key>.jsonl` into the `Document` shape
    (`text` / `id` / `metadata`, with `dataset` and `domain` for
    source-weighted sampling); stages 1–7 do language filtering, adult/SEO-spam
@@ -174,8 +177,8 @@ they own disjoint output trees:
    swapped in after an integrity check. Every run brings the committed lock
    file `configs/data/curate.lock.yaml` up to date; `status` reports stale
    units and why.
-   A stage's version is a hash of its code (`STAGE_SOURCES` in `stages.py`),
-   so editing that code reruns the stage; list new stage code there.
+   A stage's version is a hash of its module, so editing a stage's module
+   reruns that stage; keep everything that changes a stage's output in it.
    The annotations sidecar is **not** read here — it would desync after any
    datatrove step that rewrites the text.
 

@@ -30,15 +30,20 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import urlsplit
 
 from numpy.random import default_rng
 
 from datatrove.data import Document
+from datatrove.executor import LocalPipelineExecutor
 from datatrove.io import cached_asset_path_or_download
 from datatrove.pipeline.filters.base_filter import BaseFilter
 from datatrove.pipeline.writers.disk_base import DiskWriter
+
+from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +156,7 @@ def _spam_dir() -> Path:
     Returns:
         Path to `slm4ie/data/spam/`.
     """
-    return Path(__file__).resolve().parent.parent / "spam"
+    return Path(__file__).resolve().parents[2] / "spam"
 
 
 def load_spam_lexicon(code: str) -> Tuple[Set[str], Set[str], bytes]:
@@ -438,3 +443,114 @@ class SpamFilter(BaseFilter):
             doc.metadata["spam_reason"] = reason
             return True
         return False, reason
+
+
+def _build_spam_config(spcfg: Dict[str, Any]) -> SpamConfig:
+    """Resolve a spam-stage config slice into a `SpamConfig`.
+
+    Args:
+        spcfg: The effective `spam` config slice for one bucket.
+
+    Returns:
+        The resolved `SpamConfig`, with defaults applied.
+
+    Raises:
+        ValueError: If `model` is set; no model resolver is wired.
+    """
+    if spcfg.get("model"):
+        raise ValueError(
+            "the pretrain config's spam.model is set, but no model resolver is "
+            "configured. Leave it null, or wire a scorer before enabling it."
+        )
+    return SpamConfig(
+        min_adult_hits=int(spcfg.get("min_adult_hits", 2)),
+        min_spam_hits=int(spcfg.get("min_spam_hits", 2)),
+        keep_fraction=float(spcfg.get("keep_fraction", 0.0)),
+        default_language=str(spcfg.get("default_language", "sl")),
+        url_blocklist=bool(spcfg.get("url_blocklist", True)),
+        use_ldnoobw=bool(spcfg.get("use_ldnoobw", True)),
+        model=spcfg.get("model"),
+        model_threshold=float(spcfg.get("model_threshold", 0.5)),
+    )
+
+
+def build_spam_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    spam_config: Optional[SpamConfig] = None,
+    adult_words: Optional[Dict[str, Set[str]]] = None,
+    spam_words: Optional[Dict[str, Set[str]]] = None,
+    domains: Optional[Set[str]] = None,
+    model_fn: Optional[Callable[[str], float]] = None,
+    seed: Optional[int] = None,
+    input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
+) -> List[LocalPipelineExecutor]:
+    """Build the spam stage: read 01_language/ → SpamFilter → write 02_spam/.
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count.
+        spam_config: `SpamFilter` knob bundle; defaults to `SpamConfig()`.
+        adult_words: Per-language adult-term sets, keyed by language code.
+        spam_words: Per-language SEO/scam-term sets, keyed by language
+            code.
+        domains: Blocklisted registered domains.
+        model_fn: Optional text-to-score callable enabling the model
+            signal.
+        seed: Seed for the `keep_fraction` sampler.
+        input_override: Optional folder to read from instead of the
+            language stage's output, used to restrict the stage to a
+            symlinked subset of datasets.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the driver's staging folder).
+
+    Returns:
+        A list with one `LocalPipelineExecutor`.
+    """
+    in_ = input_override if input_override is not None else paths.stage_dir("language")
+    out = output_override if output_override is not None else paths.stage_dir("spam")
+    executor = LocalPipelineExecutor(
+        pipeline=[
+            jsonl_reader(in_),
+            SpamFilter(
+                adult_words=adult_words or {},
+                spam_words=spam_words or {},
+                domains=domains or set(),
+                config=spam_config or SpamConfig(),
+                model_fn=model_fn,
+                seed=seed,
+            ),
+            jsonl_writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("spam")),
+        skip_completed=False,
+    )
+    return [executor]
+
+
+def run(job: StageJob) -> Tuple[int, int]:
+    """Run the spam stage over the job's input view.
+
+    Args:
+        job: What to filter, and where to write it; `job.spam_assets` holds
+            the loaded lexicons and domain blocklist.
+
+    Returns:
+        `(records_in, records_out)` from the run's datatrove stats.
+    """
+    assets = job.spam_assets
+    execs = build_spam_executors(
+        job.paths,
+        tasks=job.workers,
+        spam_config=_build_spam_config(job.config),
+        adult_words=assets.adult_words,
+        spam_words=assets.spam_words,
+        domains=assets.domains,
+        input_override=job.input_view,
+        output_override=job.output_folder,
+    )
+    return pipeline_io_counts(execs[-1].run())

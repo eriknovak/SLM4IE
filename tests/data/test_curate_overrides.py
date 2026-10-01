@@ -6,14 +6,14 @@ import pytest
 
 pytest.importorskip("datatrove")
 
-from slm4ie.data.curate.overrides import (  # noqa: E402
+from slm4ie.data.curate.config import (
     STAGE_KNOBS,
     OverrideConfigError,
     effective_stage_config,
     validate_overrides,
 )
-from slm4ie.data.curate.pipeline import QualityConfig  # noqa: E402
-from slm4ie.data.curate.spam import SpamConfig  # noqa: E402
+from slm4ie.data.curate.stages.quality import QualityConfig  # noqa: E402
+from slm4ie.data.curate.stages.spam import SpamConfig  # noqa: E402
 
 
 def test_quality_knobs_match_dataclass() -> None:

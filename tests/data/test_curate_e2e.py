@@ -10,7 +10,7 @@ import yaml
 pytest.importorskip("datatrove")
 pytest.importorskip("lingua")
 
-from slm4ie.data.curate.runner import curate  # noqa: E402
+from slm4ie.data.curate.driver import curate  # noqa: E402
 
 # Several clearly-Slovenian sentences per dataset. Distinct topics keep
 # the cross-dataset exact/sentence dedup from collapsing them, and the
@@ -272,7 +272,10 @@ def test_override_reruns_only_target_dataset(tmp_path: Path) -> None:
     (same hash, not rewritten); `beta`'s must change (re-run with the
     merged config).
     """
-    from slm4ie.data.curate.sentinel import Sentinel, read_sentinel
+    from slm4ie.data.curate.lineage import (
+        Sentinel,
+        read_sentinel,
+    )
 
     def sentinel(folder: Path) -> Sentinel:
         s = read_sentinel(folder)
@@ -390,7 +393,7 @@ def test_bucketmates_get_distinct_per_source_counts(tmp_path: Path) -> None:
     sentinels; each must carry its own row counts. Different doc counts
     (3 vs 2) make a shared bucket total impossible to mistake for correct.
     """
-    from slm4ie.data.curate.sentinel import read_sentinel
+    from slm4ie.data.curate.lineage import read_sentinel
 
     in_dir = tmp_path / "extracted"
     out_dir = tmp_path / "pretrain"
@@ -459,7 +462,7 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     promote it, and produce the same corpus as an uninterrupted run. Stale shards of
     a key outside the roster must not reach the corpus either.
     """
-    import slm4ie.data.curate.runner as curate_runner
+    import slm4ie.data.curate.driver as curate_runner
 
     in_dir = tmp_path / "extracted"
     _write_extracted(in_dir, "alfa", ALFA_DOCS)
@@ -490,14 +493,16 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     (crash_dir / "04_repetition" / "benchmark" / "00000.jsonl.gz").write_bytes(
         (clean_dir / "04_repetition" / "alfa" / "00000.jsonl.gz").read_bytes()
     )
-    real_builder = curate_runner.build_sentence_dedup_executors
+    import slm4ie.data.curate.stages.dedup as curate_dedup
+
+    real_builder = curate_dedup.build_sentence_dedup_executors
 
     def crashing_builder(*args, **kwargs):
         execs = real_builder(*args, **kwargs)
         execs[0].run()
         raise RuntimeError("simulated crash after the signature step")
 
-    monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", crashing_builder)
+    monkeypatch.setattr(curate_dedup, "build_sentence_dedup_executors", crashing_builder)
     with pytest.raises(RuntimeError, match="simulated crash"):
         run_all(crash_dir)
     completions = crash_dir / "_logs" / "sentence_dedup" / "1_sig" / "completions"
@@ -506,7 +511,7 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     assert (crash_dir / "_partial" / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).is_file()
     assert not (crash_dir / "06_sentence_dedup").exists()
 
-    monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", real_builder)
+    monkeypatch.setattr(curate_dedup, "build_sentence_dedup_executors", real_builder)
     marker_mtimes = {m: m.stat().st_mtime_ns for m in markers}
     run_all(crash_dir)
     assert {m: m.stat().st_mtime_ns for m in markers} == marker_mtimes
@@ -525,7 +530,7 @@ def test_real_stages_rebuild_only_what_changed(tmp_path: Path, monkeypatch: pyte
     reader stamps a different `file_path` into every document, so downstream
     sentinels stay untouched (early cutoff).
     """
-    import slm4ie.data.curate.runner as curate_runner
+    import slm4ie.data.curate.driver as curate_runner
 
     in_dir = tmp_path / "extracted"
     out_dir = tmp_path / "pretrain"

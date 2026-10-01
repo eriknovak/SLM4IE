@@ -12,20 +12,25 @@ import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
 pytest.importorskip("datatrove")
 
 import scripts.curate_pretraining_corpus as curate_cli  # noqa: E402
-import slm4ie.data.curate.runner as curate_runner  # noqa: E402
-from slm4ie.data.curate import (  # noqa: E402
+import slm4ie.data.curate.config as curate_config  # noqa: E402
+import slm4ie.data.curate.paths as curate_paths  # noqa: E402
+import slm4ie.data.curate.stages as curate_stages  # noqa: E402
+import slm4ie.data.curate.status as curate_status  # noqa: E402
+import slm4ie.data.curate.driver as curate_runner  # noqa: E402
+from slm4ie.data.versioning import read_lock, write_lock  # noqa: E402
+from slm4ie.data.curate import (
     STAGE_DIRS,
     STAGE_NAMES,
-    read_sentinel,
 )
-from slm4ie.data.curate.sentinel import (  # noqa: E402
+from slm4ie.data.curate.lineage import read_sentinel
+from slm4ie.data.curate.lineage import (
     CONFIG_CHANGED,
     NOT_BUILT,
     INPUT_CHANGED,
@@ -78,7 +83,7 @@ def _write_docs(folder: Path, docs: List[Dict[str, Any]], shards: int) -> None:
 
 
 class _Stub:
-    """Stands in for `_stage_runner`, recording each run and writing real shards.
+    """Stands in for `run_stage`, recording each run and writing real shards.
 
     Attributes:
         ran: `(stage, dataset keys)` per executed stage run.
@@ -97,47 +102,30 @@ class _Stub:
         """Return the stage name of each recorded run."""
         return [stage for stage, _ in self.ran]
 
-    def __call__(
-        self,
-        stage: str,
-        paths: Any,
-        cfg: Dict[str, Any],
-        workers: int,
-        stopwords: Set[str],
-        spam_assets: Any,
-        dataset_keys: List[str],
-        input_view: Any = None,
-        log_dir: Any = None,
-        tasks: Any = None,
-        output_folder: Any = None,
-    ):
-        """Return a callable that runs the stubbed stage."""
-
-        def run() -> Tuple[int, int]:
-            self.ran.append((stage, tuple(dataset_keys)))
-            if stage == "statistics":
-                output_folder.mkdir(parents=True, exist_ok=True)
-                (output_folder / "aggregate.json").write_text("{}", encoding="utf-8")
-                return _STUB_STATS_COUNTS
-            tag = json.dumps(cfg.get(stage), sort_keys=True)
-            total = 0
-            for key in dataset_keys:
-                if stage == "convert":
-                    lines = (paths.input_folder / f"{key}.jsonl").read_text(encoding="utf-8").splitlines()
-                    records = [json.loads(line) for line in lines if line]
-                    docs = [{"text": r["text"], "id": r["uid"], "metadata": {"dataset": key}} for r in records]
-                else:
-                    docs = _read_docs(input_view / key)
-                docs = [{**d, "text": f"{d['text']}|{stage}:{tag}"} for d in docs]
-                if self.duplicate == stage:
-                    docs.append(docs[0])
-                if self.drop == stage:
-                    docs = []
-                _write_docs(output_folder / key, docs, shards=workers)
-                total += len(docs)
-            return total, total
-
-        return run
+    def __call__(self, stage: str, job: Any) -> Tuple[int, int]:
+        """Run the stubbed stage on *job*."""
+        self.ran.append((stage, tuple(job.dataset_keys)))
+        if stage == "statistics":
+            job.output_folder.mkdir(parents=True, exist_ok=True)
+            (job.output_folder / "aggregate.json").write_text("{}", encoding="utf-8")
+            return _STUB_STATS_COUNTS
+        tag = json.dumps(job.config, sort_keys=True)
+        total = 0
+        for key in job.dataset_keys:
+            if stage == "convert":
+                lines = (job.paths.input_folder / f"{key}.jsonl").read_text(encoding="utf-8").splitlines()
+                records = [json.loads(line) for line in lines if line]
+                docs = [{"text": r["text"], "id": r["uid"], "metadata": {"dataset": key}} for r in records]
+            else:
+                docs = _read_docs(job.input_view / key)
+            docs = [{**d, "text": f"{d['text']}|{stage}:{tag}"} for d in docs]
+            if self.duplicate == stage:
+                docs.append(docs[0])
+            if self.drop == stage:
+                docs = []
+            _write_docs(job.output_folder / key, docs, shards=job.workers)
+            total += len(docs)
+        return total, total
 
 
 def _run_cli(
@@ -158,15 +146,15 @@ def _run_cli(
         roster: Dataset keys `extract.yaml` declares.
         command: Subcommand to run.
     """
-    monkeypatch.setattr(curate_runner, "_load_yaml", lambda _p: cfg)
-    monkeypatch.setattr(curate_runner, "_load_stopwords", lambda _cfg: (set(), b""))
+    monkeypatch.setattr(curate_config, "_load_yaml", lambda _p: cfg)
+    monkeypatch.setattr(curate_config, "_load_stopwords", lambda _cfg: (set(), b""))
     monkeypatch.setattr(
-        curate_runner,
+        curate_config,
         "_load_spam_assets",
         lambda _cfg: SimpleNamespace(adult_words={}, spam_words={}, domains=set(), raw_bytes=b""),
     )
-    monkeypatch.setattr(curate_runner, "_find_project_root", lambda: project_root)
-    monkeypatch.setattr(curate_runner, "_list_datasets", lambda _p: list(roster or [_DATASET]))
+    monkeypatch.setattr(curate_config, "_find_project_root", lambda: project_root)
+    monkeypatch.setattr(curate_config, "_list_datasets", lambda _p: list(roster or [_DATASET]))
     # _load_yaml is stubbed, so the path only has to satisfy the required flag.
     monkeypatch.setattr(
         curate_cli.sys,
@@ -208,7 +196,7 @@ class _Env:
             "statistics": {"top_k_words": 5000},
         }
         self.stub = _Stub()
-        monkeypatch.setattr(curate_runner, "_stage_runner", self.stub)
+        monkeypatch.setattr(curate_runner, "run_stage", self.stub)
 
     def run(self, *args: str) -> List[str]:
         """Run the CLI's `run` subcommand and return the stages that executed."""
@@ -220,7 +208,7 @@ class _Env:
         """Run the `status` subcommand; return its exit code and each unit's state and reason."""
         self.stub.ran.clear()
         results: List[Any] = []
-        real_status = curate_runner.status
+        real_status = curate_status.status
 
         def capture(**kwargs: Any) -> Any:
             results.extend(real_status(**kwargs))
@@ -237,7 +225,7 @@ class _Env:
     def unit(self, stage: str, key: Optional[str] = _DATASET) -> Path:
         """Return a unit's output folder."""
         folder = self.output_dir / STAGE_DIRS[stage]
-        return folder / key if key and stage in curate_runner.SCOPED_STAGES else folder
+        return folder / key if key and stage in curate_stages.SCOPED_STAGES else folder
 
 
 @pytest.fixture
@@ -278,7 +266,7 @@ def test_touched_and_copied_files_run_no_stage(env: _Env) -> None:
 def test_stage_version_bump_with_same_documents_stops_at_that_stage(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
     """A version bump reruns its stage; identical documents keep downstream current."""
     env.run("--all")
-    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "quality", "sha256:edited")
+    monkeypatch.setitem(curate_stages.STAGE_VERSIONS, "quality", "sha256:edited")
     assert env.run("--all") == ["quality"]
     assert env.run("--all") == []
 
@@ -350,7 +338,7 @@ def test_sentinel_records_lineage_and_counts(env: _Env) -> None:
     assert sentinel is not None
     assert sentinel.config_slice == {"min_doc_words": 50}
     assert sentinel.config_hash.startswith("sha256:")
-    assert sentinel.stage_version == curate_runner.STAGE_VERSIONS["quality"]
+    assert sentinel.stage_version == curate_stages.STAGE_VERSIONS["quality"]
     assert (sentinel.records_in, sentinel.records_out) == (_DOCS_PER_DATASET, _DOCS_PER_DATASET)
     assert sentinel.document_digest and sentinel.document_digest.startswith("sum256:")
     assert sentinel.input_digest == read_sentinel(env.unit("spam")).document_digest  # type: ignore[union-attr]
@@ -371,7 +359,7 @@ def test_corpus_sentinel_records_counts_from_runner(env: _Env) -> None:
 def test_run_writes_lock_file(env: _Env) -> None:
     """A run records every unit's lineage in the lock file beside the config."""
     env.run("--all")
-    lock = curate_runner.read_lock(env.root / "curation.lock.yaml")
+    lock = read_lock(env.root / "curation.lock.yaml")
     assert set(lock) == set(STAGE_NAMES)
     entry = lock["quality"][_DATASET]
     assert entry["document_digest"] == read_sentinel(env.unit("quality")).document_digest  # type: ignore[union-attr]
@@ -387,7 +375,7 @@ def test_status_reports_reasons_and_exit_code(env: _Env, monkeypatch: pytest.Mon
     assert len(units) == len(STAGE_NAMES)
 
     env.cfg["quality"]["min_doc_words"] = 100
-    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "spam", "sha256:edited")
+    monkeypatch.setitem(curate_stages.STAGE_VERSIONS, "spam", "sha256:edited")
     code, units = env.status()
     assert code == 1
     assert units[("spam", _DATASET)] == ("stale", STAGE_VERSION_CHANGED)
@@ -400,9 +388,9 @@ def test_status_reports_changed_input_and_lock_drift(env: _Env) -> None:
     """A rewritten upstream unit shows downstream as input-changed; an edited lock shows drift."""
     env.run("--all")
     lock_path = env.root / "curation.lock.yaml"
-    lock = curate_runner.read_lock(lock_path)
+    lock = read_lock(lock_path)
     lock["repetition"][_DATASET]["document_digest"] = "sum256:other"
-    curate_runner.write_lock(lock_path, lock)
+    write_lock(lock_path, lock)
     sentinel_path = env.unit("quality") / SENTINEL_NAME
     payload = json.loads(sentinel_path.read_text())
     payload["document_digest"] = "sum256:changed"
@@ -411,10 +399,10 @@ def test_status_reports_changed_input_and_lock_drift(env: _Env) -> None:
     assert code == 1
     assert units[("repetition", _DATASET)] == ("stale", INPUT_CHANGED)
     assert units[("language", _DATASET)] == ("current", "")
-    lock = curate_runner.read_lock(lock_path)
+    lock = read_lock(lock_path)
     lock["language"][_DATASET]["records_out"] = 0
-    curate_runner.write_lock(lock_path, lock)
-    assert env.status()[1][("language", _DATASET)] == ("stale", curate_runner.LOCK_DIFFERS)
+    write_lock(lock_path, lock)
+    assert env.status()[1][("language", _DATASET)] == ("stale", curate_status.LOCK_DIFFERS)
 
 
 def _make_legacy(output_dir: Path) -> None:
@@ -486,7 +474,7 @@ class TestPrepareCorpusStage:
 
     def _paths(self, tmp_path: Path) -> Any:
         """Return curate paths with a stale staged shard, completion marker and dedup scratch in place."""
-        paths = curate_runner.CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
+        paths = curate_paths.CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
         _write_stage_shards(paths.staging_dir("sentence_dedup"), "d1", 1)
         (paths.logs_dir("sentence_dedup") / "1_sig" / "completions").mkdir(parents=True)
         (paths.logs_dir("sentence_dedup") / "1_sig" / "completions" / "00000").touch()
@@ -532,12 +520,12 @@ def test_shard_layout_tracks_shard_layout_not_mtime(tmp_path: Path) -> None:
     """The resume fingerprint counts shards and follows their sizes, not their mtimes."""
     view = tmp_path / "view"
     _write_stage_shards(view, "d1", 2)
-    count, digest = curate_runner._shard_layout(view)
+    count, digest = curate_paths.shard_layout(view)
     assert count == 2
     os.utime(view / "d1" / "00001.jsonl.gz", ns=(1, 1))
-    assert curate_runner._shard_layout(view) == (2, digest)
+    assert curate_paths.shard_layout(view) == (2, digest)
     (view / "d1" / "00001.jsonl.gz").write_bytes(b"\x1f\x8b\x08")
-    assert curate_runner._shard_layout(view)[1] != digest
+    assert curate_paths.shard_layout(view)[1] != digest
 
 
 def test_fully_filtered_dataset_empties_downstream(env: _Env) -> None:
@@ -581,7 +569,7 @@ def test_status_keeps_unit_whose_input_is_gone(env: _Env) -> None:
     (env.root / "in" / f"{_DATASET}.jsonl").unlink()
     code, units = env.status()
     assert code == 0
-    assert units[("convert", _DATASET)] == ("missing", curate_runner.NO_INPUT)
+    assert units[("convert", _DATASET)] == ("missing", curate_status.NO_INPUT)
     assert env.run("--all") == []
     assert NOT_BUILT
 
@@ -596,6 +584,6 @@ def test_partial_rebuild_updates_lock_file(env: _Env) -> None:
     assert lock_path.stat().st_mtime_ns == mtime
     env.cfg["spam"]["min_spam_hits"] = 5
     env.run(_DATASET, "--stage", "spam")
-    lock = curate_runner.read_lock(lock_path)
+    lock = read_lock(lock_path)
     assert lock_path.read_bytes() != before
     assert lock["spam"][_DATASET]["config_hash"] == read_sentinel(env.unit("spam")).config_hash  # type: ignore[union-attr]

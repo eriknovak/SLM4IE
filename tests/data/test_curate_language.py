@@ -11,7 +11,7 @@ pytest.importorskip("lingua")
 
 from datatrove.data import Document  # noqa: E402
 
-from slm4ie.data.curate.language import LinguaLanguageFilter  # noqa: E402
+from slm4ie.data.curate.stages.language import LinguaLanguageFilter  # noqa: E402
 
 
 def _doc(text: str, doc_id: str = "x") -> Document:

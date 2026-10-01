@@ -1,6 +1,6 @@
 """CLI over the language-model document judge.
 
-Parses arguments and dispatches into `slm4ie.data.judge`, which owns the
+Parses arguments and dispatches into `slm4ie.data.curate.inspect.judge`, which owns the
 batching, the subprocess calls, the schema check and the resume behaviour.
 
 Two tasks share the machinery. `--task rubric` labels a sample of documents
@@ -44,7 +44,13 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from slm4ie.data.judge import BACKENDS, PAIRWISE_STAGES, TASKS, judge_documents, judge_pairs
+from slm4ie.data.curate.inspect.judge import (
+    BACKENDS,
+    PAIRWISE_STAGES,
+    TASKS,
+    judge_documents,
+    judge_pairs,
+)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:

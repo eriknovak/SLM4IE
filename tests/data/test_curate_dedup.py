@@ -1,4 +1,4 @@
-"""Tests for the dedup helpers in `slm4ie.data.curate.dedup`.
+"""Tests for the dedup helpers in `slm4ie.data.curate.stages.dedup`.
 
 Structural assertions about the full executor ladder live in
 `test_curate_pipeline.py`; this file only covers the small content
@@ -19,8 +19,8 @@ from datatrove.data import Document  # noqa: E402
 from datatrove.pipeline.dedup import SentDedupConfig, SentenceDedupSignature  # noqa: E402
 from datatrove.utils.typeshelper import Languages  # noqa: E402
 
-import slm4ie.data.curate.dedup as dedup_module  # noqa: E402
-from slm4ie.data.curate.dedup import (  # noqa: E402
+import slm4ie.data.curate.stages.dedup as dedup_module  # noqa: E402
+from slm4ie.data.curate.stages.dedup import (
     CompactSentenceDedupSignature,
     default_exact_config,
     doc_text,
