@@ -82,14 +82,31 @@ class TestColeslawExtractor:
         docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
         assert docs[0].text == "Prometna nesreča.\n\nZvin vratu.\n\nTri tedne."
 
-    def test_doc_id_falls_back_to_id_field(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
-        """The 'id' field becomes doc_id when 'doc_id' is absent."""
+    def test_doc_id_is_positional_and_id_field_is_native(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
+        """doc_id is `<subcorpus>/<file>:<line>`; the record's 'id' survives as native_id."""
         _write_jsonl(
-            tmp_path / "PISRS" / "f.jsonl",
-            [{"id": 42, "text": "x"}],
+            tmp_path / "COLESLAW 1.0" / "PISRS" / "f.jsonl",
+            [{"id": 42, "text": "x"}, {"id": 42, "text": "y"}],
         )
         docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
-        assert docs[0].doc_id == "42"
+        assert [d.doc_id for d in docs] == ["PISRS/f:00000000", "PISRS/f:00000001"]
+        assert [d.native_id for d in docs] == ["42", "42"]
+        assert "id" in docs[0].metadata
+
+    def test_positional_id_counts_skipped_lines(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
+        """A blank or text-less line still consumes its ordinal, so ids stay pinned to raw lines."""
+        path = tmp_path / "USRS" / "usrs.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text('{"id": 1}\n\n{"id": 2, "fullText": "z"}\n', encoding="utf-8")
+        docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
+        assert [d.doc_id for d in docs] == ["USRS/usrs:00000002"]
+
+    def test_record_without_id_has_no_native_id(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
+        """native_id is None when the record carries neither 'doc_id' nor 'id'."""
+        _write_jsonl(tmp_path / "PISRS" / "f.jsonl", [{"text": "x"}])
+        docs = list(extractor.extract(tmp_path, "coleslaw", "legal"))
+        assert docs[0].doc_id == "PISRS/f:00000000"
+        assert docs[0].native_id is None
 
     def test_skips_records_without_any_text(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
         """Records lacking every recognised text field are skipped."""

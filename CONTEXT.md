@@ -73,6 +73,26 @@ _Avoid_: row, sample, entry
 The provenance field on a document, naming the dataset it came from.
 _Avoid_: source, origin, dataset
 
+**Document id**:
+The `doc_id` of a document: unique within its dataset and stable across
+re-extraction, so that `<dataset key>:<document id>` (the `uid`) is the key
+every consumer joins on. It is the native id when the source has one that is
+unique within the dataset, else a positional id. Extraction asserts the
+uniqueness: a repeat with identical text is dropped, a repeat with different
+text fails the build.
+_Avoid_: id, key, identifier, document key
+
+**Native id**:
+The identifier the raw source itself carries for a document, kept verbatim as
+`native_id` for tracing it back; it may repeat and may be absent.
+_Avoid_: original id, source id, raw id, external id
+
+**Positional id**:
+The document id `<unit>:<ordinal>` minted when a source has no usable native
+id: the raw file's path under the dataset dir without its suffix, then the
+document's zero-padded position in that file.
+_Avoid_: synthetic id, fallback id, line id, index
+
 **Domain**:
 The content label a dataset carries onto its documents — web, news, legal,
 parliamentary, scientific and so on. Corpus sampling and statistics group by it.

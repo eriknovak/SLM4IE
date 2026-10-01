@@ -167,6 +167,7 @@ class MacocuExtractor(FileBasedExtractor):
                     source=source,
                     domain=domain,
                     doc_id=elem.get("id"),
+                    native_id=elem.get("id"),
                     metadata=_doc_metadata(elem),
                 )
 

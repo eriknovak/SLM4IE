@@ -186,6 +186,7 @@ class JsonExtractor(BaseExtractor):
                 source=source,
                 domain=domain,
                 doc_id=doc_id,
+                native_id=doc_id,
                 metadata=doc_metadata,
             )
 

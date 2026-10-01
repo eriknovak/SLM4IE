@@ -23,12 +23,13 @@ Example:
         annotations: not produced.
 
 Document ids:
-    `doc_id` is `f"{rel}:{block_idx:06d}"`, where `rel` is the input
-    file's path relative to `input_dir` with its suffix removed and
-    separators normalized to `/`, and `block_idx` is the 0-based index
-    of the emitted document within that file. So `<input_dir>/sl.txt`
-    yields `sl:000000`, `sl:000001`, ... and `uid` becomes
-    `cc100:sl:000000`.
+    Plain text carries no native id, so `doc_id` is the positional id
+    `<rel>:<block_idx>` of `assembly.positional_doc_id`, where `rel` is
+    the input file's unit name (path relative to `input_dir`, suffix
+    removed, separators `/`) and `block_idx` the 0-based index of the
+    emitted document within that file, padded to six digits. So
+    `<input_dir>/sl.txt` yields `sl:000000`, `sl:000001`, ... and `uid`
+    becomes `cc100:sl:000000`.
 
     The scheme is deterministic and independent of worker count: the
     orchestrator shards by whole files and preserves per-file block
@@ -42,28 +43,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
+from slm4ie.data.extract.extractors.assembly import positional_doc_id, relative_unit
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
 
-
-def _relative_key(filepath: Path, input_dir: Path) -> str:
-    """Build the file-identifying part of a doc_id.
-
-    Args:
-        filepath (Path): Input file being parsed.
-        input_dir (Path): Dataset root the path is expressed against.
-
-    Returns:
-        str: `filepath` relative to `input_dir`, suffix stripped and
-            separators normalized to `/`. Falls back to the bare
-            filename stem when `filepath` lies outside `input_dir`.
-    """
-    try:
-        rel = filepath.relative_to(input_dir)
-    except ValueError:
-        rel = Path(filepath.name)
-    return rel.with_suffix("").as_posix()
+# Six digits: the CC100 ids were minted at this width and the shared
+# corpus keys on them; widening would renumber every one of its documents.
+_BLOCK_WIDTH = 6
 
 
 class TextExtractor(FileBasedExtractor):
@@ -132,7 +119,7 @@ class TextExtractor(FileBasedExtractor):
             Document: One document per blank-line-separated block, with
                 `doc_id` = `<rel>:<block index within this file>`.
         """
-        rel = _relative_key(filepath, input_dir)
+        rel = relative_unit(filepath, input_dir)
         buffer: List[str] = []
         block_idx = 0
 
@@ -147,7 +134,7 @@ class TextExtractor(FileBasedExtractor):
                     text=text,
                     source=source,
                     domain=domain,
-                    doc_id=f"{rel}:{block_idx:06d}",
+                    doc_id=positional_doc_id(rel, block_idx, width=_BLOCK_WIDTH),
                 )
                 block_idx += 1
 

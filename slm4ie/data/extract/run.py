@@ -1,14 +1,17 @@
 """Extract raw downloads into the canonical unified JSONL form."""
 
 import gzip
+import hashlib
 import json
 import logging
 import os
 import shutil
+from array import array
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from tqdm import tqdm
 
@@ -65,6 +68,206 @@ def _stub_line(doc_id: Optional[str], uid: Optional[str]) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def _hash64(value: str) -> int:
+    """Return a 64-bit hash of `value` that is identical across processes.
+
+    Python's own `hash` is salted per interpreter, so shard workers and
+    the parent would disagree; blake2b is not.
+
+    Args:
+        value: The string to hash.
+
+    Returns:
+        int: The hash as an unsigned 64-bit integer.
+    """
+    return int.from_bytes(hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest(), "little")
+
+
+class DuplicateDocumentIdError(ValueError):
+    """A dataset repeats a `doc_id` on documents whose text differs.
+
+    `<dataset>:<doc_id>` is the key every downstream consumer joins on
+    (see `CONTEXT.md`, "Document id"), so extraction refuses to write a
+    dataset that breaks it rather than let the collision surface later
+    as under-counted drops or mismatched annotations.
+    """
+
+    def __init__(self, key: str, conflicts: int, examples: List[str]) -> None:
+        """Format the error for one dataset.
+
+        Args:
+            key: Dataset key.
+            conflicts: Number of documents whose id repeats an earlier
+                document's id with different text.
+            examples: Up to a few of the offending ids.
+        """
+        shown = ", ".join(repr(e) for e in examples)
+        super().__init__(
+            f"{conflicts} documents in '{key}' repeat an earlier doc_id with different text (e.g. {shown}). "
+            "doc_id must be unique within a dataset: give the extractor a positional id or "
+            "narrow the input with `include:` in extract.yaml."
+        )
+        self.key = key
+        self.conflicts = conflicts
+        self.examples = examples
+
+
+class _IdLedger:
+    """Hashes of every written document's id and text, in write order.
+
+    Sixteen bytes per document, so a dataset of tens of millions of
+    documents is checked for repeated ids without holding the ids
+    themselves. Shards build one each and the parent concatenates them
+    in shard order, which is also the order of the merged output.
+    """
+
+    def __init__(self, ids: bytes = b"", texts: bytes = b"") -> None:
+        """Start a ledger, optionally from another ledger's serialized arrays.
+
+        Args:
+            ids: `array("Q")` bytes of id hashes.
+            texts: `array("Q")` bytes of text hashes, parallel to `ids`.
+        """
+        self.ids = array("Q")
+        self.ids.frombytes(ids)
+        self.texts = array("Q")
+        self.texts.frombytes(texts)
+
+    def __len__(self) -> int:
+        """Return the number of documents recorded."""
+        return len(self.ids)
+
+    def add(self, doc_id: str, text: str) -> None:
+        """Record one written document.
+
+        Args:
+            doc_id: The document's id, after any fallback was applied.
+            text: The document's text.
+        """
+        self.ids.append(_hash64(doc_id))
+        self.texts.append(_hash64(text))
+
+    def extend(self, other: "_IdLedger") -> None:
+        """Append another ledger's documents after this one's.
+
+        Args:
+            other: The ledger to append; its order is preserved.
+        """
+        self.ids.extend(other.ids)
+        self.texts.extend(other.texts)
+
+    def serialized(self) -> Tuple[bytes, bytes]:
+        """Return the two arrays as bytes, for crossing a process boundary.
+
+        Returns:
+            Tuple[bytes, bytes]: Id hashes and text hashes.
+        """
+        return self.ids.tobytes(), self.texts.tobytes()
+
+    def resolve(self) -> Tuple[bytearray, List[int]]:
+        """Decide what to do with every repeated id.
+
+        The first document carrying an id is always kept. A later
+        document with the same id is dropped when its text hash equals
+        the first one's (the same record stored twice) and reported as
+        a conflict when it differs.
+
+        Returns:
+            Tuple[bytearray, List[int]]: One keep flag (1/0) per
+                document in write order, and the write-order indices
+                of the conflicting documents.
+        """
+        n = len(self.ids)
+        keep = bytearray(b"\x01") * n
+        conflicts: List[int] = []
+        # Stable sort: within one id, write order survives, so the first
+        # element of a group is the earliest written document.
+        order = sorted(range(n), key=self.ids.__getitem__)
+        group_start = 0
+        for pos in range(1, n + 1):
+            if pos < n and self.ids[order[pos]] == self.ids[order[group_start]]:
+                continue
+            first = order[group_start]
+            for later in order[group_start + 1 : pos]:
+                if self.texts[later] == self.texts[first]:
+                    keep[later] = 0
+                else:
+                    conflicts.append(later)
+            group_start = pos
+        conflicts.sort()
+        return keep, conflicts
+
+
+def _drop_lines(path: Path, keep: Iterable[int], gz: bool) -> None:
+    """Rewrite a line-oriented file in place, keeping the flagged lines.
+
+    Args:
+        path: The file to filter; plain text or gzip.
+        keep: One truthy/falsy flag per line of the file.
+        gz: Whether the file is gzip-compressed.
+
+    Raises:
+        ValueError: If the file has a different number of lines than
+            `keep` has flags.
+    """
+    opener = gzip.open if gz else open
+    filtered = path.with_name(path.name + ".dedup")
+    with opener(path, "rb") as fin, opener(filtered, "wb") as fout:
+        for flag, line in zip(keep, fin, strict=True):
+            if flag:
+                fout.write(line)
+    os.replace(filtered, path)
+
+
+def _doc_ids_at(text_files: List[Tuple[Path, int]], indices: List[int]) -> List[str]:
+    """Read the `doc_id` of the documents at the given write-order indices.
+
+    Args:
+        text_files: The text JSONL files holding the documents in
+            order, each with its document count.
+        indices: Sorted write-order indices to look up.
+
+    Returns:
+        List[str]: The ids found, in index order.
+    """
+    wanted = list(indices)
+    found: List[str] = []
+    offset = 0
+    for path, count in text_files:
+        local = [i - offset for i in wanted if offset <= i < offset + count]
+        if local:
+            with open(path, encoding="utf-8") as fh:
+                for line_idx, line in enumerate(fh):
+                    if line_idx in local:
+                        found.append(str(json.loads(line).get("doc_id")))
+        offset += count
+    return found
+
+
+def _select_files(files: List[Path], input_dir: Path, include: Optional[List[str]]) -> List[Path]:
+    """Keep the input files matching the dataset's `include:` globs.
+
+    Args:
+        files: Every file the extractor discovered, sorted.
+        input_dir: Dataset root the globs are relative to.
+        include: Shell-style patterns matched against each file's path
+            under `input_dir` (`*` also crosses `/`). None or empty
+            keeps every file.
+
+    Returns:
+        List[Path]: The matching files, in their original order.
+
+    Raises:
+        ValueError: If the patterns match no file at all.
+    """
+    if not include:
+        return files
+    kept = [f for f in files if any(fnmatch(f.relative_to(input_dir).as_posix(), pattern) for pattern in include)]
+    if not kept:
+        raise ValueError(f"include patterns {include!r} match no input file under {input_dir}")
+    return kept
+
+
 def _chunk_files(files: List[Path], n_chunks: int) -> List[List[Path]]:
     """Split files into contiguous, order-preserving slices.
 
@@ -106,6 +309,8 @@ class ShardResult:
         count (int): Documents written by this shard.
         had_real_ann (bool): True if any document carried a real
             annotation line (not just a stub).
+        id_hashes (bytes): The shard's `_IdLedger` id array, serialized.
+        text_hashes (bytes): The shard's `_IdLedger` text array, serialized.
     """
 
     index: int
@@ -113,6 +318,8 @@ class ShardResult:
     ann_path: Path
     count: int
     had_real_ann: bool
+    id_hashes: bytes
+    text_hashes: bytes
 
 
 def _extract_shard(
@@ -151,6 +358,7 @@ def _extract_shard(
     ann_path = tmp_dir / f"{index:05d}.annotations.jsonl.gz"
     count = 0
     had_real_ann = False
+    ledger = _IdLedger()
 
     with open(text_path, "w", encoding="utf-8") as tf, gzip.open(ann_path, "wt", encoding="utf-8") as af:
         for local, doc in enumerate(extractor.extract_files(files, key, domain, input_dir, metadata_cfg)):
@@ -162,6 +370,7 @@ def _extract_shard(
                 doc.doc_id = f"idx-{index:05d}-{local:010d}"
             tf.write(doc.to_jsonl_line())
             tf.write("\n")
+            ledger.add(doc.doc_id, doc.text)
 
             ann_line = doc.to_annotation_line()
             if ann_line is not None:
@@ -172,7 +381,8 @@ def _extract_shard(
             af.write("\n")
             count += 1
 
-    return ShardResult(index, text_path, ann_path, count, had_real_ann)
+    id_hashes, text_hashes = ledger.serialized()
+    return ShardResult(index, text_path, ann_path, count, had_real_ann, id_hashes, text_hashes)
 
 
 def _extract_serial(
@@ -183,6 +393,7 @@ def _extract_serial(
     input_dir: Path,
     text_file: Path,
     ann_file: Path,
+    files: Optional[List[Path]] = None,
 ) -> int:
     """Stream a dataset to JSONL in a single pass (no sharding).
 
@@ -190,7 +401,9 @@ def _extract_serial(
     extractor generator in order, writing the text JSONL and the
     gzipped annotations sidecar in lockstep, buffering stubs until the
     first real annotation appears, then promoting the `.partial` files
-    atomically.
+    atomically. Before promotion the id ledger is resolved: repeats of
+    an id with identical text are dropped, repeats with different text
+    abort the dataset (see `DuplicateDocumentIdError`).
 
     Args:
         key (str): Dataset key (used as `source` and in messages).
@@ -201,9 +414,14 @@ def _extract_serial(
         input_dir (Path): Directory containing the raw source data.
         text_file (Path): Final destination for the text JSONL.
         ann_file (Path): Final destination for the gzipped annotations.
+        files (Optional[List[Path]]): The selected input files of a
+            `FileBasedExtractor`; None lets the extractor discover them.
 
     Returns:
         int: Number of documents written.
+
+    Raises:
+        DuplicateDocumentIdError: If a `doc_id` repeats with different text.
     """
     text_partial = text_file.parent / f"{text_file.name}.partial"
     ann_partial = ann_file.parent / f"{ann_file.name}.partial"
@@ -211,18 +429,17 @@ def _extract_serial(
     count = 0
     has_annotations = False
     pending_stubs: List[Tuple[Optional[str], Optional[str]]] = []
+    ledger = _IdLedger()
+
+    if files is not None and isinstance(extractor, FileBasedExtractor):
+        documents = extractor.extract_files(files, key, domain, input_dir, metadata_cfg)
+    else:
+        documents = extractor.extract(input_dir, key, domain, metadata=metadata_cfg)
 
     with open(text_partial, "w", encoding="utf-8") as tf:
         ann_fh = None
         try:
-            for index, doc in enumerate(
-                tqdm(
-                    extractor.extract(input_dir, key, domain, metadata=metadata_cfg),
-                    desc=key,
-                    unit="doc",
-                    disable=workers_quiet(),
-                )
-            ):
+            for index, doc in enumerate(tqdm(documents, desc=key, unit="doc", disable=workers_quiet())):
                 if doc.doc_id is None:
                     # Global fallback id. The sharded path uses a
                     # shard-namespaced scheme; see _extract_shard. Every
@@ -232,6 +449,7 @@ def _extract_serial(
 
                 tf.write(doc.to_jsonl_line())
                 tf.write("\n")
+                ledger.add(doc.doc_id, doc.text)
 
                 ann_line = doc.to_annotation_line()
                 if ann_line is not None:
@@ -254,6 +472,21 @@ def _extract_serial(
         finally:
             if ann_fh is not None:
                 ann_fh.close()
+
+    keep, conflicts = ledger.resolve()
+    if conflicts:
+        examples = _doc_ids_at([(text_partial, count)], conflicts[:3])
+        text_partial.unlink()
+        if has_annotations:
+            ann_partial.unlink()
+        raise DuplicateDocumentIdError(key, len(conflicts), examples)
+    dropped = count - sum(keep)
+    if dropped:
+        _drop_lines(text_partial, keep, gz=False)
+        if has_annotations:
+            _drop_lines(ann_partial, keep, gz=True)
+        count -= dropped
+        logger.info("Dropped %d repeated documents (same doc_id, same text) from '%s'", dropped, key)
 
     os.replace(text_partial, text_file)
     if has_annotations:
@@ -343,11 +576,29 @@ def _extract_sharded(
                 results[idx] = future.result()
 
         ordered = [r for r in results if r is not None]
-        total = sum(r.count for r in ordered)
         # Keep the merged annotations file only if at least one shard
         # produced a real annotation; otherwise every line would be a
         # stub and the serial path would have written no file at all.
         has_annotations = any(r.had_real_ann for r in ordered)
+
+        ledger = _IdLedger()
+        for r in ordered:
+            ledger.extend(_IdLedger(r.id_hashes, r.text_hashes))
+        keep, conflicts = ledger.resolve()
+        if conflicts:
+            examples = _doc_ids_at([(r.text_path, r.count) for r in ordered], conflicts[:3])
+            raise DuplicateDocumentIdError(key, len(conflicts), examples)
+        dropped = len(keep) - sum(keep)
+        if dropped:
+            offset = 0
+            for r in ordered:
+                shard_keep = keep[offset : offset + r.count]
+                offset += r.count
+                if 0 in shard_keep:
+                    _drop_lines(r.text_path, shard_keep, gz=False)
+                    _drop_lines(r.ann_path, shard_keep, gz=True)
+            logger.info("Dropped %d repeated documents (same doc_id, same text) from '%s'", dropped, key)
+        total = len(keep) - dropped
 
         text_partial = text_file.parent / f"{text_file.name}.partial"
         with open(text_partial, "wb") as out:
@@ -461,7 +712,13 @@ def _extract_one(
     cores = os.cpu_count() or 1
     shard_workers = resolve_workers(requested_workers, cores, cores)
 
-    files = extractor.iter_input_files(input_dir) if isinstance(extractor, FileBasedExtractor) else None
+    include = ds_cfg.get("include")
+    if isinstance(extractor, FileBasedExtractor):
+        files = _select_files(extractor.iter_input_files(input_dir), input_dir, include)
+    elif include:
+        raise ValueError(f"'{key}': `include:` needs a file-based extractor, and '{extractor_name}' is not one")
+    else:
+        files = None
 
     if files is not None and shard_workers > 1 and len(files) >= _SHARD_MIN_FILES:
         return _extract_sharded(
@@ -484,6 +741,7 @@ def _extract_one(
         input_dir,
         text_file,
         ann_file,
+        files=files,
     )
 
 

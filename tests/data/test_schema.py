@@ -387,3 +387,32 @@ class TestDocument:
         line = doc.to_jsonl_line()
         data = json.loads(line)
         assert "metadata" not in data
+
+
+class TestNativeId:
+    """Tests for Document.native_id."""
+
+    def test_native_id_serialised_beside_doc_id(self):
+        """native_id is its own column in the text line, not in metadata."""
+        doc = Document(text="x", source="coleslaw", domain="legal", doc_id="PISRS/f:00000003", native_id="42")
+        data = json.loads(doc.to_jsonl_line())
+        assert data["doc_id"] == "PISRS/f:00000003"
+        assert data["native_id"] == "42"
+        assert "metadata" not in data
+
+    def test_native_id_omitted_when_absent(self):
+        """A source without its own ids writes no native_id column."""
+        data = json.loads(Document(text="x", source="cc100", domain="web", doc_id="sl:000001").to_jsonl_line())
+        assert "native_id" not in data
+
+    def test_native_id_not_in_annotation_line(self):
+        """The annotations sidecar joins on doc_id/uid only."""
+        doc = Document(
+            text="x",
+            source="s",
+            domain="d",
+            doc_id="a",
+            native_id="n",
+            annotations=Annotations(tokens=[Token(form="x", lemma="x", upos="X", feats=None)], sentences=[[0, 0]]),
+        )
+        assert "native_id" not in json.loads(doc.to_annotation_line())
