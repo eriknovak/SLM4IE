@@ -609,7 +609,7 @@ def test_real_stages_rebuild_only_what_changed(tmp_path: Path, monkeypatch: pyte
     run_all(workers=2)
     assert sentinel_mtimes() == before
 
-    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "language", 2)
+    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "language", "sha256:edited")
     run_all(workers=1)
     after = sentinel_mtimes()
     rewritten = {p.relative_to(out_dir).parts[0] for p in after if after[p] != before[p]}

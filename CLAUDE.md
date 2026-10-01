@@ -174,7 +174,8 @@ they own disjoint output trees:
    swapped in after an integrity check. Every run brings the committed lock
    file `configs/data/curate.lock.yaml` up to date; `status` reports stale
    units and why.
-   Raise a stage's `STAGE_VERSIONS` entry when its code changes its output.
+   A stage's version is a hash of its code (`STAGE_SOURCES` in `stages.py`),
+   so editing that code reruns the stage; list new stage code there.
    The annotations sidecar is **not** read here — it would desync after any
    datatrove step that rewrites the text.
 

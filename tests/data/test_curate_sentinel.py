@@ -83,7 +83,7 @@ def test_sentinel_lineage_roundtrips(tmp_path: Path) -> None:
         config_hash_value="sha256:abc",
         records_in=1,
         records_out=1,
-        stage_version=2,
+        stage_version="v2",
         input_digest="sha256:in",
         document_digest="sum256:doc",
         input_files={"news.jsonl": {"size": 3, "sha256": "x", "mtime_ns": 1}},
@@ -91,7 +91,7 @@ def test_sentinel_lineage_roundtrips(tmp_path: Path) -> None:
     )
     sentinel = read_sentinel(folder)
     assert sentinel is not None
-    assert sentinel.stage_version == 2
+    assert sentinel.stage_version == "v2"
     assert sentinel.input_digest == "sha256:in"
     assert sentinel.document_digest == "sum256:doc"
     assert sentinel.shards == {"00000.jsonl.gz": 3}
@@ -120,7 +120,7 @@ def _current_unit(tmp_path: Path) -> Path:
         config_hash_value="h",
         records_in=1,
         records_out=1,
-        stage_version=1,
+        stage_version="v1",
         input_digest="in",
         document_digest="doc",
     )
@@ -129,7 +129,7 @@ def _current_unit(tmp_path: Path) -> Path:
 
 def _reason(folder: Path, **overrides: object) -> object:
     """Return `stale_reason` for *folder* with the matching lineage, overridden."""
-    kwargs = {"expected_hash": "h", "stage_version": 1, "input_digest": "in", **overrides}
+    kwargs = {"expected_hash": "h", "stage_version": "v1", "input_digest": "in", **overrides}
     return stale_reason(read_sentinel(folder), folder, **kwargs)  # type: ignore[arg-type]
 
 
@@ -142,7 +142,7 @@ def test_stale_reason_current_when_lineage_matches(tmp_path: Path) -> None:
     ("override", "reason"),
     [
         ({"expected_hash": "h2"}, CONFIG_CHANGED),
-        ({"stage_version": 2}, STAGE_VERSION_CHANGED),
+        ({"stage_version": "v2"}, STAGE_VERSION_CHANGED),
         ({"input_digest": "in2"}, INPUT_CHANGED),
     ],
 )
@@ -183,7 +183,7 @@ def test_stale_reason_legacy_and_integrity(tmp_path: Path) -> None:
         config_hash_value="h",
         records_in=1,
         records_out=2,
-        stage_version=1,
+        stage_version="v1",
         input_digest="in",
         integrity_error="boom",
     )

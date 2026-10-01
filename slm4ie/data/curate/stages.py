@@ -9,6 +9,9 @@ hash. Consumers should import from here rather than hard-coding stage
 names or folder paths.
 """
 
+import ast
+import hashlib
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 
@@ -56,9 +59,69 @@ STAGE_DIRS: Dict[str, str] = {
 }
 
 
-#: Stage version per stage: raise one by hand when a change to that stage's
-#: code changes what it writes. Refactors that keep the output leave it alone.
-STAGE_VERSIONS: Dict[str, int] = {name: 1 for name in STAGE_NAMES}
+#: The code that runs each stage, as `<module>.py` (the whole file) or
+#: `<module>.py:<name>` (one top-level function or class in a shared module).
+#: Imports are not followed: a stage's version covers only these sources.
+STAGE_SOURCES: Dict[str, Tuple[str, ...]] = {
+    "convert": ("convert.py", "runner.py:_build_convert_params"),
+    "language": ("language.py", "pipeline.py:build_language_executors", "runner.py:_build_language_params"),
+    "spam": ("spam.py", "pipeline.py:build_spam_executors", "runner.py:_build_spam_config"),
+    "quality": ("pipeline.py:QualityConfig", "pipeline.py:build_quality_executors", "runner.py:_build_quality_config"),
+    "repetition": ("pipeline.py:build_repetition_executors",),
+    "exact_dedup": ("dedup.py", "pipeline.py:build_exact_dedup_executors"),
+    "sentence_dedup": ("dedup.py", "pipeline.py:build_sentence_dedup_executors"),
+    "statistics": ("stats.py", "pipeline.py:build_statistics_executors"),
+}
+
+#: Folder holding the modules `STAGE_SOURCES` names.
+_PACKAGE_DIR = Path(__file__).parent
+
+
+def _source_text(package_dir: Path, source: str) -> str:
+    """Return the text of one `STAGE_SOURCES` entry.
+
+    Args:
+        package_dir: Folder holding the curate modules.
+        source: `<module>.py` or `<module>.py:<name>`.
+
+    Returns:
+        The whole file, or the named top-level definition's source.
+
+    Raises:
+        KeyError: If the named definition is not in the module.
+    """
+    filename, _, name = source.partition(":")
+    text = (package_dir / filename).read_text(encoding="utf-8")
+    if not name:
+        return text
+    for node in ast.parse(text).body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == name:
+            return ast.get_source_segment(text, node) or ""
+    raise KeyError(f"{name} not found in {filename}")
+
+
+def code_version(stage: str, package_dir: Path = _PACKAGE_DIR) -> str:
+    """Return a stage's version: a hash of the code that runs it.
+
+    Any edit to that code — a fix, a refactor, a comment — changes the version
+    and reruns the stage; a rerun that reproduces the same documents leaves
+    downstream stages current.
+
+    Args:
+        stage: One of the values in `STAGE_NAMES`.
+        package_dir: Folder holding the curate modules.
+
+    Returns:
+        `sha256:` hex digest over the stage's sources, in `STAGE_SOURCES` order.
+    """
+    h = hashlib.sha256()
+    for source in STAGE_SOURCES[stage]:
+        h.update(source.encode("utf-8") + b"\x00" + _source_text(package_dir, source).encode("utf-8") + b"\x00")
+    return "sha256:" + h.hexdigest()
+
+
+#: Current version of every stage, computed from its code when imported.
+STAGE_VERSIONS: Dict[str, str] = {name: code_version(name) for name in STAGE_NAMES}
 
 
 #: Per-stage top-level YAML keys that go into the sentinel config hash.

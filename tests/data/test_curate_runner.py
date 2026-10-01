@@ -278,7 +278,7 @@ def test_touched_and_copied_files_run_no_stage(env: _Env) -> None:
 def test_stage_version_bump_with_same_documents_stops_at_that_stage(env: _Env, monkeypatch: pytest.MonkeyPatch) -> None:
     """A version bump reruns its stage; identical documents keep downstream current."""
     env.run("--all")
-    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "quality", 2)
+    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "quality", "sha256:edited")
     assert env.run("--all") == ["quality"]
     assert env.run("--all") == []
 
@@ -387,7 +387,7 @@ def test_status_reports_reasons_and_exit_code(env: _Env, monkeypatch: pytest.Mon
     assert len(units) == len(STAGE_NAMES)
 
     env.cfg["quality"]["min_doc_words"] = 100
-    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "spam", 2)
+    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "spam", "sha256:edited")
     code, units = env.status()
     assert code == 1
     assert units[("spam", _DATASET)] == ("stale", STAGE_VERSION_CHANGED)

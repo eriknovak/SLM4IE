@@ -5,7 +5,7 @@ A unit is one scoped stage × one dataset (sentinel at
 `<stage_dir>/.complete`). The sentinel records the unit's full lineage:
 
 * the config hash of the slice that drove it (runtime knobs excluded),
-* the stage version (`slm4ie.data.curate.stages.STAGE_VERSIONS`),
+* the stage version, a hash of the stage's code (`stages.STAGE_VERSIONS`),
 * the input digest — the upstream units' document digests, or for `convert`
   a content hash of the extracted source files,
 * the unit's own document digest and the shard set it wrote,
@@ -51,7 +51,7 @@ class Sentinel:
         config_slice: The raw config slice the hash was computed from.
         records_in: Number of records read into the unit.
         records_out: Number of records written out (i.e. surviving).
-        stage_version: Stage version that built the unit; `None` marks a
+        stage_version: Code version of the stage that built the unit; `None` marks a
             legacy sentinel written before lineage was recorded.
         input_digest: Digest of the unit's input (see module docstring).
         document_digest: Document digest of what the unit wrote, or `None`
@@ -69,7 +69,7 @@ class Sentinel:
     config_slice: Dict[str, Any]
     records_in: int
     records_out: int
-    stage_version: Optional[int] = None
+    stage_version: Optional[str] = None
     input_digest: Optional[str] = None
     document_digest: Optional[str] = None
     shards: Dict[str, int] = field(default_factory=dict)
@@ -132,7 +132,7 @@ def write_sentinel(
     config_hash_value: str,
     records_in: int,
     records_out: int,
-    stage_version: Optional[int] = None,
+    stage_version: Optional[str] = None,
     input_digest: Optional[str] = None,
     document_digest: Optional[str] = None,
     input_files: Optional[Dict[str, Any]] = None,
@@ -152,7 +152,7 @@ def write_sentinel(
             any extra payload like stopword file contents).
         records_in: Records read.
         records_out: Records written.
-        stage_version: Stage version that built the unit.
+        stage_version: Code version of the stage that built the unit.
         input_digest: Digest of the unit's input.
         document_digest: Document digest of the unit's output.
         input_files: `convert` only: per source file size and hash.
@@ -205,7 +205,7 @@ def read_sentinel(stage_folder: Path) -> Optional[Sentinel]:
             config_slice=dict(data.get("config_slice") or {}),
             records_in=int(data.get("records_in", 0)),
             records_out=int(data.get("records_out", 0)),
-            stage_version=int(version) if version is not None else None,
+            stage_version=str(version) if version is not None else None,
             input_digest=data.get("input_digest"),
             document_digest=data.get("document_digest"),
             shards={str(k): int(v) for k, v in (data.get("shards") or {}).items()},
@@ -222,7 +222,7 @@ def stale_reason(
     folder: Path,
     *,
     expected_hash: str,
-    stage_version: int,
+    stage_version: str,
     input_digest: Optional[str],
 ) -> Optional[str]:
     """Return why a unit must be rebuilt, or `None` when it is current.

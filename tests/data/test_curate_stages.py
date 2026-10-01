@@ -1,5 +1,7 @@
 """Tests for the stage name/folder mapping in slm4ie.data.curate.stages."""
 
+from pathlib import Path
+
 from slm4ie.data.curate.stages import (
     ALL_STAGE_NAMES,
     CORPUS_STAGES,
@@ -150,3 +152,52 @@ def test_is_scoped() -> None:
     """is_scoped returns True only for scoped stages."""
     assert is_scoped("quality") is True
     assert is_scoped("exact_dedup") is False
+
+
+def _copy_package(tmp_path: Path) -> Path:
+    """Copy the curate package's sources into *tmp_path* and return the copy."""
+    import shutil
+
+    import slm4ie.data.curate as curate_pkg
+
+    target = tmp_path / "curate"
+    shutil.copytree(Path(curate_pkg.__file__).parent, target, ignore=shutil.ignore_patterns("__pycache__"))
+    return target
+
+
+def test_stage_versions_are_code_hashes() -> None:
+    """Every stage carries a version derived from its code."""
+    from slm4ie.data.curate.stages import STAGE_NAMES, STAGE_VERSIONS
+
+    assert set(STAGE_VERSIONS) == set(STAGE_NAMES)
+    assert all(v.startswith("sha256:") for v in STAGE_VERSIONS.values())
+
+
+def test_editing_a_stage_module_changes_only_its_version(tmp_path: Path) -> None:
+    """A comment added to the language module bumps the language stage alone."""
+    from slm4ie.data.curate.stages import STAGE_NAMES, code_version
+
+    package = _copy_package(tmp_path)
+    before = {stage: code_version(stage, package) for stage in STAGE_NAMES}
+    with (package / "language.py").open("a", encoding="utf-8") as fh:
+        fh.write("\n# a comment\n")
+    after = {stage: code_version(stage, package) for stage in STAGE_NAMES}
+    assert [s for s in STAGE_NAMES if before[s] != after[s]] == ["language"]
+
+
+def test_editing_a_builder_changes_only_its_stage(tmp_path: Path) -> None:
+    """Editing the quality builder in the shared pipeline module bumps quality alone."""
+    from slm4ie.data.curate.stages import STAGE_NAMES, code_version
+
+    package = _copy_package(tmp_path)
+    before = {stage: code_version(stage, package) for stage in STAGE_NAMES}
+    source = (package / "pipeline.py").read_text(encoding="utf-8")
+    (package / "pipeline.py").write_text(
+        source.replace(
+            '    in_ = input_override if input_override is not None else paths.stage_dir("language")\n    out = output_override if output_override is not None else paths.stage_dir("quality")',
+            '    # tweak\n    in_ = input_override if input_override is not None else paths.stage_dir("language")\n    out = output_override if output_override is not None else paths.stage_dir("quality")',
+        ),
+        encoding="utf-8",
+    )
+    after = {stage: code_version(stage, package) for stage in STAGE_NAMES}
+    assert [s for s in STAGE_NAMES if before[s] != after[s]] == ["quality"]

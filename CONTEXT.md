@@ -123,9 +123,9 @@ Any mismatch invalidates that stage and every stage after it.
 _Avoid_: checkpoint, marker, lock, cache
 
 **Stage version**:
-An integer per stage, raised by hand when its code changes what it outputs.
-Refactors that leave the output alone do not raise it.
-_Avoid_: code hash, revision
+A hash of the code that runs a stage, computed automatically. Any edit to that
+code — a fix, a refactor, a comment — changes it and reruns the stage.
+_Avoid_: revision, version number
 
 **Document digest**:
 An order-independent hash over the documents a stage wrote for one dataset. It

@@ -102,7 +102,7 @@ stage (`05_exact_dedup/`). Each unit's sentinel records its lineage:
 | Field             | What it is                                                                                         |
 | ----------------- | -------------------------------------------------------------------------------------------------- |
 | `config_hash`     | hash of the stage's (override-merged) config section, plus the files it names — see below          |
-| `stage_version`   | the stage's entry in `STAGE_VERSIONS` (`slm4ie/data/curate/stages.py`), raised by hand when its code changes what it writes |
+| `stage_version`   | a hash of the code that runs the stage — the files and functions `STAGE_SOURCES` in `slm4ie/data/curate/stages.py` lists for it; imports are not followed |
 | `input_digest`    | the upstream unit's recorded document digest; for `convert`, the size and SHA-256 of the extracted source file(s) |
 | `document_digest` | order-independent hash of the documents the unit wrote                                             |
 | `shards`          | every file the unit wrote, by relative path and byte size                                          |
@@ -117,9 +117,9 @@ when it failed its integrity check. Nothing else triggers a rebuild:
   the reader-stamped `metadata.file_path`, so the same documents give the same
   digest however they are split. Copying, `rsync`-ing or `touch`-ing shards or
   extracted files changes nothing; a touched extracted file is rehashed once.
-- **Early cutoff.** A stage that reruns — say after a `stage_version` bump for a
-  refactor that turned out not to change its output — and reproduces the same
-  documents leaves every downstream unit current.
+- **Early cutoff.** A stage that reruns — say after a refactor or a comment
+  edit changed its code hash — and reproduces the same documents leaves every
+  downstream unit current.
 
 The config hash covers the stage's own top-level section. `quality` and
 `statistics` also fold in the stopword file, `spam` folds in its lexicon and
