@@ -14,6 +14,18 @@ One of the three ways an extracted dataset is consumed downstream — pretrainin
 curation, task conversion, tokenizer quality. Each owns a disjoint output tree.
 _Avoid_: pipeline, path, fork
 
+**Step package**:
+One package under `slm4ie/data/` per pipeline step, every one of the same
+shape: `config.py` loads the step's registry, `run.py` is its run module,
+`tracking.py` logs to MLflow, and a backend-registry subpackage holds its
+backends.
+_Avoid_: route package, stage package, module group
+
+**Run module**:
+The argv-free entry point of a step package, `run.py`, called by the script
+subcommand of the same name; a stage module exposes `run` for the same reason.
+_Avoid_: driver, runner, main
+
 **Data tier**:
 One of the seven top-level folders under the data root, each holding the output
 of one stretch of the pipeline. A tier is larger than a stage: all eight
