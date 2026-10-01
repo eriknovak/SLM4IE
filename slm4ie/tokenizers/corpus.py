@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from slm4ie.data.io_utils import open_output, open_text_stream
+from slm4ie.utils.io import open_output, open_text_stream
 
 logger = logging.getLogger(__name__)
 

@@ -26,7 +26,7 @@
 #   extractors   jsonl (line-delimited JSON), json (single doc/array), text
 #     (plain text), conllu (CoNLL-U columns), tei (TEI XML, parliamentary/academic),
 #     macocu (MaCoCu monolingual XML), coleslaw (COLESLAW legal), huggingface
-#     (locally cached HF dataset). Registry lives in slm4ie/data/extractors/.
+#     (locally cached HF dataset). Registry lives in slm4ie/data/extract/extractors/.
 #   metadata     (a) conllu/tei extractors: per-document metadata loaded from an
 #     external TSV — keys path, key_column, key_from ("filename_stem" only),
 #     key_pattern (regex, group 1 = key), fields ({tsv_column: metadata_field}),

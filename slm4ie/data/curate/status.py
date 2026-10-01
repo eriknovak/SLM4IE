@@ -43,7 +43,7 @@ from slm4ie.data.curate.stages import (
     upstream_stage,
 )
 from slm4ie.data.curate.stages.convert import convert_input_files, input_files_digest
-from slm4ie.data.versioning import (
+from slm4ie.utils.versioning import (
     ScanRequest,
     UnitScan,
     check_integrity,

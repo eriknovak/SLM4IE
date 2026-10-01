@@ -310,7 +310,7 @@ def log_dataset_input(
     Args:
         name (str): Logical dataset name (e.g. `pretrain/06_sentence_dedup`).
         digest (str): Content digest identifying this build (see
-            `slm4ie.data.versioning.corpus_digest`).
+            `slm4ie.utils.versioning.corpus_digest`).
         source (str): Filesystem path or URI the dataset lives at.
         context (str): Lineage context label (e.g. `produced`, `training`,
             `eval`).

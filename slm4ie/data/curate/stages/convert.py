@@ -39,19 +39,18 @@ from tqdm import tqdm
 
 from slm4ie.data.curate.stages import StageJob
 
-from slm4ie.data.io_utils import (
+from slm4ie.data.extract.records import find_dataset_files, iter_joined_records
+from slm4ie.utils.io import (
     DEFAULT_MAX_SHARD_BYTES,
     ShardedJsonlWriter,
-    find_dataset_files,
-    iter_joined_records,
 )
-from slm4ie.data.parallel import (
+from slm4ie.utils.parallel import (
     cpu_default,
     resolve_workers,
     run_parallel,
     workers_quiet,
 )
-from slm4ie.data.versioning import combine_named_digests, file_sha256
+from slm4ie.utils.versioning import combine_named_digests, file_sha256
 
 logger = logging.getLogger(__name__)
 

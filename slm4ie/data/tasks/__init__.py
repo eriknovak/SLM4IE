@@ -31,7 +31,7 @@ from slm4ie.data.tasks.driver import (
     synthesize_id,
     target_splits,
 )
-from slm4ie.data.tasks.registry import (
+from slm4ie.data.tasks.config import (
     TaskEntry,
     TaskSource,
     TasksConfig,

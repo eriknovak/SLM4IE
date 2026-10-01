@@ -38,14 +38,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Type
 
-from slm4ie.data.io_utils import iter_joined_records
-from slm4ie.data.parallel import (
+from slm4ie.data.extract.records import iter_joined_records
+from slm4ie.utils.parallel import (
     configure_script_logging,
     cpu_default,
     resolve_workers,
     run_parallel,
 )
-from slm4ie.data.tasks.registry import (
+from slm4ie.data.tasks.config import (
     TaskEntry,
     TasksRoots,
     load_tasks,

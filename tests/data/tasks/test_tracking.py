@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from slm4ie.data.tasks import tracking as tt
-from slm4ie.data.tasks.registry import TaskEntry, TasksConfig, TaskSource, TasksRoots
+from slm4ie.data.tasks.config import TaskEntry, TasksConfig, TaskSource, TasksRoots
 
 
 def _entry(task: str = "sentiment", dataset: str = "demo", splits=None, labels=None) -> TaskEntry:

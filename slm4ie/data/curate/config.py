@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tup
 
 import yaml
 
-from slm4ie.data.catalog import _deep_merge
+from slm4ie.utils.config import deep_merge
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import SCOPED_STAGES, is_scoped
-from slm4ie.data.io_utils import find_project_root as _find_project_root, resolve_project_path
-from slm4ie.data.stopwords import load_stopwords
-from slm4ie.data.versioning import config_hash
+from slm4ie.utils.io import find_project_root as _find_project_root, resolve_project_path
+from slm4ie.data.curate.resources.stopwords import load_stopwords
+from slm4ie.utils.versioning import config_hash
 
 if TYPE_CHECKING:
     from slm4ie.data.curate.stages.spam import SpamAssets
@@ -155,7 +155,7 @@ def effective_stage_config(
     """
     base = dict(cfg.get(stage) or {})
     override = ((overrides or {}).get(dataset) or {}).get(stage) or {}
-    return _deep_merge(base, override)
+    return deep_merge(base, override)
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -220,7 +220,7 @@ def _resolve_dirs(input_dir: Optional[Path], output_dir: Optional[Path], cfg: Di
 def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
     """Load the stopword set and return (set, raw_bytes_for_hashing).
 
-    Thin wrapper over `slm4ie.data.stopwords.load_stopwords`. Reads the
+    Thin wrapper over `slm4ie.data.curate.resources.stopwords.load_stopwords`. Reads the
     language code from `cfg['stopwords']`. A missing or empty key
     disables stopwords (returns an empty set and empty bytes, after
     logging a warning). An unknown code is propagated as `ValueError`
@@ -235,7 +235,7 @@ def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
 
     Raises:
         ValueError: If `cfg['stopwords']` is set to a code that has no
-            bundled list under `slm4ie/data/stopwords/`.
+            bundled list under `slm4ie/data/curate/resources/stopwords/`.
     """
     code = cfg.get("stopwords")
     if not code:
@@ -261,7 +261,7 @@ def _load_spam_assets(cfg: Dict[str, Any]) -> SpamAssets:
 
     Raises:
         ValueError: If a configured language has no curated list under
-            `slm4ie/data/spam/`.
+            `slm4ie/data/curate/resources/spam/`.
     """
     from slm4ie.data.curate.stages.spam import load_spam_assets
 

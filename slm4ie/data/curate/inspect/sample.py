@@ -41,7 +41,7 @@ import numpy as np
 import yaml
 
 from slm4ie.data.curate.stages import STAGE_DIRS, final_corpus_dir, upstream_stage
-from slm4ie.data.io_utils import resolve_project_path
+from slm4ie.utils.io import resolve_project_path
 
 logger = logging.getLogger(__name__)
 

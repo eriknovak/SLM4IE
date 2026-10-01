@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 import numpy as np
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
-from slm4ie.data.parallel import (
+from slm4ie.utils.parallel import (
     configure_script_logging,
     cpu_default,
     resolve_workers,

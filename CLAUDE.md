@@ -152,7 +152,7 @@ fly downstream — never materialize a merged file:
   arrays: `forms`, `lemmas`, `upos`, `feats`, `sentences`, plus `spans` when
   present).
 
-Use `slm4ie.data.io_utils.iter_joined_records` to consume both together.
+Use `slm4ie.data.extract.records.iter_joined_records` to consume both together.
 
 ## Conversion routes — keep them separate
 
@@ -317,6 +317,16 @@ checks structure but not semantic agreement with the code.
   existing script as a subcommand; a new script needs a pipeline of its own.
   Shared argument shapes (selection, workers, config paths, log dirs) come from
   `slm4ie/utils/cli.py`.
+- Every data step is one package under `slm4ie/data/` with the same shape:
+  `config.py` loads the step's registry from `configs/data/` into a `*Config`
+  dataclass, `driver.py` is the argv-free entry point the script calls,
+  `tracking.py` logs to MLflow where the step tracks, and a backend-registry
+  subpackage holds the pluggable implementations (`download/sources/`,
+  `extract/extractors/`, `tokenization/readers/`, `tasks/converters/`,
+  `curate/stages/`). `config.py` is always the YAML loader; `registry` names
+  only in-code backend registries. Plumbing that knows nothing of the data
+  tiers (`io`, `parallel`, `versioning`, `config`) lives in `slm4ie/utils/`,
+  which never imports from `slm4ie/data/`.
 - Annotated extractors should keep text and annotations split (see Data
   layout). Don't add a "merged" output without a strong reason.
 - Every figure is drawn through `experiments/report_figures.py`: an

@@ -26,7 +26,7 @@ from slm4ie.data.tasks.driver import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.registry import TaskEntry, TasksRoots
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 
 logger = logging.getLogger(__name__)
 

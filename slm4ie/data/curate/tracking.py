@@ -38,7 +38,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from slm4ie.data.versioning import config_hash, corpus_digest
+from slm4ie.utils.versioning import config_hash, corpus_digest
 from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.data.curate.stages import SCOPED_STAGES, STAGE_DIRS, STAGE_NAMES
 from slm4ie.utils import mlflow as ml

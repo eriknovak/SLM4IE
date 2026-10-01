@@ -13,9 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
 
-from slm4ie.data.catalog import _deep_merge
+from slm4ie.utils.config import load_yaml
 from slm4ie.tokenizers.corpus import SampleBudget
 
 
@@ -172,11 +171,7 @@ def load_tokenizer_config(config_path: Path) -> TokenizerSweepConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Tokenizer config not found: {config_path}")
 
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    local_path = config_path.with_suffix(".local.yaml")
-    if local_path.exists():
-        local_raw = yaml.safe_load(local_path.read_text(encoding="utf-8")) or {}
-        raw = _deep_merge(raw, local_raw)
+    raw = load_yaml(config_path)
 
     corpus = raw.get("corpus") or {}
     morphology = raw.get("morphology") or {}

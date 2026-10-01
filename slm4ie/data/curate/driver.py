@@ -68,7 +68,7 @@ from slm4ie.data.curate.stages import (
     run_stage,
     upstream_stage,
 )
-from slm4ie.data.versioning import EMPTY_DIGEST, merge_digests, shard_files
+from slm4ie.utils.versioning import EMPTY_DIGEST, merge_digests, shard_files
 
 logger = logging.getLogger(__name__)
 

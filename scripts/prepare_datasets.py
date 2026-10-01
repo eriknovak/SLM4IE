@@ -35,12 +35,12 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from slm4ie.data.download import download_datasets
-from slm4ie.data.extract import extract_datasets
-from slm4ie.data.parallel import configure_script_logging
+from slm4ie.data.download.driver import download_datasets
+from slm4ie.data.extract.driver import extract_datasets
+from slm4ie.utils.parallel import configure_script_logging
 from slm4ie.data.tasks.driver import convert_tasks
 from slm4ie.data.tasks.converters.superglue import DEFAULT_VARIANT, VARIANT_DIRS
-from slm4ie.data.tokenization import convert_tokenization_datasets
+from slm4ie.data.tokenization.driver import convert_tokenization_datasets
 from slm4ie.utils.cli import (
     add_selection,
     add_workers,

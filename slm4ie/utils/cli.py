@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from slm4ie.data.io_utils import find_project_root
+from slm4ie.utils.io import find_project_root
 
 
 def add_selection(

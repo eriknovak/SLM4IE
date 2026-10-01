@@ -23,7 +23,7 @@ from slm4ie.data.tasks.driver import (
     synthesize_id,
     target_splits,
 )
-from slm4ie.data.tasks.registry import load_tasks
+from slm4ie.data.tasks.config import load_tasks
 
 
 def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
