@@ -68,6 +68,16 @@ result.
 | `sentence_dedup` | `06_sentence_dedup/` | corpus-wide | N-sentence sliding-window dedup (final corpus)                                                                                                          |
 | `statistics`     | `07_statistics/`     | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process)                                                                              |
 
+The `spam` stage matches its lexicon by stem, so inflected forms count: an
+entry's last token drops one trailing vowel when it has five or more letters
+and then accepts up to three more letters (`joške` matches `joškah`,
+`joškami`). `min_adult_hits` / `min_spam_hits` count **distinct stems**, so
+one word repeated or inflected counts once. Every dropped document is written
+with its `metadata.spam_reason` and `metadata.spam_terms` (the matched stems)
+to `02_spam/<key>/removed/<rank>.jsonl.gz`. That folder travels with the unit
+but is outside its integrity check and document digest, and the next stage
+never reads it.
+
 Internally each dedup stage chains three datatrove executors via `depends=`:
 signature → find (single-worker reducer over signatures) → filter + write. The
 sig/find scratch lives at `<output_dir>/_partial/<stage folder>.scratch/`, beside
@@ -205,6 +215,7 @@ effectively non-overridable until some are surfaced.
 │   └── <key>/{<rank>.jsonl.gz, .complete}  ← post-language-filter shards
 ├── 02_spam/
 │   └── <key>/{<rank>.jsonl.gz, .complete}  ← post-spam-filter shards
+│       └── removed/<rank>.jsonl.gz         ← dropped docs + spam_reason
 ├── 03_quality/
 │   └── <key>/{<rank>.jsonl.gz, .complete}
 ├── 04_repetition/

@@ -1,5 +1,6 @@
 """Tests for the adult/SEO-spam filter stage (`slm4ie.data.curate.stages.spam`)."""
 
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -8,12 +9,15 @@ pytest.importorskip("datatrove")
 
 from datatrove.data import Document  # noqa: E402
 
+from slm4ie.data.curate.stages import spam as spam_module
 from slm4ie.data.curate.stages.spam import (
     SpamConfig,
     SpamFilter,
+    collapse_keys,
     load_spam_assets,
     load_spam_domains,
     load_spam_lexicon,
+    stem_key,
 )
 
 
@@ -55,7 +59,7 @@ def _kept(result) -> bool:
 def test_load_spam_lexicon_sl_has_known_offenders() -> None:
     """The Slovenian lexicon flags the offenders found in the corpus stats."""
     adult, spam, raw = load_spam_lexicon("sl")
-    assert {"prostitutke", "porno", "seks", "kurba"} <= adult
+    assert {"prostitutka", "porno", "seks", "kurba"} <= adult
     assert "viagra" in spam
     assert raw  # non-empty bytes for sentinel hashing
 
@@ -65,6 +69,54 @@ def test_load_spam_lexicon_excludes_ambiguous_common_words() -> None:
     adult, spam, _ = load_spam_lexicon("sl")
     assert "ženske" not in adult and "ženske" not in spam
     assert "masaža" not in adult and "masaža" not in spam
+    ambiguous = {
+        "replika",
+        "replike",
+        "ponaredek",
+        "ponaredki",
+        "igralnica",
+        "igralnice",
+        "oralno",
+        "oralni",
+        "analno",
+        "analni",
+        "spolnost",
+    }
+    assert not ambiguous & (adult | spam)
+
+
+def test_lexicon_headers_name_every_excluded_word() -> None:
+    """Each word kept out of the lexicon is named in a header exclusion list."""
+    folder = Path(spam_module.__file__).resolve().parents[1] / "resources" / "spam" / "sl"
+    header = "".join(
+        line for path in folder.glob("*.txt") for line in path.read_text().splitlines(True) if line.startswith("#")
+    )
+    for word in ("replika", "igralnice", "oralno", "analni", "spolnost", "erotika", "golota", "bordeli"):
+        assert word in header
+
+
+def test_stem_key_drops_one_vowel_from_long_last_token() -> None:
+    """Only the last token of 5+ letters loses one trailing vowel."""
+    assert stem_key("joške") == "jošk"
+    assert stem_key("seks") == "seks"
+    assert stem_key("anal") == "anal"
+    assert stem_key("erotična  masaža") == "erotična masaž"
+
+
+def test_collapse_keys_folds_one_stem_family() -> None:
+    """Entries sharing a stem, or extending it by up to 3 letters, count as one key."""
+    assert collapse_keys({"seks", "seksi"}) == {"seks": "seks"}
+    assert collapse_keys({"kurba", "kurbe", "kurbir"}) == {"kurb": "kurb", "kurbir": "kurb"}
+    assert collapse_keys({"seks", "seks oglasi"}) == {"seks": "seks", "seks oglas": "seks oglas"}
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_every_lexicon_entry_matches_itself(which: int) -> None:
+    """A key counted under a shorter one still matches its own forms (`seksanje`, `fukanje`)."""
+    terms = load_spam_lexicon("sl")[which]
+    f = _filter(min_adult_hits=1, min_spam_hits=1)
+    missed = [t for t in terms if _kept(f.filter(_doc(t)))]
+    assert missed == []
 
 
 def test_load_spam_lexicon_unknown_language_raises() -> None:
@@ -143,8 +195,55 @@ def test_single_adult_hit_below_threshold_is_kept() -> None:
 def test_spam_hits_drop_the_document() -> None:
     """Reaching the SEO/scam-hit threshold drops the document."""
     f = _filter(min_spam_hits=2)
-    result = f.filter(_doc("Kupi viagra poceni, viagra na spletu!"))
+    result = f.filter(_doc("Kupi viagra poceni, cialis na spletu!"))
     assert _kept(result) is False
+
+
+def test_one_term_repeated_counts_once() -> None:
+    """One term used twice, even in two inflections, stays below threshold 2."""
+    f = _filter(min_adult_hits=2, min_spam_hits=2)
+    assert _kept(f.filter(_doc("Kupi viagra poceni, viagra na spletu!")))
+    assert _kept(f.filter(_doc("O seksu in seksa v biologiji, spet seks.")))
+
+
+@pytest.mark.parametrize("text", ["o joškah", "z joškami", "pri kurbah", "brez seksa"])
+def test_inflected_forms_fire(text: str) -> None:
+    """Inflected forms of a lexicon entry match its stem."""
+    f = _filter(min_adult_hits=1)
+    assert _kept(f.filter(_doc(text))) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "replika poslanca in replike drugih",
+        "o replikah",
+        "v igralnicah in igralnici",
+        "oralno pršilo za grlo",
+        "analiza podatkov, analni del",
+        "spolnost v šoli",
+    ],
+)
+def test_ambiguous_words_never_fire(text: str) -> None:
+    """Removed ambiguous words, and their stems, never fire."""
+    f = _filter(min_adult_hits=1, min_spam_hits=1)
+    assert _kept(f.filter(_doc(text)))
+
+
+@pytest.mark.parametrize("text", ["spletna igralnica", "spletna igralnicah", "oralni seks", "Oralni\nseks"])
+def test_phrase_forms_fire(text: str) -> None:
+    """Phrase-qualified forms still fire, inflecting only their last token."""
+    f = _filter(min_adult_hits=1, min_spam_hits=1)
+    assert _kept(f.filter(_doc(text))) is False
+
+
+def test_dropped_doc_records_reason_and_terms() -> None:
+    """A dropped document carries its reason and its sorted distinct stem keys."""
+    f = _filter(min_adult_hits=2)
+    doc = _doc("Porno, seks in spet seksi.")
+    assert _kept(f.filter(doc)) is False
+    assert doc.metadata["spam_reason"] == "adult_lexicon"
+    assert doc.metadata["spam_terms"] == ["porn", "seks"]
 
 
 def test_blocklisted_url_drops_the_document() -> None:

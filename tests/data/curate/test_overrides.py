@@ -10,7 +10,9 @@ from slm4ie.data.curate.config import (
     STAGE_KNOBS,
     OverrideConfigError,
     effective_stage_config,
+    load_curate_config,
     validate_overrides,
+    validate_spam_knobs,
 )
 from slm4ie.data.curate.stages.quality import QualityConfig  # noqa: E402
 from slm4ie.data.curate.stages.spam import SpamConfig  # noqa: E402
@@ -103,3 +105,40 @@ def test_validate_rejects_non_mapping_knobs() -> None:
     """A stage whose value is not a knob mapping is rejected."""
     with pytest.raises(OverrideConfigError, match="mapping"):
         validate_overrides({"a": {"quality": [1, 2, 3]}}, ["a"])
+
+
+@pytest.mark.parametrize(
+    "knobs",
+    [
+        {"min_adult_hits": 0},
+        {"min_spam_hits": -1},
+        {"min_spam_hits": 1.5},
+        {"min_adult_hits": True},
+        {"keep_fraction": 1.5},
+        {"keep_fraction": -0.1},
+        {"keep_fraction": "half"},
+    ],
+)
+def test_validate_rejects_out_of_bounds_spam_knobs(knobs) -> None:
+    """Spam thresholds below 1 and fractions outside [0, 1] fail in an override."""
+    with pytest.raises(OverrideConfigError, match="overrides.a.spam"):
+        validate_overrides({"a": {"spam": knobs}}, ["a"])
+
+
+def test_validate_spam_knobs_names_the_global_slice() -> None:
+    """The global slice is checked with its own path in the message."""
+    with pytest.raises(OverrideConfigError, match="spam.min_adult_hits"):
+        validate_spam_knobs({"min_adult_hits": 0}, "spam")
+
+
+def test_validate_accepts_large_spam_threshold() -> None:
+    """A huge threshold stays legal: it neutralises the signal."""
+    validate_overrides({"a": {"spam": {"min_spam_hits": 999999, "keep_fraction": 1}}}, ["a"])
+
+
+def test_load_curate_config_rejects_bad_global_spam(tmp_path) -> None:
+    """The loader bounds-checks the global spam slice."""
+    config = tmp_path / "curate.yaml"
+    config.write_text("spam:\n  min_adult_hits: 0\n")
+    with pytest.raises(OverrideConfigError, match="spam.min_adult_hits"):
+        load_curate_config(tmp_path, tmp_path, config, None)

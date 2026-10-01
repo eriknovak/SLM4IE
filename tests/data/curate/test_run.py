@@ -10,6 +10,7 @@ import gzip
 import json
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,6 +25,7 @@ import slm4ie.data.curate.paths as curate_paths  # noqa: E402
 import slm4ie.data.curate.stages as curate_stages  # noqa: E402
 import slm4ie.data.curate.status as curate_status  # noqa: E402
 import slm4ie.data.curate.run as curate_runner  # noqa: E402
+from slm4ie.data.curate.stages.spam import SpamFilter, load_spam_assets  # noqa: E402
 from slm4ie.utils.versioning import read_lock, write_lock  # noqa: E402
 from slm4ie.data.curate import (
     STAGE_DIRS,
@@ -641,3 +643,53 @@ def test_units_without_a_code_version_are_stamped_not_rebuilt(env: _Env) -> None
     assert env.stub.ran == []
     assert read_sentinel(env.unit("quality")).stage_version == curate_runner.STAGE_VERSIONS["quality"]  # type: ignore[union-attr]
     assert env.run("--all") == []
+
+
+def _spam_run(monkeypatch: pytest.MonkeyPatch, root: Path, *, exclusion: bool) -> Path:
+    """Run every stage, the spam stage for real, over a fixture with two adult docs.
+
+    Args:
+        monkeypatch: pytest's monkeypatch fixture.
+        root: tmp folder for this environment.
+        exclusion: Keep the stage's exclusion writer; when False it is removed.
+
+    Returns:
+        The spam unit's output folder.
+    """
+    env = _Env(monkeypatch, root)
+    texts = ["porno in seks", "lep dan", "pornič in seksi oglas", "seks, seksa"]
+    lines = [json.dumps({"uid": f"{_DATASET}:{i}", "text": t}) for i, t in enumerate(texts)]
+    (Path(env.cfg["input_dir"]) / f"{_DATASET}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assets = load_spam_assets(["sl"], url_blocklist=False)
+    stub = env.stub
+
+    def run_stage(stage: str, job: Any) -> Tuple[int, int]:
+        if stage != "spam":
+            return stub(stage, job)
+        return curate_stages.run_stage(stage, replace(job, spam_assets=assets))
+
+    monkeypatch.setattr(curate_runner, "run_stage", run_stage)
+    if not exclusion:
+        init = SpamFilter.__init__
+        monkeypatch.setattr(SpamFilter, "__init__", lambda self, **kw: init(self, **{**kw, "exclusion_writer": None}))
+    env.run("--all")
+    return env.unit("spam")
+
+
+def test_spam_writes_dropped_docs_without_touching_lineage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Dropped docs land in the unit's `removed/` folder; digest and counts match a run without them."""
+    unit = _spam_run(monkeypatch, tmp_path / "with", exclusion=True)
+    removed = _read_docs(unit / "removed")
+    assert sorted(d["id"] for d in removed) == [f"{_DATASET}:0", f"{_DATASET}:2"]
+    assert all(d["metadata"]["spam_reason"] == "adult_lexicon" and d["metadata"]["spam_terms"] for d in removed)
+    with_writer = read_sentinel(unit)
+    quality = read_sentinel(unit.parent.parent / STAGE_DIRS["quality"] / _DATASET)
+    assert quality is not None and quality.records_in == 2
+
+    bare = _spam_run(monkeypatch, tmp_path / "without", exclusion=False)
+    assert not (bare / "removed").exists()
+    without_writer = read_sentinel(bare)
+    assert with_writer is not None and without_writer is not None
+    assert with_writer.document_digest == without_writer.document_digest
+    assert (with_writer.records_in, with_writer.records_out) == (4, 2)
+    assert without_writer.records_out == with_writer.records_out

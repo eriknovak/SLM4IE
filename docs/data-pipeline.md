@@ -24,6 +24,7 @@ pretrain/                                      # corpus-wide curation output
   00_convert/<key>/*.jsonl.gz                    # datatrove `Document` shape
   01_language/<key>/*.jsonl.gz
   02_spam/<key>/*.jsonl.gz                       # adult/SEO-spam removal
+  02_spam/<key>/removed/*.jsonl.gz               # dropped docs + spam_reason
   03_quality/<key>/*.jsonl.gz
   04_repetition/<key>/*.jsonl.gz
   05_exact_dedup/<key>/*.jsonl.gz                # exact dedup

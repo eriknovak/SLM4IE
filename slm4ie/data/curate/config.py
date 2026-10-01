@@ -95,6 +95,32 @@ class OverrideConfigError(ValueError):
     """Raised when the `overrides:` block is malformed or out of bounds."""
 
 
+def validate_spam_knobs(knobs: Dict[str, Any], where: str) -> None:
+    """Bounds-check the spam stage's threshold knobs.
+
+    A huge threshold stays legal: it neutralises a signal without skipping
+    the stage.
+
+    Args:
+        knobs: A spam config slice, global or one dataset's override.
+        where: Config path of the slice, used in error messages.
+
+    Raises:
+        OverrideConfigError: If `min_adult_hits` / `min_spam_hits` is not
+            an integer of at least 1, or `keep_fraction` is not a number
+            in `[0, 1]`.
+    """
+    for name in ("min_adult_hits", "min_spam_hits"):
+        if name in knobs:
+            value = knobs[name]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise OverrideConfigError(f"{where}.{name}: expected an integer >= 1, got {value!r}")
+    if "keep_fraction" in knobs:
+        value = knobs["keep_fraction"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise OverrideConfigError(f"{where}.keep_fraction: expected a number in [0, 1], got {value!r}")
+
+
 def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -> None:
     """Validate the `overrides:` block against the dataset roster.
 
@@ -106,7 +132,8 @@ def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -
     Raises:
         OverrideConfigError: If a dataset key is not in `roster`, a
             section is not a scoped stage, a knob is unknown for its
-            stage, or a section/knob value has the wrong shape.
+            stage, a section/knob value has the wrong shape, or a spam
+            knob is out of bounds.
     """
     if not overrides:
         return
@@ -129,6 +156,8 @@ def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -
                     f"overrides.{dataset}.{stage}: unknown knob(s) "
                     f"{sorted(unknown)}; allowed: {sorted(STAGE_KNOBS[stage])}"
                 )
+            if stage == "spam":
+                validate_spam_knobs(knobs, f"overrides.{dataset}.spam")
 
 
 def effective_stage_config(
@@ -448,10 +477,14 @@ def load_curate_config(
 
     Returns:
         The loaded `CurateConfig`.
+
+    Raises:
+        OverrideConfigError: If the global `spam:` slice is out of bounds.
     """
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_config)
+    validate_spam_knobs(cfg.get("spam") or {}, "spam")
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
     return CurateConfig(

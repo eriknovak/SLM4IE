@@ -182,6 +182,18 @@ The committed record of every sentinel's hashes and digests, so each commit
 names the corpus it expects and `status` can report where the disk differs.
 _Avoid_: manifest, snapshot, dvc.lock
 
+**Stem key**:
+The form a spam lexicon entry is matched and counted by: its last token minus
+one trailing vowel when five letters or longer, accepting up to three more
+letters. The spam thresholds count distinct stem keys, not occurrences.
+_Avoid_: lemma, root, term count
+
+**Removed shard**:
+A shard under a unit's `removed/` folder holding the documents that stage
+dropped, each with its drop reason. It moves with the unit but is outside its
+integrity check and document digest, and no stage reads it.
+_Avoid_: rejects, excluded shard, trash
+
 ### Task conversion
 
 **Entry**:
