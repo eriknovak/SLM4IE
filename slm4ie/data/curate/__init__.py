@@ -41,7 +41,6 @@ from slm4ie.data.curate.stages import (
 from slm4ie.data.curate.sentinel import (
     Sentinel,
     SENTINEL_NAME,
-    config_hash,
     read_sentinel,
     stale_reason,
     write_sentinel,
@@ -51,12 +50,6 @@ from slm4ie.data.curate.overrides import (
     OverrideConfigError,
     effective_stage_config,
     validate_overrides,
-)
-from slm4ie.data.curate.manifest import (
-    DEFAULT_SHARD_GLOBS,
-    ROWS_NOT_COUNTED,
-    corpus_digest,
-    shard_manifest,
 )
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
 
@@ -74,7 +67,6 @@ __all__ = [
     # sentinel
     "Sentinel",
     "SENTINEL_NAME",
-    "config_hash",
     "read_sentinel",
     "stale_reason",
     "write_sentinel",
@@ -83,11 +75,6 @@ __all__ = [
     "OverrideConfigError",
     "effective_stage_config",
     "validate_overrides",
-    # manifest
-    "DEFAULT_SHARD_GLOBS",
-    "ROWS_NOT_COUNTED",
-    "corpus_digest",
-    "shard_manifest",
     # diagnostics
     "diagnose_language_leakage",
 ]

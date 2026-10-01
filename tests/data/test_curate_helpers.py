@@ -130,7 +130,7 @@ def test_repetition_has_no_overridable_knobs() -> None:
 def test_bucket_keys_by_effective_hash_groups_shared_configs() -> None:
     """Datasets sharing an effective config land in one bucket; overrides split out."""
     from slm4ie.data.curate.runner import _bucket_keys_by_effective_hash
-    from slm4ie.data.curate import config_hash
+    from slm4ie.data.versioning import config_hash
 
     cfg = {"quality": {"min_doc_words": 20, "max_ellipsis_lines_ratio": 0.3}}
     overrides = {"news": {"quality": {"max_ellipsis_lines_ratio": 0.9}}}

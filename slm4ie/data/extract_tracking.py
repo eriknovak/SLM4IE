@@ -3,7 +3,7 @@
 Reads the on-disk `extracted/` outputs after an extraction build and records a
 single MLflow run per distinct build under the `slm4ie/data/extract`
 experiment. The run is keyed by a content digest of the extracted tree
-(`slm4ie.data.curate.corpus_digest`) and upserted: a build whose digest already
+(`slm4ie.data.versioning.corpus_digest`) and upserted: a build whose digest already
 has a run is skipped unless `force` is set, in which case the prior run is
 deleted and re-logged. This mirrors the rest of the pipeline's
 skip-unless-`--force` convention and is decoupled from which sources were
@@ -35,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from slm4ie.data.curate import config_hash, corpus_digest
+from slm4ie.data.versioning import config_hash, corpus_digest
 from slm4ie.data.io_utils import find_dataset_files
 from slm4ie.utils import mlflow as ml
 

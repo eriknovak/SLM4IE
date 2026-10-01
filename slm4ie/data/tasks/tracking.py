@@ -24,7 +24,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from slm4ie.data.curate import config_hash, corpus_digest
+from slm4ie.data.versioning import config_hash, corpus_digest
 from slm4ie.data.tasks.registry import TaskEntry, TasksConfig, resolve_output_dir
 from slm4ie.data.tasks.writer import iter_jsonl, outputs_for_splits
 from slm4ie.utils import mlflow as ml

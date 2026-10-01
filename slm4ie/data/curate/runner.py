@@ -43,7 +43,6 @@ from datatrove.pipeline.dedup import SentDedupConfig
 from slm4ie.data.curate import (
     STAGE_NAMES,
     cascade_from,
-    config_hash,
     read_sentinel,
     upstream_stage,
     write_sentinel,
@@ -85,6 +84,7 @@ from slm4ie.data.io_utils import (
 )
 from slm4ie.data.stopwords import load_stopwords
 from slm4ie.data.versioning import (
+    config_hash,
     EMPTY_DIGEST,
     ScanRequest,
     UnitScan,

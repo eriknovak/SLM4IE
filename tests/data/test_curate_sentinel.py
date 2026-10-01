@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from slm4ie.data.versioning import config_hash
 from slm4ie.data.curate.sentinel import (
     CONFIG_CHANGED,
     INPUT_CHANGED,
@@ -13,7 +14,6 @@ from slm4ie.data.curate.sentinel import (
     NOT_BUILT,
     OUTPUT_CHANGED,
     STAGE_VERSION_CHANGED,
-    config_hash,
     read_sentinel,
     stale_reason,
     write_sentinel,

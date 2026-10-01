@@ -17,7 +17,6 @@ on disk as recorded (`stale_reason`). Upstream reruns that reproduce the same
 documents leave the recorded input digest valid, so downstream stays current.
 """
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -81,35 +80,6 @@ class Sentinel:
     def is_legacy(self) -> bool:
         """Return True for a sentinel written before lineage was recorded."""
         return self.stage_version is None
-
-
-def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
-    """Compute a stable hash for a config slice.
-
-    The slice is serialized as canonical JSON (sorted keys, no
-    whitespace) before hashing. Optional `extra` bytes are appended to
-    the hash input — used for hashing the *contents* of files
-    referenced by the config (e.g. the stopword file), which are
-    output-affecting but not part of the slice itself.
-
-    Args:
-        slice_: A JSON-serializable dict of output-affecting config.
-        extra: Optional extra bytes to fold into the hash (e.g. the
-            stopword file contents).
-
-    Returns:
-        Lower-case hex digest prefixed with `"sha256:"`.
-    """
-    h = hashlib.sha256()
-    # default=str coerces non-JSON-native YAML values (datetime, date, etc.)
-    # to a stable string form so the hash remains computable.
-    h.update(json.dumps(slice_, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8"))
-    if extra is not None:
-        # NUL-separate the slice from `extra` so byte boundaries can't collide
-        # between (slice ending in null bytes) and (slice + extra=b"...").
-        h.update(b"\x00")
-        h.update(extra)
-    return "sha256:" + h.hexdigest()
 
 
 def _write_payload(sentinel_path: Path, payload: Dict[str, Any]) -> None:
