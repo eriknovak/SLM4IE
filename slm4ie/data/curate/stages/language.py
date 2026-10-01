@@ -20,11 +20,18 @@ magnitude throughput win on web-scale corpora.
 # spurious ImportError. Keep these imports above the datatrove imports.
 import importlib.metadata  # noqa: F401
 import importlib.util  # noqa: F401
-from typing import List, Optional, Sequence, Set
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from datatrove.data import Document, DocumentsPipeline
+from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.base import PipelineStep
 from datatrove.pipeline.writers.disk_base import DiskWriter
+
+from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
 #: Default ISO 639-1 codes for the candidate language set used by the
 #: detector. Covers Slovenian and its likely confounders.
@@ -236,3 +243,129 @@ class _NullContext:
     def __exit__(self, exc_type, exc, tb) -> bool:
         """Swallow nothing; let exceptions propagate normally."""
         return False
+
+
+@dataclass(frozen=True)
+class LanguageParams:
+    """Resolved language-stage parameters for one config bucket.
+
+    Attributes:
+        target_languages: ISO 639-1 codes treated as in-language.
+        candidate_languages: Candidate set lingua chooses among, or None.
+        mode: `filter` drops out-of-target docs; `tag` only annotates.
+        minimum_relative_distance: Confidence gap lingua needs to commit.
+        low_accuracy: Use lingua's lighter trigram-only model.
+        max_chars: Truncate doc text to this many chars, or None.
+    """
+
+    target_languages: List[str]
+    candidate_languages: Optional[List[str]]
+    mode: str
+    minimum_relative_distance: float
+    low_accuracy: bool
+    max_chars: Optional[int]
+
+
+def _build_language_params(lang_cfg: Dict[str, Any]) -> LanguageParams:
+    """Resolve a language-stage config slice into typed parameters.
+
+    Args:
+        lang_cfg: The effective `language` config slice for one bucket.
+
+    Returns:
+        The resolved `LanguageParams`, with defaults applied.
+    """
+    return LanguageParams(
+        target_languages=lang_cfg.get("targets") or ["sl"],
+        candidate_languages=lang_cfg.get("candidates"),
+        mode=str(lang_cfg.get("mode", "filter")),
+        minimum_relative_distance=float(lang_cfg.get("minimum_relative_distance", 0.0)),
+        low_accuracy=bool(lang_cfg.get("low_accuracy", False)),
+        max_chars=lang_cfg.get("max_chars"),
+    )
+
+
+def build_language_executors(
+    paths: CuratePaths,
+    *,
+    tasks: int = 1,
+    target_languages: Sequence[str] = ("sl",),
+    candidate_languages: Optional[List[str]] = None,
+    lang_mode: str = "filter",
+    lang_minimum_relative_distance: float = 0.0,
+    lang_low_accuracy: bool = False,
+    lang_max_chars: Optional[int] = None,
+    input_override: Optional[Path] = None,
+    output_override: Optional[Path] = None,
+) -> List[LocalPipelineExecutor]:
+    """Build the language stage: read 00_convert/ → lingua filter → write 01_language/.
+
+    Args:
+        paths: Resolved input/output locations.
+        tasks: Parallel worker count for this stage.
+        target_languages: ISO 639-1 codes considered "in-language".
+        candidate_languages: ISO 639-1 candidate set for lingua.
+        lang_mode: `"tag"` keeps every doc; `"filter"` drops
+            out-of-target docs.
+        lang_minimum_relative_distance: Required confidence gap before
+            lingua commits. `0.0` disables.
+        lang_low_accuracy: Use lingua's trigram-only model.
+        lang_max_chars: Truncate doc text to this many chars before
+            detection. `None` disables truncation.
+        input_override: Optional folder to read from instead of the
+            convert stage's output folder. Used by the driver to
+            restrict the language stage to a symlinked subset of
+            `<output_dir>/00_convert/` when the user requests a subset
+            of dataset keys.
+        output_override: Optional folder to write to instead of the
+            stage's output folder (the driver's staging folder).
+
+    Returns:
+        A list with one `LocalPipelineExecutor`.
+    """
+    out = output_override if output_override is not None else paths.stage_dir("language")
+    in_ = input_override if input_override is not None else paths.stage_dir("convert")
+    executor = LocalPipelineExecutor(
+        pipeline=[
+            jsonl_reader(in_),
+            LinguaLanguageFilter(
+                targets=list(target_languages),
+                candidates=candidate_languages,
+                mode=lang_mode,
+                minimum_relative_distance=lang_minimum_relative_distance,
+                low_accuracy=lang_low_accuracy,
+                max_chars=lang_max_chars,
+            ),
+            jsonl_writer(out),
+        ],
+        tasks=tasks,
+        workers=tasks,
+        logging_dir=str(paths.logs_dir("language")),
+        skip_completed=False,
+    )
+    return [executor]
+
+
+def run(job: StageJob) -> Tuple[int, int]:
+    """Run the language stage over the job's input view.
+
+    Args:
+        job: What to filter, and where to write it.
+
+    Returns:
+        `(records_in, records_out)` from the run's datatrove stats.
+    """
+    params = _build_language_params(job.config)
+    execs = build_language_executors(
+        job.paths,
+        tasks=job.workers,
+        target_languages=params.target_languages,
+        candidate_languages=params.candidate_languages,
+        lang_mode=params.mode,
+        lang_minimum_relative_distance=params.minimum_relative_distance,
+        lang_low_accuracy=params.low_accuracy,
+        lang_max_chars=params.max_chars,
+        input_override=job.input_view,
+        output_override=job.output_folder,
+    )
+    return pipeline_io_counts(execs[-1].run())

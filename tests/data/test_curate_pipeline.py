@@ -28,24 +28,30 @@ from datatrove.pipeline.readers import JsonlReader  # noqa: E402
 from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 from datatrove.utils.typeshelper import Languages  # noqa: E402
 
-from slm4ie.data.curate.dedup import CompactSentenceDedupSignature  # noqa: E402
-from slm4ie.data.curate.language import LinguaLanguageFilter  # noqa: E402
-from slm4ie.data.curate.pipeline import (  # noqa: E402
-    CuratePaths,
+from slm4ie.data.curate.stages.dedup import CompactSentenceDedupSignature  # noqa: E402
+from slm4ie.data.curate.stages.language import LinguaLanguageFilter  # noqa: E402
+from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.stages.quality import (
     QualityConfig,
-    build_exact_dedup_executors,
-    build_language_executors,
     build_quality_executors,
-    build_repetition_executors,
-    build_sentence_dedup_executors,
-    build_spam_executors,
-    build_statistics_executors,
-    count_docs_per_key,
-    per_key_stage_counts,
-    stage_io_counts,
 )
-from slm4ie.data.curate.spam import SpamConfig, SpamFilter  # noqa: E402
-from slm4ie.data.curate.stats import CorpusStats, CorpusStatsReduce  # noqa: E402
+from slm4ie.data.curate.stages.dedup import (
+    build_exact_dedup_executors,
+    build_sentence_dedup_executors,
+)
+from slm4ie.data.curate.stages.language import build_language_executors
+from slm4ie.data.curate.stages.repetition import build_repetition_executors
+from slm4ie.data.curate.stages.spam import build_spam_executors
+from slm4ie.data.curate.stages.statistics import build_statistics_executors
+from slm4ie.data.curate.stages.common import stage_io_counts
+from slm4ie.data.curate.stages.spam import (  # noqa: E402
+    SpamConfig,
+    SpamFilter,
+)
+from slm4ie.data.curate.stages.statistics import (  # noqa: E402
+    CorpusStats,
+    CorpusStatsReduce,
+)
 
 
 def _paths(tmp_path: Path) -> CuratePaths:
@@ -440,7 +446,7 @@ def test_pipeline_io_counts_reports_reader_and_writer_totals(tmp_path: Path) -> 
     `min_doc_words` and one too short — so the reader sees 3 documents
     and the writer sees 2, and asserts the helper reports `(3, 2)`.
     """
-    from slm4ie.data.curate.pipeline import pipeline_io_counts
+    from slm4ie.data.curate.stages.common import pipeline_io_counts
 
     paths = CuratePaths(input_folder=tmp_path / "extracted", output_dir=tmp_path / "curated")
     _write_shard(
@@ -464,21 +470,21 @@ def test_pipeline_io_counts_reports_reader_and_writer_totals(tmp_path: Path) -> 
     assert pipeline_io_counts(stats) == (3, 2)
 
 
-from slm4ie.data.curate import runner as curate_runner  # noqa: E402
+from slm4ie.data.curate import paths as curate_paths  # noqa: E402
 
 
 class TestStageSubsetFiltering:
-    """`_filter_stage_subset` mirrors the requested keys into a scratch view."""
+    """`filter_stage_subset` mirrors the requested keys into a scratch view."""
 
     def test_filter_stage_subset_mirrors_multiple_datasets(self, tmp_path: Path) -> None:
-        """`_filter_stage_subset` builds symlinks for every requested key."""
+        """`filter_stage_subset` builds symlinks for every requested key."""
         convert_dir = tmp_path / "00_convert"
         for key in ("kzb", "solar"):
             shard_dir = convert_dir / key
             shard_dir.mkdir(parents=True)
             (shard_dir / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
-        holder = curate_runner._filter_stage_subset(convert_dir, ["kzb", "solar"])
+        holder = curate_paths.filter_stage_subset(convert_dir, ["kzb", "solar"])
         try:
             assert (holder / "kzb" / "00000.jsonl.gz").is_symlink()
             assert (holder / "solar" / "00000.jsonl.gz").is_symlink()
@@ -494,7 +500,7 @@ class TestStageSubsetFiltering:
         (convert_dir / "kzb" / "00000.jsonl.gz").write_bytes(b"\x1f\x8b")
 
         with pytest.raises(FileNotFoundError) as excinfo:
-            curate_runner._filter_stage_subset(convert_dir, ["kzb", "missing1", "missing2"])
+            curate_paths.filter_stage_subset(convert_dir, ["kzb", "missing1", "missing2"])
         msg = str(excinfo.value)
         assert "missing1" in msg
         assert "missing2" in msg
@@ -503,7 +509,8 @@ class TestStageSubsetFiltering:
 
 def test_quality_executor_honors_input_override(tmp_path: Path) -> None:
     """build_quality_executors reads from input_override when provided."""
-    from slm4ie.data.curate.pipeline import CuratePaths, build_quality_executors
+    from slm4ie.data.curate.paths import CuratePaths
+    from slm4ie.data.curate.stages.quality import build_quality_executors
 
     paths = CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
     override = tmp_path / "view"
@@ -515,7 +522,8 @@ def test_quality_executor_honors_input_override(tmp_path: Path) -> None:
 
 def test_repetition_executor_honors_input_override(tmp_path: Path) -> None:
     """build_repetition_executors reads from input_override when provided."""
-    from slm4ie.data.curate.pipeline import CuratePaths, build_repetition_executors
+    from slm4ie.data.curate.paths import CuratePaths
+    from slm4ie.data.curate.stages.repetition import build_repetition_executors
 
     paths = CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
     override = tmp_path / "view"
@@ -523,85 +531,6 @@ def test_repetition_executor_honors_input_override(tmp_path: Path) -> None:
     execs = build_repetition_executors(paths, tasks=1, input_override=override)
     reader = execs[0].pipeline[0]
     assert str(override) in reader.data_folder.path
-
-
-def _write_shards(stage_dir: Path, key: str, row_counts: list) -> None:
-    """Write per-shard gzipped JSONL files for *key* under *stage_dir*.
-
-    Args:
-        stage_dir: Stage output directory (e.g. `<out>/03_quality`).
-        key: Dataset key; shards land under `stage_dir/<key>/`.
-        row_counts: One entry per shard, giving its document count.
-    """
-    import gzip
-    import json
-
-    key_dir = stage_dir / key
-    key_dir.mkdir(parents=True, exist_ok=True)
-    for shard, n_rows in enumerate(row_counts):
-        path = key_dir / f"{shard:05d}.jsonl.gz"
-        with gzip.open(path, "wt", encoding="utf-8") as fh:
-            for i in range(n_rows):
-                fh.write(json.dumps({"text": f"{key}-{shard}-{i}"}) + "\n")
-
-
-class TestCountDocsPerKey:
-    """count_docs_per_key returns true per-source row counts from shards."""
-
-    def test_sums_rows_across_shards_per_key(self, tmp_path: Path) -> None:
-        """Counts every JSONL row across all of a key's shards."""
-        stage = tmp_path / "03_quality"
-        _write_shards(stage, "c4", [2, 1])
-        _write_shards(stage, "siparl", [3])
-        counts = count_docs_per_key(stage, ["c4", "siparl"])
-        assert counts == {"c4": 3, "siparl": 3}
-
-    def test_missing_key_dir_counts_zero(self, tmp_path: Path) -> None:
-        """A key with no output directory counts as zero, not an error."""
-        stage = tmp_path / "03_quality"
-        _write_shards(stage, "c4", [5])
-        counts = count_docs_per_key(stage, ["c4", "absent"])
-        assert counts == {"c4": 5, "absent": 0}
-
-    def test_empty_shard_counts_zero_rows(self, tmp_path: Path) -> None:
-        """A present-but-empty shard contributes zero rows."""
-        stage = tmp_path / "01_language"
-        _write_shards(stage, "solar", [0])
-        counts = count_docs_per_key(stage, ["solar"])
-        assert counts == {"solar": 0}
-
-
-def _write_extracted(input_folder: Path, key: str, n_rows: int) -> None:
-    """Write a flat `<key>.jsonl` extraction file with *n_rows* rows."""
-    import json
-
-    input_folder.mkdir(parents=True, exist_ok=True)
-    with open(input_folder / f"{key}.jsonl", "w", encoding="utf-8") as fh:
-        for i in range(n_rows):
-            fh.write(json.dumps({"text": f"{key}-{i}"}) + "\n")
-
-
-class TestPerKeyStageCounts:
-    """per_key_stage_counts gives true per-source (in, out) for a bucket."""
-
-    def test_downstream_stage_reads_upstream_and_own_shards(self, tmp_path: Path) -> None:
-        """records_in comes from the upstream dir, records_out from this stage."""
-        paths = CuratePaths(input_folder=tmp_path / "extracted", output_dir=tmp_path / "out")
-        # quality's upstream is spam (02_spam); its own output is 03_quality.
-        _write_shards(paths.stage_dir("spam"), "c4", [3, 2])  # in = 5
-        _write_shards(paths.stage_dir("quality"), "c4", [3])  # out = 3
-        _write_shards(paths.stage_dir("spam"), "siparl", [4])  # in = 4
-        _write_shards(paths.stage_dir("quality"), "siparl", [4])  # out = 4
-        counts = per_key_stage_counts("quality", paths, ["c4", "siparl"])
-        assert counts == {"c4": (5, 3), "siparl": (4, 4)}
-
-    def test_convert_reads_records_in_from_extracted_tier(self, tmp_path: Path) -> None:
-        """Convert has no upstream stage; records_in counts `<key>.jsonl`."""
-        paths = CuratePaths(input_folder=tmp_path / "extracted", output_dir=tmp_path / "out")
-        _write_extracted(paths.input_folder, "kas", 7)  # in = 7
-        _write_shards(paths.stage_dir("convert"), "kas", [4, 2])  # out = 6
-        counts = per_key_stage_counts("convert", paths, ["kas"])
-        assert counts == {"kas": (7, 6)}
 
 
 @pytest.mark.parametrize(

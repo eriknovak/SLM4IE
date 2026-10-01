@@ -10,7 +10,7 @@ import yaml
 pytest.importorskip("datatrove")
 pytest.importorskip("lingua")
 
-from slm4ie.data.curate.runner import curate  # noqa: E402
+from slm4ie.data.curate.driver import curate  # noqa: E402
 
 # Several clearly-Slovenian sentences per dataset. Distinct topics keep
 # the cross-dataset exact/sentence dedup from collapsing them, and the
@@ -272,7 +272,10 @@ def test_override_reruns_only_target_dataset(tmp_path: Path) -> None:
     (same hash, not rewritten); `beta`'s must change (re-run with the
     merged config).
     """
-    from slm4ie.data.curate.sentinel import Sentinel, read_sentinel
+    from slm4ie.data.curate.lineage import (
+        Sentinel,
+        read_sentinel,
+    )
 
     def sentinel(folder: Path) -> Sentinel:
         s = read_sentinel(folder)
@@ -390,7 +393,7 @@ def test_bucketmates_get_distinct_per_source_counts(tmp_path: Path) -> None:
     sentinels; each must carry its own row counts. Different doc counts
     (3 vs 2) make a shared bucket total impossible to mistake for correct.
     """
-    from slm4ie.data.curate.sentinel import read_sentinel
+    from slm4ie.data.curate.lineage import read_sentinel
 
     in_dir = tmp_path / "extracted"
     out_dir = tmp_path / "pretrain"
@@ -436,58 +439,6 @@ def _write_stage_shards(stage_dir: Path, key: str, n_rows: int) -> None:
             fh.write(json.dumps({"text": f"{key}-{i}"}) + "\n")
 
 
-def test_recount_backfills_per_source_counts(tmp_path: Path) -> None:
-    """--recount rewrites bucket-total sentinels with true per-source counts."""
-    from slm4ie.data.curate.runner import recount
-    from slm4ie.data.curate.sentinel import read_sentinel, write_dataset_sentinel
-
-    in_dir = tmp_path / "extracted"
-    out_dir = tmp_path / "pretrain"
-    extract_cfg = tmp_path / "extract.yaml"
-    pretrain_cfg = tmp_path / "pretrain.yaml"
-    _write_extract_config(extract_cfg)
-    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
-
-    # Extracted tier feeds convert's records_in: alfa=3, beta=2.
-    _write_extracted(in_dir, "alfa", ALFA_DOCS)
-    _write_extracted(in_dir, "beta", BETA_DOCS[:2])
-    # On-disk stage outputs (the ground truth). beta loses one doc at language.
-    _write_stage_shards(out_dir / "00_convert", "alfa", 3)
-    _write_stage_shards(out_dir / "00_convert", "beta", 2)
-    _write_stage_shards(out_dir / "01_language", "alfa", 3)
-    _write_stage_shards(out_dir / "01_language", "beta", 1)
-    # Sentinels carry the WRONG shared bucket totals the old code wrote.
-    for stage in ("00_convert", "01_language"):
-        for key in ("alfa", "beta"):
-            write_dataset_sentinel(
-                out_dir / stage,
-                key,
-                config_slice={},
-                config_hash_value="h",
-                records_in=5,
-                records_out=4,
-            )
-
-    recount(
-        output_dir=out_dir,
-        input_dir=in_dir,
-        pretrain_config=pretrain_cfg,
-        extract_config=extract_cfg,
-    )
-
-    conv_alfa = read_sentinel(out_dir / "00_convert" / "alfa")
-    conv_beta = read_sentinel(out_dir / "00_convert" / "beta")
-    lang_alfa = read_sentinel(out_dir / "01_language" / "alfa")
-    lang_beta = read_sentinel(out_dir / "01_language" / "beta")
-    assert (conv_alfa.records_in, conv_alfa.records_out) == (3, 3)
-    assert (conv_beta.records_in, conv_beta.records_out) == (2, 2)
-    # language records_in is the upstream (convert) per-source output.
-    assert (lang_alfa.records_in, lang_alfa.records_out) == (3, 3)
-    assert (lang_beta.records_in, lang_beta.records_out) == (2, 1)
-    # config_hash preserved, so the sentinels stay current (not re-run).
-    assert conv_alfa.config_hash == "h"
-
-
 def _corpus_rows(stage_dir: Path) -> List[str]:
     """Return every document's id and text under *stage_dir*, sorted, for output comparison.
 
@@ -507,11 +458,11 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     """A sentence-dedup crash after its signature step resumes without redoing it.
 
     The first `--all` run fails once the signature tasks are done; the rerun
-    must keep their completion markers, finish the stage, clear its progress
-    file, and produce the same corpus as an uninterrupted run. Stale shards of
+    must keep their completion markers, finish the stage in its staging folder,
+    promote it, and produce the same corpus as an uninterrupted run. Stale shards of
     a key outside the roster must not reach the corpus either.
     """
-    import slm4ie.data.curate.runner as curate_runner
+    import slm4ie.data.curate.driver as curate_runner
 
     in_dir = tmp_path / "extracted"
     _write_extracted(in_dir, "alfa", ALFA_DOCS)
@@ -542,26 +493,78 @@ def test_crashed_corpus_stage_resumes_and_matches_clean_run(tmp_path: Path, monk
     (crash_dir / "04_repetition" / "benchmark" / "00000.jsonl.gz").write_bytes(
         (clean_dir / "04_repetition" / "alfa" / "00000.jsonl.gz").read_bytes()
     )
-    real_builder = curate_runner.build_sentence_dedup_executors
+    import slm4ie.data.curate.stages.dedup as curate_dedup
+
+    real_builder = curate_dedup.build_sentence_dedup_executors
 
     def crashing_builder(*args, **kwargs):
         execs = real_builder(*args, **kwargs)
         execs[0].run()
         raise RuntimeError("simulated crash after the signature step")
 
-    monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", crashing_builder)
+    monkeypatch.setattr(curate_dedup, "build_sentence_dedup_executors", crashing_builder)
     with pytest.raises(RuntimeError, match="simulated crash"):
         run_all(crash_dir)
     completions = crash_dir / "_logs" / "sentence_dedup" / "1_sig" / "completions"
     markers = sorted(completions.iterdir())
     assert markers
-    assert (crash_dir / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).is_file()
+    assert (crash_dir / "_partial" / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).is_file()
+    assert not (crash_dir / "06_sentence_dedup").exists()
 
-    monkeypatch.setattr(curate_runner, "build_sentence_dedup_executors", real_builder)
+    monkeypatch.setattr(curate_dedup, "build_sentence_dedup_executors", real_builder)
     marker_mtimes = {m: m.stat().st_mtime_ns for m in markers}
     run_all(crash_dir)
     assert {m: m.stat().st_mtime_ns for m in markers} == marker_mtimes
     assert not (crash_dir / "06_sentence_dedup" / curate_runner.PROGRESS_NAME).exists()
+    assert not (crash_dir / "_partial" / "06_sentence_dedup").exists()
     assert (crash_dir / "07_statistics" / ".complete").exists()
     assert _dataset_dirs(crash_dir / "05_exact_dedup") == {"alfa", "beta"}
     assert _corpus_rows(crash_dir / "06_sentence_dedup") == _corpus_rows(clean_dir / "06_sentence_dedup")
+
+
+@pytest.mark.slow
+def test_real_stages_rebuild_only_what_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Against real datatrove stages: more workers rebuild nothing, a version bump stops at its stage.
+
+    A stage rerun must reproduce the same document digest even though the
+    reader stamps a different `file_path` into every document, so downstream
+    sentinels stay untouched (early cutoff).
+    """
+    import slm4ie.data.curate.driver as curate_runner
+
+    in_dir = tmp_path / "extracted"
+    out_dir = tmp_path / "pretrain"
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS)
+    extract_cfg = tmp_path / "extract.yaml"
+    pretrain_cfg = tmp_path / "pretrain.yaml"
+    _write_extract_config(extract_cfg)
+    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+
+    def run_all(workers: int) -> None:
+        curate(
+            datasets=[],
+            run_all=True,
+            stage="all",
+            input_dir=in_dir,
+            output_dir=out_dir,
+            force=False,
+            workers=workers,
+            pretrain_config=pretrain_cfg,
+            extract_config=extract_cfg,
+        )
+
+    def sentinel_mtimes() -> dict:
+        return {p: p.stat().st_mtime_ns for p in out_dir.rglob(".complete")}
+
+    run_all(workers=1)
+    before = sentinel_mtimes()
+    run_all(workers=2)
+    assert sentinel_mtimes() == before
+
+    monkeypatch.setitem(curate_runner.STAGE_VERSIONS, "language", "sha256:edited")
+    run_all(workers=1)
+    after = sentinel_mtimes()
+    rewritten = {p.relative_to(out_dir).parts[0] for p in after if after[p] != before[p]}
+    assert rewritten == {"01_language"}
+    assert (tmp_path / "pretrain.lock.yaml").is_file()

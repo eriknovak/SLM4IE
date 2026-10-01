@@ -1,4 +1,8 @@
-"""Tests for the stage name/folder mapping in slm4ie.data.curate.stages."""
+"""Tests for the stage registry in slm4ie.data.curate.stages."""
+
+from pathlib import Path
+
+import pytest
 
 from slm4ie.data.curate.stages import (
     ALL_STAGE_NAMES,
@@ -150,3 +154,43 @@ def test_is_scoped() -> None:
     """is_scoped returns True only for scoped stages."""
     assert is_scoped("quality") is True
     assert is_scoped("exact_dedup") is False
+
+
+def _copy_stages(tmp_path: Path) -> Path:
+    """Copy the stage modules into *tmp_path* and return the copy."""
+    import shutil
+
+    import slm4ie.data.curate.stages as stages_pkg
+
+    target = tmp_path / "stages"
+    shutil.copytree(Path(stages_pkg.__file__).parent, target, ignore=shutil.ignore_patterns("__pycache__"))
+    return target
+
+
+def test_stage_versions_are_code_hashes() -> None:
+    """Every stage carries a version derived from its module."""
+    from slm4ie.data.curate.stages import STAGE_NAMES, STAGE_VERSIONS
+
+    assert set(STAGE_VERSIONS) == set(STAGE_NAMES)
+    assert all(v.startswith("sha256:") for v in STAGE_VERSIONS.values())
+
+
+@pytest.mark.parametrize(
+    ("module", "changed"),
+    [
+        ("language.py", ["language"]),
+        ("quality.py", ["quality"]),
+        ("dedup.py", ["exact_dedup", "sentence_dedup"]),
+        ("common.py", []),
+    ],
+)
+def test_editing_a_module_changes_only_its_stages(tmp_path: Path, module: str, changed: list) -> None:
+    """A comment added to a stage's module bumps that stage alone; shared helpers bump none."""
+    from slm4ie.data.curate.stages import STAGE_NAMES, code_version
+
+    stages = _copy_stages(tmp_path)
+    before = {stage: code_version(stage, stages) for stage in STAGE_NAMES}
+    with (stages / module).open("a", encoding="utf-8") as fh:
+        fh.write("\n# a comment\n")
+    after = {stage: code_version(stage, stages) for stage in STAGE_NAMES}
+    assert [s for s in STAGE_NAMES if before[s] != after[s]] == changed

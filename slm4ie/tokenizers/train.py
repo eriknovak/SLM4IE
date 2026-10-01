@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
-from slm4ie.data.curate import corpus_digest
+from slm4ie.data.versioning import corpus_digest
 from slm4ie.data.parallel import (
     configure_script_logging,
     cpu_default,

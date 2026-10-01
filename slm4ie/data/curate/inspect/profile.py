@@ -35,7 +35,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
-from slm4ie.data.curate.pipeline import _count_jsonl_rows
+from slm4ie.data.curate.paths import count_jsonl_rows
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,7 @@ def count_source_documents(stage_dir: Path, workers: int = 10) -> Dict[str, int]
     shards = [(folder.name, shard) for folder in folders for shard in sorted(folder.glob("*.jsonl.gz"))]
     counts: Dict[str, int] = {folder.name: 0 for folder in folders}
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        for (source, _), rows in zip(shards, pool.map(_count_jsonl_rows, [shard for _, shard in shards])):
+        for (source, _), rows in zip(shards, pool.map(count_jsonl_rows, [shard for _, shard in shards])):
             counts[source] += rows
     return counts
 

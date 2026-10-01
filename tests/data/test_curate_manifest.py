@@ -1,11 +1,11 @@
-"""Tests for slm4ie/data/curate/manifest.py corpus digests."""
+"""Tests for corpus digests in slm4ie/data/versioning.py."""
 
 import gzip
 from pathlib import Path
 
 import pytest
 
-from slm4ie.data.curate import manifest
+from slm4ie.data import versioning as manifest
 
 
 def _write_shard(path: Path, rows: int) -> None:

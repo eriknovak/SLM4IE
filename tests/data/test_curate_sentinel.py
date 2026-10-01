@@ -1,12 +1,23 @@
 """Tests for the per-stage sentinel I/O + config-hash module."""
 
+import json
+import os
 from pathlib import Path
 
-from slm4ie.data.curate.sentinel import (
-    cascade_invalidate,
-    config_hash,
+import pytest
+
+from slm4ie.data.versioning import config_hash
+from slm4ie.data.curate.lineage import (
+    CONFIG_CHANGED,
+    INPUT_CHANGED,
+    INTEGRITY_FAILED,
+    LEGACY,
+    NOT_BUILT,
+    OUTPUT_CHANGED,
+    STAGE_VERSION_CHANGED,
+    UNVERSIONED,
     read_sentinel,
-    sentinel_is_current,
+    stale_reason,
     write_sentinel,
 )
 
@@ -63,85 +74,122 @@ def test_read_sentinel_returns_none_when_missing(tmp_path: Path) -> None:
     assert read_sentinel(tmp_path / "01_language") is None
 
 
-def test_sentinel_input_fingerprint_roundtrips(tmp_path: Path) -> None:
-    """A recorded input fingerprint survives a write/read roundtrip."""
-    folder = tmp_path / "00_convert"
-    folder.mkdir()
+def test_sentinel_lineage_roundtrips(tmp_path: Path) -> None:
+    """Lineage fields and the shard set survive a write/read roundtrip."""
+    folder = tmp_path / "00_convert" / "news"
+    folder.mkdir(parents=True)
+    (folder / "00000.jsonl.gz").write_bytes(b"abc")
     write_sentinel(
         folder,
         config_slice={},
         config_hash_value="sha256:abc",
         records_in=1,
         records_out=1,
-        input_fingerprint="news.jsonl=10:20",
+        stage_version="sha256:v2",
+        input_digest="sha256:in",
+        document_digest="sum256:doc",
+        input_files={"news.jsonl": {"size": 3, "sha256": "x", "mtime_ns": 1}},
+        info={"git_commit": "c"},
     )
     sentinel = read_sentinel(folder)
     assert sentinel is not None
-    assert sentinel.input_fingerprint == "news.jsonl=10:20"
+    assert sentinel.stage_version == "sha256:v2"
+    assert sentinel.input_digest == "sha256:in"
+    assert sentinel.document_digest == "sum256:doc"
+    assert sentinel.shards == {"00000.jsonl.gz": 3}
+    assert sentinel.input_files == {"news.jsonl": {"size": 3, "sha256": "x", "mtime_ns": 1}}
+    assert sentinel.info == {"git_commit": "c"}
+    assert not sentinel.is_legacy
 
 
-def test_sentinel_input_fingerprint_defaults_to_none(tmp_path: Path) -> None:
-    """Sentinels written without a fingerprint read back as None (legacy-safe)."""
+def test_sentinel_without_version_is_legacy(tmp_path: Path) -> None:
+    """A sentinel written before lineage tracking reads back as legacy."""
     folder = tmp_path / "02_quality"
     folder.mkdir()
+    (folder / ".complete").write_text('{"config_hash": "sha256:abc", "records_in": 1, "records_out": 1}')
+    sentinel = read_sentinel(folder)
+    assert sentinel is not None and sentinel.is_legacy
+
+
+def _current_unit(tmp_path: Path) -> Path:
+    """Write a unit with one shard and a full-lineage sentinel; return its folder."""
+    folder = tmp_path / "03_quality" / "a"
+    folder.mkdir(parents=True)
+    (folder / "00000.jsonl.gz").write_bytes(b"abc")
     write_sentinel(
         folder,
         config_slice={},
-        config_hash_value="sha256:abc",
+        config_hash_value="h",
         records_in=1,
         records_out=1,
+        stage_version="sha256:v1",
+        input_digest="in",
+        document_digest="doc",
     )
-    sentinel = read_sentinel(folder)
-    assert sentinel is not None
-    assert sentinel.input_fingerprint is None
+    return folder
 
 
-def test_sentinel_is_current_matches_hash(tmp_path: Path) -> None:
-    """sentinel_is_current returns True iff the recorded hash equals the new hash."""
-    folder = tmp_path / "02_quality"
-    folder.mkdir()
+def _reason(folder: Path, **overrides: object) -> object:
+    """Return `stale_reason` for *folder* with the matching lineage, overridden."""
+    kwargs = {"expected_hash": "h", "stage_version": "sha256:v1", "input_digest": "in", **overrides}
+    return stale_reason(read_sentinel(folder), folder, **kwargs)  # type: ignore[arg-type]
+
+
+def test_stale_reason_current_when_lineage_matches(tmp_path: Path) -> None:
+    """A unit whose lineage and shards match is current."""
+    assert _reason(_current_unit(tmp_path)) is None
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"expected_hash": "h2"}, CONFIG_CHANGED),
+        ({"stage_version": "sha256:v2"}, STAGE_VERSION_CHANGED),
+        ({"input_digest": "in2"}, INPUT_CHANGED),
+    ],
+)
+def test_stale_reason_names_the_changed_field(tmp_path: Path, override: dict, reason: str) -> None:
+    """Each lineage mismatch is reported under its own reason."""
+    assert _reason(_current_unit(tmp_path), **override) == reason
+
+
+def test_stale_reason_missing_sentinel(tmp_path: Path) -> None:
+    """A unit without a sentinel has not been built."""
+    assert _reason(tmp_path / "nothing") == NOT_BUILT
+
+
+def test_stale_reason_ignores_mtime_but_not_size(tmp_path: Path) -> None:
+    """Touching a shard keeps the unit current; changing its size or adding one does not."""
+    folder = _current_unit(tmp_path)
+    shard = folder / "00000.jsonl.gz"
+    os.utime(shard, ns=(1, 1))
+    assert _reason(folder) is None
+    (folder / "00001.jsonl.gz").write_bytes(b"stale")
+    assert _reason(folder) == OUTPUT_CHANGED
+    (folder / "00001.jsonl.gz").unlink()
+    shard.write_bytes(b"abcd")
+    assert _reason(folder) == OUTPUT_CHANGED
+
+
+def test_stale_reason_legacy_and_integrity(tmp_path: Path) -> None:
+    """Legacy sentinels and recorded integrity failures are stale."""
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / ".complete").write_text('{"config_hash": "h"}')
+    assert _reason(legacy) == LEGACY
+    assert _reason(legacy, expected_hash="h2") == CONFIG_CHANGED
+    failed = tmp_path / "failed"
     write_sentinel(
-        folder,
-        config_slice={"min_doc_words": 50},
-        config_hash_value="sha256:abc",
+        failed,
+        config_slice={},
+        config_hash_value="h",
         records_in=1,
-        records_out=1,
+        records_out=2,
+        stage_version="sha256:v1",
+        input_digest="in",
+        integrity_error="boom",
     )
-    assert sentinel_is_current(folder, "sha256:abc") is True
-    assert sentinel_is_current(folder, "sha256:different") is False
-
-
-def test_sentinel_is_current_false_when_missing(tmp_path: Path) -> None:
-    """A missing sentinel is never current."""
-    assert sentinel_is_current(tmp_path / "missing", "sha256:abc") is False
-
-
-def test_cascade_invalidate_removes_sentinels(tmp_path: Path) -> None:
-    """cascade_invalidate removes sentinels for stage + every downstream stage."""
-    for name in ("03_quality", "04_repetition", "05_exact_dedup", "06_sentence_dedup", "07_statistics"):
-        folder = tmp_path / name
-        folder.mkdir()
-        (folder / ".complete").write_text("{}")
-    for name in ("00_convert", "01_language", "02_spam"):
-        (tmp_path / name).mkdir()
-        (tmp_path / name / ".complete").write_text("{}")
-
-    removed = cascade_invalidate(tmp_path, "quality")
-    assert "quality" in removed
-    assert "statistics" in removed
-    # convert, language, and spam were before quality — must NOT be invalidated.
-    assert (tmp_path / "00_convert" / ".complete").exists()
-    assert (tmp_path / "01_language" / ".complete").exists()
-    assert (tmp_path / "02_spam" / ".complete").exists()
-    # quality + downstream sentinels gone.
-    for name in ("03_quality", "04_repetition", "05_exact_dedup", "06_sentence_dedup", "07_statistics"):
-        assert not (tmp_path / name / ".complete").exists()
-
-
-def test_cascade_invalidate_handles_missing_sentinels_silently(tmp_path: Path) -> None:
-    """It's fine to invalidate when sentinels don't exist; result lists requested stages."""
-    removed = cascade_invalidate(tmp_path, "exact_dedup")
-    assert removed == ("exact_dedup", "sentence_dedup", "statistics")
+    assert str(_reason(failed)).startswith(INTEGRITY_FAILED)
 
 
 def test_sentinel_filename_is_complete(tmp_path: Path) -> None:
@@ -217,34 +265,10 @@ def test_write_sentinel_does_not_leave_tmp_artifact(tmp_path: Path) -> None:
     assert not (folder / ".complete.tmp").exists()
 
 
-def test_dataset_sentinel_roundtrip(tmp_path: Path) -> None:
-    """A per-dataset sentinel is current only when its hash matches."""
-    from slm4ie.data.curate.sentinel import (
-        dataset_sentinel_is_current,
-        dataset_sentinel_path,
-        write_dataset_sentinel,
-    )
-
-    stage_dir = tmp_path / "02_quality"
-    write_dataset_sentinel(
-        stage_dir,
-        "gigafida",
-        config_slice={"min_doc_words": 20},
-        config_hash_value="abc123",
-        records_in=10,
-        records_out=8,
-    )
-    assert dataset_sentinel_path(stage_dir, "gigafida").exists()
-    assert dataset_sentinel_is_current(stage_dir, "gigafida", "abc123") is True
-    assert dataset_sentinel_is_current(stage_dir, "gigafida", "different") is False
-    # A different dataset under the same stage is independent.
-    assert dataset_sentinel_is_current(stage_dir, "kas", "abc123") is False
-
-
 def test_invalidate_dataset_sentinels(tmp_path: Path) -> None:
     """Invalidating removes only the named datasets' sentinels."""
-    from slm4ie.data.curate.sentinel import (
-        dataset_sentinel_is_current,
+    from slm4ie.data.curate.lineage import (
+        dataset_sentinel_path,
         invalidate_dataset_sentinels,
         write_dataset_sentinel,
     )
@@ -260,81 +284,14 @@ def test_invalidate_dataset_sentinels(tmp_path: Path) -> None:
             records_out=1,
         )
     invalidate_dataset_sentinels(stage_dir, ["a"])
-    assert dataset_sentinel_is_current(stage_dir, "a", "h") is False
-    assert dataset_sentinel_is_current(stage_dir, "b", "h") is True
+    assert not dataset_sentinel_path(stage_dir, "a").exists()
+    assert dataset_sentinel_path(stage_dir, "b").exists()
 
 
-def test_cascade_invalidate_scoped_mixes_per_dataset_and_corpus(tmp_path: Path) -> None:
-    """Scoped stages drop per-dataset sentinels; corpus stages drop stage sentinels."""
-    from slm4ie.data.curate.sentinel import (
-        cascade_invalidate_scoped,
-        dataset_sentinel_is_current,
-        sentinel_is_current,
-        write_dataset_sentinel,
-        write_sentinel,
-    )
-
-    out = tmp_path
-    # Scoped stage quality has per-dataset sentinels for a, b.
-    q = out / "03_quality"
-    for key in ("a", "b"):
-        write_dataset_sentinel(q, key, config_slice={}, config_hash_value="h", records_in=1, records_out=1)
-    # Corpus stage exact_dedup has a stage-level sentinel.
-    d = out / "05_exact_dedup"
-    write_sentinel(d, config_slice={}, config_hash_value="h", records_in=1, records_out=1)
-
-    # Invalidate from quality, only for dataset 'a'.
-    cascade_invalidate_scoped(out, "quality", ["a"])
-
-    # quality/a dropped, quality/b kept (only requested keys invalidated).
-    assert dataset_sentinel_is_current(q, "a", "h") is False
-    assert dataset_sentinel_is_current(q, "b", "h") is True
-    # Downstream corpus stage dropped wholesale (roster/inputs changed).
-    assert sentinel_is_current(d, "h") is False
-
-
-def test_update_dataset_sentinel_counts_rewrites_only_counts(tmp_path: Path) -> None:
-    """Backfill replaces records_in/out but preserves all other fields."""
-    from slm4ie.data.curate.sentinel import (
-        read_sentinel,
-        update_dataset_sentinel_counts,
-        write_dataset_sentinel,
-    )
-
-    q = tmp_path / "03_quality"
-    write_dataset_sentinel(
-        q,
-        "alfa",
-        config_slice={"min_doc_words": 20},
-        config_hash_value="sha256:abc",
-        records_in=99,
-        records_out=99,
-        input_fingerprint="fp-1",
-    )
-    before = read_sentinel(q / "alfa")
-    assert before is not None
-
-    path = update_dataset_sentinel_counts(q, "alfa", records_in=3, records_out=2)
-    assert path is not None
-
-    after = read_sentinel(q / "alfa")
-    assert after is not None
-    assert (after.records_in, after.records_out) == (3, 2)
-    # Everything else is preserved, including the original completion time.
-    assert after.config_hash == "sha256:abc"
-    assert after.config_slice == {"min_doc_words": 20}
-    assert after.input_fingerprint == "fp-1"
-    assert after.completed_at == before.completed_at
-
-
-def test_update_dataset_sentinel_counts_noop_when_missing(tmp_path: Path) -> None:
-    """Backfill never fabricates a sentinel for a dataset that has none."""
-    from slm4ie.data.curate.sentinel import (
-        read_sentinel,
-        update_dataset_sentinel_counts,
-    )
-
-    q = tmp_path / "03_quality"
-    result = update_dataset_sentinel_counts(q, "ghost", records_in=1, records_out=1)
-    assert result is None
-    assert read_sentinel(q / "ghost") is None
+def test_stale_reason_flags_version_from_before_code_hashes(tmp_path: Path) -> None:
+    """A recorded stage version that is not a code hash asks for adoption, not a rebuild reason."""
+    folder = _current_unit(tmp_path)
+    payload = json.loads((folder / ".complete").read_text())
+    payload["stage_version"] = "1"
+    (folder / ".complete").write_text(json.dumps(payload))
+    assert _reason(folder) == UNVERSIONED

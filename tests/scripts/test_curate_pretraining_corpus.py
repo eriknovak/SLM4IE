@@ -106,22 +106,29 @@ class TestWorkers:
         assert curate_cli.parse_args([*RUN, "--all", "--tasks", "4"]).workers == 4
 
 
-class TestRecount:
-    """`recount` is a standalone maintenance subcommand."""
+class TestStatus:
+    """`status` is a read-only report over the whole roster."""
 
-    def test_recount_needs_no_target(self) -> None:
-        """`recount` needs neither positional datasets nor `--all`."""
-        args = curate_cli.parse_args(["recount", "--config", "curation.yaml"])
-        assert args.command == "recount"
+    def test_status_needs_no_target(self) -> None:
+        """`status` needs neither positional datasets nor `--all`."""
+        args = curate_cli.parse_args(["status", "--config", "curation.yaml"])
+        assert args.command == "status"
+        assert args.adopt is False
 
-    def test_recount_rejects_targets(self) -> None:
-        """`recount` rewrites no data, so it takes no dataset selection."""
+    def test_status_rejects_targets(self) -> None:
+        """`status` covers every unit, so it takes no dataset selection."""
         with pytest.raises(SystemExit):
-            curate_cli.parse_args(["recount", "--config", "curation.yaml", "--all"])
+            curate_cli.parse_args(["status", "--config", "curation.yaml", "--all"])
         with pytest.raises(SystemExit):
-            curate_cli.parse_args(["recount", "--config", "curation.yaml", "alfa"])
+            curate_cli.parse_args(["status", "--config", "curation.yaml", "alfa"])
 
-    def test_recount_requires_a_curation_config(self) -> None:
+    def test_status_adopt_flag(self) -> None:
+        """`--adopt` is opt-in."""
+        args = curate_cli.parse_args(["status", "--config", "curation.yaml", "--adopt", "--max-workers", "8"])
+        assert args.adopt is True
+        assert args.workers == 8
+
+    def test_status_requires_a_curation_config(self) -> None:
         """The curation config must be explicit here too."""
         with pytest.raises(SystemExit):
-            curate_cli.parse_args(["recount"])
+            curate_cli.parse_args(["status"])

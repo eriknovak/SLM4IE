@@ -7,8 +7,15 @@ from pathlib import Path
 import pytest
 
 from slm4ie.data.curate import tracking
-from slm4ie.data.curate.sentinel import write_dataset_sentinel, write_sentinel
-from slm4ie.data.curate.stages import SCOPED_STAGES, STAGE_DIRS, STAGE_NAMES
+from slm4ie.data.curate.lineage import (
+    write_dataset_sentinel,
+    write_sentinel,
+)
+from slm4ie.data.curate.stages import (
+    SCOPED_STAGES,
+    STAGE_DIRS,
+    STAGE_NAMES,
+)
 
 DATASETS = ("alpha", "beta")
 

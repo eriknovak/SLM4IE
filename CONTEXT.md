@@ -111,10 +111,38 @@ A per-dataset block that deep-merges onto a scoped stage's defaults, so one
 dataset can differ without forking the config. Corpus stages reject them.
 _Avoid_: exception, patch, custom config
 
+**Unit**:
+One stage for one dataset (a scoped stage) or one corpus stage: the smallest
+piece of the pipeline that is built, versioned and rebuilt on its own.
+_Avoid_: job, step, task
+
 **Sentinel**:
-The completion marker a stage writes, carrying a hash of the config slice that
-produced it. A changed hash invalidates that stage and every stage after it.
+The completion marker a stage writes, carrying the config hash, stage version
+and input digest that produced it plus the document digest of what it wrote.
+Any mismatch invalidates that stage and every stage after it.
 _Avoid_: checkpoint, marker, lock, cache
+
+**Stage version**:
+A hash of the code that runs a stage, computed automatically. Any edit to that
+code — a fix, a refactor, a comment — changes it and reruns the stage.
+_Avoid_: revision, version number
+
+**Document digest**:
+An order-independent hash over the documents a stage wrote for one dataset. It
+ignores shard layout, worker count, compression and timestamps, so it changes
+only when the documents do; a rerun that reproduces it leaves downstream
+stages current.
+_Avoid_: checksum, fingerprint, version
+
+**Input digest**:
+What a unit was built from: the upstream units' document digests, or for
+`convert` the size and content hash of the extracted source file.
+_Avoid_: input fingerprint, upstream hash
+
+**Lock file**:
+The committed record of every sentinel's hashes and digests, so each commit
+names the corpus it expects and `status` can report where the disk differs.
+_Avoid_: manifest, snapshot, dvc.lock
 
 ### Task conversion
 
