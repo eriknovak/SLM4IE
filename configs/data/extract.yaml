@@ -218,3 +218,6 @@ datasets:
     extractor: conllu
     domain: mixed
     role: benchmark
+    # The full corpus with NER tags; the sl_ssj-ud-* files are a subset of
+    # the same documents (no NER) and repeat their ids with partial text.
+    include: ["*/ssj500k-morpho.conllu"]
