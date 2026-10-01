@@ -15,6 +15,12 @@
 #                wiki, parliamentary, academic, legal, medical, scientific, forum,
 #                blog, news, student, mixed); drives source-weighted sampling.
 #   metadata     Optional; two unrelated uses (see Notes: metadata).
+#   include      Optional; shell globs matched against each input file's path
+#                under raw/<key>/ (`*` also crosses `/`). Keeps only matching
+#                files; file-based extractors only (conllu, tei, text, macocu).
+#                Use it when a source ships the same documents twice (layers,
+#                corrected/original versions), since doc_id must be unique
+#                within a dataset (CONTEXT.md, "Document id").
 #   role         Optional; `pretrain` (default) or `benchmark`. Benchmarks are
 #                extracted like any source but the curation pipeline's --all
 #                skips them, so evaluation gold never enters the corpus.
@@ -152,6 +158,8 @@ datasets:
     extractor: conllu
     domain: student
     access: gated
+    # Corrected essays only: solar-orig.conllu repeats every id with raw text.
+    include: ["*/solar-corr.conllu"]
 
   finepdf:
     extractor: huggingface
@@ -203,6 +211,8 @@ datasets:
     extractor: conllu
     domain: mixed
     role: benchmark
+    # UD layer only (as ssj500k): .jos.conllu repeats every document.
+    include: ["*.ud.conllu"]
 
   ssj500k:
     extractor: conllu

@@ -38,12 +38,14 @@ Example:
 
 Document ids:
     Each row is probed for a natural key column in `NATURAL_ID_KEYS`
-    order; the first present, non-empty value becomes `doc_id`, coerced
-    to `str`. The column is also kept in `metadata`, so nothing is lost
-    by using it as the id. Rows with no natural key fall back to
-    `f"{config}:{split}:{row_idx:08d}"` — the config subdirectory name,
-    the split name (omitted for a bare `Dataset`), and the 0-based row
-    index within that split.
+    order; the first present, non-empty value becomes `doc_id` and
+    `native_id`, coerced to `str`. The column is also kept in
+    `metadata`, so nothing is lost by using it as the id. Rows with no
+    natural key get the positional id of
+    `assembly.positional_doc_id` with the unit `<config>:<split>` (the
+    config subdirectory name and the split name, the latter omitted
+    for a bare `Dataset`) and the 0-based row index within that split,
+    e.g. `default:train:00001234`; their `native_id` is None.
 
     Both schemes are deterministic for a given snapshot, replacing the
     orchestrator's positional `idx-` fallback, which varied with worker
@@ -60,7 +62,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from datasets import load_from_disk
 
 from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
-from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
+from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -205,15 +207,15 @@ class HuggingFaceExtractor(BaseExtractor):
 
             metadata = project_metadata(row, exclude={"text"}, value_transform=_to_jsonable)
 
-            doc_id = probe_doc_id(row, NATURAL_ID_KEYS)
-            if doc_id is None:
-                doc_id = f"{prefix}:{row_idx:08d}"
+            native_id = probe_doc_id(row, NATURAL_ID_KEYS)
+            doc_id = native_id if native_id is not None else positional_doc_id(prefix, row_idx)
 
             yield Document(
                 text=text,
                 source=source,
                 domain=domain,
                 doc_id=doc_id,
+                native_id=native_id,
                 metadata=metadata,
             )
 

@@ -194,6 +194,7 @@ def _build_document(
     source: str,
     domain: str,
     extra_metadata: Optional[Dict[str, Any]] = None,
+    native_id: Optional[str] = None,
 ) -> Document:
     """Combine per-sentence pieces into one document-level Document.
 
@@ -208,6 +209,9 @@ def _build_document(
             fields copied verbatim into `Document.metadata` (e.g.
             from `MetadataTable`). Empty when no sidecar TSV is
             configured.
+        native_id (Optional[str]): The file's own document id
+            (`# newdoc id` or the `sent_id` prefix); None when the
+            document is the whole file and `doc_id` is the filename.
 
     Returns:
         Document: One Document whose `text` is the sentence texts
@@ -231,6 +235,7 @@ def _build_document(
         source=source,
         domain=domain,
         doc_id=doc_id,
+        native_id=native_id,
         metadata=dict(extra_metadata) if extra_metadata else {},
         annotations=annotations,
     )
@@ -339,6 +344,7 @@ class ConlluExtractor(FileBasedExtractor):
                 source=source,
                 domain=domain,
                 extra_metadata=extra_metadata,
+                native_id=current_doc_id,
             )
 
         def _consume(block: List[str]) -> Iterator[Document]:

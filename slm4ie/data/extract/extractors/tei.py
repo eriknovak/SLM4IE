@@ -294,6 +294,7 @@ def _build_document(
     source: str,
     domain: str,
     metadata: Optional[Dict[str, Any]] = None,
+    native_id: Optional[str] = None,
 ) -> Optional[Document]:
     """Combine `<s>` siblings into one document-level Document.
 
@@ -313,6 +314,9 @@ def _build_document(
             attach to the Document. For utterance-level docs this
             typically merges per-file `MetadataTable` fields with
             the utterance's `who` / `ana` attributes.
+        native_id (Optional[str]): The element's own `xml:id` when
+            the document is one `<u>`; None when it is a whole file
+            and `doc_id` is the filename stem.
 
     Returns:
         Optional[Document]: One Document, or `None` when every
@@ -342,6 +346,7 @@ def _build_document(
         source=source,
         domain=domain,
         doc_id=doc_id,
+        native_id=native_id,
         metadata=dict(metadata) if metadata else {},
         annotations=annotations,
     )
@@ -480,14 +485,15 @@ def _parse_annotated_with_utterances(
     base: Dict[str, Any] = dict(extra_metadata) if extra_metadata else {}
     for u_elem in root.iter(_U_TAG):
         s_elems = list(u_elem.iter(_S_TAG))
-        doc_id = u_elem.get(_XML_ID) or ""
+        native_id = u_elem.get(_XML_ID)
         merged = {**base, **_utterance_metadata(u_elem)}
         doc = _build_document(
             s_elems=s_elems,
-            doc_id=doc_id,
+            doc_id=native_id or "",
             source=source,
             domain=domain,
             metadata=merged,
+            native_id=native_id,
         )
         if doc is not None:
             yield doc
@@ -568,6 +574,7 @@ def _parse_plain(
             source=source,
             domain=domain,
             doc_id=doc_id,
+            native_id=doc_id,
             metadata=dict(extra_metadata) if extra_metadata else {},
         )
 

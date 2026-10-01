@@ -23,7 +23,9 @@ Example:
         text:        paragraphs (<p> text content) joined with "\n".
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      id attribute on the <doc> element.
+        doc_id:      id attribute on the <doc> element, else the
+                     positional id `<file unit>:<doc ordinal>`.
+        native_id:   the id attribute, None when absent.
         metadata:    selected <doc> attributes: title, crawl_date,
                      lang_distr, url, domain, file_type, lm_score
                      (only those present and non-empty).
@@ -36,6 +38,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from lxml import etree
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
+from slm4ie.data.extract.extractors.assembly import positional_doc_id, relative_unit
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -130,16 +133,17 @@ class MacocuExtractor(FileBasedExtractor):
             files (List[Path]): .xml files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
-            input_dir (Path): Unused; metadata comes from <doc> attrs.
+            input_dir (Path): Dataset root; names the unit of a
+                positional id when a <doc> carries no id attribute.
             metadata (Optional[Dict[str, Any]]): Ignored.
 
         Yields:
             Document: One document per non-empty <doc> element.
         """
-        del input_dir, metadata
+        del metadata
         for filepath in files:
             try:
-                yield from self._parse_file(filepath, source, domain)
+                yield from self._parse_file(filepath, source, domain, relative_unit(filepath, input_dir))
             except etree.XMLSyntaxError as exc:
                 logger.warning("Skipping %s — parse error: %s", filepath, exc)
 
@@ -148,6 +152,7 @@ class MacocuExtractor(FileBasedExtractor):
         filepath: Path,
         source: str,
         domain: str,
+        unit: str,
     ) -> Iterator[Document]:
         """Stream-parse one MaCoCu XML file.
 
@@ -155,18 +160,23 @@ class MacocuExtractor(FileBasedExtractor):
             filepath (Path): Path to the MaCoCu XML file.
             source (str): Dataset key.
             domain (str): Domain label.
+            unit (str): The file's unit name for positional ids.
 
         Yields:
-            Document: One document per non-empty <doc> element.
+            Document: One document per non-empty <doc> element, with
+                the <doc> id attribute as `doc_id` and `native_id`, or
+                the positional id `<unit>:<doc ordinal>` when absent.
         """
-        for _, elem in etree.iterparse(str(filepath), events=("end",), tag="doc"):
+        for ordinal, (_, elem) in enumerate(etree.iterparse(str(filepath), events=("end",), tag="doc")):
             text = _doc_text(elem)
             if text:
+                native_id = elem.get("id")
                 yield Document(
                     text=text,
                     source=source,
                     domain=domain,
-                    doc_id=elem.get("id"),
+                    doc_id=native_id if native_id is not None else positional_doc_id(unit, ordinal),
+                    native_id=native_id,
                     metadata=_doc_metadata(elem),
                 )
 

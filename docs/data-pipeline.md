@@ -141,7 +141,7 @@ uv run python scripts/prepare_datasets.py extract --all \
 For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW),
 extraction writes two files per dataset under `extracted/`:
 
-- `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `metadata`, consumed both by curation's stage 0 (which lifts it into datatrove's `Document` shape) and by the task converters.
+- `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `uid` / `native_id` / `metadata`, consumed both by curation's stage 0 (which lifts it into datatrove's `Document` shape) and by the task converters. `doc_id` is unique within the dataset (extraction drops a repeat with identical text and fails on one with different text), `uid` is `<key>:<doc_id>`, and `native_id` is the raw source's own identifier when it has one.
 - `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel arrays (`forms`, `lemmas`, `upos`, `feats`, `sentences`, plus `spans` when present), kept separate to avoid loading them during text-only training.
 
 The downstream task converters (`spans`, `sentiment`, `superglue`) join these

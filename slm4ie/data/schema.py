@@ -96,7 +96,14 @@ class Document:
         text (str): Raw text of the document.
         source (str): Dataset key (e.g. "ssj500k").
         domain (str): Text domain (e.g. "web", "parliamentary").
-        doc_id (Optional[str]): Optional document identifier.
+        doc_id (Optional[str]): Document identifier, unique within
+            `source` and stable across re-extraction. Either the
+            source's native id, when that is unique, or a positional
+            id (see `slm4ie.data.extract.extractors.assembly.positional_doc_id`).
+        native_id (Optional[str]): The identifier the raw source
+            itself carries for this document, verbatim. Kept for
+            tracing a document back to its origin; not required to be
+            unique. None when the source has no per-document id.
         metadata (Dict): Arbitrary metadata.
         annotations (Optional[Annotations]): Token/sentence
             annotations, if available.
@@ -106,6 +113,7 @@ class Document:
     source: str
     domain: str
     doc_id: Optional[str] = None
+    native_id: Optional[str] = None
     metadata: Dict[str, Any] = dataclasses.field(default_factory=dict)
     annotations: Optional[Annotations] = None
 
@@ -143,6 +151,8 @@ class Document:
         if self.doc_id is not None:
             data["doc_id"] = self.doc_id
             data["uid"] = self.uid
+        if self.native_id is not None:
+            data["native_id"] = self.native_id
         if self.metadata:
             data["metadata"] = self.metadata
         return json.dumps(data, ensure_ascii=False)

@@ -3,7 +3,7 @@
 import gzip
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import pytest
 import yaml
@@ -11,6 +11,8 @@ import yaml
 from slm4ie.data.extract.extractors import register_extractor, BaseExtractor
 from slm4ie.data.schema import Annotations, Document, Token
 from slm4ie.data.extract.run import (
+    DuplicateDocumentIdError,
+    _IdLedger,
     _chunk_files,
     _extract_one,
     extract_datasets,
@@ -878,3 +880,197 @@ def test_text_doc_ids_are_worker_count_independent(tmp_path: Path) -> None:
     assert len(set(ids)) == len(ids)
     assert ids[:2] == ["part000:000000", "part000:000001"]
     assert records[0]["uid"] == "cc100:part000:000000"
+
+
+class _RepeatingStubExtractor(BaseExtractor):
+    """Yields documents whose (doc_id, text) pairs come from the dataset dir's `docs.json`."""
+
+    def extract(
+        self,
+        input_dir: Path,
+        source: str,
+        domain: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield one Document per `[doc_id, text, annotated]` triple in docs.json.
+
+        Args:
+            input_dir (Path): Dataset dir holding `docs.json`.
+            source (str): Dataset key.
+            domain (str): Domain label.
+            metadata (Optional[Dict[str, Any]]): Not used.
+
+        Yields:
+            Document: A document, annotated with one token when the triple says so.
+        """
+        for doc_id, text, annotated in json.loads((input_dir / "docs.json").read_text()):
+            annotations = None
+            if annotated:
+                annotations = Annotations(
+                    tokens=[Token(form=text, lemma=text, upos="X", feats=None)], sentences=[[0, 0]]
+                )
+            yield Document(text=text, source=source, domain=domain, doc_id=doc_id, annotations=annotations)
+
+
+register_extractor("repeating_stub", _RepeatingStubExtractor)
+
+
+def _run_repeating(tmp_path: Path, triples: list) -> Path:
+    """Extract a `repeating_stub` dataset serially and return its output dir.
+
+    Args:
+        tmp_path (Path): Temporary directory.
+        triples (list): `[doc_id, text, annotated]` triples to emit.
+
+    Returns:
+        Path: The output directory.
+    """
+    raw = tmp_path / "raw" / "rep"
+    raw.mkdir(parents=True)
+    (raw / "docs.json").write_text(json.dumps(triples))
+    out = tmp_path / "out"
+    out.mkdir()
+    _extract_one("rep", {"extractor": "repeating_stub", "domain": "test"}, tmp_path / "raw", out, force=True)
+    return out
+
+
+def _write_conllu_parts(tmp_path: Path, key: str, docs: List[Tuple[str, str]]) -> Path:
+    """Write one single-token CoNLL-U file per `(newdoc id, word)` and return the output dir.
+
+    The conllu extractor is file-based (so the sharded writer engages
+    past eight files) and takes its ids from `# newdoc id`, so two files
+    can legitimately claim the same id.
+
+    Args:
+        tmp_path (Path): Temporary directory.
+        key (str): Dataset key, also the raw subdirectory name.
+        docs (List[Tuple[str, str]]): `(doc_id, word)` per file.
+
+    Returns:
+        Path: The output directory.
+    """
+    raw = tmp_path / "raw" / key
+    raw.mkdir(parents=True)
+    for i, (doc_id, word) in enumerate(docs):
+        (raw / f"part{i:03d}.conllu").write_text(
+            f"# newdoc id = {doc_id}\n# sent_id = {doc_id}.1\n1\t{word}\t{word}\tNOUN\t_\t_\t0\troot\t_\t_\n\n",
+            encoding="utf-8",
+        )
+    out = tmp_path / "out"
+    out.mkdir()
+    return out
+
+
+class TestIdLedger:
+    """Tests for the repeated-id resolution."""
+
+    def test_identical_repeat_is_dropped_and_first_kept(self) -> None:
+        """A later copy with the same text is dropped; the first copy stays."""
+        ledger = _IdLedger()
+        for doc_id, text in (("a", "x"), ("b", "y"), ("a", "x"), ("a", "x")):
+            ledger.add(doc_id, text)
+        keep, conflicts = ledger.resolve()
+        assert list(keep) == [1, 1, 0, 0]
+        assert conflicts == []
+
+    def test_differing_repeat_is_a_conflict(self) -> None:
+        """A later copy with different text is reported, not dropped."""
+        ledger = _IdLedger()
+        for doc_id, text in (("a", "x"), ("a", "y"), ("a", "x")):
+            ledger.add(doc_id, text)
+        keep, conflicts = ledger.resolve()
+        assert list(keep) == [1, 1, 0]
+        assert conflicts == [1]
+
+    def test_extend_keeps_shard_order(self) -> None:
+        """Concatenated shard ledgers resolve as one, in output order."""
+        first, second = _IdLedger(), _IdLedger()
+        first.add("a", "x")
+        second.add("b", "y")
+        second.add("a", "x")
+        first.extend(second)
+        keep, conflicts = first.resolve()
+        assert list(keep) == [1, 1, 0]
+        assert conflicts == []
+
+
+class TestSerialUniqueness:
+    """The serial writer enforces the id contract before promoting its output."""
+
+    def test_identical_repeats_dropped_from_text_and_sidecar(self, tmp_path: Path) -> None:
+        """Both files lose the same lines, so they stay aligned."""
+        out = _run_repeating(tmp_path, [["a", "x", True], ["a", "x", True], ["b", "y", True]])
+        text = (out / "rep.jsonl").read_text().splitlines()
+        assert [json.loads(line)["doc_id"] for line in text] == ["a", "b"]
+        ann = _read_gz_lines(out / "rep.annotations.jsonl.gz")
+        assert [json.loads(line)["doc_id"] for line in ann] == ["a", "b"]
+
+    def test_conflict_raises_and_leaves_no_output(self, tmp_path: Path) -> None:
+        """A repeated id with different text aborts the dataset."""
+        with pytest.raises(DuplicateDocumentIdError, match="1 documents in 'rep'.*'a'"):
+            _run_repeating(tmp_path, [["a", "x", False], ["a", "y", False]])
+        assert list((tmp_path / "out").iterdir()) == []
+
+
+class TestShardedUniqueness:
+    """The sharded writer resolves repeats across shards before merging."""
+
+    def test_identical_repeat_in_another_shard_is_dropped(self, tmp_path: Path) -> None:
+        """The later copy goes, whichever shard wrote it, from text and sidecar alike."""
+        docs = [(f"d{i}", f"t{i}") for i in range(12)]
+        docs[9] = docs[2]
+        out = _write_conllu_parts(tmp_path, "cu", docs)
+        _extract_one(
+            "cu", {"extractor": "conllu", "domain": "test"}, tmp_path / "raw", out, force=True, requested_workers=4
+        )
+        ids = [json.loads(line)["doc_id"] for line in (out / "cu.jsonl").read_text().splitlines()]
+        assert len(ids) == 11
+        assert ids.count("d2") == 1
+        assert ids[2] == "d2"
+        ann_ids = [json.loads(line)["doc_id"] for line in _read_gz_lines(out / "cu.annotations.jsonl.gz")]
+        assert ann_ids == ids
+
+    def test_conflict_across_shards_raises(self, tmp_path: Path) -> None:
+        """Same id, different text, in different shards still fails."""
+        docs = [(f"d{i}", f"t{i}") for i in range(12)]
+        docs[9] = ("d2", "other")
+        out = _write_conllu_parts(tmp_path, "cu", docs)
+        with pytest.raises(DuplicateDocumentIdError, match="'d2'"):
+            _extract_one(
+                "cu", {"extractor": "conllu", "domain": "test"}, tmp_path / "raw", out, force=True, requested_workers=4
+            )
+        assert not (out / "cu.jsonl").exists()
+
+
+class TestIncludeFilter:
+    """The `include:` knob narrows a file-based extractor's inputs."""
+
+    def test_include_keeps_only_matching_files(self, tmp_path: Path) -> None:
+        """Globs match the path under the dataset dir, `*` crossing directories."""
+        raw = tmp_path / "raw" / "ds" / "sub"
+        raw.mkdir(parents=True)
+        (raw / "a.ud.txt").write_text("ud\n")
+        (raw / "a.jos.txt").write_text("jos\n")
+        out = tmp_path / "out"
+        out.mkdir()
+        cfg = {"extractor": "text", "domain": "test", "include": ["*.ud.txt"]}
+        _extract_one("ds", cfg, tmp_path / "raw", out, force=True)
+        lines = (out / "ds.jsonl").read_text().splitlines()
+        assert [json.loads(line)["text"] for line in lines] == ["ud"]
+
+    def test_include_matching_nothing_raises(self, tmp_path: Path) -> None:
+        """A pattern that selects no file is a config error, not an empty dataset."""
+        raw = tmp_path / "raw" / "ds"
+        raw.mkdir(parents=True)
+        (raw / "a.txt").write_text("x\n")
+        cfg = {"extractor": "text", "domain": "test", "include": ["*.nope"]}
+        with pytest.raises(ValueError, match="match no input file"):
+            _extract_one("ds", cfg, tmp_path / "raw", tmp_path, force=True)
+
+    def test_include_on_non_file_extractor_raises(self, tmp_path: Path) -> None:
+        """Only file-based extractors expose a file list to filter."""
+        raw = tmp_path / "raw" / "ds"
+        raw.mkdir(parents=True)
+        cfg = {"extractor": "stub", "domain": "test", "include": ["*"]}
+        with pytest.raises(ValueError, match="file-based"):
+            _extract_one("ds", cfg, tmp_path / "raw", tmp_path, force=True)

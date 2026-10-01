@@ -39,13 +39,25 @@ Example:
                      fields (in fixed reading order).
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      doc_id if present, else id (coerced to str),
-                     else None.
+        doc_id:      positional, `<subcorpus>/<file stem>:<line>`
+                     (see Document ids below).
+        native_id:   the record's `doc_id` or `id` (coerced to str)
+                     when present, else None.
         metadata:    subcorpus (parent directory name: PISRS,
                      UradniList, SodnaPraksa, USRS) plus all other
                      record fields except the ones consumed for
-                     text and doc_id.
+                     text.
         annotations: not produced.
+
+Document ids:
+    The corpus's own `id` is not a document key: it restarts per file,
+    `sp_claims` and `sp_courts` share ids for the same case, and in
+    `ul-uredbeni` it is the item number inside a gazette issue (148k
+    rows carry 6.4k distinct ids). So `doc_id` is the positional id of
+    `assembly.positional_doc_id`: the file's path under the dataset dir
+    plus the record's 0-based line index, e.g.
+    `UradniList/ul-uredbeni:00001234`. The raw `id` is kept as
+    `native_id`.
 """
 
 import json
@@ -54,7 +66,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
-from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
+from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
 logger = logging.getLogger(__name__)
@@ -162,16 +174,16 @@ class ColeslawExtractor(BaseExtractor):
         del metadata
         files = sorted(p for p in input_dir.rglob("*.jsonl") if p.is_file())
 
+        # Subcorpus dir + stem, not the full path: "COLESLAW 1.0/" has a space.
         for filepath in files:
-            subcorpus = filepath.parent.name
-            yield from self._parse_file(filepath, source, domain, subcorpus)
+            yield from self._parse_file(filepath, source, domain, f"{filepath.parent.name}/{filepath.stem}")
 
     def _parse_file(
         self,
         filepath: Path,
         source: str,
         domain: str,
-        subcorpus: str,
+        unit: str,
     ) -> Iterator[Document]:
         """Parse one COLESLAW JSONL file and yield Documents.
 
@@ -179,14 +191,16 @@ class ColeslawExtractor(BaseExtractor):
             filepath (Path): Path to the JSONL file.
             source (str): Dataset key.
             domain (str): Domain label.
-            subcorpus (str): Name of the parent directory
-                (e.g. "PISRS").
+            unit (str): The file's path under the dataset dir without
+                suffix (e.g. "PISRS/register-predpisov"); the id
+                prefix, and its first segment is the subcorpus.
 
         Yields:
             Document: One document per valid line with usable text.
         """
+        subcorpus = filepath.parent.name
         with filepath.open(encoding="utf-8") as fh:
-            for lineno, raw_line in enumerate(fh, start=1):
+            for line_idx, raw_line in enumerate(fh):
                 line = raw_line.strip()
                 if not line:
                     continue
@@ -196,7 +210,7 @@ class ColeslawExtractor(BaseExtractor):
                 except json.JSONDecodeError as exc:
                     logger.warning(
                         "Invalid JSON on line %d of %s: %s",
-                        lineno,
+                        line_idx + 1,
                         filepath,
                         exc,
                     )
@@ -209,12 +223,11 @@ class ColeslawExtractor(BaseExtractor):
                 if not candidates:
                     continue
                 chosen_source, text = candidates[0]
-                doc_id = probe_doc_id(record, ["doc_id", "id"])
+                doc_id = positional_doc_id(unit, line_idx)
                 if len(candidates) > 1:
                     logger.warning(
-                        "Record %s in subcorpus %s has multiple text sources %s; using %s",
+                        "Record %s has multiple text sources %s; using %s",
                         doc_id,
-                        subcorpus,
                         [name for name, _ in candidates],
                         chosen_source,
                     )
@@ -230,6 +243,7 @@ class ColeslawExtractor(BaseExtractor):
                     source=source,
                     domain=domain,
                     doc_id=doc_id,
+                    native_id=probe_doc_id(record, ["doc_id", "id"]),
                     metadata=metadata,
                 )
 

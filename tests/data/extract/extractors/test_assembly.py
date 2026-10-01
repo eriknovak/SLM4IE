@@ -1,6 +1,8 @@
 """Tests for the shared record-assembly seam."""
 
-from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
+from pathlib import Path
+
+from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata, relative_unit
 
 
 class TestProbeDocId:
@@ -101,3 +103,28 @@ class TestProjectMetadata:
         """With no exclude/whitelist, every non-None field is kept as-is."""
         record = {"a": 1, "b": "x"}
         assert project_metadata(record) == {"a": 1, "b": "x"}
+
+
+class TestPositionalDocId:
+    """Tests for positional_doc_id and relative_unit."""
+
+    def test_default_width_is_eight_digits(self) -> None:
+        """The ordinal is zero-padded to the shared width."""
+        assert positional_doc_id("UradniList/ul-uredbeni", 1234) == "UradniList/ul-uredbeni:00001234"
+
+    def test_width_can_be_overridden(self) -> None:
+        """Extractors with pre-existing ids pass their own width."""
+        assert positional_doc_id("sl", 7, width=6) == "sl:000007"
+
+    def test_ordinal_past_width_stays_unique(self) -> None:
+        """An ordinal wider than the padding is not truncated."""
+        assert positional_doc_id("u", 10**9, width=8) == "u:1000000000"
+
+    def test_relative_unit_strips_suffix_and_uses_posix_separators(self, tmp_path: Path) -> None:
+        """The unit is the path under the dataset dir without its suffix."""
+        path = tmp_path / "SUK.CoNLL-U" / "ambiga.ud.conllu"
+        assert relative_unit(path, tmp_path) == "SUK.CoNLL-U/ambiga.ud"
+
+    def test_relative_unit_falls_back_to_name_outside_root(self, tmp_path: Path) -> None:
+        """A file outside the dataset dir is named by its bare stem."""
+        assert relative_unit(Path("/elsewhere/file.txt"), tmp_path) == "file"
