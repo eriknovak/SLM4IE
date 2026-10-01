@@ -5,7 +5,7 @@ title: ""
 labels: lab, needs-triage
 ---
 
-Experiment record: `experiments/<category>/<slug>/` (labflow, <main-line|secondary>, branch `exp/<slug>`).
+Experiment record: `experiments/<category>/<slug>/` (labflow, <main-line|secondary>, branch `<exp|study>/<slug>`). Builds on <slug> (#n); siblings: <slug> (#n).
 
 ## Problem Statement
 

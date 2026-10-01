@@ -17,9 +17,23 @@ When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the 
 Beside the triage roles, every issue carries one kind label saying which
 workflow owns it:
 
-| Label | Meaning                                    |
-| ----- | ------------------------------------------ |
-| `dev` | Development task — delivery work (devflow) |
-| `lab` | Experiment task — research work (labflow)  |
+| Label  | Meaning                                                              |
+| ------ | -------------------------------------------------------------------- |
+| `dev`  | Development task — delivery work (devflow)                           |
+| `lab`  | Experiment task — research work (labflow)                            |
+| `idea` | A change to a reference entry that could become an experiment; always paired with `lab` (labflow:reference) |
+
+## Experiment labels
+
+A `lab` issue filed by `labflow:start` also carries its category and its
+line, mirroring the record's frontmatter; a human-filed one gets them at
+triage:
+
+| Group    | Labels                              | Meaning                                       |
+| -------- | ----------------------------------- | --------------------------------------------- |
+| Category | `data` / `methods` / `validation`   | What the hypothesis is about                  |
+| Line     | `main-line` / `secondary`           | Merges into main, or record merges and branch freezes |
+
+The same labels, plus `experiment`, mark the conclusion PR.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
