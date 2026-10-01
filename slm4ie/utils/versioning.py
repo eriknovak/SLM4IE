@@ -358,9 +358,13 @@ def shard_files(folder: Path) -> List[Path]:
         folder: A unit's output folder.
 
     Returns:
-        Every `*.jsonl.gz` below *folder*; empty when it does not exist.
+        Every `*.jsonl.gz` below *folder*, except those under a `removed/`
+        folder (documents a stage dropped); empty when *folder* does not
+        exist.
     """
-    return sorted(folder.rglob("*.jsonl.gz")) if folder.is_dir() else []
+    if not folder.is_dir():
+        return []
+    return sorted(p for p in folder.rglob("*.jsonl.gz") if "removed" not in p.relative_to(folder).parts[:-1])
 
 
 def check_integrity(inp: UnitScan, out: UnitScan) -> Optional[str]:
