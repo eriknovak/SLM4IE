@@ -418,7 +418,8 @@ def test_status_reports_changed_input_and_lock_drift(env: _Env) -> None:
 
 
 def _make_legacy(output_dir: Path) -> None:
-    """Strip every sentinel under *output_dir* down to the pre-lineage fields."""
+    """Strip every sentinel under *output_dir* to the pre-lineage fields, and drop the lock beside it."""
+    (output_dir.parent / "curation.lock.yaml").unlink(missing_ok=True)
     for path in output_dir.rglob(SENTINEL_NAME):
         payload = json.loads(path.read_text())
         keep = ("completed_at", "config_hash", "config_slice", "records_in", "records_out")

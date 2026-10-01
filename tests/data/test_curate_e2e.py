@@ -436,58 +436,6 @@ def _write_stage_shards(stage_dir: Path, key: str, n_rows: int) -> None:
             fh.write(json.dumps({"text": f"{key}-{i}"}) + "\n")
 
 
-def test_recount_backfills_per_source_counts(tmp_path: Path) -> None:
-    """--recount rewrites bucket-total sentinels with true per-source counts."""
-    from slm4ie.data.curate.runner import recount
-    from slm4ie.data.curate.sentinel import read_sentinel, write_dataset_sentinel
-
-    in_dir = tmp_path / "extracted"
-    out_dir = tmp_path / "pretrain"
-    extract_cfg = tmp_path / "extract.yaml"
-    pretrain_cfg = tmp_path / "pretrain.yaml"
-    _write_extract_config(extract_cfg)
-    _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
-
-    # Extracted tier feeds convert's records_in: alfa=3, beta=2.
-    _write_extracted(in_dir, "alfa", ALFA_DOCS)
-    _write_extracted(in_dir, "beta", BETA_DOCS[:2])
-    # On-disk stage outputs (the ground truth). beta loses one doc at language.
-    _write_stage_shards(out_dir / "00_convert", "alfa", 3)
-    _write_stage_shards(out_dir / "00_convert", "beta", 2)
-    _write_stage_shards(out_dir / "01_language", "alfa", 3)
-    _write_stage_shards(out_dir / "01_language", "beta", 1)
-    # Sentinels carry the WRONG shared bucket totals the old code wrote.
-    for stage in ("00_convert", "01_language"):
-        for key in ("alfa", "beta"):
-            write_dataset_sentinel(
-                out_dir / stage,
-                key,
-                config_slice={},
-                config_hash_value="h",
-                records_in=5,
-                records_out=4,
-            )
-
-    recount(
-        output_dir=out_dir,
-        input_dir=in_dir,
-        pretrain_config=pretrain_cfg,
-        extract_config=extract_cfg,
-    )
-
-    conv_alfa = read_sentinel(out_dir / "00_convert" / "alfa")
-    conv_beta = read_sentinel(out_dir / "00_convert" / "beta")
-    lang_alfa = read_sentinel(out_dir / "01_language" / "alfa")
-    lang_beta = read_sentinel(out_dir / "01_language" / "beta")
-    assert (conv_alfa.records_in, conv_alfa.records_out) == (3, 3)
-    assert (conv_beta.records_in, conv_beta.records_out) == (2, 2)
-    # language records_in is the upstream (convert) per-source output.
-    assert (lang_alfa.records_in, lang_alfa.records_out) == (3, 3)
-    assert (lang_beta.records_in, lang_beta.records_out) == (2, 1)
-    # config_hash preserved, so the sentinels stay current (not re-run).
-    assert conv_alfa.config_hash == "h"
-
-
 def _corpus_rows(stage_dir: Path) -> List[str]:
     """Return every document's id and text under *stage_dir*, sorted, for output comparison.
 

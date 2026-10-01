@@ -142,10 +142,9 @@ plain `run --all` refolds it — and whatever downstream it actually changes. A
 dataset whose extracted file is absent is skipped, never emptied.
 
 **Lock file.** After every successful run — a dataset subset, a single stage
-or `--all` — and after `status --adopt`,
-[`configs/data/curate.lock.yaml`](../configs/data/curate.lock.yaml) (beside
-whichever config was passed) is rebuilt from the sentinels on disk: one entry
-per unit with its lineage and counts. It is rewritten only when an entry
+or `--all` — `configs/data/curate.lock.yaml` (beside whichever config was
+passed; the first run creates it) is rebuilt from the sentinels on disk: one
+entry per unit with its lineage and counts. It is rewritten only when an entry
 changed, so a run that rebuilt nothing leaves it untouched. Committed, it names
 the corpus each commit expects.
 

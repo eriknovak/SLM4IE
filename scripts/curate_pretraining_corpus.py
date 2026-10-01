@@ -3,7 +3,7 @@
 Parses arguments and dispatches into `slm4ie.data.curate.runner`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Seven subcommands:
+Six subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
@@ -15,8 +15,6 @@ Seven subcommands:
   stale with the reason, or missing, and exits non-zero when any is stale.
   Read-only; `--adopt` first gives legacy sentinels their lineage by reading
   each unit once, and rewrites only sentinels and the lock file.
-* `recount` backfills per-source record counts onto existing scoped sentinels
-  and rewrites no data.
 * `diagnose` samples the finished corpus and reports where foreign-language
   text survives the language stage. Read-only: it writes nothing.
 * `sample` draws a `dataset x stage x decision` sample of kept and dropped
@@ -55,8 +53,6 @@ Examples:
     uv run python scripts/curate_pretraining_corpus.py status --config $CURATION --adopt \
         --max-workers 16
 
-    # Backfill per-source counts onto existing sentinels; reprocesses no data.
-    uv run python scripts/curate_pretraining_corpus.py recount --config $CURATION
 
     # Report foreign-language leakage in the finished corpus.
     uv run python scripts/curate_pretraining_corpus.py diagnose --config $CURATION \
@@ -77,7 +73,7 @@ from typing import List, Optional
 
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.diagnose import diagnose_language_leakage
-from slm4ie.data.curate.runner import curate, recount, status
+from slm4ie.data.curate.runner import curate, status
 from slm4ie.data.curate.duplication import DEDUP_STAGES, assess_dedup
 from slm4ie.data.curate.profile import describe_corpus
 from slm4ie.data.curate.sample import JUDGED_STAGES, draw_stratified_sample, resolve_output_dir
@@ -180,12 +176,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     status_parser.add_argument(
         "--max-workers", dest="workers", type=int, default=1, help="Shards read at once when adopting."
     )
-
-    recount_parser = subparsers.add_parser(
-        "recount",
-        help="Backfill per-source record counts onto existing scoped sentinels.",
-    )
-    _add_common_arguments(recount_parser)
 
     diagnose_parser = subparsers.add_parser(
         "diagnose",
@@ -375,15 +365,6 @@ def main() -> None:
         print(f"{len(results)} unit(s), {stale} stale")
         if stale:
             raise SystemExit(1)
-        return
-
-    if args.command == "recount":
-        recount(
-            input_dir=args.input_dir,
-            output_dir=args.output_dir,
-            pretrain_config=args.config,
-            extract_config=args.extract_config,
-        )
         return
 
     curate(
