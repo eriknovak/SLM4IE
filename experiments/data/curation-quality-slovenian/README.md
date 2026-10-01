@@ -89,7 +89,7 @@ concluded: 2026-09-30
   6. Drop byte-identical copies across the corpus (exact dedup).
   7. Remove three-sentence windows seen elsewhere, and drop documents left too short (sentence dedup).
   8. Compute per-source statistics of the finished corpus.
-- **Code**: `slm4ie/data/curate/driver.py::curate`
+- **Code**: `slm4ie/data/curate/run.py::curate`
 - **Settings**: `spam.min_adult_hits` (adult-word occurrences that drop a document, 2), `spam.min_spam_hits` (spam-word occurrences that drop a document, 2), `quality.min_doc_words` (shortest document the quality filter keeps, 20 words), `sentence_dedup.n_sentences` (sentences per window, 3) and `sentence_dedup.min_doc_words` (shortest document sentence dedup keeps, 50 words), in configs/data/curate.yaml
 
 ### M2 — Draw kept and dropped documents for every source and deciding stage
