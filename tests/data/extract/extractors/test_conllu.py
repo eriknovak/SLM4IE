@@ -417,3 +417,117 @@ class TestConlluMetadata:
         """Without the kwarg, metadata stays empty (backward compatible)."""
         docs = _extract(tmp_path, SENTENCE_1)
         assert docs[0].metadata == {}
+
+
+# ---------------------------------------------------------------------------
+# Entity spans
+# ---------------------------------------------------------------------------
+
+# Two sentences under one newdoc, raw lower-case ssj500k/SUK labels:
+# a multi-token entity, an `I-` continuation, a `deriv-per` label, an
+# entity glued to punctuation via SpaceAfter=No, and an `O`-only sentence.
+ENTITY_DOC = textwrap.dedent("""\
+    # newdoc id = ent1
+    # sent_id = ent1.s1
+    # text = Vlada je razpravljala.
+    1\tVlada\tvlada\tNOUN\tNcfsn\t_\t3\tnsubj\t_\tNER=O
+    2\tje\tbiti\tAUX\tVa-r3s-n\t_\t3\taux\t_\tNER=O
+    3\trazpravljala\trazpravljati\tVERB\tVmpp-sf\t_\t0\troot\t_\tNER=O
+    4\t.\t.\tPUNCT\tZ\t_\t3\tpunct\t_\tNER=O
+
+    # sent_id = ent1.s2
+    # text = Janez Novak iz Nove Gorice pozna Freudovo delo (Evropa).
+    1\tJanez\tJanez\tPROPN\tNpmsn\t_\t6\tnsubj\t_\tNER=B-per
+    2\tNovak\tNovak\tPROPN\tNpmsn\t_\t1\tflat\t_\tNER=I-per
+    3\tiz\tiz\tADP\tSg\t_\t4\tcase\t_\tNER=O
+    4\tNove\tnov\tADJ\tAgpfsg\t_\t6\tobl\t_\tNER=B-loc
+    5\tGorice\tGorica\tPROPN\tNpfsg\t_\t4\tflat\t_\tNER=I-loc
+    6\tpozna\tpoznati\tVERB\tVmpr3s\t_\t0\troot\t_\tNER=O
+    7\tFreudovo\tFreudov\tADJ\tAspfsa\t_\t8\tamod\t_\tNER=B-deriv-per
+    8\tdelo\tdelo\tNOUN\tNcnsa\t_\t6\tobj\t_\tNER=O
+    9\t(\t(\tPUNCT\tZ\t_\t10\tpunct\tSpaceAfter=No\tNER=O
+    10\tEvropa\tEvropa\tPROPN\tNpfsn\t_\t8\tappos\tSpaceAfter=No\tNER=B-loc
+    11\t)\t)\tPUNCT\tZ\t_\t10\tpunct\tSpaceAfter=No\tNER=O
+    12\t.\t.\tPUNCT\tZ\t_\t6\tpunct\t_\tNER=O
+""")
+
+# A stray `I-` with no open span opens one; an `I-` with another label
+# closes the open span and opens a new one.
+STRAY_I_DOC = textwrap.dedent("""\
+    # newdoc id = stray
+    # sent_id = stray.s1
+    # text = Novak Ljubljana Pariz
+    1\tNovak\tNovak\tPROPN\tNpmsn\t_\t0\troot\t_\tNER=I-per
+    2\tLjubljana\tLjubljana\tPROPN\tNpfsn\t_\t1\tflat\t_\tNER=B-loc
+    3\tPariz\tPariz\tPROPN\tNpmsn\t_\t1\tflat\t_\tNER=I-org
+""")
+
+# The `# text` comment disagrees with the tokens, so alignment fails.
+MISALIGNED_DOC = textwrap.dedent("""\
+    # newdoc id = bad
+    # sent_id = bad.s1
+    # text = Nekaj povsem drugega.
+    1\tJanez\tJanez\tPROPN\tNpmsn\t_\t0\troot\t_\tNER=B-per
+    2\t.\t.\tPUNCT\tZ\t_\t1\tpunct\t_\tNER=O
+""")
+
+
+def _surfaces(doc: Document) -> List[tuple]:
+    """Return `(surface, label)` for every span of *doc*.
+
+    Args:
+        doc (Document): An extracted document with entity spans.
+
+    Returns:
+        List[tuple]: `(text[start:end], label)` per span, in order.
+    """
+    assert doc.annotations is not None and doc.annotations.spans is not None
+    return [(doc.text[s:e], label) for s, e, label in doc.annotations.spans]
+
+
+class TestEntitySpans:
+    """Entity spans decoded from `NER=` MISC tags."""
+
+    def test_spans_match_surface_text(self, tmp_path: Path) -> None:
+        """Every span slices its entity's surface string out of the document text."""
+        (doc,) = _extract(tmp_path, ENTITY_DOC)
+        assert _surfaces(doc) == [
+            ("Janez Novak", "PER"),
+            ("Nove Gorice", "LOC"),
+            ("Freudovo", "DERIV-PER"),
+            ("Evropa", "LOC"),
+        ]
+
+    def test_second_sentence_offsets_are_shifted(self, tmp_path: Path) -> None:
+        """Offsets are relative to the newline-joined document text, not the sentence."""
+        (doc,) = _extract(tmp_path, ENTITY_DOC)
+        first = doc.annotations.spans[0]
+        assert first[0] == len("Vlada je razpravljala.") + 1
+
+    def test_entity_free_annotated_doc_has_empty_list(self, tmp_path: Path) -> None:
+        """A document whose tokens carry only `O` tags gets `spans == []`."""
+        (doc,) = _extract(tmp_path, SENTENCE_1)
+        assert doc.annotations.spans == []
+
+    def test_source_without_ner_tags_has_no_spans(self, tmp_path: Path) -> None:
+        """A source without the `NER=` attribute leaves `spans` unset."""
+        (doc,) = _extract(tmp_path, NO_NEWDOC_MARKER)
+        assert doc.annotations.spans is None
+
+    def test_stray_continuation_opens_span(self, tmp_path: Path) -> None:
+        """Lenient IOB: a stray `I-` opens a span, a label change closes it."""
+        (doc,) = _extract(tmp_path, STRAY_I_DOC)
+        assert _surfaces(doc) == [("Novak", "PER"), ("Ljubljana", "LOC"), ("Pariz", "ORG")]
+
+    def test_reconstructed_text_aligns(self, tmp_path: Path) -> None:
+        """Without a `# text` comment the rendered text aligns by construction."""
+        content = "\n".join(line for line in ENTITY_DOC.splitlines() if not line.startswith("# text")) + "\n"
+        (doc,) = _extract(tmp_path, content)
+        assert [s for s, _ in _surfaces(doc)] == ["Janez Novak", "Nove Gorice", "Freudovo", "Evropa"]
+
+    def test_misaligned_sentence_yields_no_spans_and_warns(self, tmp_path: Path, caplog) -> None:
+        """A sentence whose tokens cannot be aligned contributes no spans and is counted."""
+        with caplog.at_level("WARNING"):
+            (doc,) = _extract(tmp_path, MISALIGNED_DOC)
+        assert doc.annotations.spans == []
+        assert any("1 sentence" in rec.message for rec in caplog.records)
