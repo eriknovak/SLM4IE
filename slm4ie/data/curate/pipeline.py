@@ -62,7 +62,7 @@ class CuratePaths:
             the `convert` stage (stage 0) reads from.
         output_dir: Curation output root. Stage folders
             (`00_convert/`, `01_language/`, ...) live directly under
-            this path, alongside `_dedup_state/` and `_logs/`.
+            this path, alongside `_partial/` and `_logs/`.
     """
 
     input_folder: Path
@@ -82,15 +82,31 @@ class CuratePaths:
         """
         return self.output_dir / STAGE_DIRS[stage]
 
-    @property
-    def dedup_state_dir(self) -> Path:
-        """Return the folder holding dedup sig/dup scratch between dedup sub-stages.
+    def staging_dir(self, stage: str) -> Path:
+        """Return the folder a stage builds into before its output is promoted.
+
+        Args:
+            stage: Stage name (see `slm4ie.data.curate.stages.STAGE_NAMES`).
 
         Returns:
-            `<output_dir>/_dedup_state`. The CLI runner purges its
-            contents after each dedup sub-stage's sentinel lands.
+            `<output_dir>/_partial/<stage folder>`.
         """
-        return self.output_dir / "_dedup_state"
+        return self.output_dir / "_partial" / STAGE_DIRS[stage]
+
+    def scratch_dir(self, stage: str) -> Path:
+        """Return the folder for a stage's intermediate files, kept beside its staging folder.
+
+        The dedup stages pass signatures and duplicate lists between their
+        steps here. It survives a crash so a resumed run keeps finished
+        steps, and is never promoted with the output.
+
+        Args:
+            stage: Stage name (see `slm4ie.data.curate.stages.STAGE_NAMES`).
+
+        Returns:
+            `<output_dir>/_partial/<stage folder>.scratch`.
+        """
+        return self.output_dir / "_partial" / f"{STAGE_DIRS[stage]}.scratch"
 
     def logs_dir(self, stage: str) -> Path:
         """Return the per-stage logging directory.
@@ -539,8 +555,8 @@ def build_exact_dedup_executors(
     """Build the exact-dedup stage: sig → find → filter+write 05_exact_dedup/.
 
     Three executors chained via `depends`:
-        1. (parallel) read 04_repetition/ → ExactDedupSignature → exact_sigs/
-        2. (single)   ExactFindDedups(exact_sigs/) → exact_dups/
+        1. (parallel) read 04_repetition/ → ExactDedupSignature → <scratch>/sigs/
+        2. (single)   ExactFindDedups(<scratch>/sigs/) → <scratch>/dups/
         3. (parallel) read 04_repetition/ → ExactDedupFilter → write 05_exact_dedup/
 
     Args:
@@ -566,8 +582,8 @@ def build_exact_dedup_executors(
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("repetition")
     out = output_override if output_override is not None else paths.stage_dir("exact_dedup")
-    sigs = paths.dedup_state_dir / "exact_sigs"
-    dups = paths.dedup_state_dir / "exact_dups"
+    sigs = paths.scratch_dir("exact_dedup") / "sigs"
+    dups = paths.scratch_dir("exact_dedup") / "dups"
 
     sig = LocalPipelineExecutor(
         pipeline=[
@@ -616,8 +632,8 @@ def build_sentence_dedup_executors(
     """Build the sentence-dedup stage: sig → find → filter+write 06_sentence_dedup/.
 
     Three executors chained via `depends`, mirroring the exact stage:
-        1. (parallel) read 05_exact_dedup/ → CompactSentenceDedupSignature → sent_sigs/
-        2. (single)   SentenceFindDedups(sent_sigs/) → sent_dups/
+        1. (parallel) read 05_exact_dedup/ → CompactSentenceDedupSignature → <scratch>/sigs/
+        2. (single)   SentenceFindDedups(<scratch>/sigs/) → <scratch>/dups/
         3. (parallel) read 05_exact_dedup/ → SentenceDedupFilter → write 06_sentence_dedup/
 
     Args:
@@ -641,8 +657,8 @@ def build_sentence_dedup_executors(
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("exact_dedup")
     out = output_override if output_override is not None else paths.stage_dir("sentence_dedup")
-    sigs = paths.dedup_state_dir / "sent_sigs"
-    dups = paths.dedup_state_dir / "sent_dups"
+    sigs = paths.scratch_dir("sentence_dedup") / "sigs"
+    dups = paths.scratch_dir("sentence_dedup") / "dups"
 
     sig = LocalPipelineExecutor(
         pipeline=[

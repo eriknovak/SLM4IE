@@ -314,7 +314,7 @@ def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
     write_sentinel(dedup, config_slice={}, config_hash_value="h", records_in=1, records_out=1)
     (dedup / "alfa").mkdir(parents=True)
     (dedup / "alfa" / "000.jsonl.gz").write_bytes(b"x")
-    state = out / "_dedup_state"
+    state = out / "_partial" / "05_exact_dedup.scratch"
     state.mkdir(parents=True)
     _apply_force(out, stage="exact_dedup", run_all=True, dataset_keys=["alfa"])
     assert not dedup.exists()

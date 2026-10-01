@@ -318,19 +318,6 @@ def _shard_layout(view: Path) -> Tuple[int, str]:
     return len(shards), digest.hexdigest()
 
 
-def _staging_dir(paths: CuratePaths, stage: str) -> Path:
-    """Return the folder a stage writes into before its output is promoted.
-
-    Args:
-        paths: Resolved curation paths.
-        stage: Stage name.
-
-    Returns:
-        `<output_dir>/_partial/<stage folder>`.
-    """
-    return paths.output_dir / "_partial" / STAGE_DIRS[stage]
-
-
 def _swap_into_place(new: Path, final: Path) -> None:
     """Replace *final* with the finished folder *new* by renaming.
 
@@ -377,7 +364,7 @@ def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str
     file matches the current config hash, stage version, task count and
     inputs; datatrove then skips the tasks it marked complete. Otherwise the
     staging folder, the stage's logs (with the completion markers) and its
-    dedup scratch are removed first, so nothing from an earlier run survives.
+    scratch folder are removed first, so nothing from an earlier run survives.
 
     Args:
         paths: Resolved curation paths.
@@ -389,7 +376,7 @@ def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str
     Returns:
         True when resuming, False when the staging folder was cleared.
     """
-    staging = _staging_dir(paths, stage)
+    staging = paths.staging_dir(stage)
     progress_file = staging / PROGRESS_NAME
     expected = {
         "config_hash": config_hash_value,
@@ -401,8 +388,7 @@ def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str
         return True
     shutil.rmtree(staging, ignore_errors=True)
     shutil.rmtree(paths.logs_dir(stage), ignore_errors=True)
-    if stage in ("exact_dedup", "sentence_dedup"):
-        _purge_dedup_state(paths, stage)
+    shutil.rmtree(paths.scratch_dir(stage), ignore_errors=True)
     staging.mkdir(parents=True)
     progress_file.write_text(json.dumps(expected), encoding="utf-8")
     return False
@@ -481,19 +467,6 @@ def _extracted_input_summary(input_dir: Path, keys: List[str]) -> Tuple[int, int
         present += 1
         total_bytes += path.stat().st_size
     return present, total_bytes
-
-
-def _purge_dedup_state(paths: CuratePaths, which: str) -> None:
-    """Purge the dedup scratch for *which* stage.
-
-    Args:
-        paths: Resolved curation paths.
-        which: Either `"exact_dedup"` or `"sentence_dedup"`.
-    """
-    prefix = {"exact_dedup": "exact", "sentence_dedup": "sent"}[which]
-    for sub in (paths.dedup_state_dir / f"{prefix}_sigs", paths.dedup_state_dir / f"{prefix}_dups"):
-        if sub.exists():
-            shutil.rmtree(sub, ignore_errors=True)
 
 
 @dataclass(frozen=True)
@@ -1080,10 +1053,9 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
         affected = cascade_from(stage)
         for name in affected:
             shutil.rmtree(paths.stage_dir(name), ignore_errors=True)
-        if set(affected) & {"exact_dedup", "sentence_dedup"}:
-            shutil.rmtree(paths.dedup_state_dir, ignore_errors=True)
         for name in affected:
-            shutil.rmtree(_staging_dir(paths, name), ignore_errors=True)
+            shutil.rmtree(paths.staging_dir(name), ignore_errors=True)
+            shutil.rmtree(paths.scratch_dir(name), ignore_errors=True)
         logger.warning("--force --stage %s: removed %s", stage, list(affected))
         return
 
@@ -1098,7 +1070,6 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
             shutil.rmtree(folder / key, ignore_errors=True)
     for name in CORPUS_STAGES:
         (paths.stage_dir(name) / SENTINEL_NAME).unlink(missing_ok=True)
-    shutil.rmtree(paths.dedup_state_dir, ignore_errors=True)
     shutil.rmtree(output_dir / "_partial", ignore_errors=True)
     logger.warning(
         "--force: reset scoped stages %s for %s + corpus sentinels",
@@ -1500,7 +1471,7 @@ def _run_scoped_bucket(
         RuntimeError: If any unit fails its integrity check.
     """
     paths = setup.paths
-    staging = _staging_dir(paths, stage)
+    staging = paths.staging_dir(stage)
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     upstream = upstream_stage(stage)
@@ -1582,7 +1553,7 @@ def _curate_scoped(
     inputs: Dict[str, Tuple[Optional[str], Optional[Dict[str, Any]]]] = {}
     no_input: List[str] = []
     for key in dataset_keys:
-        _recover_promotion(_staging_dir(paths, stage) / key, paths.stage_dir(stage) / key)
+        _recover_promotion(paths.staging_dir(stage) / key, paths.stage_dir(stage) / key)
         # An unmounted extracted tier or an unbuilt upstream must not wipe output.
         if not _has_input(paths, stage, key):
             no_input.append(key)
@@ -1645,7 +1616,7 @@ def _curate_corpus(setup: _Setup, stage: str, workers: int, info: Dict[str, Any]
         RuntimeError: If a dataset's output fails its integrity check.
     """
     paths = setup.paths
-    _recover_promotion(_staging_dir(paths, stage), paths.stage_dir(stage))
+    _recover_promotion(paths.staging_dir(stage), paths.stage_dir(stage))
     if not _corpus_has_input(setup, stage):
         logger.info("[%s] upstream not built; skipping.", stage)
         return
@@ -1658,7 +1629,7 @@ def _curate_corpus(setup: _Setup, stage: str, workers: int, info: Dict[str, Any]
     expected_hash = setup.expected_hash(stage)
     if not input_keys:
         # Every dataset was filtered out upstream: the stage's output is empty.
-        staging = _staging_dir(paths, stage)
+        staging = paths.staging_dir(stage)
         shutil.rmtree(staging, ignore_errors=True)
         write_sentinel(
             staging,
@@ -1686,7 +1657,7 @@ def _curate_corpus(setup: _Setup, stage: str, workers: int, info: Dict[str, Any]
         tasks,
         workers,
     )
-    staging = _staging_dir(paths, stage)
+    staging = paths.staging_dir(stage)
     runner = _stage_runner(
         stage,
         paths,
@@ -1729,8 +1700,7 @@ def _curate_corpus(setup: _Setup, stage: str, workers: int, info: Dict[str, Any]
         info=info,
     )
     _swap_into_place(staging, paths.stage_dir(stage))
-    if stage in ("exact_dedup", "sentence_dedup"):
-        _purge_dedup_state(paths, stage)
+    shutil.rmtree(paths.scratch_dir(stage), ignore_errors=True)
     shutil.rmtree(view, ignore_errors=True)
     logger.info("[%s] done (records_in=%d, records_out=%d)", stage, records_in, records_out)
 

@@ -486,29 +486,29 @@ class TestPrepareCorpusStage:
     def _paths(self, tmp_path: Path) -> Any:
         """Return curate paths with a stale staged shard, completion marker and dedup scratch in place."""
         paths = curate_runner.CuratePaths(input_folder=tmp_path / "in", output_dir=tmp_path / "out")
-        _write_stage_shards(curate_runner._staging_dir(paths, "sentence_dedup"), "d1", 1)
+        _write_stage_shards(paths.staging_dir("sentence_dedup"), "d1", 1)
         (paths.logs_dir("sentence_dedup") / "1_sig" / "completions").mkdir(parents=True)
         (paths.logs_dir("sentence_dedup") / "1_sig" / "completions" / "00000").touch()
-        (paths.dedup_state_dir / "sent_sigs").mkdir(parents=True)
+        (paths.scratch_dir("sentence_dedup") / "sigs").mkdir(parents=True)
         _write_stage_shards(paths.stage_dir("sentence_dedup"), "d1", 1)
         return paths
 
     def test_fresh_start_clears_staging_only(self, tmp_path: Path) -> None:
         """Without a progress file, staging, logs and dedup scratch go; the promoted output stays."""
         paths = self._paths(tmp_path)
-        staging = curate_runner._staging_dir(paths, "sentence_dedup")
+        staging = paths.staging_dir("sentence_dedup")
         resumed = curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i")
         assert resumed is False
         assert list(staging.glob("*/*.jsonl.gz")) == []
         assert not paths.logs_dir("sentence_dedup").exists()
-        assert not (paths.dedup_state_dir / "sent_sigs").exists()
+        assert not paths.scratch_dir("sentence_dedup").exists()
         assert (staging / curate_runner.PROGRESS_NAME).is_file()
         assert (paths.stage_dir("sentence_dedup") / "d1" / "00000.jsonl.gz").exists()
 
     def test_matching_progress_resumes(self, tmp_path: Path) -> None:
         """A progress file with the same hash, tasks and inputs keeps finished work."""
         paths = self._paths(tmp_path)
-        staging = curate_runner._staging_dir(paths, "sentence_dedup")
+        staging = paths.staging_dir("sentence_dedup")
         curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i")
         _write_stage_shards(staging, "d1", 1)
         (paths.logs_dir("sentence_dedup") / "1_sig" / "completions").mkdir(parents=True)
@@ -520,7 +520,7 @@ class TestPrepareCorpusStage:
     def test_changed_settings_start_fresh(self, tmp_path: Path, changed: Tuple[str, int, str]) -> None:
         """A different config hash, task count or inputs clears the staging folder."""
         paths = self._paths(tmp_path)
-        staging = curate_runner._staging_dir(paths, "sentence_dedup")
+        staging = paths.staging_dir("sentence_dedup")
         curate_runner._prepare_corpus_stage(paths, "sentence_dedup", "h", 4, "i")
         _write_stage_shards(staging, "d1", 1)
         assert curate_runner._prepare_corpus_stage(paths, "sentence_dedup", *changed) is False

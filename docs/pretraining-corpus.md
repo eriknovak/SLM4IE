@@ -70,8 +70,9 @@ result.
 
 Internally each dedup stage chains three datatrove executors via `depends=`:
 signature → find (single-worker reducer over signatures) → filter + write. The
-sig/find scratch lives at `<output_dir>/_dedup_state/` and is purged when the
-stage's sentinel lands. The statistics stage maps `CorpusStats` over the corpus
+sig/find scratch lives at `<output_dir>/_partial/<stage folder>.scratch/`, beside
+the stage's staging folder, and is purged when the stage is promoted. The
+statistics stage maps `CorpusStats` over the corpus
 into per-task partials and reduces them in one process. The sentence-dedup blocks
 use `Languages.slovenian` so datatrove dispatches its bundled Slovenian
 `SpaCyTokenizer` for sentence boundaries; its signature step packs hashes into
@@ -215,8 +216,8 @@ effectively non-overridable until some are surfaced.
 │   └── .complete
 ├── _partial/<stage>/                       staging: a unit builds here, then
 │                                           replaces its old folder by rename
-├── _dedup_state/                           sig/find scratch (auto-purged
-│                                           when each dedup sentinel lands)
+├── _partial/<stage>.scratch/               dedup sig/find scratch (purged
+│                                           when its stage is promoted)
 ├── _inputs/<stage>/                        roster view a corpus stage reads
 └── _logs/<stage>/                          datatrove per-executor logs and
                                             per-task completion markers
