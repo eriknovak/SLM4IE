@@ -1,10 +1,17 @@
 # Slovenian SEO/scam spam terms — high precision only.
 # Pill spam, fake pharma, counterfeit goods, gambling promos, follower/
 # crypto scams. One token (or space-separated phrase) per line; blank
-# lines and #-comments ignored; lowercased on load. Matching is
-# whole-word, so multi-word phrases must use spaces (not hyphens).
-# Ambiguous legitimate words (kredit, zavarovanje, igre, hujšanje, delo
-# od doma) are deliberately excluded.
+# lines and #-comments ignored; lowercased on load. Multi-word phrases
+# use spaces (not hyphens).
+# Matching is by stem: the last token of an entry drops one trailing
+# vowel when it has 5+ letters and then accepts up to 3 more letters
+# (`kazino` matches `kazinoji`); earlier tokens of a phrase match
+# literally. List one line per stem family; the filter counts distinct
+# stems.
+# Ambiguous legitimate words are deliberately excluded:
+#   kredit, zavarovanje, igre, hujšanje, delo od doma,
+#   replika, replike, ponaredek, ponaredki, igralnica, igralnice
+#   (kept only in phrases).
 
 # pill / ED spam
 viagra
@@ -19,19 +26,28 @@ povečanje penisa
 # gambling promos
 casino
 kazino
-kazinoji
-igralnica
-igralnice
 spletna igralnica
 spletne igralnice
 online casino
+spletni casino
+casino bonus
+blackjack
+ruleta
+jackpot
+poker
+spletni poker
+online poker
+igralni avtomat
+depozit
+depozitni bonus
+vrtljaji
+brezplačni vrtljaji
+bonus dobrodošlice
+bonus brez pologa
+spletne stave
 
 # counterfeit goods
-replika
-replike
 replika ure
-ponaredek
-ponaredki
 ponarejene ure
 rolex replika
 
