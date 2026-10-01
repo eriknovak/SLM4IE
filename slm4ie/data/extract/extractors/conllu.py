@@ -75,9 +75,11 @@ from slm4ie.data.schema import Annotations, Document, Token, render_sentence
 
 logger = logging.getLogger(__name__)
 
-#: IOB tag of a token outside any entity, also assumed for a token
-#: whose MISC lacks `NER=` inside an otherwise tagged sentence.
+#: IOB tag outside any entity; assumed when a tagged sentence's token lacks `NER=`.
 _OUTSIDE = "O"
+
+#: Joins sentence texts into the document text; entity offsets shift by it.
+_SENTENCE_SEP = "\n"
 
 
 def _blank_to_none(value: str) -> Optional[str]:
@@ -280,7 +282,7 @@ def _entity_spans(
             else:
                 for first, last, label in _decode_iob(tags):
                     spans.append([offset + offsets[first][0], offset + offsets[last][1], label])
-        offset += len(text) + 1
+        offset += len(text) + len(_SENTENCE_SEP)
     return spans, misaligned
 
 
@@ -384,7 +386,7 @@ def _build_document(
     spans, misaligned = _entity_spans(sentence_texts, sentence_tokens, sentence_tags)
     annotations = Annotations(tokens=flat_tokens, sentences=sentences, spans=spans)
     document = Document(
-        text="\n".join(sentence_texts),
+        text=_SENTENCE_SEP.join(sentence_texts),
         source=source,
         domain=domain,
         doc_id=doc_id,
@@ -462,8 +464,8 @@ class ConlluExtractor(FileBasedExtractor):
         filepath: Path,
         source: str,
         domain: str,
-        extra_metadata: Optional[Dict[str, Any]] = None,
-        misaligned: Optional[List[int]] = None,
+        extra_metadata: Optional[Dict[str, Any]],
+        misaligned: List[int],
     ) -> Iterator[Document]:
         """Parse a single CoNLL-U file and yield Documents.
 
@@ -481,9 +483,9 @@ class ConlluExtractor(FileBasedExtractor):
                 fields copied into every yielded `Document.metadata`.
                 The same dict applies to every Document produced from
                 this file (sidecar TSV rows are keyed by filename).
-            misaligned (Optional[List[int]]): One-cell counter the
-                caller shares across files; incremented by the number
-                of sentences whose entity spans were dropped.
+            misaligned (List[int]): One-cell counter the caller shares
+                across files; incremented by the number of sentences
+                whose entity spans were dropped.
 
         Yields:
             Document: One Document per detected boundary, or one per
@@ -498,7 +500,6 @@ class ConlluExtractor(FileBasedExtractor):
         # marker-driven and the sent_id-prefix heuristic is off.
         seen_newdoc_marker = False
         current_prefix: Optional[str] = None
-        counter = misaligned if misaligned is not None else [0]
 
         def _flush() -> Optional[Document]:
             if not sentence_tokens:
@@ -514,7 +515,7 @@ class ConlluExtractor(FileBasedExtractor):
                 extra_metadata=extra_metadata,
                 native_id=current_doc_id,
             )
-            counter[0] += dropped
+            misaligned[0] += dropped
             return document
 
         def _reset() -> None:
@@ -560,7 +561,7 @@ class ConlluExtractor(FileBasedExtractor):
 
         with filepath.open(encoding="utf-8") as fh:
             for raw_line in fh:
-                line = raw_line.rstrip("\n")
+                line = raw_line.rstrip("\r\n")
                 if line == "":
                     if current_block:
                         yield from _consume(current_block)
