@@ -57,6 +57,7 @@ SENTINEL_NAME = ".complete"
 NOT_BUILT = "not built"
 CONFIG_CHANGED = "config changed"
 LEGACY = "legacy sentinel (run `status --adopt`)"
+UNVERSIONED = "code version not recorded (run `status --adopt`)"
 INTEGRITY_FAILED = "integrity failure"
 STAGE_VERSION_CHANGED = "stage version changed"
 INPUT_CHANGED = "input changed"
@@ -103,6 +104,11 @@ class Sentinel:
     def is_legacy(self) -> bool:
         """Return True for a sentinel written before lineage was recorded."""
         return self.stage_version is None
+
+    @property
+    def needs_version(self) -> bool:
+        """Return True for a sentinel whose stage version predates code hashes."""
+        return self.stage_version is not None and not self.stage_version.startswith("sha256:")
 
 
 def _write_payload(sentinel_path: Path, payload: Dict[str, Any]) -> None:
@@ -240,6 +246,8 @@ def stale_reason(
         return CONFIG_CHANGED
     if sentinel.is_legacy:
         return LEGACY
+    if sentinel.needs_version:
+        return UNVERSIONED
     if sentinel.integrity_error:
         return f"{INTEGRITY_FAILED}: {sentinel.integrity_error}"
     if sentinel.stage_version != stage_version:
@@ -263,6 +271,22 @@ def dataset_sentinel_path(stage_folder: Path, dataset: str) -> Path:
         Path to `<stage_folder>/<dataset>/.complete`.
     """
     return stage_folder / dataset / SENTINEL_NAME
+
+
+def stamp_stage_version(stage_folder: Path, stage_version: str) -> None:
+    """Record *stage_version* in an existing sentinel, leaving every other field as it is.
+
+    Used once, when code versions are first measured: the unit is taken to
+    have been built by the code as it stands, the same claim adoption makes.
+
+    Args:
+        stage_folder: The unit's output folder.
+        stage_version: The stage's current code version.
+    """
+    sentinel_path = stage_folder / SENTINEL_NAME
+    payload = json.loads(sentinel_path.read_text(encoding="utf-8"))
+    payload["stage_version"] = stage_version
+    _write_payload(sentinel_path, payload)
 
 
 def write_dataset_sentinel(stage_folder: Path, dataset: str, **fields: Any) -> Path:
@@ -506,7 +530,8 @@ def legacy_units(setup: Setup, keys: List[str], corpus: bool) -> List[str]:
             continue
         for name, folder, key in units:
             sentinel = read_sentinel(folder)
-            if sentinel is not None and sentinel.is_legacy and sentinel.config_hash == setup.expected_hash(stage, key):
+            unadopted = sentinel is not None and (sentinel.is_legacy or sentinel.needs_version)
+            if unadopted and sentinel.config_hash == setup.expected_hash(stage, key):
                 found.append(name)
     return found
 

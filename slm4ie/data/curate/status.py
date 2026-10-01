@@ -28,6 +28,7 @@ from slm4ie.data.curate.lineage import (
     read_sentinel,
     run_info,
     scoped_reason,
+    stamp_stage_version,
     upstream_digest,
     write_sentinel,
 )
@@ -209,7 +210,9 @@ def adopt_legacy(setup: Setup, workers: int = 1) -> None:
     unit that fails the check is recorded with the failure, so the next run
     rebuilds it (and, if its documents change, whatever sits downstream).
     Legacy units whose config no longer matches are left alone: they are
-    stale either way. No stage runs and no shard is written.
+    stale either way. Units that already carry lineage but whose stage version
+    predates code hashes only get the current code version recorded, without
+    a read. No stage runs and no shard is written.
 
     Args:
         setup: The loaded setup.
@@ -222,6 +225,16 @@ def adopt_legacy(setup: Setup, workers: int = 1) -> None:
 
     # Keys outside the roster (e.g. benchmarks run by name) are adopted too.
     keys = dataset_keys_on_disk(setup)
+    stamped = 0
+    folders = [(s, paths.stage_dir(s) / k, k) for s in SCOPED_STAGES for k in keys]
+    folders += [(s, paths.stage_dir(s), None) for s in CORPUS_STAGES]
+    for stage, folder, key in folders:
+        sentinel = read_sentinel(folder)
+        if sentinel is not None and sentinel.needs_version and sentinel.config_hash == setup.expected_hash(stage, key):
+            stamp_stage_version(folder, STAGE_VERSIONS[stage])
+            stamped += 1
+    if stamped:
+        logger.info("[adopt] recorded the current code version on %d unit(s)", stamped)
     scoped = [
         (stage, key)
         for stage in SCOPED_STAGES

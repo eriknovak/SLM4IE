@@ -38,6 +38,7 @@ from slm4ie.data.curate.lineage import (
     OUTPUT_CHANGED,
     SENTINEL_NAME,
     STAGE_VERSION_CHANGED,
+    UNVERSIONED,
 )
 
 #: Single dataset key the default roster exposes.
@@ -587,3 +588,20 @@ def test_partial_rebuild_updates_lock_file(env: _Env) -> None:
     lock = read_lock(lock_path)
     assert lock_path.read_bytes() != before
     assert lock["spam"][_DATASET]["config_hash"] == read_sentinel(env.unit("spam")).config_hash  # type: ignore[union-attr]
+
+
+def test_units_without_a_code_version_are_stamped_not_rebuilt(env: _Env) -> None:
+    """Units recorded before code versions block `run` until adoption stamps the current versions."""
+    env.run("--all")
+    for path in env.output_dir.rglob(SENTINEL_NAME):
+        payload = json.loads(path.read_text())
+        payload["stage_version"] = "1"
+        path.write_text(json.dumps(payload))
+    with pytest.raises(RuntimeError, match="status --adopt"):
+        env.run("--all")
+    assert env.status()[1][("quality", _DATASET)] == ("stale", UNVERSIONED)
+    code, units = env.status("--adopt")
+    assert code == 0, units
+    assert env.stub.ran == []
+    assert read_sentinel(env.unit("quality")).stage_version == curate_runner.STAGE_VERSIONS["quality"]  # type: ignore[union-attr]
+    assert env.run("--all") == []

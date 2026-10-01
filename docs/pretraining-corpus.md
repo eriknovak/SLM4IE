@@ -156,9 +156,12 @@ or `missing` (nothing to build it from), compares the lock file too, and exits
 while legacy sentinels remain. `status --adopt` reads each legacy unit once,
 checks it, computes its document digest and rewrites its sentinel, so a corpus
 built earlier becomes current without a rebuild. Units failing the check are
-recorded as such and are the only ones the next run rebuilds. Adoption reads the whole corpus and every extracted file once,
-with one sequential reader feeding `--max-workers` parsing processes, so a
-spinning disk streams instead of seeking between files.
+recorded as such and are the only ones the next run rebuilds. Adoption reads
+the whole corpus and every extracted file once, with one sequential reader
+feeding `--max-workers` parsing processes, so a spinning disk streams instead
+of seeking between files. Units that already carry lineage but a stage version
+from before code hashes only get the current code version recorded — no read —
+on the claim that the code as it stands built them.
 
 ## Per-dataset overrides
 
