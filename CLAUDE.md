@@ -171,8 +171,9 @@ they own disjoint output trees:
    Driven by `configs/data/curate.yaml`. Each unit's sentinel records its
    lineage (config hash, stage version, input digest, document digest, shard
    set); a unit is rebuilt only when one changed, builds in `_partial/` and is
-   swapped in after an integrity check. Runs rewrite the committed lock file
-   `configs/data/curate.lock.yaml`; `status` reports stale units and why.
+   swapped in after an integrity check. `--all` runs rewrite the committed
+   lock file `configs/data/curate.lock.yaml`; `status` reports stale units and
+   why.
    Raise a stage's `STAGE_VERSIONS` entry when its code changes its output.
    The annotations sidecar is **not** read here — it would desync after any
    datatrove step that rewrites the text.

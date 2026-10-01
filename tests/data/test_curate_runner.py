@@ -583,3 +583,15 @@ def test_status_keeps_unit_whose_input_is_gone(env: _Env) -> None:
     assert units[("convert", _DATASET)] == ("missing", curate_runner.NO_INPUT)
     assert env.run("--all") == []
     assert NOT_BUILT
+
+
+def test_subset_run_leaves_lock_file_alone(env: _Env) -> None:
+    """Only a full `--all` run rewrites the lock file; a subset run on a branch does not churn it."""
+    lock_path = env.root / "curation.lock.yaml"
+    env.run(_DATASET)
+    assert not lock_path.exists()
+    env.run("--all")
+    before = lock_path.read_bytes()
+    env.cfg["quality"]["min_doc_words"] = 100
+    env.run(_DATASET)
+    assert lock_path.read_bytes() == before
