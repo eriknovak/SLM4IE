@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
@@ -47,7 +48,15 @@ from slm4ie.data.curate.lineage import (
     swap_into_place,
     write_sentinel,
 )
-from slm4ie.data.curate.paths import CuratePaths, filter_stage_subset, has_stage_output, human_bytes, shard_layout
+from slm4ie.data.curate.paths import (
+    CuratePaths,
+    bucket_log_scope,
+    filter_stage_subset,
+    has_stage_output,
+    human_bytes,
+    record_bucket,
+    shard_layout,
+)
 from slm4ie.data.curate.stages import (
     CORPUS_STAGES,
     SCOPED_STAGES,
@@ -251,7 +260,9 @@ def _run_scoped_bucket(
     """Build one config bucket of a scoped stage into staging, check it, promote it.
 
     Every unit is checked before any is promoted, so a failure keeps every
-    old output and sentinel in place.
+    old output and sentinel in place. The bucket's executor logs under a
+    folder of its own (`bucket_log_scope`), cleared first and recorded in the
+    stage's bucket index before the run.
 
     Args:
         setup: The loaded setup.
@@ -270,10 +281,13 @@ def _run_scoped_bucket(
     Raises:
         RuntimeError: If any unit fails its integrity check.
     """
-    paths = setup.paths
+    scope = bucket_log_scope(bucket_hash, bucket_keys)
+    paths = replace(setup.paths, log_scope=scope)
     staging = paths.staging_dir(stage)
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
+    shutil.rmtree(paths.logs_dir(stage), ignore_errors=True)
+    record_bucket(paths.logs_dir(stage).parent, scope, bucket_hash, bucket_keys)
     upstream = upstream_stage(stage)
     up_dir = paths.stage_dir(upstream) if upstream is not None else None
     # A key whose upstream unit kept no documents is promoted empty, not skipped.

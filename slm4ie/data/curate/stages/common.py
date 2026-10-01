@@ -25,6 +25,8 @@ from datatrove.pipeline.readers import JsonlReader
 from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.stats import PipelineStats
 
+from slm4ie.data.curate.paths import executor_task_stats
+
 
 def jsonl_writer(stage_folder: Path) -> JsonlWriter:
     """Return a JsonlWriter that emits `<stage_folder>/<dataset>/<rank>.jsonl.gz`.
@@ -89,7 +91,8 @@ def stage_io_counts(logging_dir: Path) -> Tuple[int, int]:
     datatrove writes each finished task's stats to
     `<logging_dir>/stats/<rank>.json`. A resumed run returns stats for the
     tasks it ran this time only (or `None` when all were already done), so
-    stage totals are read back from these per-task files instead.
+    stage totals are read back from these per-task files instead, over the
+    ranks the executor declares (`executor_task_stats`).
 
     Args:
         logging_dir: The `logging_dir` of the stage's last executor.
@@ -99,6 +102,6 @@ def stage_io_counts(logging_dir: Path) -> Tuple[int, int]:
         over all finished tasks; `(0, 0)` when none has finished.
     """
     merged = PipelineStats()
-    for stats_file in sorted((logging_dir / "stats").glob("*.json")):
+    for stats_file in executor_task_stats(logging_dir):
         merged = merged + PipelineStats.from_json(json.loads(stats_file.read_text(encoding="utf-8")))
     return pipeline_io_counts(merged)

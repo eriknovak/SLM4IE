@@ -40,6 +40,7 @@ import yaml
 
 from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.inspect.judge import interleave
+from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -63,9 +64,10 @@ DEDUP_STAGES = frozenset({"exact_dedup", "sentence_dedup"})
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
 
 
-#: Every datatrove executor the curation run launches, in pipeline order. The
-#: scoped stages launch one per config bucket but all of them log into the same
-#: folder, so only the bucket that ran last leaves its timings (issue #10).
+#: Every executor step the curation run launches, in pipeline order. A scoped
+#: stage launches one executor per config bucket, each under its own folder
+#: named in the stage's bucket index; a stage folder without an index holds
+#: one bucket's logs.
 LOG_STEPS: Tuple[Tuple[str, str], ...] = (
     ("language", ""),
     ("spam", ""),
@@ -612,10 +614,8 @@ def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
     contains the writer's, so summing them double-counts. Subtracting the
     duration from the end recovers when the executor began.
 
-    datatrove never removes a stats file, so a folder reused by a smaller
-    executor still holds the higher ranks of the larger one before it. Those
-    ranks are skipped, which is what keeps a scoped stage's numbers to the one
-    bucket that ran last rather than silently mixing buckets.
+    Only the ranks the executor declares are read (`executor_task_stats`),
+    so a folder a larger executor used earlier cannot mix two runs.
 
     Args:
         logging_dir: An executor's `logging_dir` under `_logs/`.
@@ -634,9 +634,7 @@ def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
     durations: List[float] = []
     blocks: Dict[str, float] = defaultdict(float)
     documents = 0
-    for path in sorted((logging_dir / "stats").glob("*.json")):
-        if int(path.stem) >= executor["tasks"]:
-            continue
+    for path in executor_task_stats(logging_dir):
         stats = json.loads(path.read_text(encoding="utf-8"))
         durations.append(max(block["time_stats"]["total"] for block in stats))
         ends.append(path.stat().st_mtime)
@@ -667,42 +665,33 @@ def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
     under the pool wherever tasks finish at uneven speeds and the last few run
     alone.
 
-    The scoped stages are reported for one config bucket only, because every
-    bucket logs into the same folder and the last one overwrites the rest
-    (issue #10). The corpus stages run once over everything, so theirs are
-    complete and only those are totalled.
+    A scoped stage gets one row per config bucket, read from the folders its
+    bucket index names. Logs written before the index existed hold only the
+    bucket that ran last, reported as `one bucket`. The corpus stages run once
+    over everything, so theirs are complete and only those are totalled.
 
     Args:
         pretrain_dir: The curation `output_dir`, holding `_logs/`.
 
     Returns:
-        One row per executor step in pipeline order, each naming the block
-        that set its pace, with a totals row over the corpus-wide steps last.
+        One row per executor in pipeline order, each naming the block that
+        set its pace, with a totals row over the corpus-wide steps last.
     """
     rows: List[Dict[str, Any]] = []
     for stage, step in LOG_STEPS:
-        timings = _step_timings(pretrain_dir / "_logs" / stage / step)
-        if timings is None:
-            continue
-        wall, cpu, documents = timings["wall_seconds"], timings["cpu_seconds"], timings["documents"]
-        slowest = max(timings["blocks"], key=lambda block: timings["blocks"][block])
-        rows.append(
-            {
-                "stage": stage,
-                "step": step,
-                "scope": "corpus" if stage in CORPUS_STAGES else "one bucket",
-                "finished": timings["finished"],
-                "tasks": timings["tasks"],
-                "workers": timings["workers"],
-                "documents": documents or "",
-                "cpu_hours": round(cpu / 3600, 2),
-                "wall_hours": round(wall / 3600, 2),
-                "docs_per_second": round(documents / wall, 1) if documents and wall else "",
-                "docs_per_cpu_second": round(documents / cpu, 1) if documents and cpu else "",
-                "worker_use": round(cpu / (wall * timings["workers"]), 3) if wall else "",
-                "pacing_block": slowest,
-            }
-        )
+        stage_logs = pretrain_dir / "_logs" / stage
+        executors: List[Tuple[Path, str, str]] = [(stage_logs / step, "corpus", "")]
+        if stage not in CORPUS_STAGES:
+            index = read_bucket_index(stage_logs)
+            executors = [
+                (stage_logs / folder, f"bucket:{folder}", ",".join(entry["datasets"]))
+                for folder, entry in sorted(index.items())
+            ] or [(stage_logs, "one bucket", "")]
+        for logging_dir, scope, datasets in executors:
+            timings = _step_timings(logging_dir)
+            if timings is None:
+                continue
+            rows.append(_throughput_row(stage, step, scope, datasets, timings))
     corpus = [row for row in rows if row["scope"] == "corpus"]
     total = {key: "" for key in rows[0]}
     total.update(
@@ -715,6 +704,40 @@ def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
     )
     rows.append(total)
     return rows
+
+
+def _throughput_row(stage: str, step: str, scope: str, datasets: str, timings: Dict[str, Any]) -> Dict[str, Any]:
+    """Turn one executor's timings into a throughput table row.
+
+    Args:
+        stage: The stage the executor belongs to.
+        step: The executor's step within a corpus stage, empty for a scoped stage.
+        scope: `corpus`, `bucket:<folder>` or `one bucket` for a stage folder without an index.
+        datasets: Comma-joined dataset keys of a bucket, empty otherwise.
+        timings: What `_step_timings` read from the executor's folder.
+
+    Returns:
+        The row, with CPU and wall hours, documents per second and the
+        pacing block.
+    """
+    wall, cpu, documents = timings["wall_seconds"], timings["cpu_seconds"], timings["documents"]
+    slowest = max(timings["blocks"], key=lambda block: timings["blocks"][block])
+    return {
+        "stage": stage,
+        "step": step,
+        "scope": scope,
+        "datasets": datasets,
+        "finished": timings["finished"],
+        "tasks": timings["tasks"],
+        "workers": timings["workers"],
+        "documents": documents or "",
+        "cpu_hours": round(cpu / 3600, 2),
+        "wall_hours": round(wall / 3600, 2),
+        "docs_per_second": round(documents / wall, 1) if documents and wall else "",
+        "docs_per_cpu_second": round(documents / cpu, 1) if documents and cpu else "",
+        "worker_use": round(cpu / (wall * timings["workers"]), 3) if wall else "",
+        "pacing_block": slowest,
+    }
 
 
 def pairwise_rows(pairs: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -909,7 +932,7 @@ def draw_figures(
     figures["curate-cpu-hours-by-step"] = BarChart(
         [
             {
-                "label": f"{row['stage']}/{row['step']}" if row["step"] else f"{row['stage']} (one bucket)",
+                "label": f"{row['stage']}/{row['step']}" if row["step"] else f"{row['stage']} ({row['scope']})",
                 "y": row["cpu_hours"],
             }
             for row in reversed(steps)
