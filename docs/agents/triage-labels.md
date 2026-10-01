@@ -12,4 +12,14 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
+## Kind labels
+
+Beside the triage roles, every issue carries one kind label saying which
+workflow owns it:
+
+| Label | Meaning                                    |
+| ----- | ------------------------------------------ |
+| `dev` | Development task — delivery work (devflow) |
+| `lab` | Experiment task — research work (labflow)  |
+
 Edit the right-hand column to match whatever vocabulary you actually use.
