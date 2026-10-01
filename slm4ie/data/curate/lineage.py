@@ -530,8 +530,9 @@ def legacy_units(setup: Setup, keys: List[str], corpus: bool) -> List[str]:
             continue
         for name, folder, key in units:
             sentinel = read_sentinel(folder)
-            unadopted = sentinel is not None and (sentinel.is_legacy or sentinel.needs_version)
-            if unadopted and sentinel.config_hash == setup.expected_hash(stage, key):
+            if sentinel is None or not (sentinel.is_legacy or sentinel.needs_version):
+                continue
+            if sentinel.config_hash == setup.expected_hash(stage, key):
                 found.append(name)
     return found
 

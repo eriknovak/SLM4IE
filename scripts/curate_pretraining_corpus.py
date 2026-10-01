@@ -14,7 +14,7 @@ Six subcommands:
 * `status` reports every unit (stage x dataset, or corpus stage) as current,
   stale with the reason, or missing, and exits non-zero when any is stale.
   Read-only; `--adopt` first gives legacy sentinels their lineage by reading
-  each unit once, and rewrites only sentinels and the lock file.
+  each unit once, and rewrites only sentinels.
 * `diagnose` samples the finished corpus and reports where foreign-language
   text survives the language stage. Read-only: it writes nothing.
 * `sample` draws a `dataset x stage x decision` sample of kept and dropped
@@ -52,7 +52,6 @@ Examples:
     # Adopt sentinels written before lineage tracking; rebuilds nothing.
     uv run python scripts/curate_pretraining_corpus.py status --config $CURATION --adopt \
         --max-workers 16
-
 
     # Report foreign-language leakage in the finished corpus.
     uv run python scripts/curate_pretraining_corpus.py diagnose --config $CURATION \

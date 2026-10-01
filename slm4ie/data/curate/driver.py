@@ -572,7 +572,7 @@ def curate(
     legacy = legacy_units(setup, dataset_keys, corpus=run_all)
     if legacy:
         raise RuntimeError(
-            f"{len(legacy)} unit(s) carry a sentinel from before lineage tracking (e.g. {legacy[0]}). "
+            f"{len(legacy)} unit(s) lack lineage or a code version (e.g. {legacy[0]}). "
             "Run `curate_pretraining_corpus.py status --adopt` first to adopt them without a rebuild."
         )
 

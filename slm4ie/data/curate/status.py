@@ -226,7 +226,9 @@ def adopt_legacy(setup: Setup, workers: int = 1) -> None:
     # Keys outside the roster (e.g. benchmarks run by name) are adopted too.
     keys = dataset_keys_on_disk(setup)
     stamped = 0
-    folders = [(s, paths.stage_dir(s) / k, k) for s in SCOPED_STAGES for k in keys]
+    folders: List[Tuple[str, Path, Optional[str]]] = [
+        (s, paths.stage_dir(s) / k, k) for s in SCOPED_STAGES for k in keys
+    ]
     folders += [(s, paths.stage_dir(s), None) for s in CORPUS_STAGES]
     for stage, folder, key in folders:
         sentinel = read_sentinel(folder)

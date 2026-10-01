@@ -2,7 +2,7 @@
 
 A pipeline stage's output is versioned by what it holds, not by how it was laid
 out on disk. The pieces here are pipeline-agnostic so any route that writes
-JSONL documents can adopt them; the curation runner is the first consumer.
+JSONL documents can adopt them; curation is the first consumer.
 
 * Document digest: an order-independent hash over a set of documents — the sum
   modulo 2^256 of each document's SHA-256 over its canonical JSON. It ignores

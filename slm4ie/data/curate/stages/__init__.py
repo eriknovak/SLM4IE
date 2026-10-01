@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tupl
 
 if TYPE_CHECKING:
     from slm4ie.data.curate.paths import CuratePaths
+    from slm4ie.data.curate.stages.spam import SpamAssets
 
 
 #: Stage names in pipeline execution order. `convert` is stage 0: it
@@ -132,7 +133,7 @@ class StageJob:
     tasks: Optional[int] = None
     log_dir: Optional[Path] = None
     stopwords: Set[str] = field(default_factory=set)
-    spam_assets: Any = None
+    spam_assets: Optional[SpamAssets] = None
 
 
 def run_stage(stage: str, job: StageJob) -> Tuple[int, int]:

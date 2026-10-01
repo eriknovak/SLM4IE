@@ -1,4 +1,4 @@
-"""Tests for slm4ie.data.curate.stats.CorpusStats."""
+"""Tests for slm4ie.data.curate.stages.statistics.CorpusStats."""
 
 import importlib.metadata  # noqa: F401  (datatrove workaround)
 import importlib.util  # noqa: F401  (datatrove workaround)
