@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from slm4ie.tokenizers.backends.char_bpe import CharBpeTokenizer
+from slm4ie.tokenizers.backends.hf_bpe import BpeTokenizer
 from slm4ie.tokenizers.backends.morph_bpe import MorphBpeTokenizer
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.bpe_core import encode_bpe, merge_ranks
+from slm4ie.tokenizers.metrics import _segments, _token_spans
 from slm4ie.tokenizers.morphology import MorphemeSegmentation, MorphLexicon
 
 TABLES = Path(__file__).resolve().parent / "tables"
@@ -39,6 +41,8 @@ HELD_OUT: List[str] = ["hišami", "mizami"]
 SPECIAL_TOKENS: List[str] = ["<unk>"]
 #: Eight characters, six merges and the unknown token.
 VOCAB_SIZE = 15
+#: The 256 byte symbols, six merges and the unknown token.
+BYTE_VOCAB_SIZE = 256 + 6 + 1
 TRACED_WORD = "hiša"
 
 
@@ -172,29 +176,34 @@ def pair_counts(words: Dict[str, int], merges: List[Tuple[str, str]]) -> Dict[Tu
     return counts
 
 
-def character_bpe() -> None:
-    """Write the merge trace and the encodings for the Character BPE entry.
+def merge_rows(
+    merges: List[Tuple[str, str]], words: Dict[str, int], vocab: Dict[str, int], traced: str
+) -> List[List[str]]:
+    """Replay the pair counts behind every learned merge and check the merge rule.
 
-    The trainer runs inside the HuggingFace `tokenizers` library, so the merge
-    rule is checked here instead: every learned pair must be the most frequent
-    one at its step, and a tie must go to the pair whose symbols entered the
-    vocabulary first.
+    The trainer runs inside the HuggingFace `tokenizers` library, so the rule
+    is checked here instead: every learned pair must be the most frequent one at
+    its step, and a tie must go to the pair whose symbols entered the vocabulary
+    first.
+
+    Args:
+        merges (List[Tuple[str, str]]): Ordered learned merges.
+        words (Dict[str, int]): Training word to corpus count, in the symbols the
+            trainer saw.
+        vocab (Dict[str, int]): Token to id, which fixes the tie order.
+        traced (str): The word to show after each merge, in the same symbols.
+
+    Returns:
+        List[List[str]]: One row per merge: number, pair, count, the tied pairs
+            it beat, and `traced` after it.
 
     Raises:
-        AssertionError: If a learned merge is not a most frequent pair, if a tie
-            is broken another way, or if replaying the merges disagrees with the
-            backend's own encoder.
+        AssertionError: If a learned merge is not a most frequent pair, or a tie
+            is broken another way.
     """
-    sentences = [form for form, count in CORPUS.items() for _ in range(count)]
-    context = TrainContext(special_tokens=SPECIAL_TOKENS)
-    char = CharBpeTokenizer()
-    char.train(sentences, VOCAB_SIZE, config=context)
-    merges = learned_merges(char)
-    vocab = char.vocab
-
     rows: List[List[str]] = []
     for k, pair in enumerate(merges):
-        counts = pair_counts(CORPUS, merges[:k])
+        counts = pair_counts(words, merges[:k])
         top = max(counts.values())
         tied = sorted(p for p, n in counts.items() if n == top)
         assert counts[pair] == top, (k, pair, counts)
@@ -205,9 +214,26 @@ def character_bpe() -> None:
                 " + ".join(pair),
                 str(top),
                 ", ".join(a + b for a, b in tied if (a, b) != pair) or "none",
-                " ".join(encode_bpe(TRACED_WORD, merge_ranks(merges[: k + 1]))),
+                " ".join(encode_bpe(traced, merge_ranks(merges[: k + 1]))),
             ]
         )
+    return rows
+
+
+def character_bpe() -> None:
+    """Write the merge trace and the encodings for the Character BPE entry.
+
+    Raises:
+        AssertionError: If replaying the merges disagrees with the backend's own
+            encoder.
+    """
+    sentences = [form for form, count in CORPUS.items() for _ in range(count)]
+    context = TrainContext(special_tokens=SPECIAL_TOKENS)
+    char = CharBpeTokenizer()
+    char.train(sentences, VOCAB_SIZE, config=context)
+    merges = learned_merges(char)
+
+    rows = merge_rows(merges, CORPUS, char.vocab, TRACED_WORD)
     write_csv("character-bpe-merges", ["Merge", "Joins", "Count", "Tied pairs left", f"{TRACED_WORD} after it"], rows)
 
     ranks = merge_ranks(merges)
@@ -223,6 +249,53 @@ def character_bpe() -> None:
     )
 
 
+def byte_level_bpe() -> None:
+    """Write the merge trace and the encodings for the Byte-level BPE entry.
+
+    The trainer sees every word as the printable form of its UTF-8 bytes with
+    the space marker in front, so the pair counts are replayed on those symbols.
+
+    Raises:
+        AssertionError: If a learned merge breaks the merge rule, or if
+            replaying the merges disagrees with the backend's own encoder.
+    """
+    sentences = [form for form, count in CORPUS.items() for _ in range(count)]
+    bpe = BpeTokenizer()
+    bpe.train(sentences, BYTE_VOCAB_SIZE, config=TrainContext(special_tokens=SPECIAL_TOKENS))
+    merges = learned_merges(bpe)
+
+    def as_bytes(word: str) -> str:
+        return "".join(piece for piece, _ in bpe._tokenizer.pre_tokenizer.pre_tokenize_str(word))
+
+    words = {as_bytes(form): count for form, count in CORPUS.items()}
+    rows = merge_rows(merges, words, bpe.vocab, as_bytes(TRACED_WORD))
+    write_csv("byte-level-bpe-merges", ["Merge", "Joins", "Count", "Tied pairs left", f"{TRACED_WORD} after it"], rows)
+
+    ranks = merge_ranks(merges)
+    for word in [*CORPUS, *HELD_OUT]:
+        replayed = encode_bpe(as_bytes(word), ranks)
+        assert replayed == bpe.encode(word), (word, replayed, bpe.encode(word))
+    encoding_rows: List[List[str]] = []
+    for word in ["hiša", "mize", *HELD_OUT, "hišaq", "čas"]:
+        spans = _token_spans(bpe, word)
+        assert spans is not None, word
+        encoding_rows.append(
+            [
+                word,
+                "yes" if word in CORPUS else "no",
+                " ".join(bpe.encode(word)),
+                str(len(bpe.encode(word))),
+                " ".join(_segments(spans, word)),
+            ]
+        )
+    write_csv(
+        "byte-level-bpe-encoding",
+        ["Form", "In the corpus", "Tokens", "Token count", "Cuts seen by the morph metrics"],
+        encoding_rows,
+    )
+
+
 if __name__ == "__main__":
     character_bpe()
+    byte_level_bpe()
     morphbpe()

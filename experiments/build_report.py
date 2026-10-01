@@ -2301,6 +2301,27 @@ class Topic:
         for e in self.entries:
             e.topic = self
 
+    def in_lineage(self) -> list[RefEntry]:
+        """Entries with every predecessor above its variants: the roots in name
+        order, each followed by its variants, depth first."""
+        inside = {e.key: e for e in self.entries}
+        out: list[RefEntry] = []
+
+        def walk(e: RefEntry) -> None:
+            if e in out:
+                return
+            out.append(e)
+            for v in self.entries:
+                if e.key in v.relations["variant_of"]:
+                    walk(v)
+
+        for e in self.entries:
+            if not any(p in inside for p in e.relations["variant_of"]):
+                walk(e)
+        for e in self.entries:  # a cycle has no root
+            walk(e)
+        return out
+
 
 class Idea:
     """One tracker issue labelled `idea`. Its `## Touches` section has one line per
@@ -2694,7 +2715,7 @@ def render_compared(t: Topic, ref: Reference) -> str:
     if not t.compare:
         return ""
     rows = []
-    for e in t.entries:
+    for e in t.in_lineage():
         parent = next((ref.by_key[k] for k in e.relations["variant_of"] if k in ref.by_key), None)
         cells = []
         for label in t.compare:
@@ -2853,11 +2874,12 @@ REF_CSS = """
 .alg li.hl{background:var(--accent-soft);margin:0 -14px;padding:0 14px}.alg .cm{color:var(--muted);font-style:italic;margin-left:18px}.alg .cm code{font-style:normal;font-size:11px}.alg code{font-size:.8em}
 :root[data-theme=dark] .alg,:root[data-theme=dark] .diff{background:var(--plate)}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .alg,:root:not([data-theme=light]) .diff{background:var(--plate)}}
-.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);gap:24px;align-items:start;margin:0 0 22px}
+.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);grid-template-rows:max-content 1fr;gap:0 24px;align-items:start;margin:0 0 22px}
+.algrow>.sh,.algrow>.alg{grid-column:1}.algrow>.sh{margin:0 0 8px}.algrow>.reading{grid-column:2;grid-row:1/span 2}
 .reading .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
 .walk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;font-size:var(--t-sm);line-height:1.55}.walk .tag{align-self:start;margin-top:1px;white-space:nowrap}
 .diff{font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:16px;line-height:1.6;border:1px solid var(--line);border-radius:8px;overflow-x:auto;background:var(--fig)}
-.diff>div{display:grid;grid-template-columns:150px 30px minmax(max-content,1fr);gap:0 10px;padding:4px 14px;align-items:baseline}.diff .who{font-family:var(--sans);font-size:var(--t-sm);color:var(--muted)}.diff .ln{font-size:13px;color:var(--muted)}
+.diff>div{display:grid;grid-template-columns:150px max-content minmax(max-content,1fr);gap:0 10px;padding:4px 14px;align-items:baseline}.diff .who{font-family:var(--sans);font-size:var(--t-sm);color:var(--muted)}.diff .ln{font-size:13px;color:var(--muted)}
 .diff .old{background:var(--bad-soft)}.diff .new{background:var(--ok-soft)}.effect{margin:8px 0 0;font-size:var(--t-sm);color:var(--muted)}
 .lim{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.lim .card{padding:14px 18px}.lim h3{margin:0 0 4px;font-size:var(--t-body)}.lim p{margin:0;font-size:var(--t-sm)}
 .rel.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.rel .r{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.rel.three .t{color:var(--accent)}.rel.three .m{font-size:var(--t-sm)}
@@ -2865,8 +2887,8 @@ h3.ev{margin:18px 0 2px;font-size:var(--t-body)}p.muted{margin:0 0 4px}
 .map .d{font-size:12.5px;line-height:1.45;margin-top:4px}.map .n-open{background:var(--panel)}
 .idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:60px}.idea h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--t-body)}
 .idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}table.inner tr{background:transparent}table.inner tr:last-child td{border-bottom:0}
-@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:800px){.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px 26px minmax(max-content,1fr)}}
+@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.algrow>.reading{grid-column:1;grid-row:auto}}
+@media(max-width:800px){.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px max-content minmax(max-content,1fr)}}
 """
 REF_FONT = "&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400"
 

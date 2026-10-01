@@ -1,0 +1,7 @@
+Form,In the corpus,Tokens,Token count,Cuts seen by the morph metrics
+hiša,yes,ĠhiÅ¡ a,2,hiš a
+mize,yes,Ġ miz e,3,m iz e
+hišami,no,ĠhiÅ¡ a m i,4,hiš a m i
+mizami,no,Ġ miz a m i,5,m iz a m i
+hišaq,no,ĠhiÅ¡ a q,3,hiš a q
+čas,no,Ġ Ä į a s,5,č a s

@@ -1,0 +1,7 @@
+Merge,Joins,Count,Tied pairs left,hiša after it
+1,h + i,12,"iÅ, Å¡, Ġh",Ġ hi Å ¡ a
+2,Å + ¡,12,"hiÅ, Ġhi",Ġ hi Å¡ a
+3,Ġ + hi,12,hiÅ¡,Ġhi Å¡ a
+4,Ġhi + Å¡,12,none,ĠhiÅ¡ a
+5,i + z,9,"mi, Ġm",ĠhiÅ¡ a
+6,m + iz,9,Ġm,ĠhiÅ¡ a
