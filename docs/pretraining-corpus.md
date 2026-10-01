@@ -141,11 +141,13 @@ wider run can therefore never survive into a rebuilt unit.
 plain `run --all` refolds it — and whatever downstream it actually changes. A
 dataset whose extracted file is absent is skipped, never emptied.
 
-**Lock file.** Every successful `run --all` (and `status --adopt`) rewrites
+**Lock file.** After every successful run — a dataset subset, a single stage
+or `--all` — and after `status --adopt`,
 [`configs/data/curate.lock.yaml`](../configs/data/curate.lock.yaml) (beside
-whichever config was passed), one entry per unit with its lineage and counts.
-Committed, it names the corpus each commit expects. Subset runs leave it alone,
-so work on an experiment branch does not churn it.
+whichever config was passed) is rebuilt from the sentinels on disk: one entry
+per unit with its lineage and counts. It is rewritten only when an entry
+changed, so a run that rebuilt nothing leaves it untouched. Committed, it names
+the corpus each commit expects.
 
 **Status.** `status` reports every unit as `current`, `stale` with the reason,
 or `missing` (nothing to build it from), compares the lock file too, and exits

@@ -14,7 +14,7 @@
 # Notes:
 #   sentinels    Each unit (stage x dataset, or corpus stage) writes a `.complete`
 #     sentinel with its lineage; a rerun rebuilds a unit only when its section,
-#     stage version or input documents changed. --all runs rewrite curate.lock.yaml;
+#     stage version or input documents changed. Runs update curate.lock.yaml;
 #     `status` lists stale units and why (docs/pretraining-corpus.md).
 #   mlflow       When enabled, one run per build is upserted to `experiment`
 #     (keyed by a content digest of the final 06_sentence_dedup corpus): a step-indexed

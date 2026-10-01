@@ -436,14 +436,21 @@ def read_lock(path: Path) -> Dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def write_lock(path: Path, entries: Dict[str, Any], header: str = "") -> None:
-    """Write a lock file atomically.
+def write_lock(path: Path, entries: Dict[str, Any], header: str = "") -> bool:
+    """Write a lock file atomically, leaving it untouched when nothing changed.
 
     Args:
         path: Lock file path.
         entries: Lock entries; written in the given key order.
         header: Optional comment block written above the entries.
+
+    Returns:
+        True if the file was written, False if it already held these entries.
     """
+    text = header + yaml.safe_dump(entries, sort_keys=False, allow_unicode=True)
+    if path.is_file() and path.read_text(encoding="utf-8") == text:
+        return False
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(header + yaml.safe_dump(entries, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
+    return True
