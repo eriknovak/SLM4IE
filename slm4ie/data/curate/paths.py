@@ -1,19 +1,21 @@
 """Filesystem layout of a curation run, and the shard helpers every part shares.
 
 `CuratePaths` names every folder under `<output_dir>/`: the stage folders, the
-staging and scratch folders under `_partial/`, and the per-stage datatrove
-logs. The helpers here only look at the tree — build a symlink view of some
-datasets' shards, test whether a dataset has output, fingerprint a shard
-layout, count JSONL rows — and import nothing beyond the standard library.
+staging and scratch folders under `_partial/`, and the datatrove logs, one
+folder per executor. The helpers here work on the tree alone — build a symlink
+view of some datasets' shards, test whether a dataset has output, fingerprint a
+shard layout, count JSONL rows, keep the per-stage index of executor log
+folders — and import nothing beyond the standard library.
 """
 
 import gzip
 import hashlib
+import json
 import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from slm4ie.data.curate.stages import STAGE_DIRS
 
@@ -28,10 +30,14 @@ class CuratePaths:
         output_dir: Curation output root. Stage folders
             (`00_convert/`, `01_language/`, ...) live directly under
             this path, alongside `_partial/` and `_logs/`.
+        log_scope: Folder name from `bucket_log_scope` that scopes `logs_dir`,
+            so each executor of a scoped stage logs into a folder of its own;
+            `None` for the corpus stages, which launch one executor each.
     """
 
     input_folder: Path
     output_dir: Path
+    log_scope: Optional[str] = None
 
     def stage_dir(self, stage: str) -> Path:
         """Return the folder under `output_dir` that holds *stage*'s output.
@@ -74,16 +80,105 @@ class CuratePaths:
         return self.output_dir / "_partial" / f"{STAGE_DIRS[stage]}.scratch"
 
     def logs_dir(self, stage: str) -> Path:
-        """Return the per-stage logging directory.
+        """Return the logging directory for *stage*'s executor chain.
 
         Args:
             stage: Stage name (one of `STAGE_NAMES`).
 
         Returns:
-            `<output_dir>/_logs/<stage>` — datatrove's `logging_dir`
-            for that stage's executor chain.
+            `<output_dir>/_logs/<stage>`, or `<output_dir>/_logs/<stage>/<log_scope>`
+            when the paths are scoped to one config bucket — datatrove's
+            `logging_dir` for that executor chain.
         """
-        return self.output_dir / "_logs" / stage
+        root = self.output_dir / "_logs" / stage
+        return root if self.log_scope is None else root / self.log_scope
+
+
+#: Per-stage index of executor log folders, kept beside them.
+BUCKET_INDEX_NAME = "buckets.json"
+
+
+def bucket_log_scope(bucket_hash: str, keys: List[str]) -> str:
+    """Name the log folder of one executor of a scoped stage.
+
+    Args:
+        bucket_hash: The bucket's config hash as the sentinels carry it
+            (`sha256:<hex>`).
+        keys: Dataset keys the executor runs.
+
+    Returns:
+        `<config digest prefix>-<dataset-set digest prefix>`. Naming the
+        dataset set too gives a later run of the same config over a
+        different subset a folder of its own, while an exact rerun reuses one.
+    """
+    keys_digest = hashlib.sha256("\n".join(sorted(keys)).encode("utf-8")).hexdigest()
+    return f"{bucket_hash.split(':', 1)[-1][:16]}-{keys_digest[:8]}"
+
+
+def read_bucket_index(stage_logs: Path) -> Dict[str, Dict[str, Any]]:
+    """Read which executors logged under a scoped stage's log folder.
+
+    Args:
+        stage_logs: `<output_dir>/_logs/<stage>` of a scoped stage.
+
+    Returns:
+        Mapping of executor folder name (relative to *stage_logs*) to
+        `{"config_hash": "sha256:...", "datasets": [...]}`; empty when no
+        executor has been recorded.
+    """
+    index = stage_logs / BUCKET_INDEX_NAME
+    if not index.is_file():
+        return {}
+    return json.loads(index.read_text(encoding="utf-8"))
+
+
+def record_bucket(stage_logs: Path, folder: str, bucket_hash: str, keys: List[str]) -> None:
+    """Record the executor about to run one config bucket in the stage's index.
+
+    Every dataset is listed under the executor that ran it last: *keys* are
+    removed from every other entry, and an entry left with no datasets is
+    dropped together with its folder, so the index names exactly the folders
+    whose logs are current.
+
+    Args:
+        stage_logs: `<output_dir>/_logs/<stage>` of a scoped stage.
+        folder: The executor's folder name, from `bucket_log_scope`.
+        bucket_hash: The bucket's config hash.
+        keys: Dataset keys the executor runs.
+    """
+    index = read_bucket_index(stage_logs)
+    for name, entry in list(index.items()):
+        remaining = [key for key in entry["datasets"] if key not in keys]
+        if name == folder:
+            continue
+        if remaining:
+            entry["datasets"] = remaining
+        else:
+            del index[name]
+            shutil.rmtree(stage_logs / name, ignore_errors=True)
+    index[folder] = {"config_hash": bucket_hash, "datasets": list(keys)}
+    stage_logs.mkdir(parents=True, exist_ok=True)
+    (stage_logs / BUCKET_INDEX_NAME).write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def executor_task_stats(logging_dir: Path) -> List[Path]:
+    """List the per-task stats files of the tasks an executor declares.
+
+    datatrove writes `stats/<rank>.json` per finished task and never removes
+    one, so a folder a larger executor used earlier keeps its higher ranks.
+    Ranks at or above the task count in `executor.json` are left out; without
+    that file every stats file counts.
+
+    Args:
+        logging_dir: An executor's `logging_dir`.
+
+    Returns:
+        The stats files in rank order, empty when none has finished.
+    """
+    executor_file = logging_dir / "executor.json"
+    tasks = json.loads(executor_file.read_text(encoding="utf-8"))["tasks"] if executor_file.is_file() else None
+    files = sorted((logging_dir / "stats").glob("*.json"))
+    return [path for path in files if tasks is None or int(path.stem) < tasks]
 
 
 def count_jsonl_rows(path: Path) -> int:

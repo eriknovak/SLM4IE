@@ -9,6 +9,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+from slm4ie.data.curate.paths import record_bucket
+
 _SCRIPT = Path(__file__).resolve().parents[2] / "experiments" / "data" / "curation-quality-slovenian" / "analysis.py"
 
 
@@ -257,3 +259,28 @@ class TestStepTimings:
     def test_missing_executor_is_none(self, tmp_path: Path) -> None:
         """A step that never ran reports nothing."""
         assert analysis._step_timings(tmp_path) is None
+
+    def test_throughput_reports_each_bucket_from_the_index(self, tmp_path: Path) -> None:
+        """A scoped stage gets one row per bucket folder, and a bucket's stale ranks are skipped."""
+        stage_logs = tmp_path / "_logs" / "quality"
+        record_bucket(stage_logs, "aaaa1111", "sha256:a", ["d1", "d2"])
+        record_bucket(stage_logs, "bbbb2222", "sha256:b", ["d3"])
+        for bucket, tasks, documents in (("aaaa1111", 2, 100), ("bbbb2222", 1, 10)):
+            folder = stage_logs / bucket
+            folder.mkdir()
+            (folder / "executor.json").write_text(json.dumps({"tasks": tasks, "workers": 2}), encoding="utf-8")
+            for rank in range(tasks):
+                self._stats(folder / "stats" / f"{rank:05d}.json", 1.0, 10.0, 8.0, documents, end=1_000.0 + rank)
+        # a stale rank from a larger executor that used the folder earlier
+        self._stats(stage_logs / "bbbb2222" / "stats" / "00001.json", 1.0, 999.0, 1.0, documents=9_999, end=500.0)
+        corpus = tmp_path / "_logs" / "exact_dedup" / "1_sig"
+        corpus.mkdir(parents=True)
+        (corpus / "executor.json").write_text(json.dumps({"tasks": 1, "workers": 1}), encoding="utf-8")
+        self._stats(corpus / "stats" / "00000.json", 1.0, 36.0, 8.0, documents=50, end=2_000.0)
+
+        rows = analysis.throughput_rows(tmp_path)
+
+        scoped = [(row["scope"], row["datasets"], row["documents"], row["cpu_hours"]) for row in rows[:2]]
+        assert scoped == [("bucket:aaaa1111", "d1,d2", 200, 0.01), ("bucket:bbbb2222", "d3", 10, 0.0)]
+        assert [row["scope"] for row in rows[2:]] == ["corpus", "corpus"]
+        assert rows[-1]["stage"] == "TOTAL" and rows[-1]["cpu_hours"] == 0.01

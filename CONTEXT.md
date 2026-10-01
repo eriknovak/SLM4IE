@@ -111,6 +111,12 @@ A per-dataset block that deep-merges onto a scoped stage's defaults, so one
 dataset can differ without forking the config. Corpus stages reject them.
 _Avoid_: exception, patch, custom config
 
+**Config bucket**:
+The datasets of a scoped stage that resolve to the same effective config and
+so run together in one executor, named by that config's hash. Each bucket
+keeps its own log folder.
+_Avoid_: group, batch, partition
+
 **Unit**:
 One stage for one dataset (a scoped stage) or one corpus stage: the smallest
 piece of the pipeline that is built, versioned and rebuilt on its own.

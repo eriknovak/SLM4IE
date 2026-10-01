@@ -30,6 +30,7 @@ from slm4ie.data.curate import (
     STAGE_NAMES,
 )
 from slm4ie.data.curate.lineage import read_sentinel
+from slm4ie.data.curate.paths import read_bucket_index
 from slm4ie.data.curate.lineage import (
     CONFIG_CHANGED,
     NOT_BUILT,
@@ -88,6 +89,7 @@ class _Stub:
 
     Attributes:
         ran: `(stage, dataset keys)` per executed stage run.
+        log_dirs: The executor log folder of each run, in order.
         duplicate: Stage whose next run writes one document twice.
         drop: Stage whose next run keeps no documents.
     """
@@ -95,6 +97,7 @@ class _Stub:
     def __init__(self) -> None:
         """Start with no recorded runs."""
         self.ran: List[Tuple[str, Tuple[str, ...]]] = []
+        self.log_dirs: List[Path] = []
         self.duplicate: Optional[str] = None
         self.drop: Optional[str] = None
 
@@ -106,6 +109,7 @@ class _Stub:
     def __call__(self, stage: str, job: Any) -> Tuple[int, int]:
         """Run the stubbed stage on *job*."""
         self.ran.append((stage, tuple(job.dataset_keys)))
+        self.log_dirs.append(job.paths.logs_dir(stage))
         if stage == "statistics":
             job.output_folder.mkdir(parents=True, exist_ok=True)
             (job.output_folder / "aggregate.json").write_text("{}", encoding="utf-8")
@@ -202,6 +206,7 @@ class _Env:
     def run(self, *args: str) -> List[str]:
         """Run the CLI's `run` subcommand and return the stages that executed."""
         self.stub.ran.clear()
+        self.stub.log_dirs.clear()
         _run_cli(self.monkeypatch, self.cfg, list(args), self.root, self.roster)
         return self.stub.stages
 
@@ -299,6 +304,37 @@ def test_override_rebuilds_only_its_dataset(monkeypatch: pytest.MonkeyPatch, tmp
         ("sentence_dedup", ("d1", "d2")),
         ("statistics", ("d1", "d2")),
     ]
+
+
+def test_config_buckets_log_into_their_own_folders(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Each bucket's executor logs under the bucket's hash, and the stage index names every bucket."""
+    env = _Env(monkeypatch, tmp_path, roster=["d1", "d2"])
+    env.cfg["overrides"] = {"d2": {"quality": {"min_doc_words": 10}}}
+    env.run("--all")
+    stage_logs = env.output_dir / "_logs" / "quality"
+    quality_dirs = [d for (stage, _), d in zip(env.stub.ran, env.stub.log_dirs) if stage == "quality"]
+    assert len(quality_dirs) == 2 and len(set(quality_dirs)) == 2
+    assert all(d.parent == stage_logs for d in quality_dirs)
+    index = read_bucket_index(stage_logs)
+    assert sorted(entry["datasets"] for entry in index.values()) == [["d1"], ["d2"]]
+    assert {stage_logs / folder for folder in index} == set(quality_dirs)
+    corpus_dirs = [d for (stage, _), d in zip(env.stub.ran, env.stub.log_dirs) if stage == "exact_dedup"]
+    assert corpus_dirs == [env.output_dir / "_logs" / "exact_dedup"]
+
+
+def test_partial_rerun_of_a_bucket_keeps_the_earlier_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Rebuilding one dataset of a bucket logs into a new folder; the index moves only that dataset."""
+    env = _Env(monkeypatch, tmp_path, roster=["d1", "d2"])
+    quality_dirs: List[Path] = []
+    for args in (["--all"], ["--force", "d1"]):
+        env.run(*args)
+        quality_dirs += [d for (stage, _), d in zip(env.stub.ran, env.stub.log_dirs) if stage == "quality"]
+    assert len(quality_dirs) == 2 and quality_dirs[0] != quality_dirs[1]
+    index = read_bucket_index(env.output_dir / "_logs" / "quality")
+    assert {folder: entry["datasets"] for folder, entry in index.items()} == {
+        quality_dirs[0].name: ["d2"],
+        quality_dirs[1].name: ["d1"],
+    }
 
 
 def test_stale_shards_cannot_survive_a_rebuild(env: _Env) -> None:

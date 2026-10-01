@@ -6,6 +6,7 @@ the bottom of this file (marked `@pytest.mark.slow`).
 
 import importlib.metadata  # noqa: F401  (datatrove workaround)
 import importlib.util  # noqa: F401  (datatrove workaround)
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,7 @@ from datatrove.utils.typeshelper import Languages  # noqa: E402
 
 from slm4ie.data.curate.stages.dedup import CompactSentenceDedupSignature  # noqa: E402
 from slm4ie.data.curate.stages.language import LinguaLanguageFilter  # noqa: E402
-from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.paths import CuratePaths, bucket_log_scope, read_bucket_index, record_bucket
 from slm4ie.data.curate.stages.quality import (
     QualityConfig,
     build_quality_executors,
@@ -291,7 +292,7 @@ class TestStatisticsStage:
 
 import gzip  # noqa: E402
 import json  # noqa: E402
-from typing import Any, List  # noqa: E402
+from typing import Any, List, Tuple  # noqa: E402
 
 from datatrove.pipeline.dedup import SentDedupConfig  # noqa: E402
 
@@ -566,17 +567,62 @@ def test_scoped_stage_executors_do_not_skip_completed(tmp_path: Path) -> None:
     assert not any(ex.skip_completed for ex in execs)
 
 
-def test_stage_io_counts_sums_finished_tasks(tmp_path: Path) -> None:
-    """Counts are summed over every per-task stats file, not only the last run's tasks."""
+def _write_task_stats(stats_dir: Path, counts: List[Tuple[int, int]]) -> None:
+    """Write one datatrove stats file per `(read, written)` pair, ranked in order."""
     from datatrove.utils.stats import PipelineStats, Stats
 
-    stats_dir = tmp_path / "logs" / "stats"
     stats_dir.mkdir(parents=True)
-    for rank, (read, written) in enumerate([(5, 3), (7, 4)]):
+    for rank, (read, written) in enumerate(counts):
         reader, writer = Stats("reader"), Stats("writer")
         reader["documents"].update(read)
         writer["total"].update(written)
         with (stats_dir / f"{rank:05d}.json").open("w") as fh:
             PipelineStats([reader, writer]).save_to_disk(fh)
+
+
+def test_stage_io_counts_sums_finished_tasks(tmp_path: Path) -> None:
+    """Counts are summed over every per-task stats file, not only the last run's tasks."""
+    _write_task_stats(tmp_path / "logs" / "stats", [(5, 3), (7, 4)])
     assert stage_io_counts(tmp_path / "logs") == (12, 7)
     assert stage_io_counts(tmp_path / "missing") == (0, 0)
+
+
+def test_stage_io_counts_skips_ranks_beyond_the_executor(tmp_path: Path) -> None:
+    """Stats files left by a larger executor that used the folder earlier are ignored."""
+    _write_task_stats(tmp_path / "logs" / "stats", [(5, 3), (7, 4), (100, 100)])
+    (tmp_path / "logs" / "executor.json").write_text(json.dumps({"tasks": 2}), encoding="utf-8")
+    assert stage_io_counts(tmp_path / "logs") == (12, 7)
+
+
+def test_logs_dir_is_scoped_by_config_bucket(tmp_path: Path) -> None:
+    """Scoped paths put each bucket's executor under its own folder; unscoped paths keep the stage folder."""
+    paths = _paths(tmp_path)
+    assert paths.logs_dir("quality") == paths.output_dir / "_logs" / "quality"
+    scoped = replace(paths, log_scope="abc123")
+    assert scoped.logs_dir("quality") == paths.output_dir / "_logs" / "quality" / "abc123"
+    assert scoped.stage_dir("quality") == paths.stage_dir("quality")
+
+
+def test_bucket_log_scope_names_config_and_dataset_set(tmp_path: Path) -> None:
+    """The folder changes with the config hash or the dataset set and ignores key order."""
+    same = bucket_log_scope("sha256:abc", ["d2", "d1"])
+    assert same == bucket_log_scope("sha256:abc", ["d1", "d2"])
+    assert same.startswith("abc-")
+    assert same != bucket_log_scope("sha256:abc", ["d1"])
+    assert same != bucket_log_scope("sha256:abd", ["d1", "d2"])
+
+
+def test_bucket_index_lists_each_dataset_under_its_last_executor(tmp_path: Path) -> None:
+    """A dataset moves to the executor that ran it last; an executor left with nothing is dropped."""
+    (tmp_path / "f1").mkdir()
+    record_bucket(tmp_path, "f1", "sha256:h1", ["d1", "d2"])
+    record_bucket(tmp_path, "f2", "sha256:h2", ["d3"])
+    record_bucket(tmp_path, "f3", "sha256:h1", ["d1"])
+    assert read_bucket_index(tmp_path) == {
+        "f1": {"config_hash": "sha256:h1", "datasets": ["d2"]},
+        "f2": {"config_hash": "sha256:h2", "datasets": ["d3"]},
+        "f3": {"config_hash": "sha256:h1", "datasets": ["d1"]},
+    }
+    record_bucket(tmp_path, "f4", "sha256:h3", ["d2"])
+    assert "f1" not in read_bucket_index(tmp_path) and not (tmp_path / "f1").exists()
+    assert read_bucket_index(tmp_path / "missing") == {}
