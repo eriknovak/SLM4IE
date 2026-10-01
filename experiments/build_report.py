@@ -1861,6 +1861,18 @@ def render_map(prog: Programme) -> str:
     )
 
 
+def card_table(html: str) -> str:
+    """Label every body cell with its column header, which the card layout on narrow columns shows."""
+    labels = [re.sub(r"<[^>]+>", "", h).strip() for h in re.findall(r"<th[^>]*>(.*?)</th>", html, re.S)]
+    head, body = html.split("<tbody>", 1)
+
+    def row(m: re.Match) -> str:
+        cols = iter(labels)
+        return re.sub(r"<td(?=[\s>])", lambda _: f'<td data-l="{esc(next(cols, ""))}"', m.group(0))
+
+    return head + "<tbody>" + re.sub(r"<tr[^>]*>.*?</tr>", row, body, flags=re.S)
+
+
 def render_programme_constraints(prog: Programme) -> str:
     """One row per member: what each experiment needs beyond code, from its Design rows."""
     rows = [(r, constraints(r)) for r in prog.members]
@@ -1875,8 +1887,8 @@ def render_programme_constraints(prog: Programme) -> str:
         + "</tr>"
         for r, c in rows
     )
-    return (
-        f'<h2 id="{prog.page_id}/needs">Needs</h2><div class="scroll"><table class="data wide needs-table">'
+    return f'<h2 id="{prog.page_id}/needs">Needs</h2>' + card_table(
+        '<div class="scroll"><table class="data wide needs-table cards">'
         f"<thead><tr><th>Experiment</th>{head}</tr></thead><tbody>{body}</tbody></table></div>"
     )
 
@@ -1904,8 +1916,8 @@ def render_programme_table(prog: Programme) -> str:
             f'<tr class="planned"><td title="{esc(x.get("title") or "")}">{esc(x.get("short") or x.get("title") or x["slug"])}</td><td class="mono"></td>'
             f'<td><span class="badge b-draft">planned</span></td><td class="mono">{esc(x.get("ticket") or "—")}</td><td class="muted">{parents}</td></tr>'
         )
-    return (
-        '<div class="scroll"><table class="data wide exp-table"><thead><tr><th>Experiment</th><th>Category</th><th>Outcome</th><th>Concluded</th><th>Builds on</th></tr></thead>'
+    return card_table(
+        '<div class="scroll"><table class="data wide exp-table cards"><thead><tr><th>Experiment</th><th>Category</th><th>Outcome</th><th>Concluded</th><th>Builds on</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
@@ -2688,9 +2700,8 @@ def render_compared(t: Topic, ref: Reference) -> str:
             f'<td class="muted">{esc(parent.title) if parent else "—"}</td>{"".join(cells)}</tr>'
         )
     head = "".join(f"<th>{esc(c)}</th>" for c in t.compare)
-    return (
-        '<p class="intro">Filled from each entry\'s Facts. A tinted cell differs from the entry\'s own predecessor.</p>'
-        f'<div class="scroll"><table class="data wide compared"><thead><tr><th>Entry</th><th>Predecessor</th>{head}</tr></thead>'
+    return '<p class="intro">Filled from each entry\'s Facts. A tinted cell differs from the entry\'s own predecessor.</p>' + card_table(
+        f'<div class="scroll"><table class="data wide compared cards"><thead><tr><th>Entry</th><th>Predecessor</th>{head}</tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
@@ -2757,7 +2768,7 @@ def entries_table(t: Topic) -> str:
         paper = next(iter(e.idents), "")
         rows.append(
             f'<tr><td><a href="#{e.page_id}">{esc(e.title)}</a></td><td class="muted">{esc(e.kind)}</td><td>{entry_badge(e)}</td>'
-            f'<td class="mono">{short_paths(md_inline(code)) if code else "—"}</td><td>{md_inline(link_idents(paper)) if paper else "—"}</td></tr>'
+            f'<td class="mono" data-l="Code">{short_paths(md_inline(code)) if code else "—"}</td><td data-l="Paper">{md_inline(link_idents(paper)) if paper else "—"}</td></tr>'
         )
     return (
         '<div class="scroll"><table class="data wide entries"><thead><tr><th>Entry</th><th>Kind</th><th>Status</th><th>Code</th><th>Paper</th></tr></thead>'
@@ -2848,8 +2859,8 @@ h3.ev{margin:18px 0 2px;font-size:var(--t-body)}p.muted{margin:0 0 4px}
 .map .d{font-size:12.5px;line-height:1.45;margin-top:4px}.map .n-open{background:var(--panel)}
 .idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:60px}.idea h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--t-body)}
 .idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}table.inner tr{background:transparent}table.inner tr:last-child td{border-bottom:0}
-@media(max-width:1100px){.algrow{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:800px){.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px 26px minmax(max-content,1fr)}}
+@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:800px){.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px 26px minmax(max-content,1fr)}}
 """
 REF_FONT = "&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400"
 
@@ -3091,11 +3102,38 @@ details.dec>summary h3{align-items:baseline}details.dec>summary h3 .wt{flex:none
  table.clauses td:nth-child(n+3){grid-column:1/-1}table.clauses td:nth-child(n+3):empty{display:none}
  table.clauses td:nth-child(n+3)::before{content:attr(data-l);display:block;font-size:var(--t-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:8px 0 2px}
  table.clauses td.result{font-weight:500}
+ /* the contents table: one card per experiment — number, title and outcome in the head, key findings under it */
+ .scroll:has(>table.toc),.scroll:has(>table.entries){overflow:visible;-webkit-mask-image:none;mask-image:none}
+ table.toc,table.toc tbody,table.entries,table.entries tbody{display:block}table.toc thead,table.entries thead{display:none}
+ table.toc tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;border-top:1px solid var(--line);padding:10px 0 12px;background:none}
+ table.toc td,table.data.wide.toc td:first-child{display:block;border:0;padding:0;position:static;background:none;min-width:0;width:auto}
+ table.toc td:nth-child(2){font-weight:500}table.toc td:nth-child(4){grid-column:1/-1}
+ table.toc td:last-child{width:auto}table.toc tr.planned{opacity:1}table.toc tr.planned td{color:var(--muted)}
+ /* the entries table: name, kind and status in the head, code and paper as labelled rows */
+ table.entries tr{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:2px 10px;align-items:baseline;border-top:1px solid var(--line);padding:10px 0 12px;background:none}
+ table.entries td,table.data.wide.entries td:first-child{display:block;border:0;padding:0;position:static;background:none;min-width:0;width:auto}
+ table.entries td:first-child{font-weight:600}table.entries td:nth-child(n+4){grid-column:1/-1;display:flex;gap:8px;align-items:baseline}
+ table.entries td:nth-child(n+4)::before{content:attr(data-l);font-family:var(--sans);font-size:var(--t-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);flex:none;width:44px}
+ /* any table marked `cards`: the first column heads a card, the others follow as header-labelled rows */
+ .scroll:has(>table.cards){overflow:visible;-webkit-mask-image:none;mask-image:none}
+ table.cards,table.cards tbody{display:block}table.cards thead{display:none}
+ table.cards tr{display:block;border-top:1px solid var(--line);padding:10px 0 12px;background:none}
+ table.cards td,table.data.wide.cards td:first-child{display:block;border:0;padding:0;position:static;background:none;min-width:0;width:auto;white-space:normal}
+ table.cards td:first-child{font-weight:600;font-family:var(--sans);font-size:var(--t-body)}
+ table.cards td:not(:first-child){display:flow-root;padding-left:114px;margin-top:5px}
+ table.cards td:not(:first-child)::before{content:attr(data-l);float:left;width:104px;margin:3px 0 0 -114px;font-family:var(--sans);font-size:var(--t-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);line-height:1.3}
+ table.cards td.hot{background:none}table.cards td.hot::before{color:var(--run)}
+ table.cards tr.planned td{color:var(--muted)}
+ /* a thread line: who on its own row, then the claim and its verdict */
+ .thread .line{grid-template-columns:minmax(0,1fr) auto;gap:4px 12px}.thread .line .who{grid-column:1/-1;font-size:var(--t-xs)}
+}
+@container (max-width:560px){
+ .gloss .g{grid-template-columns:minmax(0,1fr);gap:2px 0}
 }
 /* 4. phones: the section bar is one scrollable row, boxes stack to one column */
 @media(max-width:800px){
  .bar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent)}
- .bar::-webkit-scrollbar{display:none}.bar a{white-space:nowrap;flex:none}
+ .bar::-webkit-scrollbar{display:none}.bar a{white-space:nowrap;flex:none}.bar .filter{flex:none;width:150px;margin-left:8px}
  .hyp{grid-template-columns:minmax(0,1fr);gap:8px}.hyp .lab,.hyp .out{padding:0}
  /* finding and method heads flow as text: tag, title and weight on one line, a method's code path under its title */
  .res>h3,details.res>summary h3,details.met>summary h3{display:block;line-height:1.45}.res>h3 .tag,details.res>summary h3 .tag,details.met>summary h3 .tag{margin-right:8px;vertical-align:1px}
@@ -3127,7 +3165,7 @@ addEventListener('resize',edges);addEventListener('load',edges);if(document.font
 function spy(){const page=document.querySelector('.page.on');if(!page)return;const bar=page.querySelector('.bar');if(!bar)return;
  const top=main.getBoundingClientRect().top+90;const marks=[...page.querySelectorAll('h2')];let cur=marks[0];for(const m of marks){if(m.getBoundingClientRect().top<=top)cur=m;else break;}
  bar.querySelectorAll('a').forEach(a=>a.classList.toggle('on',cur&&a.getAttribute('href')==='#'+cur.id));}
-const scrollers=[...document.querySelectorAll('.scroll')];
+const scrollers=[...document.querySelectorAll('.scroll,.alg')];
 function cut(){for(const el of scrollers){const mx=el.scrollWidth-el.clientWidth,my=el.scrollHeight-el.clientHeight,x=mx>1&&el.scrollLeft<mx-1,y=my>1&&el.scrollTop<my-1;
  el.classList.toggle('x',x);el.classList.toggle('y',y);let h=el.previousElementSibling;if(!h||!h.classList.contains('sh')){h=document.createElement('div');h.className='sh';el.before(h);}
  const w=[];if(mx>1)w.push('\u2194 scrolls sideways');if(my>1)w.push('\u2195 scrolls down');h.textContent=w.join(' \u00b7 ');h.classList.toggle('on',w.length>0);}}
@@ -3316,7 +3354,7 @@ def selftest() -> int:
         and "fig-light" not in body,
         "short titles in the sidebar": '<span class="lab">Alpha gold</span>' in body
         and 'title="Alpha gold set"' in body,
-        "programme needs table": '<table class="data wide needs-table">' in body,
+        "programme needs table": '<table class="data wide needs-table cards">' in body,
         "prose lint is a warning, structure a problem": WARNING.search("F1 Summary is 29 words (cap 25)") is not None
         and WARNING.search("method step heading not `### M<n> — title`: M4 Broken heading no dash") is None,
         "dataset card: prose beside the figure, table full width under": re.search(
@@ -3330,7 +3368,7 @@ def selftest() -> int:
         and 'class="node n-planned"' in body
         and 'class="node n-confirmed"' in body
         and '<div class="from" title=' in body
-        and '<table class="data wide exp-table">' in body
+        and '<table class="data wide exp-table cards">' in body
         and '<h2 id="overview/programmes">Programmes</h2>' in overview
         and 'in <a href="#programme-gamma" title=' in body
         and 'href="#programme-gamma"' in overview,
@@ -3569,9 +3607,9 @@ def selftest() -> int:
         and '<a class="node n-confirmed" data-slug="base-cut" data-parents=""' in body
         and '<a class="node n-planned" data-slug="test-split"' in body
         and '<table class="data wide entries">' in body,
-        "compared tints what differs from the predecessor": '<td class="muted">Base cut</td><td>characters</td><td class=hot>marked piece</td>'
+        "compared tints what differs from the predecessor": '<td data-l="Predecessor" class="muted">Base cut</td><td data-l="Base unit">characters</td><td data-l="Chunk" class=hot>marked piece</td>'
         in body
-        and '<td class="muted">—</td><td>characters</td><td>whole word</td>' in body,
+        and '<td data-l="Predecessor" class="muted">—</td><td data-l="Base unit">characters</td><td data-l="Chunk">whole word</td>' in body,
         "ideas from the cache: overview row, card per idea, tested in": '<table class="data wide ideas">' in body
         and '<th>Base cut</th><th>Broken cut</th><th>Morph cut</th><th>Test split</th><th>Issue</th><th>Tested in</th>'
         in body
