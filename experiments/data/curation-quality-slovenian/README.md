@@ -88,7 +88,7 @@ concluded: 2026-09-30
   6. Drop byte-identical copies across the corpus (exact dedup).
   7. Remove three-sentence windows seen elsewhere, and drop documents left too short (sentence dedup).
   8. Compute per-source statistics of the finished corpus.
-- **Code**: `slm4ie/data/curate/runner.py::curate`
+- **Code**: `slm4ie/data/curate/driver.py::curate`
 - **Settings**: `spam.min_adult_hits` (adult-word occurrences that drop a document, 2), `spam.min_spam_hits` (spam-word occurrences that drop a document, 2), `quality.min_doc_words` (shortest document the quality filter keeps, 20 words), `sentence_dedup.n_sentences` (sentences per window, 3) and `sentence_dedup.min_doc_words` (shortest document sentence dedup keeps, 50 words), in configs/data/curate.yaml
 
 ### M2 — Draw kept and dropped documents for every source and deciding stage
@@ -99,7 +99,7 @@ concluded: 2026-09-30
   1. For each source and stage, read the stage's output once, keeping a seeded sample of kept documents and an index of every surviving id.
   2. Search a seeded random subset of the stage's input shards, the compressed files a stage writes its documents into, for documents the index lacks. Those are the drops, and a sample of them is kept. Drops are therefore drawn from a few files per source, not from all of them.
   3. Merge rows by document id, so a document kept by one stage and dropped by the next counts in both cells.
-- **Code**: `slm4ie/data/curate/sample.py::draw_stratified_sample`
+- **Code**: `slm4ie/data/curate/inspect/sample.py::draw_stratified_sample`
 - **Settings**: `--per-cell` (documents per source, stage and decision, 40), `--shards-per-cell` (input shards searched for drops, 3), `--max-chars` (characters kept per document, 2,000), `--seed` (fixes the draw, 20260916), flags of the sample subcommand of curate_pretraining_corpus.py
 
 ### M3 — Judge each drawn document on a seven-property rubric
@@ -107,7 +107,7 @@ concluded: 2026-09-30
 - **Input**: the drawn documents ([M2]) and the rubric prompt `experiments/data/curation-quality-slovenian/configs/judge-rubric.md`.
 - **Output**: `interim/verdicts-full-sonnet.jsonl`, one verdict per document: language, text type, coherence from 1 to 5, domain, and yes-or-no flags for adult or spam, machine translation and personal data.
 - **How**: documents go to the judge in groups, each shown by id and text only, never with its stage or decision. Every reply is checked against a schema, and a group whose reply fails is judged again. Documents already judged are skipped on a rerun.
-- **Code**: `slm4ie/data/judge.py::judge_documents`
+- **Code**: `slm4ie/data/curate/inspect/judge.py::judge_documents`
 - **Settings**: `--model` (the judging model, Sonnet 5), `--backend` (Batch API or command line; the command line here), `--batch-size` (documents per request, 10), flags of scripts/judge_documents.py
 
 ### M4 — Measure how far the judge agrees with a person on keep or drop
@@ -141,7 +141,7 @@ concluded: 2026-09-30
   1. Pair kept and dropped documents of the same source and stage at random, with a fixed seed.
   2. Ask the judge for the better document twice, with the two swapped. The drawing records which slot held the kept document; the prompt never says.
   3. A pair counts for the kept document, the dropped one or a tie only when both orders agree; otherwise the orders differ.
-- **Code**: `slm4ie/data/judge.py::judge_pairs`
+- **Code**: `slm4ie/data/curate/inspect/judge.py::judge_pairs`
 - **Settings**: `--pairs-per-cell` (pairs per source and stage, 20), `--stages` (stages paired, the four content filters), `--model` (the judging model, Opus 5), flags of scripts/judge_documents.py with the pairwise task
 
 ### M7 — Check whether each dedup drop's content survives as another copy
@@ -153,7 +153,7 @@ concluded: 2026-09-30
   2. Scan the exact-dedup output for documents sharing the text hash or any window; the best twin shares the most windows.
   3. An exact-dedup drop is matched when an identical twin exists, a sentence-dedup drop when a twin holds at least the coverage floor of its windows. Either way the twin must reach the finished corpus. Only the best twin is checked, so a drop whose other copies survive is counted as lost.
   4. Score the unmatched drops against their judge verdicts.
-- **Code**: `slm4ie/data/curate/duplication.py::assess_dedup`
+- **Code**: `slm4ie/data/curate/inspect/duplication.py::assess_dedup`
 - **Settings**: `--coverage-floor` (share of windows a twin must hold, one half), flags of the duplication subcommand of curate_pretraining_corpus.py
 
 ### M8 — Have a person settle the cases where judge and pipeline conflict
@@ -176,7 +176,7 @@ concluded: 2026-09-30
   2. Build each source's survival funnel from the sentinels and those counts. The share lost at each stage is taken over the converted documents. Five sources left the language filter doubled, because an earlier run's output files stayed beside the new ones; their shares are taken over the language filter's output instead.
   3. Total documents and words by domain and by licence from the statistics stage.
   4. The profile reads every tenth document of each source's first three files, up to the per-source count, and reports length percentiles, type-token ratio at a fixed token budget, out-of-vocabulary rate against Sloleks, and language-identification confidence.
-- **Code**: `slm4ie/data/curate/profile.py::describe_corpus`
+- **Code**: `slm4ie/data/curate/inspect/profile.py::describe_corpus`
 - **Settings**: `--per-source` (documents profiled per source, 2,000), `--sloleks` (the lexicon file), flags of the describe subcommand of curate_pretraining_corpus.py
 
 ### M10 — Read the processor time of every pipeline step
@@ -473,7 +473,7 @@ uv run python scripts/curate_pretraining_corpus.py sample --config $CURATION --a
 uv run python scripts/judge_documents.py --source $OUT/sample.jsonl --out $OUT/verdicts-full-sonnet.jsonl --rubric $EXP/configs/judge-rubric.md --backend cli --model claude-sonnet-5 --batch-size 10
 
 # Calibration set, a deterministic draw fixed by the sample's seed, and its judge run for F12 (commit 276be08)
-uv run python -c "import json; from pathlib import Path; from slm4ie.data.judge import draw_calibration_set, read_documents; out = Path('$OUT'); rows = draw_calibration_set(read_documents(out / 'sample.jsonl'), 300); (out / 'calibration.jsonl').write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows))"
+uv run python -c "import json; from pathlib import Path; from slm4ie.data.curate.inspect.judge import draw_calibration_set, read_documents; out = Path('$OUT'); rows = draw_calibration_set(read_documents(out / 'sample.jsonl'), 300); (out / 'calibration.jsonl').write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows))"
 uv run python scripts/judge_documents.py --source $OUT/calibration.jsonl --out $OUT/verdicts-sonnet.jsonl --rubric $EXP/configs/judge-rubric.md --backend api --model claude-sonnet-5
 
 # Calibration labels for F12, by hand, frozen to final/human-labels-calibration.jsonl (commit 5246ee3)
