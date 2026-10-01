@@ -1,0 +1,7 @@
+Merge,Joins,Count,Tied pairs left,hiša after it,The paper's rule would join
+1,h + ##i,12,##i##š,hi ##š ##a,"##i + ##š, h + ##i"
+2,hi + ##š,12,none,hiš ##a,hi + ##š
+3,m + ##i,9,##i##z,hiš ##a,"##i + ##z, m + ##i"
+4,mi + ##z,9,none,hiš ##a,mi + ##z
+5,hiš + ##a,5,none,hiša,hiš + ##a
+6,hiš + ##e,4,miz##a,hiša,miz + ##a
