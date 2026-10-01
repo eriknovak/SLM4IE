@@ -24,9 +24,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from slm4ie.data.versioning import config_hash, corpus_digest
-from slm4ie.data.tasks.registry import TaskEntry, TasksConfig, resolve_output_dir
-from slm4ie.data.tasks.writer import iter_jsonl, outputs_for_splits
+from slm4ie.utils.versioning import config_hash, corpus_digest
+from slm4ie.data.tasks.config import TaskEntry, TasksConfig, resolve_output_dir
+from slm4ie.data.tasks.splits import iter_jsonl, outputs_for_splits
 from slm4ie.utils import mlflow as ml
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ def log_task_dataset(
     return digest
 
 
-def log_task_runs(
+def log_tasks_runs(
     tasks_config: TasksConfig,
     by_key: Dict[str, TaskEntry],
     keys: List[str],

@@ -12,7 +12,7 @@ from typing import List
 import zstandard
 from tqdm import tqdm
 
-from slm4ie.data.parallel import workers_quiet
+from slm4ie.utils.parallel import workers_quiet
 
 logger = logging.getLogger(__name__)
 

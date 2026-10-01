@@ -30,7 +30,7 @@ from datatrove.pipeline.base import PipelineStep
 from datatrove.pipeline.writers.disk_base import DiskWriter
 
 from slm4ie.data.curate.paths import CuratePaths
-from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
 #: Default ISO 639-1 codes for the candidate language set used by the
@@ -313,12 +313,12 @@ def build_language_executors(
         lang_max_chars: Truncate doc text to this many chars before
             detection. `None` disables truncation.
         input_override: Optional folder to read from instead of the
-            convert stage's output folder. Used by the driver to
+            convert stage's output folder. Used by the run loop to
             restrict the language stage to a symlinked subset of
             `<output_dir>/00_convert/` when the user requests a subset
             of dataset keys.
         output_override: Optional folder to write to instead of the
-            stage's output folder (the driver's staging folder).
+            stage's output folder (the run loop's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
@@ -346,7 +346,7 @@ def build_language_executors(
     return [executor]
 
 
-def run(job: StageJob) -> Tuple[int, int]:
+def run(job: StageRun) -> Tuple[int, int]:
     """Run the language stage over the job's input view.
 
     Args:

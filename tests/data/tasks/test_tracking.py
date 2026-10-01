@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from slm4ie.data.tasks import tracking as tt
-from slm4ie.data.tasks.registry import TaskEntry, TasksConfig, TaskSource, TasksRoots
+from slm4ie.data.tasks.config import TaskEntry, TasksConfig, EntrySource, TasksRoots
 
 
 def _entry(task: str = "sentiment", dataset: str = "demo", splits=None, labels=None) -> TaskEntry:
@@ -16,7 +16,7 @@ def _entry(task: str = "sentiment", dataset: str = "demo", splits=None, labels=N
         task=task,
         dataset=dataset,
         role="finetune_and_eval",
-        source=TaskSource(kind="extracted", keys=["demo"]),
+        source=EntrySource(kind="extracted", keys=["demo"]),
         splits=splits or {"test": "test.jsonl.gz"},
         labels=labels,
         suite=None,
@@ -130,4 +130,4 @@ class TestLogTaskRuns:
         entry, roots = _entry(), _roots(tmp_path)
         config = TasksConfig(roots=roots, converter_defaults={}, entries=[entry], mlflow={"enabled": False})
         # Should simply return without raising even though no store is configured.
-        tt.log_task_runs(config, {"sentiment/demo": entry}, ["sentiment/demo"], mlflow_enabled=None)
+        tt.log_tasks_runs(config, {"sentiment/demo": entry}, ["sentiment/demo"], mlflow_enabled=None)

@@ -7,7 +7,7 @@ remove it, because it is grammatical text. `SpamFilter` drops such
 documents using three complementary, language-aware signals:
 
 * a per-language lexicon of unambiguous adult and SEO/scam terms
-  (curated lists shipped under `slm4ie/data/spam/`, with LDNOOBW lists
+  (curated lists shipped under `slm4ie/data/curate/resources/spam/`, with LDNOOBW lists
   auto-loaded on demand for languages without a curated file);
 * a language-agnostic URL/domain blocklist matched against
   `metadata.url`;
@@ -42,7 +42,7 @@ from datatrove.pipeline.filters.base_filter import BaseFilter
 from datatrove.pipeline.writers.disk_base import DiskWriter
 
 from slm4ie.data.curate.paths import CuratePaths
-from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
 logger = logging.getLogger(__name__)
@@ -154,16 +154,16 @@ def _spam_dir() -> Path:
     """Return the directory holding the bundled spam assets.
 
     Returns:
-        Path to `slm4ie/data/spam/`.
+        Path to `slm4ie/data/curate/resources/spam/`.
     """
-    return Path(__file__).resolve().parents[2] / "spam"
+    return Path(__file__).resolve().parents[1] / "resources" / "spam"
 
 
 def load_spam_lexicon(code: str) -> Tuple[Set[str], Set[str], bytes]:
     """Load the curated adult and SEO-spam term sets for a language.
 
     Resolves `<code>/adult.txt` and `<code>/spam.txt` under
-    `slm4ie/data/spam/`, parsing each into a lowercased token set.
+    `slm4ie/data/curate/resources/spam/`, parsing each into a lowercased token set.
 
     Args:
         code: Language code identifying the bundled lists (e.g. `"sl"`).
@@ -190,7 +190,7 @@ def load_spam_lexicon(code: str) -> Tuple[Set[str], Set[str], bytes]:
 def load_spam_domains() -> Tuple[Set[str], bytes]:
     """Load the bundled adult/spam domain blocklist.
 
-    Resolves `domains.txt` under `slm4ie/data/spam/`.
+    Resolves `domains.txt` under `slm4ie/data/curate/resources/spam/`.
 
     Returns:
         Tuple `(domain set, raw bytes)`. The bytes are the original
@@ -504,7 +504,7 @@ def build_spam_executors(
             language stage's output, used to restrict the stage to a
             symlinked subset of datasets.
         output_override: Optional folder to write to instead of the
-            stage's output folder (the driver's staging folder).
+            stage's output folder (the run loop's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
@@ -532,7 +532,7 @@ def build_spam_executors(
     return [executor]
 
 
-def run(job: StageJob) -> Tuple[int, int]:
+def run(job: StageRun) -> Tuple[int, int]:
     """Run the spam stage over the job's input view.
 
     Args:

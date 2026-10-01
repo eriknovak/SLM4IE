@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from slm4ie.data.io_utils import open_output, open_text_stream
+from slm4ie.utils.io import open_output, open_text_stream
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +314,7 @@ def build_morph_lexicon(sloleks_path: Path, *, min_stem_len: int = 2) -> MorphLe
 
     Args:
         sloleks_path (Path): Path to `tokenization/sloleks.jsonl.gz` as
-            produced by `slm4ie/data/tokenization.py`.
+            produced by `slm4ie/data/tokenization/run.py`.
         min_stem_len (int): Minimum stem length for a reliable split.
 
     Returns:
@@ -351,7 +351,7 @@ def build_derivational_lexicon(path: Path) -> MorphLexicon:
     """Build a derivational morpheme lexicon from a word-relations JSONL.
 
     Reads the `sloleks_relations` JSONL produced by
-    `slm4ie/data/tokenization.py`, where each record carries a derived
+    `slm4ie/data/tokenization/run.py`, where each record carries a derived
     `lemma` and its `morphemes` already split on the resource's underscore
     decomposition. Unlike `build_morph_lexicon`, no heuristic alignment runs:
     the boundaries are taken as given. The keyed form is the lemma itself, so

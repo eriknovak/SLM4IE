@@ -9,8 +9,8 @@
 #
 # Notes:
 #   datasets     Each key must (1) be declared in configs/data/download.yaml
-#     (so its raw download dir resolves via `output_dir`) and (2) have a reader
-#     registered in slm4ie/data/tokenization.py. Lexicon-derived corpora
+#     (so its raw download dir resolves via `output_dir`) and (2) have a lexicon module
+#     registered in slm4ie/data/tokenization/run.py. Lexicon-derived corpora
 #     (currently Sloleks 3.1); they measure tokenizer quality (compression ratio,
 #     fertility, OOV rate, morphological coverage) and never enter the
 #     pretraining corpus.

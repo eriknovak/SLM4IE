@@ -9,7 +9,7 @@ line is:
 Sources are read from the extraction tree (`<roots.extracted>/<key>.jsonl` plus
 the optional annotations sidecar) and joined on the fly. Annotation spans whose
 label is not in the entry's `labels` allow-list are dropped, with one warning
-per dataset. The split policy is HASH: the driver buckets each document by a
+per dataset. The split policy is HASH: the run loop buckets each document by a
 deterministic hash of its stable id.
 """
 
@@ -17,7 +17,7 @@ import logging
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.schema import NerExample
-from slm4ie.data.tasks.driver import (
+from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
     TaskConverter,
@@ -26,7 +26,7 @@ from slm4ie.data.tasks.driver import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.registry import TaskEntry, TasksRoots
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class SpansConverter(TaskConverter):
             entry: NER task entry.
             roots: Filesystem roots.
             ctx: Per-run options (unused by this family).
-            splits: Target split names (unused; the driver hashes each id).
+            splits: Target split names (unused; the run loop hashes each id).
 
         Yields:
             `(stable_id, example)` pairs for the HASH split policy.

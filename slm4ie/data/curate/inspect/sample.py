@@ -41,7 +41,7 @@ import numpy as np
 import yaml
 
 from slm4ie.data.curate.stages import STAGE_DIRS, final_corpus_dir, upstream_stage
-from slm4ie.data.io_utils import resolve_project_path
+from slm4ie.utils.io import resolve_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ def _reservoir_add(reservoir: List[Any], item: Any, seen: int, size: int, rng: r
         reservoir[index] = item
 
 
-def resolve_output_dir(config_path: Path, override: Optional[Path] = None) -> Path:
+def resolve_sample_dir(config_path: Path, override: Optional[Path] = None) -> Path:
     """Resolve the folder holding the stage outputs.
 
     Args:

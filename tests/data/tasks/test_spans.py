@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from slm4ie.data.tasks.driver import convert_tasks
+from slm4ie.data.tasks.run import convert_tasks
 from slm4ie.data.tasks.converters import spans
 
 

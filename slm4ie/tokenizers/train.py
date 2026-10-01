@@ -19,15 +19,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
-from slm4ie.data.versioning import corpus_digest
-from slm4ie.data.parallel import (
+from slm4ie.utils.versioning import corpus_digest
+from slm4ie.utils.parallel import (
     configure_script_logging,
     cpu_default,
     resolve_workers,
     run_parallel,
 )
 from slm4ie.tokenizers.base import TrainContext
-from slm4ie.tokenizers.corpus import iter_sample_cache, sample_corpus, write_sample_cache
+from slm4ie.tokenizers.corpus import iter_sample, sample_corpus, write_sample
 from slm4ie.tokenizers.morphology import (
     build_derivational_lexicon,
     build_morph_lexicon,
@@ -38,7 +38,7 @@ from slm4ie.tokenizers.morphology import (
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
-from slm4ie.tokenizers.config import TokenizerSweepConfig
+from slm4ie.tokenizers.config import SweepConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ TOKENIZER_ARTIFACT_GLOBS: Tuple[str, ...] = ("tokenizer.json", "spm.model", "met
 MLFLOW_LINK_FILENAME = "mlflow_train.json"
 
 
-def run_key(name: str, vocab_size: int) -> str:
+def sweep_run_key(name: str, vocab_size: int) -> str:
     """Return the canonical run key for a tokenizer and vocab size.
 
     Args:
@@ -70,11 +70,11 @@ def run_key(name: str, vocab_size: int) -> str:
     return f"{name}-{vocab_size}"
 
 
-def parse_run_key(key: str) -> Tuple[str, int]:
+def parse_sweep_run_key(key: str) -> Tuple[str, int]:
     """Split a run key back into its tokenizer name and vocab size.
 
     Args:
-        key (str): A key produced by `run_key`.
+        key (str): A key produced by `sweep_run_key`.
 
     Returns:
         Tuple[str, int]: The tokenizer name and vocab size.
@@ -88,26 +88,26 @@ def parse_run_key(key: str) -> Tuple[str, int]:
     return name, int(vocab)
 
 
-def plan_runs(cfg: TokenizerSweepConfig) -> List[str]:
+def plan_sweep_runs(cfg: SweepConfig) -> List[str]:
     """Enumerate every tokenizer x vocab-size run key in the sweep.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
 
     Returns:
         List[str]: Run keys in tokenizer-major, vocab-minor order.
     """
-    return [run_key(name, vocab) for name, vocab in product(cfg.tokenizers, cfg.vocab_sizes)]
+    return [sweep_run_key(name, vocab) for name, vocab in product(cfg.tokenizers, cfg.vocab_sizes)]
 
 
-def prepare_inputs(cfg: TokenizerSweepConfig, force: bool = False) -> Tuple[Path, Optional[Path]]:
+def prepare_inputs(cfg: SweepConfig, force: bool = False) -> Tuple[Path, Optional[Path]]:
     """Materialize the shared training sample and morpheme lexicon.
 
     Both artifacts are reused across every run. Existing artifacts are kept
     unless `force` is set.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         force (bool): Rebuild even when the artifacts already exist.
 
     Returns:
@@ -117,7 +117,7 @@ def prepare_inputs(cfg: TokenizerSweepConfig, force: bool = False) -> Tuple[Path
     sample_path = cfg.corpus_sample_path
     if force or not sample_path.exists():
         logger.info("Sampling training corpus -> %s", sample_path)
-        write_sample_cache(sample_corpus(cfg.corpus_root, cfg.train_budget), sample_path)
+        write_sample(sample_corpus(cfg.corpus_root, cfg.train_budget), sample_path)
     else:
         logger.info("Reusing cached training sample: %s", sample_path)
 
@@ -145,7 +145,7 @@ def prepare_inputs(cfg: TokenizerSweepConfig, force: bool = False) -> Tuple[Path
 def train_one(
     key: str,
     *,
-    cfg: TokenizerSweepConfig,
+    cfg: SweepConfig,
     sample_path: Path,
     lexicon_path: Optional[Path],
     force: bool = False,
@@ -154,7 +154,7 @@ def train_one(
 
     Args:
         key (str): Run key (`<name>-<vocab>`).
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         sample_path (Path): Cached training-sample path.
         lexicon_path (Optional[Path]): Morpheme lexicon path for morphological
             backends, or None.
@@ -167,7 +167,7 @@ def train_one(
     Raises:
         ValueError: If a morphological run is requested without a lexicon.
     """
-    name, vocab_size = parse_run_key(key)
+    name, vocab_size = parse_sweep_run_key(key)
     out_dir = cfg.output_root / key
     if (out_dir / "metadata.json").exists() and not force:
         logger.info("Skipping %s; artifact exists (use --force to retrain).", key)
@@ -187,7 +187,7 @@ def train_one(
     tokenizer = get_tokenizer(name)()
     logger.info("Training %s (vocab=%d)", name, vocab_size)
     start = time.perf_counter()
-    tokenizer.train(iter_sample_cache(sample_path), vocab_size, config=context)
+    tokenizer.train(iter_sample(sample_path), vocab_size, config=context)
     train_seconds = time.perf_counter() - start
     tokenizer.save(out_dir)
     _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg)
@@ -202,7 +202,7 @@ def _write_train_stats(
     vocab_size: int,
     vocab_used: int,
     train_seconds: float,
-    cfg: TokenizerSweepConfig,
+    cfg: SweepConfig,
 ) -> None:
     """Write the per-run training-stats sidecar for later MLflow logging.
 
@@ -216,7 +216,7 @@ def _write_train_stats(
         vocab_size (int): Target vocabulary size.
         vocab_used (int): Actual vocabulary size after training.
         train_seconds (float): Wall-clock training time in seconds.
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
     """
     stats = {
         "run_key": key,
@@ -232,8 +232,8 @@ def _write_train_stats(
     (out_dir / TRAIN_STATS_FILENAME).write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def select_runs(
-    cfg: TokenizerSweepConfig,
+def select_sweep_runs(
+    cfg: SweepConfig,
     *,
     run_keys: Optional[List[str]] = None,
     tokenizers: Optional[List[str]] = None,
@@ -242,7 +242,7 @@ def select_runs(
     """Resolve which run keys to execute from explicit keys or filters.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         run_keys (Optional[List[str]]): Explicit run keys; takes precedence.
         tokenizers (Optional[List[str]]): Restrict to these tokenizer names.
         vocab_sizes (Optional[List[int]]): Restrict to these vocab sizes.
@@ -250,7 +250,7 @@ def select_runs(
     Returns:
         List[str]: The selected run keys, preserving sweep order.
     """
-    planned = plan_runs(cfg)
+    planned = plan_sweep_runs(cfg)
     if run_keys:
         planned_set = set(planned)
         unknown = [k for k in run_keys if k not in planned_set]
@@ -261,15 +261,15 @@ def select_runs(
     selected = planned
     if tokenizers:
         wanted = set(tokenizers)
-        selected = [k for k in selected if parse_run_key(k)[0] in wanted]
+        selected = [k for k in selected if parse_sweep_run_key(k)[0] in wanted]
     if vocab_sizes:
         wanted_vocab = set(vocab_sizes)
-        selected = [k for k in selected if parse_run_key(k)[1] in wanted_vocab]
+        selected = [k for k in selected if parse_sweep_run_key(k)[1] in wanted_vocab]
     return selected
 
 
-def resolve_run_selection(
-    cfg: TokenizerSweepConfig,
+def resolve_sweep_runs(
+    cfg: SweepConfig,
     *,
     all_runs: bool,
     tokenizer: Optional[str],
@@ -282,7 +282,7 @@ def resolve_run_selection(
     narrowed to one `vocab_size`. The two modes are mutually exclusive.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         all_runs (bool): Select the whole sweep (the `--all` flag).
         tokenizer (Optional[str]): The one tokenizer to select, or None.
         vocab_size (Optional[int]): A single vocab size narrowing `tokenizer`,
@@ -298,7 +298,7 @@ def resolve_run_selection(
     if all_runs:
         if tokenizer or vocab_size is not None:
             raise ValueError("--all takes no other selector; drop --tokenizer/--vocab-size.")
-        return select_runs(cfg)
+        return select_sweep_runs(cfg)
     if not tokenizer:
         raise ValueError("Specify --tokenizer NAME (optionally --vocab-size N), or --all.")
     if tokenizer not in cfg.tokenizers:
@@ -306,7 +306,7 @@ def resolve_run_selection(
     if vocab_size is not None and vocab_size not in cfg.vocab_sizes:
         raise ValueError(f"Unknown vocab size {vocab_size}. Configured: {cfg.vocab_sizes}.")
     vocab_sizes = [vocab_size] if vocab_size is not None else None
-    return select_runs(cfg, tokenizers=[tokenizer], vocab_sizes=vocab_sizes)
+    return select_sweep_runs(cfg, tokenizers=[tokenizer], vocab_sizes=vocab_sizes)
 
 
 def _write_mlflow_link(
@@ -337,7 +337,7 @@ def _write_mlflow_link(
     (out_dir / MLFLOW_LINK_FILENAME).write_text(json.dumps(link, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def log_training_to_mlflow(keys: List[str], cfg: TokenizerSweepConfig) -> None:
+def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
     """Log the training sweep to MLflow as a parent run with nested children.
 
     Each child run records the run's training parameters and timing under the
@@ -348,7 +348,7 @@ def log_training_to_mlflow(keys: List[str], cfg: TokenizerSweepConfig) -> None:
 
     Args:
         keys (List[str]): Run keys whose `train_stats.json` should be logged.
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
     """
     if not cfg.mlflow_enabled:
         return
@@ -407,7 +407,7 @@ def log_training_to_mlflow(keys: List[str], cfg: TokenizerSweepConfig) -> None:
 
 
 @dataclass
-class TrainingSummary:
+class TrainSummary:
     """Outcome of a training sweep.
 
     Attributes:
@@ -422,11 +422,11 @@ class TrainingSummary:
 
 
 def train_sweep(
-    cfg: TokenizerSweepConfig,
+    cfg: SweepConfig,
     keys: List[str],
     force: bool = False,
     max_workers: int = 0,
-) -> TrainingSummary:
+) -> TrainSummary:
     """Train the selected runs and log them to MLflow.
 
     Prepares the shared training sample (and the derived morpheme lexicon when a
@@ -434,13 +434,13 @@ def train_sweep(
     pool.
 
     Args:
-        cfg (TokenizerSweepConfig): The resolved sweep configuration.
+        cfg (SweepConfig): The resolved sweep configuration.
         keys (List[str]): Run keys (`<name>-<vocab>`) to train.
         force (bool): Retrain runs whose artifacts already exist.
         max_workers (int): Parallel runs. 0=auto (cpu_count // 2), 1=serial.
 
     Returns:
-        TrainingSummary: The trained, skipped, and failed run keys.
+        TrainSummary: The trained, skipped, and failed run keys.
     """
     cfg.output_root.mkdir(parents=True, exist_ok=True)
     workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
@@ -469,7 +469,7 @@ def train_sweep(
         log_dir=stamped_log_dir("tokenizer-train"),
     )
 
-    summary = TrainingSummary(
+    summary = TrainSummary(
         trained=[k for k, v in results.items() if v is not None],
         skipped=[k for k, v in results.items() if v is None],
         failed=[k for k, _ in failures],
@@ -481,5 +481,5 @@ def train_sweep(
         summary.failed or "none",
     )
     if summary.trained:
-        log_training_to_mlflow(summary.trained, cfg)
+        log_train_runs(summary.trained, cfg)
     return summary

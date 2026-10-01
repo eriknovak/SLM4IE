@@ -1,7 +1,7 @@
 """Loading the curation config: paths, roster, per-dataset overrides, config hashes.
 
 The pipeline is driven by a single curation config (`configs/data/curate.yaml`
-or an experiment's own variant). `load_setup` reads it once into a `Setup`
+or an experiment's own variant). `load_curate_config` reads it once into a `CurateConfig`
 holding everything a run, a status check or an adoption derives from it: the
 resolved paths, the dataset roster from `extract.yaml`, the stopword and spam
 assets, the lock file's location, and each unit's expected config hash.
@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tup
 
 import yaml
 
-from slm4ie.data.catalog import _deep_merge
+from slm4ie.utils.config import deep_merge
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import SCOPED_STAGES, is_scoped
-from slm4ie.data.io_utils import find_project_root as _find_project_root, resolve_project_path
-from slm4ie.data.stopwords import load_stopwords
-from slm4ie.data.versioning import config_hash
+from slm4ie.utils.io import find_project_root as _find_project_root, resolve_project_path
+from slm4ie.data.curate.resources.stopwords import load_stopwords
+from slm4ie.utils.versioning import config_hash
 
 if TYPE_CHECKING:
     from slm4ie.data.curate.stages.spam import SpamAssets
@@ -155,7 +155,7 @@ def effective_stage_config(
     """
     base = dict(cfg.get(stage) or {})
     override = ((overrides or {}).get(dataset) or {}).get(stage) or {}
-    return _deep_merge(base, override)
+    return deep_merge(base, override)
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -220,7 +220,7 @@ def _resolve_dirs(input_dir: Optional[Path], output_dir: Optional[Path], cfg: Di
 def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
     """Load the stopword set and return (set, raw_bytes_for_hashing).
 
-    Thin wrapper over `slm4ie.data.stopwords.load_stopwords`. Reads the
+    Thin wrapper over `slm4ie.data.curate.resources.stopwords.load_stopwords`. Reads the
     language code from `cfg['stopwords']`. A missing or empty key
     disables stopwords (returns an empty set and empty bytes, after
     logging a warning). An unknown code is propagated as `ValueError`
@@ -235,7 +235,7 @@ def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
 
     Raises:
         ValueError: If `cfg['stopwords']` is set to a code that has no
-            bundled list under `slm4ie/data/stopwords/`.
+            bundled list under `slm4ie/data/curate/resources/stopwords/`.
     """
     code = cfg.get("stopwords")
     if not code:
@@ -261,7 +261,7 @@ def _load_spam_assets(cfg: Dict[str, Any]) -> SpamAssets:
 
     Raises:
         ValueError: If a configured language has no curated list under
-            `slm4ie/data/spam/`.
+            `slm4ie/data/curate/resources/spam/`.
     """
     from slm4ie.data.curate.stages.spam import load_spam_assets
 
@@ -365,7 +365,7 @@ def _stage_extra(stage: str, stopwords_bytes: bytes, spam_bytes: bytes, dataset_
 
 
 @dataclass
-class Setup:
+class CurateConfig:
     """Everything a run, a status check or an adoption derives from the config.
 
     Attributes:
@@ -435,9 +435,9 @@ def lock_path_for(pretrain_config: Path) -> Path:
     return pretrain_config.with_name(f"{pretrain_config.stem}.lock.yaml")
 
 
-def load_setup(
+def load_curate_config(
     input_dir: Optional[Path], output_dir: Optional[Path], pretrain_config: Path, extract_config: Optional[Path]
-) -> Setup:
+) -> CurateConfig:
     """Load the config and everything derived from it.
 
     Args:
@@ -447,14 +447,14 @@ def load_setup(
         extract_config: Path to extract.yaml, or None for the default.
 
     Returns:
-        The loaded `Setup`.
+        The loaded `CurateConfig`.
     """
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_config)
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
-    return Setup(
+    return CurateConfig(
         cfg=cfg,
         overrides=cfg.get("overrides") or {},
         paths=CuratePaths(input_folder=resolved_input, output_dir=resolved_output),

@@ -10,7 +10,7 @@ Two source kinds are supported:
 * `kind: raw` -- reads SentiNews-format TSV files from `<roots.raw>/<key>/`
   (the held-out Twitter dataset).
 
-The split policy is HASH: the driver buckets each record by a deterministic hash
+The split policy is HASH: the run loop buckets each record by a deterministic hash
 of its stable id. A single-split entry (e.g. a held-out `test`-only dataset)
 therefore lands entirely in that one split without any special-casing here.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from slm4ie.data.schema import SentimentExample
-from slm4ie.data.tasks.driver import (
+from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
     TaskConverter,
@@ -29,7 +29,7 @@ from slm4ie.data.tasks.driver import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.registry import TaskEntry, TasksRoots
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 
 #: Map common label spellings to canonical 3-class labels.
 _LABEL_NORMALIZATION: Dict[str, str] = {
@@ -207,7 +207,7 @@ class SentimentConverter(TaskConverter):
             entry: Sentiment task entry.
             roots: Filesystem roots.
             ctx: Per-run options (unused by this family).
-            splits: Target split names (unused; the driver hashes each id).
+            splits: Target split names (unused; the run loop hashes each id).
 
         Yields:
             `(stable_id, example)` pairs for the HASH split policy.

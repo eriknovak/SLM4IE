@@ -8,9 +8,9 @@ from typing import Dict, List
 from slm4ie.tokenizers.corpus import (
     SampleBudget,
     iter_dedup_documents,
-    iter_sample_cache,
+    iter_sample,
     sample_corpus,
-    write_sample_cache,
+    write_sample,
 )
 
 
@@ -88,12 +88,12 @@ class TestSampleCache:
     def test_round_trip_flattens_newlines(self, tmp_path: Path):
         """Cached docs round-trip with internal newlines collapsed."""
         cache = tmp_path / "sample.txt.gz"
-        write_sample_cache(iter(["a\nb", "c d"]), cache)
-        assert list(iter_sample_cache(cache)) == ["a b", "c d"]
+        write_sample(iter(["a\nb", "c d"]), cache)
+        assert list(iter_sample(cache)) == ["a b", "c d"]
 
     def test_plain_text_cache(self, tmp_path: Path):
         """A non-gz cache path produces a plain text file."""
         cache = tmp_path / "sample.txt"
-        write_sample_cache(iter(["hello"]), cache)
+        write_sample(iter(["hello"]), cache)
         assert cache.read_text(encoding="utf-8").strip() == "hello"
-        assert list(iter_sample_cache(cache)) == ["hello"]
+        assert list(iter_sample(cache)) == ["hello"]

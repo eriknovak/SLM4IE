@@ -37,21 +37,20 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from tqdm import tqdm
 
-from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages import StageRun
 
-from slm4ie.data.io_utils import (
+from slm4ie.data.extract.records import find_dataset_files, iter_joined_records
+from slm4ie.utils.io import (
     DEFAULT_MAX_SHARD_BYTES,
     ShardedJsonlWriter,
-    find_dataset_files,
-    iter_joined_records,
 )
-from slm4ie.data.parallel import (
+from slm4ie.utils.parallel import (
     cpu_default,
     resolve_workers,
     run_parallel,
     workers_quiet,
 )
-from slm4ie.data.versioning import combine_named_digests, file_sha256
+from slm4ie.utils.versioning import combine_named_digests, file_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +213,7 @@ def _convert_stream(
     return count
 
 
-def convert_dataset(
+def lift_dataset(
     key: str,
     *,
     input_dir: Path,
@@ -329,11 +328,11 @@ def run_convert_stage(
         output_dir: Stage output folder (`<output_dir>/00_convert/`).
             Per-key shard subfolders land directly under it.
         dataset_keys: Dataset keys to convert.
-        text_field: See `convert_dataset`.
-        id_field: See `convert_dataset`.
-        metadata_fields: See `convert_dataset`.
-        include_annotations: See `convert_dataset`.
-        max_shard_bytes: See `convert_dataset`.
+        text_field: See `lift_dataset`.
+        id_field: See `lift_dataset`.
+        metadata_fields: See `lift_dataset`.
+        include_annotations: See `lift_dataset`.
+        max_shard_bytes: See `lift_dataset`.
         workers: Effective worker count. Use `1` for serial execution,
             `0` for auto (`cpu_count // 2`), `N` for explicit width.
         log_dir: Optional directory for per-dataset log files.
@@ -360,7 +359,7 @@ def run_convert_stage(
         }
 
     results, failures = run_parallel(
-        convert_dataset,
+        lift_dataset,
         dataset_keys,
         max_workers=effective_workers,
         desc="convert",
@@ -481,7 +480,7 @@ def input_files_digest(files: Dict[str, Optional[Dict[str, Any]]]) -> str:
     return combine_named_digests({name: f"{f['size']}:{f['sha256']}" if f else None for name, f in files.items()})
 
 
-def run(job: StageJob) -> Tuple[int, int]:
+def run(job: StageRun) -> Tuple[int, int]:
     """Convert the job's datasets into the job's output folder.
 
     Args:

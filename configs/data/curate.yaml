@@ -21,7 +21,7 @@
 #     per-stage survival funnel + per-source variants as metrics, final per-dataset
 #     word shares from aggregate.json, the flattened config as params, stats/_logs
 #     as artifacts, and the final corpus as a `produced` dataset input.
-#   stopwords    Selects slm4ie/data/stopwords/<code>.txt, used by the quality
+#   stopwords    Selects slm4ie/data/curate/resources/stopwords/<code>.txt, used by the quality
 #     stage (Gopher min_stop_words) and the stats stage (word/n-gram/keyword
 #     filtering). Omit the key to disable; an unknown code raises at startup.
 #   candidates   Every European language lingua supports (36 living European
@@ -104,7 +104,7 @@ language:
 # --- Stage 2: spam (02_spam) --------------------------------------------
 # Adult / SEO-spam removal via curated lexicons + URL blocklist + optional
 # model.  High precision by design.  Reads 01_language/  Writes 02_spam/
-# Lexicons under slm4ie/data/spam/ fold into this stage's sentinel hash.
+# Lexicons under slm4ie/data/curate/resources/spam/ fold into this stage's sentinel hash.
 spam:
   languages: [sl, en]             # codes whose curated adult.txt + spam.txt load eagerly
   use_ldnoobw: true               # auto-load an LDNOOBW list when no curated list ships

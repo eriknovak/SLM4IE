@@ -5,7 +5,7 @@ LM-pretraining phase. `bpe`, `charbpe`, `wordpiece`, and `morphbpe` wrap their
 `tokenizer.json` as a `PreTrainedTokenizerFast`; `unigram` is converted from its
 SentencePiece model; `morphpiece` returns the custom slow tokenizer. Every
 returned object supports `decode` and offset mapping (native for the fast ones,
-via `encode_with_offsets` for MorphPiece). `export_runs` writes those files for
+via `encode_with_offsets` for MorphPiece). `export_sweep_runs` writes those files for
 a whole selection of trained runs.
 """
 
@@ -153,7 +153,7 @@ class ExportSummary:
     failed: List[str] = field(default_factory=list)
 
 
-def export_runs(output_root: Path, keys: List[str]) -> ExportSummary:
+def export_sweep_runs(output_root: Path, keys: List[str]) -> ExportSummary:
     """Export each selected trained run as a HuggingFace tokenizer directory.
 
     Args:

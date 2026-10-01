@@ -14,7 +14,7 @@ from datatrove.pipeline.filters import GopherQualityFilter
 from datatrove.utils.typeshelper import Languages
 
 from slm4ie.data.curate.paths import CuratePaths
-from slm4ie.data.curate.stages import StageJob
+from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
 
@@ -100,7 +100,7 @@ def build_quality_executors(
             language stage's output, used to restrict the stage to a
             symlinked subset of datasets.
         output_override: Optional folder to write to instead of the
-            stage's output folder (the driver's staging folder).
+            stage's output folder (the run loop's staging folder).
 
     Returns:
         A list with one `LocalPipelineExecutor`.
@@ -134,7 +134,7 @@ def build_quality_executors(
     return [executor]
 
 
-def run(job: StageJob) -> Tuple[int, int]:
+def run(job: StageRun) -> Tuple[int, int]:
     """Run the quality stage over the job's input view.
 
     Args:

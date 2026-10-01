@@ -145,7 +145,7 @@ extraction writes two files per dataset under `extracted/`:
 - `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel arrays (`forms`, `lemmas`, `upos`, `feats`, `sentences`, plus `spans` when present), kept separate to avoid loading them during text-only training.
 
 The downstream task converters (`spans`, `sentiment`, `superglue`) join these
-two files on the fly via `slm4ie.data.io_utils.iter_joined_records`, so no
+two files on the fly via `slm4ie.data.extract.records.iter_joined_records`, so no
 intermediate merged file is materialized.
 
 ## Tokenizer-quality data

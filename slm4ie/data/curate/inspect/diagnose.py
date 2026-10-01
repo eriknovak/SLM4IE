@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from slm4ie.data.curate.inspect.sample import resolve_output_dir
+from slm4ie.data.curate.inspect.sample import resolve_sample_dir
 from slm4ie.data.curate.stages import final_corpus_dir
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def resolve_corpus_dir(config_path: Path, base_dir: Optional[Path] = None) -> Pa
     """
     if base_dir is not None:
         return base_dir
-    return resolve_output_dir(config_path) / final_corpus_dir()
+    return resolve_sample_dir(config_path) / final_corpus_dir()
 
 
 def build_detector(candidates: List[str], low_accuracy: bool) -> Any:

@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import pytest
 
-from slm4ie.tokenizers.config import load_tokenizer_config
+from slm4ie.tokenizers.config import load_sweep_config
 
 _BASE_CONFIG = dedent(
     """\
@@ -50,11 +50,11 @@ def _write(path: Path, text: str) -> Path:
 
 
 class TestLoadTokenizerConfig:
-    """Tests for load_tokenizer_config."""
+    """Tests for load_sweep_config."""
 
     def test_parses_full_config(self, tmp_path: Path):
         """A complete config parses into the expected dataclass."""
-        cfg = load_tokenizer_config(_write(tmp_path / "tokenizers.yaml", _BASE_CONFIG))
+        cfg = load_sweep_config(_write(tmp_path / "tokenizers.yaml", _BASE_CONFIG))
         assert cfg.corpus_root == Path("/data/pretrain/06_sentence_dedup")
         assert cfg.tokenizers == ["bpe", "morphbpe"]
         assert cfg.vocab_sizes == [16000, 32000]
@@ -68,13 +68,13 @@ class TestLoadTokenizerConfig:
     def test_default_experiment_name(self, tmp_path: Path):
         """An omitted mlflow block defaults to the slm4ie/<workstream>/<stage> name."""
         no_mlflow = _BASE_CONFIG.split("mlflow:")[0]
-        cfg = load_tokenizer_config(_write(tmp_path / "tokenizers.yaml", no_mlflow))
+        cfg = load_sweep_config(_write(tmp_path / "tokenizers.yaml", no_mlflow))
         assert cfg.mlflow_experiment == "slm4ie/tokenizers/sweep"
         assert cfg.mlflow_enabled is False
 
     def test_needs_morphology(self, tmp_path: Path):
         """needs_morphology is True when a morph backend is requested."""
-        cfg = load_tokenizer_config(_write(tmp_path / "tokenizers.yaml", _BASE_CONFIG))
+        cfg = load_sweep_config(_write(tmp_path / "tokenizers.yaml", _BASE_CONFIG))
         assert cfg.needs_morphology() is True
 
     def test_local_overlay_overrides(self, tmp_path: Path):
@@ -84,7 +84,7 @@ class TestLoadTokenizerConfig:
             tmp_path / "tokenizers.local.yaml",
             "mlflow:\n  tracking_uri: http://example:5555\n",
         )
-        cfg = load_tokenizer_config(tmp_path / "tokenizers.yaml")
+        cfg = load_sweep_config(tmp_path / "tokenizers.yaml")
         assert cfg.mlflow_tracking_uri == "http://example:5555"
         # Base values survive the merge.
         assert cfg.mlflow_experiment == "tokenizer/slovenian"
@@ -93,9 +93,9 @@ class TestLoadTokenizerConfig:
         """Omitting a required field raises ValueError listing it."""
         bad = "tokenizers: [bpe]\nvocab_sizes: [16000]\n"
         with pytest.raises(ValueError, match="corpus.root"):
-            load_tokenizer_config(_write(tmp_path / "bad.yaml", bad))
+            load_sweep_config(_write(tmp_path / "bad.yaml", bad))
 
     def test_missing_file_raises(self, tmp_path: Path):
         """A non-existent config path raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            load_tokenizer_config(tmp_path / "nope.yaml")
+            load_sweep_config(tmp_path / "nope.yaml")

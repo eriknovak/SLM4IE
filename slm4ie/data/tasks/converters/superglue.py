@@ -14,7 +14,7 @@ The split policy is SOURCE: each record keeps its originating split
 (`train` / `val` / `test`). The distribution is expected under
 `<roots.raw>/superglue_sl/` (e.g. `SuperGLUE-HumanT/<Task>/`); the
 `--variant` flag (default `humant`) selects the translated variant. Because
-the split policy is SOURCE, the driver's role gate for a `held_out` entry simply
+the split policy is SOURCE, the run loop's role gate for a `held_out` entry simply
 means its `train.jsonl` source file is never read.
 """
 
@@ -29,7 +29,7 @@ from slm4ie.data.schema import (
     QaBooleanExample,
     WsdExample,
 )
-from slm4ie.data.tasks.driver import (
+from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
     TaskConverter,
@@ -37,8 +37,8 @@ from slm4ie.data.tasks.driver import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.registry import TaskEntry, TasksRoots
-from slm4ie.data.tasks.writer import find_first_existing, iter_jsonl
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
+from slm4ie.data.tasks.splits import find_first_existing, iter_jsonl
 
 logger = logging.getLogger(__name__)
 

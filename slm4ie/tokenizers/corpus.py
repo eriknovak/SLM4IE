@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from slm4ie.data.io_utils import open_output, open_text_stream
+from slm4ie.utils.io import open_output, open_text_stream
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def sample_corpus(root: Path, budget: SampleBudget) -> Iterator[str]:
                         break
 
 
-def write_sample_cache(texts: Iterator[str], cache_path: Path) -> Path:
+def write_sample(texts: Iterator[str], cache_path: Path) -> Path:
     """Materialize sampled texts to a one-document-per-line cache file.
 
     Internal newlines are collapsed to spaces so each document occupies a
@@ -142,8 +142,8 @@ def write_sample_cache(texts: Iterator[str], cache_path: Path) -> Path:
     return cache_path
 
 
-def iter_sample_cache(cache_path: Path) -> Iterator[str]:
-    """Yield one text per line from a cache written by `write_sample_cache`.
+def iter_sample(cache_path: Path) -> Iterator[str]:
+    """Yield one text per line from a cache written by `write_sample`.
 
     Args:
         cache_path (Path): Path to the `.txt`/`.txt.gz` cache file.

@@ -38,7 +38,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from slm4ie.data.versioning import config_hash, corpus_digest
+from slm4ie.utils.versioning import config_hash, corpus_digest
 from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.data.curate.stages import SCOPED_STAGES, STAGE_DIRS, STAGE_NAMES
 from slm4ie.utils import mlflow as ml
@@ -58,7 +58,7 @@ FINAL_CORPUS_DIR = STAGE_DIRS["sentence_dedup"]
 _MAX_PARAM_LEN = 500
 
 
-def build_pretrain_funnel(output_dir: Path) -> List[Dict[str, Any]]:
+def build_curate_funnel(output_dir: Path) -> List[Dict[str, Any]]:
     """Read the per-stage survival funnel from the pipeline sentinels.
 
     For each stage in `STAGE_NAMES`, reads `records_in` / `records_out` from its
@@ -159,7 +159,7 @@ def _funnel_metrics(funnel: List[Dict[str, Any]]) -> List[tuple]:
     """Build (metric_name, value, step) tuples from the stage funnel.
 
     Args:
-        funnel: The per-stage funnel from `build_pretrain_funnel`.
+        funnel: The per-stage funnel from `build_curate_funnel`.
 
     Returns:
         A list of `(name, value, step)` tuples for step-indexed logging.
@@ -199,7 +199,7 @@ def _aggregate_metrics(aggregate: Dict[str, Any]) -> Dict[str, float]:
     return metrics
 
 
-def log_pretrain_run(
+def log_curate_run(
     output_dir: Path,
     config: Dict[str, Any],
     *,
@@ -250,7 +250,7 @@ def log_pretrain_run(
     if existing is not None:
         ml.delete_run(existing, tracking_uri=tracking_uri)
 
-    funnel = build_pretrain_funnel(output_dir)
+    funnel = build_curate_funnel(output_dir)
     aggregate = read_aggregate_stats(output_dir)
 
     artifact_root = artifact_dir if artifact_dir is not None else Path(tempfile.mkdtemp(prefix="pretrain-track-"))
