@@ -109,8 +109,8 @@ spam:
   languages: [sl, en]             # codes whose curated adult.txt + spam.txt load eagerly
   use_ldnoobw: true               # auto-load an LDNOOBW list when no curated list ships
   url_blocklist: true             # enable the URL/domain blocklist signal
-  min_adult_hits: 2               # drop once adult-term occurrences reach this count
-  min_spam_hits: 2                # drop once SEO/scam-term occurrences reach this count
+  min_adult_hits: 2               # drop once this many distinct adult stems match
+  min_spam_hits: 2                # drop once this many distinct SEO/scam stems match
   keep_fraction: 0.0              # fraction of flagged docs retained anyway (seeded sample)
   default_language: sl            # assumed for docs without metadata.language
   model: null                    # optional classifier spec; null = lexicon + URL only
