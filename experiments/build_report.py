@@ -332,6 +332,12 @@ GITHUB_ICON = (
     "1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73"
     '.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>'
 )
+# Inline flask glyph in the report's muted ink: a light grey that reads on light and dark tabs.
+FAVICON = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%238a93a3'%3E"
+    "%3Cpath d='M8 2h8a1 1 0 0 1 0 2h-1v5.2l5.3 9.3A2 2 0 0 1 18.6 22H5.4a2 2 0 0 1-1.7-3.5L9 9.2V4H8a1 1 0 0 1 0-2z"
+    "m3 2v5.8L8.1 15h7.8L13 9.8V4h-2z'/%3E%3C/svg%3E"
+)
 
 
 def brand_name() -> str:
@@ -3251,6 +3257,7 @@ def build(out: Path, warnings: bool = False) -> int:
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>{esc(repo)}</title>"
+        f'<link rel="icon" href="{FAVICON}">'
         '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500'
         f'{REF_FONT if ref else ""}&display=swap">'
         f'<style>{CSS}{REF_CSS if ref else ""}</style></head><body><div class="app">'
