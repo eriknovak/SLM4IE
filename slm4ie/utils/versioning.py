@@ -351,6 +351,10 @@ def scan_files(files: Sequence[Path], *, id_key: str = "id", digest: bool = True
     return scan_units({0: ScanRequest(files, id_key, digest)}, workers)[0]
 
 
+#: Folder inside a unit that holds the documents its stage dropped.
+REMOVED_DIR = "removed"
+
+
 def shard_files(folder: Path) -> List[Path]:
     """Return the gzipped JSONL shards under *folder*, sorted.
 
@@ -358,13 +362,12 @@ def shard_files(folder: Path) -> List[Path]:
         folder: A unit's output folder.
 
     Returns:
-        Every `*.jsonl.gz` below *folder*, except those under a `removed/`
-        folder (documents a stage dropped); empty when *folder* does not
-        exist.
+        Every `*.jsonl.gz` below *folder*, except those under a
+        `REMOVED_DIR` folder; empty when *folder* does not exist.
     """
     if not folder.is_dir():
         return []
-    return sorted(p for p in folder.rglob("*.jsonl.gz") if "removed" not in p.relative_to(folder).parts[:-1])
+    return sorted(p for p in folder.rglob("*.jsonl.gz") if REMOVED_DIR not in p.relative_to(folder).parts[:-1])
 
 
 def check_integrity(inp: UnitScan, out: UnitScan) -> Optional[str]:

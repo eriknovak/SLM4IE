@@ -104,10 +104,19 @@ def test_stem_key_drops_one_vowel_from_long_last_token() -> None:
 
 
 def test_collapse_keys_folds_one_stem_family() -> None:
-    """Entries sharing a stem, or extending it by up to 3 letters, collapse to one key."""
-    assert collapse_keys({"seks", "seksi"}) == {"seks"}
-    assert collapse_keys({"kurba", "kurbe", "kurbir"}) == {"kurb"}
-    assert collapse_keys({"seks", "seks oglasi"}) == {"seks", "seks oglas"}
+    """Entries sharing a stem, or extending it by up to 3 letters, count as one key."""
+    assert collapse_keys({"seks", "seksi"}) == {"seks": "seks"}
+    assert collapse_keys({"kurba", "kurbe", "kurbir"}) == {"kurb": "kurb", "kurbir": "kurb"}
+    assert collapse_keys({"seks", "seks oglasi"}) == {"seks": "seks", "seks oglas": "seks oglas"}
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_every_lexicon_entry_matches_itself(which: int) -> None:
+    """A key counted under a shorter one still matches its own forms (`seksanje`, `fukanje`)."""
+    terms = load_spam_lexicon("sl")[which]
+    f = _filter(min_adult_hits=1, min_spam_hits=1)
+    missed = [t for t in terms if _kept(f.filter(_doc(t)))]
+    assert missed == []
 
 
 def test_load_spam_lexicon_unknown_language_raises() -> None:

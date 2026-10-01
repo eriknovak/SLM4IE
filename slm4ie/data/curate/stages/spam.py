@@ -57,6 +57,7 @@ from datatrove.pipeline.writers.jsonl import JsonlWriter
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
+from slm4ie.utils.versioning import REMOVED_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -292,30 +293,31 @@ def stem_key(term: str) -> str:
     return " ".join(tokens)
 
 
-def collapse_keys(terms: Set[str]) -> Set[str]:
-    """Stem a term set and drop keys another key already matches.
+def collapse_keys(terms: Set[str]) -> Dict[str, str]:
+    """Stem a term set and map each stem key to the key it is counted as.
 
-    A key is covered when another key has the same phrase head and its last
-    token is a prefix of this key's last token by at most `_MAX_SUFFIX`
-    characters, so `kurbir` folds into `kurb`.
+    A key is counted as the shortest other key with the same phrase head
+    whose last token is a prefix of its own by at most `_MAX_SUFFIX`
+    characters, so `kurbir` counts as `kurb`. Every key still matches its
+    own forms; only the count is shared.
 
     Args:
         terms: Lowercased lexicon entries.
 
     Returns:
-        The distinct stem keys the filter counts.
+        Mapping of every stem key to its counting key.
     """
     keys = {stem_key(t) for t in terms if t.strip()}
     split = {k: k.rpartition(" ") for k in keys}
-    out = set()
+    counted: Dict[str, str] = {}
     for key, (head, _, last) in split.items():
-        covered = any(
-            other != key and o_head == head and last.startswith(o_last) and len(last) - len(o_last) <= _MAX_SUFFIX
+        covering = [
+            other
             for other, (o_head, _, o_last) in split.items()
-        )
-        if not covered:
-            out.add(key)
-    return out
+            if o_head == head and last.startswith(o_last) and len(last) - len(o_last) <= _MAX_SUFFIX
+        ]
+        counted[key] = min(covering, key=lambda k: (len(k), k))
+    return counted
 
 
 @dataclass
@@ -324,22 +326,22 @@ class TermMatcher:
 
     Attributes:
         pattern: Alternation over every key, capturing the matched surface.
-        keys: The keys the pattern matches; surfaces map back to these.
+        keys: Every key the pattern matches, mapped to its counting key.
         stemmed: Whether keys accept an inflectional suffix.
     """
 
     pattern: re.Pattern
-    keys: Set[str]
+    keys: Dict[str, str]
     stemmed: bool
 
     def matched_keys(self, text: str) -> Set[str]:
-        """Return the distinct keys whose forms occur in a lowercased text.
+        """Return the distinct counting keys whose forms occur in a lowercased text.
 
         Args:
             text: Lowercased document text.
 
         Returns:
-            The set of matched keys.
+            The set of matched counting keys.
         """
         found: Set[str] = set()
         for surface in self.pattern.findall(text):
@@ -350,7 +352,7 @@ class TermMatcher:
             for cut in range(min(_MAX_SUFFIX, len(last)) + 1):
                 key = " ".join([*head, last[: len(last) - cut]])
                 if key in self.keys:
-                    found.add(key)
+                    found.add(self.keys[key])
                     break
         return found
 
@@ -370,7 +372,7 @@ def _compile_terms(terms: Set[str], language: str) -> Optional[TermMatcher]:
         return None
     if language in _NO_BOUNDARY_LANGS:
         alternation = "|".join(re.escape(t) for t in sorted(terms, key=lambda t: (-len(t), t)))
-        return TermMatcher(re.compile(f"({alternation})"), set(terms), stemmed=False)
+        return TermMatcher(re.compile(f"({alternation})"), {t: t for t in terms}, stemmed=False)
     keys = collapse_keys(terms)
     # Longest first, so a phrase wins over its own leading word.
     branches = []
@@ -431,11 +433,11 @@ class SpamFilter(BaseFilter):
         self.domains = {d.lower() for d in domains}
         self.model_fn = model_fn
         self.uniform = default_rng(seed).uniform
-        self._adult_regex: Dict[str, Optional[TermMatcher]] = {}
-        self._spam_regex: Dict[str, Optional[TermMatcher]] = {}
+        self._adult_matchers: Dict[str, Optional[TermMatcher]] = {}
+        self._spam_matchers: Dict[str, Optional[TermMatcher]] = {}
 
-    def _adult_pattern(self, lang: str) -> Optional[TermMatcher]:
-        """Return (and cache) the adult-term regex for a language.
+    def _adult_matcher(self, lang: str) -> Optional[TermMatcher]:
+        """Return (and cache) the adult-term matcher for a language.
 
         Falls back to an LDNOOBW list for languages without a curated
         set when `use_ldnoobw` is enabled.
@@ -446,15 +448,15 @@ class SpamFilter(BaseFilter):
         Returns:
             Compiled matcher, or `None` when no terms are available.
         """
-        if lang not in self._adult_regex:
+        if lang not in self._adult_matchers:
             terms = self._adult_words.get(lang)
             if terms is None and self.config.use_ldnoobw:
                 terms = self._load_ldnoobw(lang)
-            self._adult_regex[lang] = _compile_terms(terms or set(), lang)
-        return self._adult_regex[lang]
+            self._adult_matchers[lang] = _compile_terms(terms or set(), lang)
+        return self._adult_matchers[lang]
 
-    def _spam_pattern(self, lang: str) -> Optional[TermMatcher]:
-        """Return (and cache) the SEO/scam-term regex for a language.
+    def _spam_matcher(self, lang: str) -> Optional[TermMatcher]:
+        """Return (and cache) the SEO/scam-term matcher for a language.
 
         Args:
             lang: Language code.
@@ -462,9 +464,9 @@ class SpamFilter(BaseFilter):
         Returns:
             Compiled matcher, or `None` when no terms are available.
         """
-        if lang not in self._spam_regex:
-            self._spam_regex[lang] = _compile_terms(self._spam_words.get(lang) or set(), lang)
-        return self._spam_regex[lang]
+        if lang not in self._spam_matchers:
+            self._spam_matchers[lang] = _compile_terms(self._spam_words.get(lang) or set(), lang)
+        return self._spam_matchers[lang]
 
     def _load_ldnoobw(self, lang: str) -> Set[str]:
         """Fetch and cache the LDNOOBW adult list for a language.
@@ -534,13 +536,13 @@ class SpamFilter(BaseFilter):
             if url and self._host_blocked(url):
                 reasons.append("spam_url")
 
-        adult_pat = self._adult_pattern(lang)
-        adult = adult_pat.matched_keys(text) if adult_pat is not None else set()
+        adult_matcher = self._adult_matcher(lang)
+        adult = adult_matcher.matched_keys(text) if adult_matcher is not None else set()
         if len(adult) >= self.config.min_adult_hits:
             reasons.append("adult_lexicon")
 
-        spam_pat = self._spam_pattern(lang)
-        spam = spam_pat.matched_keys(text) if spam_pat is not None else set()
+        spam_matcher = self._spam_matcher(lang)
+        spam = spam_matcher.matched_keys(text) if spam_matcher is not None else set()
         if len(spam) >= self.config.min_spam_hits:
             reasons.append("spam_lexicon")
 
@@ -640,7 +642,7 @@ def build_spam_executors(
                 model_fn=model_fn,
                 seed=seed,
                 exclusion_writer=JsonlWriter(
-                    output_folder=str(out), output_filename="${dataset}/removed/${rank}.jsonl.gz"
+                    output_folder=str(out), output_filename=f"${{dataset}}/{REMOVED_DIR}/${{rank}}.jsonl.gz"
                 ),
             ),
             jsonl_writer(out),
