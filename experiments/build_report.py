@@ -59,6 +59,7 @@ import argparse
 import base64
 import contextlib
 import csv
+import datetime
 import html
 import io
 import json
@@ -321,6 +322,27 @@ def cap(text: str) -> str:
 def md_inline(text: str) -> str:
     out = md(text).strip()
     return re.sub(r"^<p>(.*)</p>$", r"\1", out, flags=re.S) if out.count("<p>") == 1 else out
+
+
+GITHUB_ICON = (
+    '<svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 '
+    "7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-"
+    ".52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 "
+    "0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 "
+    "1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73"
+    '.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>'
+)
+
+
+def git_head() -> str | None:
+    """Short hash of the commit the report is built from; None outside a checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(EXPERIMENTS), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out or None
 
 
 def repo_url() -> str | None:
@@ -1582,8 +1604,6 @@ def render_page(
         meta.append(pr)
     if record.meta.get("concluded"):
         meta.append(f"concluded {esc(record.meta['concluded'])}")
-    if branch := str(record.meta.get("branch") or ""):
-        meta.append(f"branch <code>{esc(branch)}</code>")
     hyp = hypothesis_text(record)
     parts = [
         f"{kicker(record.path)}<h1>{esc(record.title)}</h1>",
@@ -2925,7 +2945,8 @@ CSS = """
 a{color:var(--accent);text-decoration:none}a:hover{color:color-mix(in srgb,var(--accent),var(--fg) 25%)}
 .app{display:grid;grid-template-rows:52px minmax(0,1fr);grid-template-columns:320px minmax(0,1fr) 280px;height:100vh}.app.nonav{grid-template-columns:minmax(0,1fr) 280px}.app.nonav .side{display:none}
 .top{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:0 20px;background:var(--bg);border-bottom:1px solid var(--line)}
-.brand{font-weight:700}.crumb{display:flex;gap:8px;color:var(--muted);font-size:var(--t-sm);margin-left:8px}.crumb b{color:var(--fg);font-weight:600}
+.top .lhs{display:flex;align-items:center;gap:16px;flex:none;width:260px}.brand{font-weight:700;color:var(--fg);display:inline-flex;align-items:center;gap:7px}a.brand:hover{color:var(--accent)}.gh{width:18px;height:18px;fill:currentColor;flex:none}.crumb{display:flex;gap:8px;color:var(--muted);font-size:var(--t-sm)}.crumb b{color:var(--fg);font-weight:600}
+.foot{max-width:1120px;margin:48px auto 0;padding-top:16px;border-top:1px solid var(--line);font-size:var(--t-sm);color:var(--muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center}.foot a{display:inline-flex;align-items:center;gap:5px}.foot .gh{width:14px;height:14px}
 .theme{margin-left:auto}.nav,.theme{font:inherit;font-size:var(--t-sm);color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer}
 .side{background:var(--bg);border-right:1px solid var(--line);padding:16px 12px;overflow:auto;display:flex;flex-direction:column;gap:2px}
 .side .h{font-size:var(--t-xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 10px 6px;margin:0}
@@ -3018,12 +3039,12 @@ details.more{border:0;padding:0;margin:10px 0 0}details.more>summary{color:var(-
 .rel a .t{font-family:var(--sans)}
 @media(max-width:1100px){.main{padding:24px 28px 56px}}
 @media(max-width:800px){.app{grid-template-columns:minmax(0,1fr);grid-template-rows:52px minmax(0,1fr)}.side{position:fixed;top:52px;left:0;bottom:0;width:min(320px,85vw);z-index:8;box-shadow:0 0 24px rgba(0,0,0,.25)}.app.nonav .side{display:none}
-.main{padding:16px 16px 48px}h1{font-size:22px}.top{padding:0 12px;gap:10px}.crumb{display:none}.bar{top:-16px}.bar .hint{display:none}
+.main{padding:16px 16px 48px}h1{font-size:22px}.top{padding:0 12px;gap:10px}.top .lhs{width:auto;gap:10px}.crumb{display:none}.bar{top:-16px}.bar .hint{display:none}
 .needs{grid-template-columns:1fr 1fr}.needs>div{border-bottom:1px solid var(--line)}.split,.read.two,.pair,.rows,details.met .io,.thread li{grid-template-columns:minmax(0,1fr)}.rows{gap:4px 0}.rows>b{padding-top:8px}.res{padding:14px}.thread .who{text-align:left}}
 #overview .book{font-size:var(--t-body);max-width:760px}.toc-nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px;font-family:var(--sans);font-size:var(--t-sm)}.toc-nav a{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:5px 12px;color:var(--fg)}.toc-nav a:hover{color:var(--accent)}.toc-nav .n{font-family:var(--mono);font-size:var(--t-mono);color:var(--muted);margin-left:6px}
 .prog{margin:0 0 18px;scroll-margin-top:60px}.prog .head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;font-family:var(--sans)}.prog .head .t{font-size:18px;font-weight:600;color:var(--fg)}.prog .head .t:hover{color:var(--accent)}.prog .head .m{font-family:var(--mono);font-size:var(--t-mono);color:var(--muted)}.prog .head .go{margin-left:auto;font-size:var(--t-sm)}.prog .q{margin:6px 0 0;color:var(--muted);font-size:var(--t-sm);max-width:820px}.prog .scroll{margin:14px 0 0}
 table.toc td{padding:10px 12px}table.toc th{padding:8px 12px}table.toc td:nth-child(2){min-width:240px}table.toc td:nth-child(2) a,table.toc td .t{font-family:var(--sans);font-weight:600;color:var(--fg)}table.toc td:nth-child(2) a:hover{color:var(--accent)}table.toc td .m{font-family:var(--mono);font-size:var(--t-mono);color:var(--muted);margin-top:3px}table.toc td .m a{font-weight:400;color:var(--accent)}table.toc .fl{display:flex;gap:8px;align-items:baseline}table.toc .fl+.fl{margin-top:3px}table.toc .fl .tag{flex:none}table.toc tr.planned{opacity:.75}table.toc td:last-child{width:52%}
-@media print{.scroll.tall{max-height:none;overflow:visible}.scroll{-webkit-mask-image:none;mask-image:none}.sh{display:none}:root{--bg:#fff;--panel:#fff;--plate:#fff}.app{display:block;height:auto}.top,.side,.right{display:none}.main{overflow:visible;padding:0;background:#fff}.fig{border:0;padding:0;background:none}pre{background:#f4f5f7;color:#16181d;border:1px solid #d8dce3}pre .c{color:#6b7280}.page{display:block!important;max-width:none;break-before:page}h2{break-after:avoid}.res,.dec,.met,details,.rel a{break-inside:avoid}a{color:inherit}body{font-size:11pt}}
+@media print{.scroll.tall{max-height:none;overflow:visible}.scroll{-webkit-mask-image:none;mask-image:none}.sh{display:none}:root{--bg:#fff;--panel:#fff;--plate:#fff}.app{display:block;height:auto}.top,.side,.right,.foot{display:none}.main{overflow:visible;padding:0;background:#fff}.fig{border:0;padding:0;background:none}pre{background:#f4f5f7;color:#16181d;border:1px solid #d8dce3}pre .c{color:#6b7280}.page{display:block!important;max-width:none;break-before:page}h2{break-after:avoid}.res,.dec,.met,details,.rel a{break-inside:avoid}a{color:inherit}body{font-size:11pt}}
 """
 
 JS = """
@@ -3117,16 +3138,25 @@ def build(out: Path, warnings: bool = False) -> int:
             used.setdefault(slug, []).append((pid, label))
     pages = [render_overview(fams, terms, progs, ref)] + [h for _, _, h in titled] + [render_glossary(terms, used)]
     repo = EXPERIMENTS.parent.name
+    brand = f'<span class="brand">{esc(repo)}</span>'
+    foot = [f"Built {datetime.date.today().isoformat()}"]
+    if sha := git_head():
+        code = f"<code>{esc(sha)}</code>"
+        foot[0] += f' at <a href="{esc(REPO_URL)}/commit/{esc(sha)}">{code}</a>' if REPO_URL else f" at {code}"
+    if REPO_URL:
+        brand = f'<a class="brand" href="{esc(REPO_URL)}" target="_blank" rel="noopener">{GITHUB_ICON}{esc(repo)}</a>'
+        foot.append(f'<a href="{esc(REPO_URL)}">{GITHUB_ICON}GitHub</a>')
+    foot = " · ".join(foot)
     page = (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>{esc(repo)} · Findings</title>"
+        f"<title>{esc(repo)}</title>"
         '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500'
         f'{REF_FONT if ref else ""}&display=swap">'
         f'<style>{CSS}{REF_CSS if ref else ""}</style></head><body><div class="app">'
-        f'<div class="top"><button class="nav" title="toggle experiment list">☰</button><span class="brand">{esc(repo)} · Findings</span><span class="crumb"></span><button class="theme">theme</button></div>'
+        f'<div class="top"><div class="lhs"><button class="nav" title="toggle experiment list">☰</button>{brand}</div><span class="crumb"></span><button class="theme">theme</button></div>'
         f'<nav class="side">{render_sidebar(fams, terms, progs, ref)}</nav>'
-        f'<main class="main">{"".join(pages)}</main></div>'
+        f'<main class="main">{"".join(pages)}<footer class="foot">{foot}</footer></main></div>'
         f"<script>{JS}</script></body></html>"
     )
     out.write_text(restore_math(relink(page, records)), encoding="utf-8")
