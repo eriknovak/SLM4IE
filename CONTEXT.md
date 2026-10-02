@@ -108,6 +108,11 @@ An annotations line carrying only identifiers, written for a document that has
 none so the sidecar stays aligned with the text line for line.
 _Avoid_: placeholder, empty record, null row
 
+**Entity span**:
+One named entity in a document, recorded in the annotations sidecar as the
+character range of its surface text and its upper-case label.
+_Avoid_: NER tag, mention, entity annotation, IOB span
+
 **Metadata table**:
 The flat per-document TSV or CSV a few datasets ship beside their text, merged
 into document metadata during extraction.

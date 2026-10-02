@@ -71,21 +71,32 @@ class Annotations:
             sentences in the document.
         sentences (List[List[int]]): One inclusive `[start, end]`
             token-index pair per sentence, in document order.
+        spans (Optional[List[List[Any]]]): Entity spans as
+            `[start, end, label]` triples, where `start` and `end`
+            are character offsets into the document text (`end`
+            exclusive) and `label` is upper-case. An empty list is an
+            annotated document with no entities; None means the source
+            carries no `NER=` tags at all.
     """
 
     tokens: List[Token]
     sentences: List[List[int]]
+    spans: Optional[List[List[Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a dict representation with tokens serialized.
 
         Returns:
-            Dict[str, Any]: Annotations as a plain dict.
+            Dict[str, Any]: Annotations as a plain dict; `spans` is
+                included only when the document carries entity spans.
         """
-        return {
+        data: Dict[str, Any] = {
             "tokens": [t.to_dict() for t in self.tokens],
             "sentences": self.sentences,
         }
+        if self.spans is not None:
+            data["spans"] = self.spans
+        return data
 
 
 @dataclasses.dataclass
@@ -163,7 +174,8 @@ class Document:
         Returns None if the document has no annotations. Output
         format uses parallel arrays (forms, lemmas, upos, feats,
         space_after) instead of one dict per token to reduce
-        storage size.
+        storage size. Entity spans are written under `spans` only
+        when the source carries them (see `Annotations.spans`).
 
         Returns:
             Optional[str]: A single JSON line, or None.
@@ -182,6 +194,8 @@ class Document:
         data["feats"] = [t.feats for t in tokens]
         data["space_after"] = [t.space_after for t in tokens]
         data["sentences"] = self.annotations.sentences
+        if self.annotations.spans is not None:
+            data["spans"] = self.annotations.spans
         return json.dumps(data, ensure_ascii=False)
 
 

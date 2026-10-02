@@ -416,3 +416,27 @@ class TestNativeId:
             annotations=Annotations(tokens=[Token(form="x", lemma="x", upos="X", feats=None)], sentences=[[0, 0]]),
         )
         assert "native_id" not in json.loads(doc.to_annotation_line())
+
+
+class TestEntitySpans:
+    """Serialization of entity spans on the annotations sidecar line."""
+
+    def _doc(self, spans) -> Document:
+        ann = Annotations(tokens=[Token(form="Janez"), Token(form="Novak")], sentences=[[0, 1]], spans=spans)
+        return Document(text="Janez Novak", source="ssj500k", domain="web", doc_id="d1", annotations=ann)
+
+    def test_spans_written_when_present(self):
+        """A span list is emitted as `spans` triples."""
+        data = json.loads(self._doc([[0, 11, "PER"]]).to_annotation_line())
+        assert data["spans"] == [[0, 11, "PER"]]
+
+    def test_empty_span_list_is_kept(self):
+        """An annotated document without entities still carries `spans: []`."""
+        data = json.loads(self._doc([]).to_annotation_line())
+        assert data["spans"] == []
+
+    def test_no_spans_key_when_absent(self):
+        """A source without `NER=` tags writes no `spans` key."""
+        data = json.loads(self._doc(None).to_annotation_line())
+        assert "spans" not in data
+        assert data["forms"] == ["Janez", "Novak"]

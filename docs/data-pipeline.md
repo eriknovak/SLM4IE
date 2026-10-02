@@ -143,7 +143,7 @@ For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW),
 extraction writes two files per dataset under `extracted/`:
 
 - `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `uid` / `native_id` / `metadata`, consumed both by curation's stage 0 (which lifts it into datatrove's `Document` shape) and by the task converters. `doc_id` is unique within the dataset (extraction drops a repeat with identical text and fails on one with different text), `uid` is `<key>:<doc_id>`, and `native_id` is the raw source's own identifier when it has one.
-- `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel arrays (`forms`, `lemmas`, `upos`, `feats`, `sentences`, plus `spans` when present), kept separate to avoid loading them during text-only training.
+- `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel arrays (`forms`, `lemmas`, `upos`, `feats`, `space_after`, `sentences`), kept separate to avoid loading them during text-only training. A CoNLL-U source whose tokens carry `NER=` IOB tags also gets `spans`: one `[start, end, label]` triple per entity, where `start`/`end` are character offsets into `text` (`end` exclusive, so `text[start:end]` is the entity surface) and `label` is upper-case (`PER`, `LOC`, `ORG`, `MISC`, `DERIV-PER`). An annotated document without entities carries `spans: []`; a source without the tag has no `spans` key.
 
 The downstream task converters (`spans`, `sentiment`, `superglue`) join these
 two files on the fly via `slm4ie.data.extract.records.iter_joined_records`, so no

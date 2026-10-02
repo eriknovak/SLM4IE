@@ -8,12 +8,14 @@ dropped.
 
 import gzip
 import json
+import textwrap
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 import yaml
 
+from slm4ie.data.extract.run import extract_datasets
 from slm4ie.data.tasks.run import (
     SplitPolicy,
     assign_hash_split,
@@ -287,3 +289,66 @@ def test_converters_declare_split_policy() -> None:
     assert get_converter("spans").split_policy is SplitPolicy.HASH
     assert get_converter("sentiment").split_policy is SplitPolicy.HASH
     assert get_converter("superglue").split_policy is SplitPolicy.SOURCE
+
+
+class TestNerFromConllu:
+    """Extraction of a `NER=`-tagged CoNLL-U source feeds a `ner/` entry's splits."""
+
+    CONLLU = textwrap.dedent("""\
+        # newdoc id = d{i}
+        # sent_id = d{i}.s1
+        # text = Janez Novak živi v Ljubljani.
+        1\tJanez\tJanez\tPROPN\tNpmsn\t_\t3\tnsubj\t_\tNER=B-per
+        2\tNovak\tNovak\tPROPN\tNpmsn\t_\t1\tflat\t_\tNER=I-per
+        3\tživi\tživeti\tVERB\tVmpr3s\t_\t0\troot\t_\tNER=O
+        4\tv\tv\tADP\tSl\t_\t5\tcase\t_\tNER=O
+        5\tLjubljani\tLjubljana\tPROPN\tNpfsl\t_\t3\tobl\tSpaceAfter=No\tNER=B-loc
+        6\t.\t.\tPUNCT\tZ\t_\t3\tpunct\t_\tNER=O
+
+    """)
+
+    def test_extract_then_convert_writes_entity_spans(self, tmp_path: Path) -> None:
+        """Running extraction then the task route yields rows whose entity spans carry upper-case labels."""
+        raw = tmp_path / "raw" / "kzb"
+        raw.mkdir(parents=True)
+        (raw / "kzb.conllu").write_text("".join(self.CONLLU.format(i=i) for i in range(30)), encoding="utf-8")
+        extract_cfg = tmp_path / "extract.yaml"
+        extract_cfg.write_text(
+            yaml.safe_dump(
+                {
+                    "input_dir": str(tmp_path / "raw"),
+                    "output_dir": str(tmp_path / "extracted"),
+                    "datasets": {"kzb": {"extractor": "conllu", "domain": "mixed"}},
+                }
+            )
+        )
+        extract_datasets(extract_cfg)
+
+        tasks_root = tmp_path / "tasks"
+        tasks_root.mkdir()
+        tasks_cfg = tmp_path / "tasks.yaml"
+        roots = {"extracted": str(tmp_path / "extracted"), "raw": str(tmp_path / "raw"), "tasks": str(tasks_root)}
+        entry = {
+            "role": "finetune_and_eval",
+            "source": {"kind": "extracted", "keys": ["kzb"]},
+            "splits": {"train": "train.jsonl.gz", "val": "val.jsonl.gz", "test": "test.jsonl.gz"},
+            "labels": ["PER", "LOC"],
+            "suite": None,
+            "language": "sl",
+            "license": "cc-by-sa-4.0",
+        }
+        tasks_cfg.write_text(
+            yaml.safe_dump({"roots": roots, "converters": {"ner": "spans"}, "entries": {"ner/kzb": entry}})
+        )
+        convert_tasks(tasks_cfg, entry_keys=["ner/kzb"], max_workers=1)
+
+        rows = []
+        for split in ("train", "val", "test"):
+            with gzip.open(tasks_root / "ner" / "kzb" / f"{split}.jsonl.gz", "rt", encoding="utf-8") as fh:
+                split_rows = [json.loads(line) for line in fh]
+            assert split_rows, f"{split} is empty"
+            rows.extend(split_rows)
+        assert len(rows) == 30
+        for row in rows:
+            surfaces = [(row["text"][s["start"] : s["end"]], s["label"]) for s in row["spans"]]
+            assert surfaces == [("Janez Novak", "PER"), ("Ljubljani", "LOC")]

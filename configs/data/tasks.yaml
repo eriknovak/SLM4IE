@@ -60,7 +60,7 @@ entries:
     role: finetune_and_eval
     source: { kind: extracted, keys: [ssj500k] }
     splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
-    labels: [PER, LOC, ORG, MISC]
+    labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
     language: sl
     license: cc-by-sa-4.0
