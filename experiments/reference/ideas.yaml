@@ -1,0 +1,102 @@
+- body: '## Why
+
+
+    BPE keeps every token it ever formed, including those that exist only as stepping stones to longer
+    tokens. On their own they are rare, their embeddings stay under-trained, and they hold slots that
+    could go to whole stems and endings. Picky-BPE (Chizhov et al., EMNLP 2024, https://aclanthology.org/2024.emnlp-main.925/)
+    removes a part whose uses are almost all inside the new merge, measured as the pair count over the
+    part''s own count against a threshold. Scaffold-BPE (Lian et al., arXiv:2404.17808) removes a part
+    whose remaining count falls below the count of the merge just made. Both report no loss in compression
+    and equal or better downstream scores.
+
+
+    ## Step
+
+
+    Training, the merge loop
+
+
+    ## Touches
+
+
+    - subword-tokenizers/byte-level-bpe | changes | Alg. 1, line 10 | after the pair is joined, drop a
+    part whose remaining count is nearly all inside the new token, and free its slot for another merge
+    | fewer under-trained tokens, more room for stems at the same size, same compression
+
+    - subword-tokenizers/character-bpe | changes | Alg. 1, line 10 | the same rule on characters | the
+    same
+
+    - subword-tokenizers/morphbpe | changes | Alg. 1, line 10 | the same rule inside morpheme chunks |
+    more of the budget reaches whole stems and endings
+
+    - subword-tokenizers/morphpiece | changes | Alg. 1, line 5 | the rule applies to the BPE path | the
+    same, on the fallback path only
+
+    - subword-tokenizers/bpe-knockout | already has | Alg. 1 | prunes merges after training by morphological
+    blame rather than by count; the two rules could be stacked | —
+
+    - subword-tokenizers/morfessor-pretokenization | changes | Alg. 2, line 5 | the rule applies when
+    the inner tokenizer is BPE | the same, inside morphs
+
+    - subword-tokenizers/wordpiece | does not apply | — | the trainer keeps only the vocabulary and the
+    greedy encoder has no merges to prune; dropping a token would change the longest-match cuts, a different
+    idea | —
+
+    - subword-tokenizers/unigram | does not apply | — | Unigram already prunes its vocabulary by likelihood
+    loss every round | —
+
+    '
+  number: 23
+  state: OPEN
+  title: Drop intermediate BPE tokens during training, as Picky-BPE and Scaffold-BPE do
+  url: https://github.com/eriknovak/SLM4IE/issues/23
+- body: '## Why
+
+
+    MorphBPE forbids every merge across a lexicon boundary, so an ending never joins its stem and the
+    vocabulary may not fill. The Slovak morphological tokenizer SKMT (Držík and Forgáč, PeerJ Computer
+    Science 2024, doi:10.7717/peerj-cs.2465, with a follow-up in Expert Systems with Applications 312,
+    2026) protects only the root: it is one atomic symbol from the start, and the letters around it merge
+    freely, including onto the root. A small Slovak masked model trained with it reached lower perplexity
+    than BPE and gained on semantic similarity and question answering.
+
+
+    ## Step
+
+
+    Training, how a word is chunked before pairs are counted
+
+
+    ## Touches
+
+
+    - subword-tokenizers/morphbpe | changes | Alg. 1, line 3 | the stem becomes one indivisible symbol,
+    the ending stays as characters that may merge with anything, the stem included | the vocabulary fills,
+    the stem is always a whole token, a frequent ending may fuse onto it
+
+    - subword-tokenizers/character-bpe | changes | Alg. 1, line 3 | the same, which turns the entry into
+    the Slovak recipe | the same
+
+    - subword-tokenizers/byte-level-bpe | changes | Alg. 1, line 3 | the stem as one symbol over its byte
+    spelling, with the space before it | the same, with no merge spent on rebuilding `š` inside a stem
+
+    - subword-tokenizers/wordpiece | changes | Alg. 1, line 3 | the stem as one word-start symbol | the
+    same
+
+    - subword-tokenizers/unigram | changes | Alg. 1, line 2 | every stem added to the seed vocabulary
+    and never pruned | stems stay whole, the lattice still chooses the ending
+
+    - subword-tokenizers/morphpiece | does not apply | — | the table already emits the whole stem for
+    a known word | —
+
+    - subword-tokenizers/bpe-knockout | does not apply | — | prunes after training and leaves the chunking
+    alone; could be stacked on a stem-protected tokenizer | —
+
+    - subword-tokenizers/morfessor-pretokenization | does not apply | — | the stem comes from Morfessor''s
+    own cuts, not from a lexicon | —
+
+    '
+  number: 24
+  state: OPEN
+  title: Protect only the stem during BPE training, as the Slovak morphological tokenizer does
+  url: https://github.com/eriknovak/SLM4IE/issues/24

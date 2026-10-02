@@ -1,0 +1,6 @@
+Morpheme token,Count in the corpus,Also a BPE token,Id
+a,9,yes,65
+e,7,yes,69
+hiš,12,no,263
+miz,9,yes,262
+o,5,yes,79

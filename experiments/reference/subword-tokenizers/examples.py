@@ -18,6 +18,7 @@ from slm4ie.tokenizers.backends.char_bpe import CharBpeTokenizer
 from slm4ie.tokenizers.backends.hf_bpe import BpeTokenizer
 from slm4ie.tokenizers.backends.hf_wordpiece import WordPieceTokenizer
 from slm4ie.tokenizers.backends.morph_bpe import MorphBpeTokenizer
+from slm4ie.tokenizers.backends.morph_piece import MorphPieceTokenizer
 from slm4ie.tokenizers.backends.sp_unigram import UnigramTokenizer
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.bpe_core import encode_bpe, merge_ranks
@@ -52,6 +53,8 @@ WORDPIECE_VOCAB_SIZE = 8 + 6 + 6 + 1
 CONTINUATION = "##"
 #: The WordPiece target again; Unigram keeps fewer pieces than asked on this corpus.
 UNIGRAM_VOCAB_SIZE = WORDPIECE_VOCAB_SIZE
+#: The byte-level target plus the five morphemes of the toy lexicon, which MorphPiece adds as tokens.
+MORPHPIECE_VOCAB_SIZE = BYTE_VOCAB_SIZE + 5
 #: SentencePiece marks the space before a word with this character.
 SPACE_MARKER = "▁"
 #: Euler's constant, for the digamma function at an integer.
@@ -618,9 +621,88 @@ def unigram() -> None:
     )
 
 
+def morphpiece() -> None:
+    """Write the vocabulary split and the encodings for the MorphPiece entry.
+
+    The backend keeps a table of lexicon forms and a byte-level BPE for every
+    other word, so two claims are checked here: a form in the table is encoded
+    as exactly its lexicon morphemes, and any other word is encoded exactly as
+    the inner BPE encodes it.
+
+    Raises:
+        AssertionError: If an encoding does not follow the path the entry
+            describes.
+    """
+    sentences = [form for form, count in CORPUS.items() for _ in range(count)]
+    lexicon = toy_lexicon()
+    piece = MorphPieceTokenizer()
+    piece.train(sentences, MORPHPIECE_VOCAB_SIZE, config=TrainContext(special_tokens=SPECIAL_TOKENS, lexicon=lexicon))
+
+    morpheme_freqs: Dict[str, int] = {}
+    for form, count in CORPUS.items():
+        for morpheme in GOLD[form]:
+            morpheme_freqs[morpheme] = morpheme_freqs.get(morpheme, 0) + count
+    bpe_vocab = piece._bpe.get_vocab()
+    vocabulary_rows = [
+        [morpheme, str(morpheme_freqs[morpheme]), "yes" if morpheme in bpe_vocab else "no", str(piece.vocab[morpheme])]
+        for morpheme in sorted(piece.morpheme_tokens | (set(morpheme_freqs) & set(bpe_vocab)))
+    ]
+    write_csv(
+        "morphpiece-vocabulary",
+        ["Morpheme token", "Count in the corpus", "Also a BPE token", "Id"],
+        vocabulary_rows,
+    )
+    shared = len(vocabulary_rows) - len(piece.morpheme_tokens)
+    write_csv(
+        "morphpiece-sizes",
+        ["Asked", "BPE path", "Morphemes kept", "Of which already BPE tokens", "Final"],
+        [
+            [
+                str(MORPHPIECE_VOCAB_SIZE),
+                str(len(bpe_vocab)),
+                str(len(vocabulary_rows)),
+                str(shared),
+                str(len(piece.vocab)),
+            ]
+        ],
+    )
+    merges = [
+        tuple(pair) if isinstance(pair, list) else tuple(pair.split(" "))
+        for pair in json.loads(piece._bpe.to_str())["model"]["merges"]
+    ]
+    write_csv(
+        "morphpiece-merges", ["Merge", "Joins"], [[str(k + 1), " + ".join(pair)] for k, pair in enumerate(merges)]
+    )
+
+    encoding_rows: List[List[str]] = []
+    for word in ["hiša", "mize", *HELD_OUT, "Hiša", "hiš"]:
+        tokens = piece.encode(word)
+        in_table = word in piece._table
+        expected = GOLD[word] if in_table else piece._bpe.encode(word).tokens
+        assert tokens == expected, (word, tokens, expected)
+        spans = _token_spans(piece, word)
+        assert spans is not None, word
+        encoding_rows.append(
+            [
+                word,
+                "yes" if in_table else "no",
+                " ".join(tokens),
+                " ".join(str(i) for i in piece.encode_ids(word)),
+                str(len(tokens)),
+                " ".join(_segments(spans, word)),
+            ]
+        )
+    write_csv(
+        "morphpiece-encoding",
+        ["Form", "In the table", "Tokens", "Ids", "Token count", "Cuts seen by the morph metrics"],
+        encoding_rows,
+    )
+
+
 if __name__ == "__main__":
     character_bpe()
     byte_level_bpe()
     morphbpe()
     wordpiece()
     unigram()
+    morphpiece()

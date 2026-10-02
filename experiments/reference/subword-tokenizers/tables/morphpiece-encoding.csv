@@ -1,0 +1,7 @@
+Form,In the table,Tokens,Ids,Token count,Cuts seen by the morph metrics
+hiša,yes,hiš a,263 65,2,hiš a
+mize,yes,miz e,262 69,2,miz e
+hišami,no,ĠhiÅ¡ a m i,260 65 77 73,4,hiš a m i
+mizami,no,Ġ miz a m i,221 262 65 77 73,5,m iz a m i
+Hiša,no,Ġ H i Å¡ a,221 40 73 258 65,5,H i š a
+hiš,no,ĠhiÅ¡,260,1,hiš
