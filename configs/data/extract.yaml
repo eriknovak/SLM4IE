@@ -218,5 +218,5 @@ datasets:
     extractor: conllu
     domain: mixed
     role: benchmark
-    # The only file with entity tags; sl_ssj-ud-* repeat its document ids.
+    # The only file carrying `NER=` tags; sl_ssj-ud-* repeat its document ids.
     include: ["*/ssj500k-morpho.conllu"]

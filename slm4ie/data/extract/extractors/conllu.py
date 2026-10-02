@@ -115,7 +115,7 @@ def _parse_misc(misc: str) -> Dict[str, str]:
 
 
 def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token], Optional[List[str]]]]:
-    """Parse a single CoNLL-U sentence block into (text, tokens, NER tags).
+    """Parse a single CoNLL-U sentence block into (text, tokens, IOB tags).
 
     Skips multiword and empty-node lines (ID contains `-` or `.`).
     Each token's `space_after` is derived from the MISC field

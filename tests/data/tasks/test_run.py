@@ -292,7 +292,7 @@ def test_converters_declare_split_policy() -> None:
 
 
 class TestNerFromConllu:
-    """Extraction of a `NER=`-tagged CoNLL-U source feeds non-empty NER splits."""
+    """Extraction of a `NER=`-tagged CoNLL-U source feeds a `ner/` entry's splits."""
 
     CONLLU = textwrap.dedent("""\
         # newdoc id = d{i}
@@ -308,7 +308,7 @@ class TestNerFromConllu:
     """)
 
     def test_extract_then_convert_writes_entity_spans(self, tmp_path: Path) -> None:
-        """Running extraction then the task route yields NER rows with upper-case labels."""
+        """Running extraction then the task route yields rows whose entity spans carry upper-case labels."""
         raw = tmp_path / "raw" / "kzb"
         raw.mkdir(parents=True)
         (raw / "kzb.conllu").write_text("".join(self.CONLLU.format(i=i) for i in range(30)), encoding="utf-8")

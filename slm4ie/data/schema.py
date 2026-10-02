@@ -76,7 +76,7 @@ class Annotations:
             are character offsets into the document text (`end`
             exclusive) and `label` is upper-case. An empty list is an
             annotated document with no entities; None means the source
-            carries no entity annotation at all.
+            carries no `NER=` tags at all.
     """
 
     tokens: List[Token]

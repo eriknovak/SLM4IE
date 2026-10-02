@@ -436,7 +436,7 @@ class TestEntitySpans:
         assert data["spans"] == []
 
     def test_no_spans_key_when_absent(self):
-        """A source without entity tags writes no `spans` key."""
+        """A source without `NER=` tags writes no `spans` key."""
         data = json.loads(self._doc(None).to_annotation_line())
         assert "spans" not in data
         assert data["forms"] == ["Janez", "Novak"]
