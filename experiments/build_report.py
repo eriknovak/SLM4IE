@@ -69,7 +69,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Dict, List
 
 import markdown
 import yaml
@@ -2755,27 +2755,45 @@ def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
     def tested(i: Idea) -> str:
         return ", ".join(f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a> {badge(r)}' for r in ref.testing(i))
 
+    def grouped(i: Idea) -> str:
+        """The entries an idea touches, one row per relation, for the narrow layout."""
+        groups: Dict[str, List[str]] = {}
+        for e in t.entries:
+            if (r := i.row(e.key)) and IDEA_RELATIONS.get(r[1].lower()):
+                groups.setdefault(r[1], []).append(e.title)
+        return "".join(
+            f'<div class="rl">{idea_mark(k)}<span>{esc(", ".join(v))}</span></div>'
+            for k, v in groups.items()
+        )
+
     head = "".join(f"<th>{esc(e.title)}</th>" for e in t.entries)
     body = "".join(
         f'<tr><td><a href="#{t.page_id}/idea-{i.number}"><span class="tag">#{i.number}</span></a> {md_inline(i.title)}</td>'
+        f'<td class="rel">{grouped(i)}</td>'
         + "".join(
-            f"<td>{idea_mark(r[1]) if (r := i.row(e.key)) else '<span class=muted>not assessed</span>'}</td>"
+            f'<td class="mark" data-l="{esc(e.title)}">'
+            f"{idea_mark(r[1]) if (r := i.row(e.key)) else '<span class=muted>not assessed</span>'}</td>"
             for e in t.entries
         )
-        + f'<td class="muted">{esc(i.state or "—")}</td><td>{tested(i) or "<span class=muted>—</span>"}</td></tr>'
+        + f'<td class="aux muted" data-l="Issue">{esc(i.state or "—")}</td>'
+        f'<td class="aux" data-l="Tested in">{tested(i) or "<span class=muted>—</span>"}</td></tr>'
         for i in ideas
     )
     cards = []
     for i in ideas:
         rows = "".join(
-            f'<tr><td>{entry_link(ref.by_key[r[0]]) if r[0] in ref.by_key else esc(r[0])}</td><td>{idea_mark(r[1])}</td>'
-            f'<td class="mono">{esc(r[2]) or "—"}</td><td>{md_inline(r[3]) if r[3] else "—"}</td><td class="muted">{md_inline(r[4]) if r[4] else "—"}</td></tr>'
+            f'<tr><td>{entry_link(ref.by_key[r[0]]) if r[0] in ref.by_key else esc(r[0])}'
+            f'{f"<span class={chr(34)}rl{chr(34)}>{idea_mark(r[1])}</span>" if IDEA_RELATIONS.get(r[1].lower()) else ""}</td>'
+            f"<td>{idea_mark(r[1])}</td>"
+            f'<td class="mono" data-l="Touches">{esc(r[2]) or "—"}</td><td data-l="Change">{md_inline(r[3]) if r[3] else "—"}</td>'
+            f'<td class="muted" data-l="Effect">{md_inline(r[4]) if r[4] else "—"}</td></tr>'
             for r in i.rows
         )
-        state = " · ".join(x for x in (esc(i.step), issue(i), esc(i.state), tested(i) and "tested in " + tested(i)) if x)
+        meta = [x for x in (esc(i.step), issue(i), esc(i.state), tested(i) and "tested in " + tested(i)) if x]
         cards.append(
             f'<article class="idea" id="{t.page_id}/idea-{i.number}" data-title="#{i.number} · {esc(plain(i.title))}">'
-            f'<h3><span class="tag">#{i.number}</span>{md_inline(i.title)}<span class="wt">{state}</span></h3>'
+            f'<h3><span class="tag">#{i.number}</span>{md_inline(i.title)}</h3>'
+            f'<div class="meta">{"".join(f"<span>{m}</span>" for m in meta)}</div>'
             f'{f"<p class=why>{md_inline(i.why)}</p>" if i.why else ""}'
             '<div class="scroll"><table class="data wide inner"><thead><tr><th>Entry</th><th>Relation</th><th>Touches</th>'
             f'<th>What changes there</th><th>Expected effect</th></tr></thead><tbody>{rows}</tbody></table></div></article>'
@@ -2887,7 +2905,8 @@ REF_CSS = """
 h3.ev{margin:18px 0 2px;font-size:var(--t-body)}p.muted{margin:0 0 4px}
 .map .d{font-size:12.5px;line-height:1.45;margin-top:4px}.map .n-open{background:var(--panel)}
 .idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:60px}.idea h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--t-body)}
-.idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}table.inner tr{background:transparent}table.inner tr:last-child td{border-bottom:0}
+.idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}.idea .meta{margin:0 0 8px}table.inner tr{background:transparent}
+table.ideas td.rel,table.inner td:first-child .rl{display:none}table.inner tr:last-child td{border-bottom:0}
 @container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.algrow>.reading{grid-column:1;grid-row:auto;margin-top:28px}}
 /* narrow facts tables: label above its value, long values wrap instead of overflowing */
 .facts table.data td{overflow-wrap:anywhere}.facts table.data td:last-child{min-width:0}
@@ -3012,7 +3031,7 @@ a{color:var(--accent);text-decoration:none}a:hover{color:color-mix(in srgb,var(-
 .kicker{font-family:var(--mono);font-size:var(--t-mono);color:var(--muted);margin:0}
 h1{font-size:var(--t-h1);font-weight:700;letter-spacing:-.02em;margin:8px 0 10px}
 p.lede{font-size:var(--t-lead);color:var(--muted);margin:0 0 8px}ul.lede{font-size:var(--t-lead);margin:0 0 24px;padding-left:20px}ul.lede li{margin:0 0 8px}ul.lede a{color:inherit;font-weight:600;text-decoration:none}ul.lede a:hover{color:var(--accent)}ul.lede .s{display:block;font-size:var(--t-sm);color:var(--muted)}
-.badge{display:inline-block;font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;vertical-align:middle}
+.badge{display:inline-block;font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:5px;vertical-align:middle}
 .b-confirmed{background:var(--ok-soft);color:var(--ok)}.b-refuted{background:var(--bad-soft);color:var(--bad)}.b-inconclusive,.b-draft{background:var(--soft);color:var(--muted)}.b-running{background:var(--run-soft);color:var(--run)}
 h2{font-size:var(--t-h2);font-weight:600;letter-spacing:-.01em;margin:64px 0 20px;scroll-margin-top:20px}
 h3{font-size:var(--t-h3);font-weight:600;margin:0 0 8px}
@@ -3157,6 +3176,21 @@ details.dec>summary h3{align-items:baseline}details.dec>summary h3 .wt{flex:none
  table.cards td:not(:first-child)::before{content:attr(data-l);float:left;width:104px;margin:3px 0 0 -114px;font-family:var(--sans);font-size:var(--t-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);line-height:1.3}
  table.cards td.hot{background:none}table.cards td.hot::before{color:var(--run)}
  table.cards tr.planned td{color:var(--muted)}
+ /* the ideas overview: one card per idea — tag and title, then relations, issue and tests in one label column */
+ .scroll:has(>table.ideas),.scroll:has(>table.inner){overflow:visible;-webkit-mask-image:none;mask-image:none}
+ table.ideas,table.ideas tbody,table.inner,table.inner tbody{display:block}table.ideas thead,table.inner thead{display:none}
+ table.ideas tr,table.inner tr{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 10px;align-items:baseline;border-top:1px solid var(--line);padding:10px 0 12px;background:none}
+ table.ideas td,table.data.wide.ideas td:first-child,table.inner td,table.data.wide.inner td:first-child{display:block;border:0;padding:0;position:static;background:none;min-width:0;width:auto;white-space:normal}
+ table.ideas td:first-child{grid-column:1/-1;font-weight:500;margin-bottom:4px}
+ table.ideas td.mark{display:none}table.data.wide.ideas td.rel,table.ideas td.rel .rl,table.ideas td.aux{display:contents}
+ table.ideas td.aux::before,table.inner td:nth-child(n+3)::before{content:attr(data-l)}
+ table.ideas td.aux::before,table.inner td:nth-child(n+3)::before{font-family:var(--sans);font-size:var(--t-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);line-height:1.5}
+ table.ideas .rl .badge{justify-self:start;margin:0}
+ table.ideas td.aux.muted{color:var(--fg)}table.ideas td.aux a{font-weight:500}
+ /* an idea's own table: one card per entry — name and relation on the head line, touches / change / effect under it */
+ table.data.wide.inner td:first-child{grid-column:1/-1;font-weight:600;font-family:var(--sans);display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+ table.data.wide.inner td:first-child .rl{display:inline}table.inner td:nth-child(2){display:none}
+ table.inner td:nth-child(n+3){display:contents}table.inner td.mono{font-size:var(--t-mono)}
  /* a thread line: who on its own row, then the claim and its verdict */
  .thread .line{grid-template-columns:minmax(0,1fr) auto;gap:4px 12px}.thread .line .who{grid-column:1/-1;font-size:var(--t-xs)}
 }
@@ -3647,10 +3681,13 @@ def selftest() -> int:
         "ideas from the cache: overview row, card per idea, tested in": '<table class="data wide ideas">' in body
         and '<th>Base cut</th><th>Broken cut</th><th>Morph cut</th><th>Test split</th><th>Issue</th><th>Tested in</th>'
         in body
-        and '<span class="badge b-confirmed">already has</span>' in body
+        and '<td class="mark" data-l="Base cut"><span class="badge b-confirmed">already has</span></td>' in body
         and '<span class="badge b-running">changes</span>' in body
+        and '<td class="rel"><div class="rl"><span class="badge b-confirmed">already has</span><span>Base cut</span></div>' in body
         and "<span class=muted>not assessed</span>" in body
         and '<article class="idea" id="topic-cutting/idea-7"' in body
+        and '</h3><div class="meta"><span>' in body
+        and '<td data-l="Change">' in body
         and 'tested in <a href="#alpha">Alpha gold</a>' in body
         and 'id="topic-cutting/idea-8"' not in body
         and "Read from the cache, not the tracker." in body,
