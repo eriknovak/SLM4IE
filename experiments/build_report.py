@@ -2633,7 +2633,6 @@ def render_entry(e: RefEntry, ref: Reference, terms: list[Term]) -> str:
         labels.setdefault(k, []).extend(row_values(v))
     sources = [(k, "".join(f'<div class="sl">{ref_inline(e, ref, x)}</div>' for x in vs)) for k, vs in labels.items()]
     right = f"<h2>Facts</h2>{facts_table(facts)}" if facts else ""
-    right += f'<h2 class="s">Sources</h2>{facts_table(sources)}' if sources else ""
     sections: list[tuple[str, str, str]] = []
     if e.diff:
         sections.append(("difference", "Difference from predecessor", render_difference(e, ref)))
@@ -2657,6 +2656,8 @@ def render_entry(e: RefEntry, ref: Reference, terms: list[Term]) -> str:
             for label, o in related
         )
         sections.append(("related", "Related", f'<div class="rel three">{cards}</div>'))
+    if sources:
+        sections.append(("sources", "Sources", facts_table(sources)))
     bar = f'<a href="#{pid}/description">Description</a>' + "".join(
         f'<a href="#{pid}/{key}">{title.split(" from ")[0]}</a>' for key, title, _ in sections
     )
@@ -2863,7 +2864,7 @@ REF_CSS = """
 /* ---- reference: topics and entries ---- */
 .item.topic{font-weight:600}.item.nest{padding-left:28px}.item.topic.on{font-weight:600}
 .call{background:var(--soft);border-radius:8px;padding:12px 16px;margin:18px 0 0;font-size:var(--t-prose);line-height:1.6}
-.lead2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:28px;align-items:start;margin-top:26px}.lead2 h2{margin-top:0}.lead2 h2.s{margin-top:24px}.lead2 h3{margin:20px 0 8px;font-size:var(--t-body)}
+.lead2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:28px;align-items:start;margin-top:26px}.lead2 h2{margin-top:0}.lead2 h3{margin:20px 0 8px;font-size:var(--t-body)}
 .lead2 .prose{font-size:var(--t-prose);line-height:1.6}.intro{max-width:760px}.small{font-size:var(--t-sm)}
 .facts{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}.facts table.data td:first-child{position:static;font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap;width:1%;padding-top:9px}
 .facts tr:last-child td{border-bottom:0}.facts code{font-size:11.5px;overflow-wrap:anywhere}.sl+.sl{margin-top:6px}
@@ -2874,7 +2875,7 @@ REF_CSS = """
 .alg li.hl{background:var(--accent-soft);margin:0 -14px;padding:0 14px}.alg .cm{color:var(--muted);font-style:italic;margin-left:18px}.alg .cm code{font-style:normal;font-size:11px}.alg code{font-size:.8em}
 :root[data-theme=dark] .alg,:root[data-theme=dark] .diff{background:var(--plate)}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .alg,:root:not([data-theme=light]) .diff{background:var(--plate)}}
-.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);grid-template-rows:max-content 1fr;gap:0 24px;align-items:start;margin:0 0 22px}
+.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);grid-template-rows:max-content 1fr;gap:0 24px;align-items:start;margin:0 0 22px}.algrow+.algrow{margin-top:72px}
 .algrow>.sh,.algrow>.alg{grid-column:1}.algrow>.sh{margin:0 0 8px}.algrow>.reading{grid-column:2;grid-row:1/span 2}
 .reading .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
 .walk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;font-size:var(--t-sm);line-height:1.55}.walk .tag{align-self:start;margin-top:1px;white-space:nowrap}
@@ -2887,7 +2888,10 @@ h3.ev{margin:18px 0 2px;font-size:var(--t-body)}p.muted{margin:0 0 4px}
 .map .d{font-size:12.5px;line-height:1.45;margin-top:4px}.map .n-open{background:var(--panel)}
 .idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:60px}.idea h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--t-body)}
 .idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}table.inner tr{background:transparent}table.inner tr:last-child td{border-bottom:0}
-@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.algrow>.reading{grid-column:1;grid-row:auto}}
+@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.algrow>.reading{grid-column:1;grid-row:auto;margin-top:28px}}
+/* narrow facts tables: label above its value, long values wrap instead of overflowing */
+.facts table.data td{overflow-wrap:anywhere}.facts table.data td:last-child{min-width:0}
+@container (max-width:560px){.facts table.data tr,.facts table.data td{display:block}.facts table.data td:first-child{width:auto;padding:9px 10px 2px;border-bottom:0}.facts table.data td:last-child{padding:0 10px 9px}}
 @media(max-width:800px){.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px max-content minmax(max-content,1fr)}}
 """
 REF_FONT = "&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400"
@@ -3574,8 +3578,8 @@ def selftest() -> int:
         in body
         and body.count('<tr><td>Paper</td>') == 2
         and '</div><div class="sl">A second source, ' in body,
-        "paper notes under the description, sources under the facts": re.search(
-            r'<div class="lead2"><div class="prose"><h2 id="ref-cutting-base-cut/description">Description</h2>.*?<h3>What the paper adds</h3>.*?</div><div class="side2"><h2>Facts</h2>.*?<h2 class="s">Sources</h2>',
+        "paper notes under the description, facts beside, sources last": re.search(
+            r'<div class="lead2"><div class="prose"><h2 id="ref-cutting-base-cut/description">Description</h2>.*?<h3>What the paper adds</h3>.*?</div><div class="side2"><h2>Facts</h2>.*?<h2 id="ref-cutting-base-cut/sources">Sources</h2>(?:(?!<h2 ).)*</section>',
             body,
             re.S,
         )

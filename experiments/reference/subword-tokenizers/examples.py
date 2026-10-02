@@ -18,6 +18,7 @@ from slm4ie.tokenizers.backends.char_bpe import CharBpeTokenizer
 from slm4ie.tokenizers.backends.hf_bpe import BpeTokenizer
 from slm4ie.tokenizers.backends.hf_wordpiece import WordPieceTokenizer
 from slm4ie.tokenizers.backends.morph_bpe import MorphBpeTokenizer
+from slm4ie.tokenizers.backends.sp_unigram import UnigramTokenizer
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.bpe_core import encode_bpe, merge_ranks
 from slm4ie.tokenizers.metrics import _segments, _token_spans
@@ -49,6 +50,12 @@ BYTE_VOCAB_SIZE = 256 + 6 + 1
 WORDPIECE_VOCAB_SIZE = 8 + 6 + 6 + 1
 #: WordPiece marks a piece that continues a word with this prefix.
 CONTINUATION = "##"
+#: The WordPiece target again; Unigram keeps fewer pieces than asked on this corpus.
+UNIGRAM_VOCAB_SIZE = WORDPIECE_VOCAB_SIZE
+#: SentencePiece marks the space before a word with this character.
+SPACE_MARKER = "▁"
+#: Euler's constant, for the digamma function at an integer.
+EULER_GAMMA = 0.5772156649015329
 TRACED_WORD = "hiša"
 Replay = Callable[[str, List[Tuple[str, str]]], List[str]]
 
@@ -506,8 +513,114 @@ def wordpiece() -> None:
     )
 
 
+def digamma(count: int) -> float:
+    """Return the digamma function at a positive integer.
+
+    Args:
+        count (int): The argument, at least 1.
+
+    Returns:
+        float: Minus Euler's constant plus the harmonic number of `count - 1`.
+    """
+    return -EULER_GAMMA + sum(1 / k for k in range(1, count))
+
+
+def segmentations(form: str, scores: Dict[str, float]) -> List[Tuple[List[str], float]]:
+    """Enumerate every way to spell `form` from the scored pieces, with its log probability.
+
+    Args:
+        form (str): The text to spell, space marker included.
+        scores (Dict[str, float]): Piece to log probability.
+
+    Returns:
+        List[Tuple[List[str], float]]: Each segmentation and the sum of its
+            pieces' log probabilities, best first.
+    """
+    if not form:
+        return [([], 0.0)]
+    found: List[Tuple[List[str], float]] = []
+    for end in range(1, len(form) + 1):
+        piece = form[:end]
+        if piece in scores:
+            for rest, score in segmentations(form[end:], scores):
+                found.append(([piece, *rest], scores[piece] + score))
+    return sorted(found, key=lambda item: -item[1])
+
+
+def unigram() -> None:
+    """Write the vocabulary, the candidate segmentations and the encodings for the Unigram entry.
+
+    Training runs inside the SentencePiece library, so two of its claims are
+    checked here instead: each learned log probability is reproduced from the
+    piece's count in the best segmentation of the corpus through the digamma
+    rule, and each encoding is the highest-scoring segmentation over the
+    vocabulary.
+
+    Raises:
+        AssertionError: If a score or an encoding is not reproduced.
+    """
+    from sentencepiece import sentencepiece_model_pb2 as model_pb2
+
+    sentences = [form for form, count in CORPUS.items() for _ in range(count)]
+    unigram_tokenizer = UnigramTokenizer()
+    unigram_tokenizer.train(sentences, UNIGRAM_VOCAB_SIZE, config=TrainContext(special_tokens=SPECIAL_TOKENS))
+    model = model_pb2.ModelProto()
+    model.ParseFromString(unigram_tokenizer._model_bytes)
+    scores = {piece.piece: piece.score for piece in model.pieces if piece.type == piece.NORMAL}
+
+    counts: Dict[str, int] = {}
+    for form, freq in CORPUS.items():
+        for token in unigram_tokenizer.encode(form):
+            counts[token] = counts.get(token, 0) + freq
+    total = sum(counts.values())
+    vocab_rows: List[List[str]] = []
+    for piece, score in scores.items():
+        if piece in counts:
+            expected = digamma(counts[piece]) - digamma(total)
+            assert math.isclose(score, expected, abs_tol=1e-3), (piece, score, expected)
+            vocab_rows.append([piece, f"{score:.3f}", str(counts[piece]), f"{expected:.3f}"])
+        else:
+            vocab_rows.append([piece, f"{score:.3f}", "0", "kept as a character"])
+    write_csv(
+        "unigram-vocabulary",
+        ["Piece", "Log probability", "Count in the corpus", "Digamma of count minus digamma of total"],
+        vocab_rows,
+    )
+
+    segmentation_rows: List[List[str]] = []
+    for word in ["mize", "hišami"]:
+        candidates = segmentations(SPACE_MARKER + word, scores)
+        assert candidates[0][0] == unigram_tokenizer.encode(word), (word, candidates[0], unigram_tokenizer.encode(word))
+        for rank, (pieces, score) in enumerate(candidates):
+            segmentation_rows.append([word, " ".join(pieces), f"{score:.3f}", "yes" if rank == 0 else "no"])
+    write_csv("unigram-segmentations", ["Form", "Segmentation", "Log probability", "Picked"], segmentation_rows)
+
+    encoding_rows: List[List[str]] = []
+    for word in ["hiša", "mize", *HELD_OUT, "hišaq", "hiš", "Hiša..."]:
+        tokens = unigram_tokenizer.encode(word)
+        ids = unigram_tokenizer.encode_ids(word)
+        spans = _token_spans(unigram_tokenizer, word)
+        assert spans is not None, word
+        encoding_rows.append(
+            [
+                word,
+                "yes" if word in CORPUS else "no",
+                " ".join(tokens),
+                " ".join(str(i) for i in ids),
+                str(len(tokens)),
+                " ".join(_segments(spans, word)),
+            ]
+        )
+    write_csv(
+        "unigram-encoding",
+        ["Form", "In the corpus", "Tokens", "Ids", "Token count", "Cuts seen by the morph metrics"],
+        encoding_rows,
+    )
+
+
 if __name__ == "__main__":
     character_bpe()
     byte_level_bpe()
     morphbpe()
     wordpiece()
+    unigram()

@@ -1,0 +1,12 @@
+Piece,Log probability,Count in the corpus,Digamma of count minus digamma of total
+▁hiš,-1.283,12,-1.283
+a,-1.585,9,-1.585
+▁miz,-1.585,9,-1.585
+e,-1.853,7,-1.853
+z,-2.219,0,kept as a character
+m,-2.219,0,kept as a character
+š,-2.219,0,kept as a character
+h,-2.219,0,kept as a character
+▁,-2.219,0,kept as a character
+i,-2.220,0,kept as a character
+o,-2.220,5,-2.220
