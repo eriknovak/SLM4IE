@@ -14,7 +14,8 @@ something output-affecting changed for — config, code, or input documents — 
 stops as soon as a rebuilt stage reproduces the same documents (see
 [Versioning](#versioning-what-triggers-a-rebuild)). `input_dir` is the folder of `<key>.jsonl` files from the
 extract step; `output_dir` is the pretrain-owned tree. The dataset key list
-comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml); entries
+comes from [`configs/data/extract.yaml`](../configs/data/extract.yaml), narrowed
+by the [selection](#selection-one-representative-per-containment-group); entries
 marked `role: benchmark` (evaluation gold such as SUK) are skipped by `--all`
 so they never enter the corpus, and `access: gated` marks licence-bound sources
 whose totals are reported separately from the open ones.
@@ -49,6 +50,34 @@ This iterates all eight stages in order, skipping every unit that is current,
 and rewrites the lock file `configs/data/curate.lock.yaml`. The final corpus lands at
 `<output_dir>/06_sentence_dedup/<dataset>/<rank>.jsonl.gz`; statistics at
 `<output_dir>/07_statistics/`.
+
+## Selection: one representative per containment group
+
+`--all` does not curate every key in `extract.yaml`. It resolves the download
+catalog ([`configs/data/download.yaml`](../configs/data/download.yaml)) into a
+selection first, so each source document enters the corpus once:
+
+- An entry with another role (`benchmark`, `lexicon`) is `skipped: role <role>`.
+- An entry with `enabled: false` (after the gitignored `download.local.yaml`
+  overlay) is `skipped: disabled`.
+- An enabled pretraining entry that another enabled pretraining entry
+  `contains`, directly or transitively, is `skipped: contained in <key>`, where
+  `<key>` is the group's representative: the outermost entry, which nothing
+  enabled contains.
+- Everything else is `selected`. A key `extract.yaml` declares but the catalog
+  lacks is selected too.
+
+`overlaps` never changes the selection. Each selected overlapping pair is
+printed as a warning naming the pair and the stages expected to remove what it
+shares (exact and sentence dedup), so the duplicate load is visible up front.
+
+Positional keys bypass the selection on purpose: naming a contained member
+runs it. The selection is printed at the start of every `run` and at the top of
+`status`, and recorded under `selection:` in the lock file; when the catalog
+changes so that a key moves in or out, `status` adds a
+`selection differs from lock: …` line before anything is rebuilt.
+Overrides are validated against every key `extract.yaml` declares, so an
+override for a skipped dataset stays valid.
 
 ## The eight stages
 
@@ -290,7 +319,8 @@ CURATION=configs/data/curate.yaml
 # Run all eight stages, rebuilding only stale units.
 uv run python scripts/curate_pretraining_corpus.py run --config "$CURATION" --all
 
-# What would the next run rebuild, and why? Exits 1 when anything is stale.
+# What would the next run rebuild, and why? Prints the selection first.
+# Exits 1 when anything is stale.
 uv run python scripts/curate_pretraining_corpus.py status --config "$CURATION"
 
 # One-off: adopt sentinels written before lineage tracking, without a rebuild.
@@ -391,3 +421,27 @@ it made, because a dropped document sharing an id with a surviving one reads as
 a survivor — `coleslaw` is such a source. And only datasets present in the final
 corpus are sampled: sources excluded from the build, or dropped entirely by a
 stage, are not part of the roster.
+
+## Measuring overlap between extracted corpora
+
+`overlap` measures how far the extracted corpora share documents, the evidence
+behind the measured verdicts in the
+[containment map](datasets.md#containment-map). It reads `extracted/` only and
+writes `overlap.csv` plus per-corpus hash arrays to `--out-dir`; nothing goes to
+MLflow.
+
+```bash
+uv run python scripts/curate_pretraining_corpus.py overlap --config "$CURATION" \
+    --out-dir <scratch>/overlap --max-workers 20 fineweb2 c4 cc100 hplt
+```
+
+Each row is an ordered pair `(a, b)`. `url_share` is the share of `a`'s distinct
+normalised URLs (scheme, `www.`, fragment, tracking parameters and trailing
+slash dropped) found in `b`, for corpora that record a URL. `text_share` is the
+share of `a`'s sentence units found anywhere in `b`: a unit is a sentence
+reduced to its lowercased word tokens, at least 40 characters, so tokenised and
+plain extractions compare equal. `a` contributes a seeded sample of
+`--sample-docs` documents (1M); both sides keep the same seeded 1-in-
+`--keep-one-in` (16) slice of units by hash, which keeps the estimate unbiased.
+Boilerplate sentences repeated across sites count as shared, so web pairs read
+somewhat high.

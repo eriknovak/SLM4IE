@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from slm4ie.data.download.config import ConfigError, DatasetConfig, load_download_config
+from slm4ie.data.download.config import (
+    ConfigError,
+    DatasetConfig,
+    load_download_config,
+    resolve_selection,
+    validate_relations,
+)
 
 
 class TestDatasetConfig:
@@ -359,3 +365,126 @@ class TestLoadConfigOverlay:
         datasets = load_download_config(config_file).datasets
         assert datasets["gigafida"].enabled is False
         assert datasets["gigafida"].urls == []
+
+
+def _write_catalog(tmp_path: Path, datasets: dict) -> Path:
+    """Write a minimal download catalog holding *datasets* and return its path."""
+    path = tmp_path / "download.yaml"
+    path.write_text(yaml.dump({"output_dir": "data/raw", "datasets": datasets}))
+    return path
+
+
+def _entry(**fields) -> dict:
+    """Return an enabled pretraining entry with *fields* layered on top."""
+    return {"source": "http", "output_dir": "x", **fields}
+
+
+class TestContainmentFields:
+    """The `contains` and `overlaps` relations on a catalog entry."""
+
+    def test_fields_default_to_empty(self):
+        """An entry without relations has empty `contains` and `overlaps`."""
+        config = DatasetConfig.from_dict("a", _entry())
+        assert config.contains == []
+        assert config.overlaps == []
+
+    def test_fields_round_trip(self, tmp_path: Path):
+        """Declared relations are parsed into the entry."""
+        path = _write_catalog(tmp_path, {"a": _entry(contains=["b"], overlaps=["c"]), "b": _entry(), "c": _entry()})
+        catalog = load_download_config(path)
+        assert catalog.datasets["a"].contains == ["b"]
+        assert catalog.datasets["a"].overlaps == ["c"]
+
+    def test_unknown_key_raises(self, tmp_path: Path):
+        """A relation naming a key outside the registry is a config error."""
+        path = _write_catalog(tmp_path, {"a": _entry(contains=["ghost"], overlaps=["phantom"])})
+        with pytest.raises(ConfigError) as excinfo:
+            load_download_config(path)
+        assert any("ghost" in p for p in excinfo.value.problems)
+        assert any("phantom" in p for p in excinfo.value.problems)
+
+    def test_self_reference_raises(self, tmp_path: Path):
+        """An entry may not contain or overlap itself."""
+        path = _write_catalog(tmp_path, {"a": _entry(contains=["a"]), "b": _entry(overlaps=["b"])})
+        with pytest.raises(ConfigError) as excinfo:
+            load_download_config(path)
+        assert len(excinfo.value.problems) == 2
+
+    def test_cycle_raises(self, tmp_path: Path):
+        """A `contains` cycle, direct or through a third entry, is a config error."""
+        path = _write_catalog(
+            tmp_path, {"a": _entry(contains=["b"]), "b": _entry(contains=["c"]), "c": _entry(contains=["a"])}
+        )
+        with pytest.raises(ConfigError, match="cycle"):
+            load_download_config(path)
+
+    def test_non_list_raises(self):
+        """A relation must be a list of keys."""
+        with pytest.raises(ConfigError, match="contains"):
+            DatasetConfig.from_dict("a", _entry(contains="b"))
+
+    def test_shipped_registry_loads(self):
+        """The committed catalog passes relation validation."""
+        root = Path(__file__).resolve().parents[3]
+        catalog = load_download_config(root / "configs" / "data" / "download.yaml")
+        assert catalog.datasets
+
+
+def _catalog(**entries: dict) -> dict:
+    """Parse keyword entries into catalog `DatasetConfig`s, validating relations."""
+    datasets = {key: DatasetConfig.from_dict(key, _entry(**fields)) for key, fields in entries.items()}
+    validate_relations(datasets)
+    return datasets
+
+
+class TestResolveSelection:
+    """`resolve_selection` picks one representative per containment group."""
+
+    def test_contained_member_is_skipped(self):
+        """A member of an enabled superset is skipped and names the superset."""
+        selection = resolve_selection(_catalog(big={"contains": ["small"]}, small={}, other={}))
+        assert selection.selected == ["big", "other"]
+        assert selection.status["small"] == "skipped: contained in big"
+
+    def test_containment_is_transitive(self):
+        """The outermost enabled superset wins over every nested member."""
+        selection = resolve_selection(_catalog(top={"contains": ["mid"]}, mid={"contains": ["leaf"]}, leaf={}))
+        assert selection.selected == ["top"]
+        assert selection.status["mid"] == "skipped: contained in top"
+        assert selection.status["leaf"] == "skipped: contained in top"
+
+    def test_disabled_superset_leaves_members_selected(self):
+        """A disabled superset is not a representative; its members stay."""
+        selection = resolve_selection(
+            _catalog(top={"enabled": False, "contains": ["mid"]}, mid={"contains": ["leaf"]}, leaf={})
+        )
+        assert selection.selected == ["mid"]
+        assert selection.status["top"] == "skipped: disabled"
+        assert selection.status["leaf"] == "skipped: contained in mid"
+
+    def test_non_pretrain_superset_is_not_a_representative(self):
+        """A benchmark that contains a corpus does not displace it."""
+        selection = resolve_selection(_catalog(gold={"role": "benchmark", "contains": ["corpus"]}, corpus={}))
+        assert selection.selected == ["corpus"]
+        assert selection.status["gold"] == "skipped: role benchmark"
+
+    def test_overlaps_only_warn(self):
+        """An overlapping pair is selected in full and reported once."""
+        selection = resolve_selection(_catalog(a={"overlaps": ["b"]}, b={"overlaps": ["a"]}, c={"overlaps": ["a"]}))
+        assert selection.selected == ["a", "b", "c"]
+        assert selection.overlaps == [("a", "b"), ("a", "c")]
+
+    def test_overlaps_are_not_transitive(self):
+        """a~b and b~c does not report a~c."""
+        selection = resolve_selection(_catalog(a={"overlaps": ["b"]}, b={"overlaps": ["c"]}, c={}))
+        assert selection.overlaps == [("a", "b"), ("b", "c")]
+
+    def test_overlap_with_skipped_entry_is_not_reported(self):
+        """Only pairs that both enter the corpus warn."""
+        selection = resolve_selection(_catalog(a={"overlaps": ["b"]}, b={"enabled": False}))
+        assert selection.overlaps == []
+
+    def test_every_entry_has_a_status(self):
+        """Every catalog entry is listed, in declaration order."""
+        datasets = _catalog(a={}, b={"enabled": False}, c={"role": "lexicon"})
+        assert list(resolve_selection(datasets).status) == ["a", "b", "c"]

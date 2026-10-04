@@ -3,8 +3,13 @@
 The pipeline is driven by a single curation config (`configs/data/curate.yaml`
 or an experiment's own variant). `load_curate_config` reads it once into a `CurateConfig`
 holding everything a run, a status check or an adoption derives from it: the
-resolved paths, the dataset roster from `extract.yaml`, the stopword and spam
-assets, the lock file's location, and each unit's expected config hash.
+resolved paths, the dataset roster, the stopword and spam assets, the lock
+file's location, and each unit's expected config hash.
+
+The roster is the pretraining keys `extract.yaml` declares, narrowed by the
+download catalog's selection (`resolve_selection`): a disabled entry, or one
+contained in another selected entry, is left out, so each source document
+enters the corpus once.
 
 Each scoped stage (convert, language, spam, quality, repetition) consumes the
 global section named after it. An optional top-level `overrides:` block lets an
@@ -33,6 +38,7 @@ from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tup
 
 import yaml
 
+from slm4ie.data.download.config import SELECTED, DatasetConfig, Selection, load_download_config, resolve_selection
 from slm4ie.utils.config import deep_merge
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import SCOPED_STAGES, is_scoped
@@ -486,7 +492,10 @@ class CurateConfig:
         paths: Resolved curation paths.
         project_root: Repository root.
         lock_path: The lock file beside the pretrain config.
-        roster: Every pretraining dataset key in `extract.yaml`.
+        roster: The pretraining keys an `--all` run curates: those
+            `extract.yaml` declares that the selection keeps.
+        declared: Every pretraining dataset key in `extract.yaml`, selected or not.
+        selection: The download catalog's resolved pretraining selection.
         stopwords: Loaded stopword set.
         stopwords_raw: Raw stopword bytes folded into config hashes.
         spam_assets: Loaded spam lexicons and domain blocklist.
@@ -498,6 +507,8 @@ class CurateConfig:
     project_root: Path
     lock_path: Path
     roster: List[str]
+    declared: List[str]
+    selection: Selection
     stopwords: Set[str]
     stopwords_raw: bytes
     spam_assets: SpamAssets
@@ -550,6 +561,28 @@ class CurateConfig:
         return bool(effective_stage_config(self.cfg, self.overrides, key, "convert").get("include_annotations", False))
 
 
+def load_selection(download_config: Path, declared: List[str]) -> Selection:
+    """Resolve the pretraining selection over the download catalog.
+
+    Keys `extract.yaml` declares that the catalog lacks carry no relation and
+    are selected; without a catalog file every declared key is.
+
+    Args:
+        download_config: Path to `download.yaml`; it may be absent.
+        declared: Pretraining keys `extract.yaml` declares.
+
+    Returns:
+        The catalog's selection, followed by the declared keys it lacks.
+    """
+    datasets: Dict[str, DatasetConfig] = {}
+    if download_config.is_file():
+        datasets = load_download_config(download_config).datasets
+    selection = resolve_selection(datasets)
+    for key in declared:
+        selection.status.setdefault(key, SELECTED)
+    return selection
+
+
 def lock_path_for(pretrain_config: Path) -> Path:
     """Return the lock file that sits beside a curation config.
 
@@ -563,7 +596,11 @@ def lock_path_for(pretrain_config: Path) -> Path:
 
 
 def load_curate_config(
-    input_dir: Optional[Path], output_dir: Optional[Path], pretrain_config: Path, extract_config: Optional[Path]
+    input_dir: Optional[Path],
+    output_dir: Optional[Path],
+    pretrain_config: Path,
+    extract_config: Optional[Path],
+    download_config: Optional[Path] = None,
 ) -> CurateConfig:
     """Load the config and everything derived from it.
 
@@ -572,6 +609,8 @@ def load_curate_config(
         output_dir: Override for the pretrain config's output_dir, or None.
         pretrain_config: Path to the curation config.
         extract_config: Path to extract.yaml, or None for the default.
+        download_config: Path to download.yaml, whose relations resolve the
+            selection, or None for the default.
 
     Returns:
         The loaded `CurateConfig`.
@@ -579,6 +618,7 @@ def load_curate_config(
     Raises:
         OverrideConfigError: If the global `spam:` slice is out of bounds,
             or a profile is invalid or unknown.
+        ConfigError: If the download catalog's relations are invalid.
     """
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
@@ -587,13 +627,17 @@ def load_curate_config(
     overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
+    declared = _list_datasets(extract_path)
+    selection = load_selection(download_config or (project_root / "configs" / "data" / "download.yaml"), declared)
     return CurateConfig(
         cfg=cfg,
         overrides=overrides,
         paths=CuratePaths(input_folder=resolved_input, output_dir=resolved_output),
         project_root=project_root,
         lock_path=lock_path_for(pretrain_config),
-        roster=_list_datasets(extract_path),
+        roster=[key for key in declared if selection.status[key] == SELECTED],
+        declared=declared,
+        selection=selection,
         stopwords=stopwords,
         stopwords_raw=stopwords_raw,
         spam_assets=_load_spam_assets(cfg),

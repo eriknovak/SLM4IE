@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import abc
 import enum
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -191,6 +192,8 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[Dict
     Reads each source key's `<key>.jsonl` text file joined with its optional
     `<key>.annotations.jsonl.gz` sidecar. Shared by the document-shaped families
     (`spans`, `sentiment`) so the extraction-tree read lives in one place.
+    Records whose `doc_id` occurs in a `source.exclude` key's text file are
+    dropped.
 
     Args:
         entry: A task entry whose `source.kind` is `extracted`.
@@ -200,15 +203,31 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[Dict
         Joined records (text plus, when present, an `annotations` field).
 
     Raises:
-        FileNotFoundError: If a source `<key>.jsonl` is missing.
+        FileNotFoundError: If a source or excluded `<key>.jsonl` is missing.
     """
+    excluded: Set[str] = set()
+    for key in entry.source.exclude:
+        path = roots.extracted / f"{key}.jsonl"
+        if not path.exists():
+            raise FileNotFoundError(f"Excluded source for {entry.task}/{entry.dataset}: {path} does not exist.")
+        with path.open(encoding="utf-8") as fh:
+            excluded.update(json.loads(line)["doc_id"] for line in fh if line.strip())
+    dropped = 0
     for key in entry.source.keys:
         text_path = roots.extracted / f"{key}.jsonl"
         ann_path = roots.extracted / f"{key}.annotations.jsonl.gz"
         if not text_path.exists():
             raise FileNotFoundError(f"Source for {entry.task}/{entry.dataset}: {text_path} does not exist.")
         ann_arg: Optional[Path] = ann_path if ann_path.exists() else None
-        yield from iter_joined_records(text_path, ann_arg)
+        for record in iter_joined_records(text_path, ann_arg):
+            if record.get("doc_id") in excluded:
+                dropped += 1
+                continue
+            yield record
+    if entry.source.exclude:
+        logger.info(
+            "%s/%s: dropped %d document(s) of %s", entry.task, entry.dataset, dropped, ", ".join(entry.source.exclude)
+        )
 
 
 # --- Converter registry and abstract base ---

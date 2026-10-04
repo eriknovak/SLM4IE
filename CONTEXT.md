@@ -145,9 +145,28 @@ One gzipped JSONL piece of a stage's output for one dataset.
 _Avoid_: chunk, part, batch
 
 **Roster**:
-The set of datasets one curation run covers. Adding or removing a dataset
-invalidates every corpus stage.
-_Avoid_: dataset list, selection, manifest
+The set of datasets one curation run covers: the selection's selected keys
+under `--all`, else the keys named on the command line. Adding or removing a
+dataset invalidates every corpus stage.
+_Avoid_: dataset list, manifest
+
+**Containment group**:
+A dataset together with every dataset its `contains` relation reaches in the
+download catalog, transitively: corpora that hold the same documents, so only
+one of them may enter the corpus.
+_Avoid_: family, cluster, duplicate set
+
+**Representative**:
+The member of a containment group the selection keeps: the outermost enabled
+pretraining dataset, which no other enabled pretraining dataset contains.
+_Avoid_: superset (unless it is one), canonical dataset, winner
+
+**Selection**:
+The download catalog resolved into what `--all` curates: every entry
+`selected` or skipped with its reason (contained in its representative,
+disabled, or another role), plus a warning per selected `overlaps` pair. It is
+printed by `status` and at the start of every run, and recorded in the lock file.
+_Avoid_: dataset filter, active set
 
 **Override**:
 A per-dataset block that deep-merges onto a scoped stage's defaults, so one
@@ -225,7 +244,10 @@ converter and a role.
 _Avoid_: task, dataset, benchmark
 
 **Entry source**:
-The block on an entry naming which keys it reads and where from.
+The block on an entry naming which keys it reads and where from, and which
+keys' documents it excludes by document id. A `finetune_and_eval` and a
+`held_out` entry of one task may not share a key, nor may one's key contain the
+other's unless excluded.
 _Avoid_: source, input
 
 **Source kind**:

@@ -85,7 +85,23 @@ See [pretraining-corpus.md](pretraining-corpus.md).
 Download raw corpora declared in
 [`configs/data/download.yaml`](../configs/data/download.yaml). Selection is
 explicit: pass one or more dataset keys as positional arguments, or pass
-`--all`. Bare invocation errors out.
+`--all`. Bare invocation errors out. A `manual: true` entry is never fetched:
+`--all` only checks its folder holds files and logs its note otherwise.
+
+Two optional entry fields record how the catalog's corpora relate, declared
+once here and read by every consumer (the extract registry does not repeat
+them):
+
+- `contains` — keys whose documents the entry fully includes (`suk` contains
+  `ssj500k`). Transitive. Keys must exist, an entry may not list itself, and a
+  cycle is a config error.
+- `overlaps` — keys sharing part of the entry's documents, usually the same
+  upstream crawl. Symmetric and never transitive; declared on one side.
+
+`role` says what a dataset is for; `contains` and `overlaps` say what it is made
+of. Curation's `--all` keeps one representative per containment group, and the
+task registry refuses train/held-out pairs that share documents. The audit
+behind every relation is the containment map in [datasets.md](datasets.md#containment-map).
 
 ```bash
 # Download every enabled dataset in the config
@@ -185,8 +201,15 @@ writes to `tasks/<task>/<dataset>/<split>.jsonl.gz` using a task-family schema
 declares:
 
 - `role` — `finetune_and_eval` or `held_out`; the registry, not directory placement, enforces train/test isolation across families. A `held_out` entry never writes a `train` split (records are re-bucketed, not dropped).
-- `source` — `{kind: extracted, keys: […]}` for document-shaped sources joined via `extracted/`, or `{kind: raw, keys: […]}` for task-native bundles (SuperGLUE-SL) read straight from `raw/`.
+- `source` — `{kind: extracted, keys: […]}` for document-shaped sources joined via `extracted/`, or `{kind: raw, keys: […]}` for task-native bundles (SuperGLUE-SL) read straight from `raw/`. An extracted source may add `exclude: […]`: catalog keys whose documents are dropped by `doc_id` (`ner/suk` excludes `ssj500k`).
 - `splits`, `labels`, `suite`, `language`, `license`.
+
+Source isolation is checked when the registry loads, before anything is
+written: a `finetune_and_eval` and a `held_out` entry of the same task may not
+read the same key, and neither side's key may contain the other's (the
+`contains` relation in `download.yaml`, followed transitively) unless that side
+excludes the contained key. A violation fails with both entry names and the
+containing key.
 
 Adding a new task dataset is a one-entry edit to `tasks.yaml`; the appropriate
 converter (defaulted by the `converters:` map at the top of the file) will pick

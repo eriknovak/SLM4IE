@@ -76,6 +76,7 @@ from slm4ie.data.curate.stages import (
     run_stage,
     upstream_stage,
 )
+from slm4ie.data.curate.status import selection_report
 from slm4ie.utils.versioning import EMPTY_DIGEST, merge_digests, shard_files
 
 logger = logging.getLogger(__name__)
@@ -610,7 +611,8 @@ def curate(
 
     Args:
         datasets: Positional dataset keys. Must be empty when run_all is True.
-        run_all: Process every dataset from the extract config.
+        run_all: Process the roster: every selected pretraining dataset (see
+            `load_selection`). Positional keys bypass the selection.
         stage: `--stage` value (`"all"` or a stage name).
         input_dir: Override for the pretrain config's input_dir, or None.
         output_dir: Override for the pretrain config's output_dir, or None.
@@ -635,8 +637,13 @@ def curate(
     paths = setup.paths
     output_dir = paths.output_dir
     # Validate overrides up front so a typo fails before any stage runs.
-    validate_overrides(setup.overrides, setup.roster)
+    validate_overrides(setup.overrides, setup.declared)
 
+    for line in selection_report(setup):
+        if line.startswith("warning: "):
+            logger.warning("[selection] %s", line.removeprefix("warning: "))
+        else:
+            logger.info("[selection] %s", line)
     dataset_keys = list(setup.roster) if run_all else list(datasets)
     # `workers` is a CPU budget, not an item count. The convert stage caps
     # it at the dataset count itself (run_convert_stage); the datatrove

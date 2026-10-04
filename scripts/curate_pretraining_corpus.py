@@ -3,16 +3,19 @@
 Parses arguments and dispatches into `slm4ie.data.curate.run`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Six subcommands:
+Seven subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
   datasets only; corpus stages never run in that mode. With `--all` it runs
-  every stage for every dataset in `extract.yaml`, skipping sentinels that are
-  already current. The corpus stages (exact_dedup, sentence_dedup, statistics)
-  require `--all` -- `--stage exact_dedup` without it is an error.
-* `status` reports every unit (stage x dataset, or corpus stage) as current,
-  stale with the reason, or missing, and exits non-zero when any is stale.
+  every stage for the selection: each enabled pretraining dataset in
+  `extract.yaml`, minus those contained in another selected one, skipping
+  sentinels that are already current. Every run first prints the selection.
+  The corpus stages (exact_dedup, sentence_dedup, statistics) require `--all` -- `--stage exact_dedup` without it is an error.
+* `status` prints the selection (every catalog entry as selected or skipped
+  with the reason, then the overlap warnings), then reports every unit (stage
+  x dataset, or corpus stage) as current, stale with the reason, or missing,
+  and exits non-zero when any is stale.
   Read-only; `--adopt` first gives legacy sentinels their lineage by reading
   each unit once, and rewrites only sentinels.
 * `diagnose` samples the finished corpus and reports where foreign-language
@@ -25,6 +28,9 @@ Six subcommands:
 * `describe` counts every source after exact dedup and profiles the finished
   corpus — length, vocabulary, language confidence — for the statistics that
   need no judge. Read-only apart from the two JSON files it writes.
+* `overlap` measures URL and sentence overlap between every pair of extracted
+  corpora, the evidence behind the containment audit's measured verdicts.
+  Read-only apart from the table and hash arrays it writes to `--out-dir`.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -73,11 +79,13 @@ from typing import List, Optional
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.inspect.diagnose import diagnose_language_leakage
 from slm4ie.data.curate.run import curate
-from slm4ie.data.curate.status import status
+from slm4ie.data.curate.status import selection_status, status
 from slm4ie.data.curate.inspect.duplication import (
     DEDUP_STAGES,
     assess_dedup,
 )
+from slm4ie.data.curate.config import load_curate_config
+from slm4ie.data.curate.inspect.overlap import measure_overlap
 from slm4ie.data.curate.inspect.profile import describe_corpus
 from slm4ie.data.curate.inspect.sample import (
     JUDGED_STAGES,
@@ -281,6 +289,20 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     describe_parser.add_argument("--per-source", type=int, default=2000, help="Documents profiled per source.")
     describe_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards counted at once.")
 
+    overlap_parser = subparsers.add_parser(
+        "overlap",
+        help="Measure URL and sentence overlap between extracted corpora (read-only).",
+    )
+    _add_common_arguments(overlap_parser)
+    overlap_parser.add_argument(
+        "datasets", nargs="*", help="Extracted corpora to compare (default: every <key>.jsonl in the input dir)."
+    )
+    overlap_parser.add_argument("--out-dir", type=Path, required=True, help="Folder for overlap.csv and hash arrays.")
+    overlap_parser.add_argument("--sample-docs", type=int, default=1_000_000, help="Documents sampled per corpus.")
+    overlap_parser.add_argument("--seed", type=int, default=0, help="Seed of the document sample and unit slice.")
+    overlap_parser.add_argument("--keep-one-in", type=int, default=16, help="Keep 1 in N sentence units by hash.")
+    overlap_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Corpora scanned at once.")
+
     args = parser.parse_args(argv)
     if args.command == "sample":
         validate_keys(parser, args, "datasets")
@@ -357,7 +379,29 @@ def main() -> None:
         )
         return
 
+    if args.command == "overlap":
+        setup = load_curate_config(args.input_dir, args.output_dir, args.config, args.extract_config)
+        rows = measure_overlap(
+            setup.paths.input_folder,
+            out_dir=args.out_dir,
+            keys=args.datasets or None,
+            seed=args.seed,
+            sample_docs=args.sample_docs,
+            keep_one_in=args.keep_one_in,
+            workers=args.workers,
+        )
+        print(f"wrote {args.out_dir / 'overlap.csv'} ({len(rows)} pairs)")
+        return
+
     if args.command == "status":
+        for line in selection_status(
+            input_dir=args.input_dir,
+            output_dir=args.output_dir,
+            pretrain_config=args.config,
+            extract_config=args.extract_config,
+        ):
+            print(line)
+        print()
         results = status(
             input_dir=args.input_dir,
             output_dir=args.output_dir,

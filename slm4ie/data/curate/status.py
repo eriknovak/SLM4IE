@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from slm4ie.data.curate.config import CurateConfig, load_curate_config
 from slm4ie.data.curate.lineage import (
     NOT_BUILT,
+    SELECTION,
     Sentinel,
     corpus_has_input,
     corpus_input_digest,
@@ -29,6 +30,7 @@ from slm4ie.data.curate.lineage import (
     read_sentinel,
     run_info,
     scoped_reason,
+    selection_entry,
     stamp_stage_version,
     upstream_digest,
     write_sentinel,
@@ -114,6 +116,55 @@ def _unit_status(
     if reason is None and lock_exists and locked != lock_entry(sentinel):
         reason = LOCK_DIFFERS
     return UnitStatus(stage, dataset, "stale" if reason else "current", reason)
+
+
+def selection_report(setup: CurateConfig) -> List[str]:
+    """Render the resolved pretraining selection as `status` and `run` print it.
+
+    Args:
+        setup: The loaded setup.
+
+    Returns:
+        One line per catalog entry (`selected` or `skipped: <reason>`), one
+        warning per selected overlapping pair, and, when the selection the
+        lock file recorded differs, a line naming every key whose status moved.
+    """
+    lines = setup.selection.report()
+    locked = read_lock(setup.lock_path).get(SELECTION)
+    if locked is None:
+        return lines
+    current = selection_entry(setup.selection)
+    was = set(locked.get("selected") or [])
+    now = set(current["selected"])
+    moved = [f"{key} now selected" for key in current["selected"] if key not in was]
+    moved += [
+        f"{key} now skipped ({current['skipped'][key]})" for key in sorted(was - now) if key in current["skipped"]
+    ]
+    moved += [f"{key} no longer declared" for key in sorted(was - now) if key not in current["skipped"]]
+    if moved:
+        lines.append(f"selection differs from lock: {'; '.join(moved)}")
+    return lines
+
+
+def selection_status(
+    *,
+    input_dir: Optional[Path],
+    output_dir: Optional[Path],
+    pretrain_config: Path,
+    extract_config: Optional[Path] = None,
+) -> List[str]:
+    """Load the config and render its selection (see `selection_report`).
+
+    Args:
+        input_dir: Override for the pretrain config's input_dir, or None.
+        output_dir: Override for the pretrain config's output_dir, or None.
+        pretrain_config: Path to the curation config.
+        extract_config: Path to extract.yaml, or None for the default.
+
+    Returns:
+        The selection report's lines.
+    """
+    return selection_report(load_curate_config(input_dir, output_dir, pretrain_config, extract_config))
 
 
 def status(

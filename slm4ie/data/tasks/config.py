@@ -10,11 +10,12 @@ paths on disk.
 import dataclasses
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Set
 
 import yaml
 
-from slm4ie.utils.io import resolve_project_path
+from slm4ie.data.download.config import contained_in, load_download_config
+from slm4ie.utils.io import find_project_root, resolve_project_path
 
 _KEY_PATTERN = re.compile(r"^[a-z]+/[a-z0-9_]+$")
 _VALID_ROLES = {"finetune_and_eval", "held_out"}
@@ -46,10 +47,14 @@ class EntrySource:
             `"raw"` (resolved against `TasksRoots.raw` as a
             subdirectory).
         keys: Non-empty list of source keys.
+        exclude: Catalog keys whose documents are dropped from the source
+            by `doc_id`, so a superset can be held out against a contained
+            training source. `extracted` sources only.
     """
 
     kind: Literal["extracted", "raw"]
     keys: List[str]
+    exclude: List[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -104,11 +109,14 @@ class TasksConfig:
     mlflow: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-def load_tasks_config(yaml_path: Path) -> TasksConfig:
+def load_tasks_config(yaml_path: Path, download_config: Optional[Path] = None) -> TasksConfig:
     """Loads and validates `configs/data/tasks.yaml`.
 
     Args:
         yaml_path: Path to the task registry YAML.
+        download_config: Download catalog whose `contains` relations the
+            source isolation check reads; defaults to the project's
+            `configs/data/download.yaml`. Without one, only shared keys are caught.
 
     Returns:
         A fully parsed and validated `TasksConfig`.
@@ -117,7 +125,9 @@ def load_tasks_config(yaml_path: Path) -> TasksConfig:
         FileNotFoundError: If `yaml_path` does not exist.
         ValueError: If the YAML structure violates any registry
             invariant (missing fields, malformed keys, unknown role
-            or source kind, empty source keys, etc.).
+            or source kind, empty source keys, etc.), or a training and a
+            held-out entry of one task share documents (see
+            `check_source_isolation`).
         KeyError: If an entry's task has no default converter in the
             `converters:` map and no per-entry `converter:`
             override.
@@ -141,12 +151,55 @@ def load_tasks_config(yaml_path: Path) -> TasksConfig:
     for key, value in entries_raw.items():
         entries.append(_parse_entry(key, value, converter_defaults))
 
+    catalog_path = download_config or find_project_root() / "configs" / "data" / "download.yaml"
+    catalog = load_download_config(catalog_path).datasets if catalog_path.is_file() else {}
+    check_source_isolation(entries, {key: contained_in(catalog, key) for key in catalog})
+
     return TasksConfig(
         roots=roots,
         converter_defaults=converter_defaults,
         entries=entries,
         mlflow=raw.get("mlflow") or {},
     )
+
+
+def check_source_isolation(entries: List[TaskEntry], contains: Dict[str, Set[str]]) -> None:
+    """Reject a training and a held-out entry of one task whose sources share documents.
+
+    Two such entries may not read the same source key, and no key on one side
+    may contain (transitively) a key on the other unless that side excludes
+    the contained key's documents.
+
+    Args:
+        entries: Parsed task entries.
+        contains: Every catalog key mapped to the keys it contains, transitively.
+
+    Raises:
+        ValueError: Naming both entries and the shared or containing key, for
+            every violating pair.
+    """
+    problems: List[str] = []
+    train = [e for e in entries if e.role == "finetune_and_eval"]
+    held = [e for e in entries if e.role == "held_out"]
+    for a in train:
+        for b in held:
+            if a.task != b.task:
+                continue
+            pair = f"{a.task}/{a.dataset} (finetune_and_eval) and {b.task}/{b.dataset} (held_out)"
+            for x in a.source.keys:
+                for y in b.source.keys:
+                    if x == y:
+                        problems.append(f"{pair} share source {x}")
+                    for outer, outer_source, inner in ((x, a.source, y), (y, b.source, x)):
+                        if inner in contains.get(outer, set()) and not _excludes(outer_source, inner, contains):
+                            problems.append(f"{pair}: {outer} contains {inner}")
+    if problems:
+        raise ValueError("Task sources are not isolated:\n  - " + "\n  - ".join(problems))
+
+
+def _excludes(source: EntrySource, key: str, contains: Dict[str, Set[str]]) -> bool:
+    """Return whether *source* drops *key*'s documents, directly or through an excluded superset."""
+    return any(key == x or key in contains.get(x, set()) for x in source.exclude)
 
 
 def resolve_source_paths(entry: TaskEntry, roots: TasksRoots) -> List[Path]:
@@ -334,7 +387,12 @@ def _parse_source(key: str, raw: Any) -> EntrySource:
     for k in keys:
         if not isinstance(k, str) or not k:
             raise ValueError(f"Entry {key!r} `source.keys` entries must be non-empty strings.")
-    return EntrySource(kind=kind, keys=list(keys))
+    exclude = raw.get("exclude") or []
+    if not isinstance(exclude, list) or not all(isinstance(k, str) and k for k in exclude):
+        raise ValueError(f"Entry {key!r} `source.exclude` must be a list of dataset keys.")
+    if exclude and kind != "extracted":
+        raise ValueError(f"Entry {key!r} `source.exclude` needs an `extracted` source.")
+    return EntrySource(kind=kind, keys=list(keys), exclude=list(exclude))
 
 
 def _parse_splits(key: str, raw: Any) -> Dict[str, str]:
