@@ -312,6 +312,12 @@ checks structure but not semantic agreement with the code.
   in a gitignored `*.local.yaml` sibling, which `load_yaml` deep-merges over
   the base config. The `.githooks/pre-commit` hook blocks presigned-URL
   credentials; enable it with `git config core.hooksPath .githooks`.
+- Branch work happens in a git worktree under `.claude/worktrees/` (devflow
+  tasks and labflow experiments alike); the main checkout stays on `main`.
+  `.worktreelink` lists the untracked paths each worktree symlinks from the
+  main checkout — `data`, `logs/`, `.env`, the `*.local.yaml` overlays — so
+  every tree reads the same corpus and writes the same logs. A new shared
+  gitignored path is added there.
 - Scripts in `scripts/` should stay thin: parse args, load config, dispatch
   into `slm4ie/`. Don't hide library logic inside a script. A new step joins an
   existing script as a subcommand; a new script needs a pipeline of its own.

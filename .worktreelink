@@ -1,0 +1,6 @@
+# Untracked paths every git worktree shares with the main checkout.
+# wt-new.sh symlinks each one; a trailing slash marks a directory.
+data
+logs/
+.env
+configs/*/*.local.yaml
