@@ -1,4 +1,4 @@
-"""Tests for the document digest, integrity check, shard set and lock file."""
+"""Tests for slm4ie/utils/versioning.py: digests, integrity, shard sets, lock file, config hash."""
 
 import gzip
 import json
@@ -10,10 +10,12 @@ import pytest
 pytest.importorskip("orjson")
 pytest.importorskip("numpy")
 
+from slm4ie.utils import versioning as manifest  # noqa: E402
 from slm4ie.utils.versioning import (  # noqa: E402
     EMPTY_DIGEST,
     check_integrity,
     combine_named_digests,
+    config_hash,
     file_sha256,
     merge_digests,
     read_lock,
@@ -214,3 +216,125 @@ def test_scan_units_keeps_lines_longer_than_a_block(tmp_path: Path, monkeypatch:
     scan = versioning.scan_units({"k": versioning.ScanRequest([path], id_key="uid", raw_sha256=True)}, 2)["k"]
     assert scan.records == 2
     assert scan.raw_sha256 == file_sha256(path)
+
+
+def _write_rows_shard(path: Path, rows: int) -> None:
+    """Write a gzipped JSONL shard with `rows` trivial records."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "".join(f'{{"i": {i}}}\n' for i in range(rows)).encode("utf-8")
+    path.write_bytes(gzip.compress(payload))
+
+
+class TestShardManifest:
+    """Tests for building the per-shard manifest."""
+
+    def test_sorted_relative_posix_paths(self, tmp_path: Path):
+        """Shards are listed by sorted root-relative POSIX path."""
+        _write_rows_shard(tmp_path / "b" / "000.jsonl.gz", 1)
+        _write_rows_shard(tmp_path / "a" / "000.jsonl.gz", 1)
+        rels = [rel for rel, _, _ in manifest.shard_listing(tmp_path)]
+        assert rels == ["a/000.jsonl.gz", "b/000.jsonl.gz"]
+
+    def test_rows_unset_by_default(self, tmp_path: Path):
+        """Row counts are left unset unless explicitly requested."""
+        _write_rows_shard(tmp_path / "000.jsonl.gz", 3)
+        (_rel, size, rows) = manifest.shard_listing(tmp_path)[0]
+        assert size > 0
+        assert rows == manifest.ROWS_NOT_COUNTED
+
+    def test_rows_counted_when_requested(self, tmp_path: Path):
+        """with_rows decompresses each shard and counts its records."""
+        _write_rows_shard(tmp_path / "000.jsonl.gz", 3)
+        (_, _, rows) = manifest.shard_listing(tmp_path, with_rows=True)[0]
+        assert rows == 3
+
+    def test_missing_root_raises(self, tmp_path: Path):
+        """A non-existent root is an explicit error."""
+        with pytest.raises(FileNotFoundError):
+            manifest.shard_listing(tmp_path / "nope")
+
+
+class TestCorpusDigest:
+    """Tests for the content digest over a corpus directory."""
+
+    def test_prefixed_hex(self, tmp_path: Path):
+        """The digest carries the project's sha256 prefix."""
+        _write_rows_shard(tmp_path / "000.jsonl.gz", 1)
+        assert manifest.corpus_digest(tmp_path).startswith("sha256:")
+
+    def test_stable_across_calls(self, tmp_path: Path):
+        """Identical shards yield an identical digest on repeat calls."""
+        _write_rows_shard(tmp_path / "000.jsonl.gz", 2)
+        assert manifest.corpus_digest(tmp_path) == manifest.corpus_digest(tmp_path)
+
+    def test_changes_when_a_shard_changes(self, tmp_path: Path):
+        """Rewriting a shard with different content changes the digest."""
+        shard = tmp_path / "000.jsonl.gz"
+        _write_rows_shard(shard, 2)
+        before = manifest.corpus_digest(tmp_path)
+        _write_rows_shard(shard, 5)
+        assert manifest.corpus_digest(tmp_path) != before
+
+    def test_changes_when_a_shard_is_added(self, tmp_path: Path):
+        """Adding a shard changes the digest."""
+        _write_rows_shard(tmp_path / "000.jsonl.gz", 1)
+        before = manifest.corpus_digest(tmp_path)
+        _write_rows_shard(tmp_path / "001.jsonl.gz", 1)
+        assert manifest.corpus_digest(tmp_path) != before
+
+    def test_empty_root_is_well_defined(self, tmp_path: Path):
+        """An existing root with no shards still digests deterministically."""
+        digest = manifest.corpus_digest(tmp_path)
+        assert digest.startswith("sha256:")
+        assert digest == manifest.corpus_digest(tmp_path)
+
+    def test_with_rows_distinguishes_same_size_different_rows(self, tmp_path: Path):
+        """with_rows separates builds a size-only digest could collide."""
+        shard = tmp_path / "000.jsonl.gz"
+        _write_rows_shard(shard, 2)
+        size_only = manifest.corpus_digest(tmp_path)
+        with_rows = manifest.corpus_digest(tmp_path, with_rows=True)
+        assert size_only != with_rows
+
+
+def test_config_hash_is_deterministic() -> None:
+    """The hash is stable across calls with identical input."""
+    cfg = {"min_doc_words": 50, "max_doc_words": 100000}
+    assert config_hash(cfg) == config_hash(cfg)
+
+
+def test_config_hash_differs_on_value_change() -> None:
+    """Changing any value changes the hash."""
+    a = {"min_doc_words": 50}
+    b = {"min_doc_words": 100}
+    assert config_hash(a) != config_hash(b)
+
+
+def test_config_hash_ignores_key_order() -> None:
+    """Two dicts with the same keys/values in different insertion order hash equal."""
+    a = {"a": 1, "b": 2}
+    b = {"b": 2, "a": 1}
+    assert config_hash(a) == config_hash(b)
+
+
+def test_config_hash_includes_extra_payload() -> None:
+    """Optional extra payload (e.g. stopword file contents) affects the hash."""
+    a = config_hash({"min_doc_words": 50})
+    b = config_hash({"min_doc_words": 50}, extra=b"different bytes")
+    assert a != b
+
+
+def test_config_hash_handles_yaml_datetime_values(tmp_path: Path) -> None:
+    """config_hash does not raise on YAML-style non-JSON values like datetime."""
+    from datetime import datetime, timezone
+
+    a = config_hash({"created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)})
+    b = config_hash({"created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)})
+    assert a == b
+
+
+def test_config_hash_handles_non_ascii_values() -> None:
+    """Non-ASCII characters in the slice influence the hash predictably."""
+    a = config_hash({"stopwords_path": "stopwords_sl.txt"})
+    b = config_hash({"stopwords_path": "stopwords_žirovski.txt"})
+    assert a != b

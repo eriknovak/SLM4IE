@@ -3,7 +3,7 @@
 The stage executors are replaced by a stub that writes real shards — each
 stage appends a tag derived from its config slice to every document — so the
 sentinel lineage, the document digests, the atomic swap and the integrity
-check all run for real. The real builders are tested in test_curate_pipeline.py.
+check all run for real. The real builders are tested under stages/.
 """
 
 import gzip

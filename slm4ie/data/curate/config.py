@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Knobs each scoped stage accepts as an override. The quality and spam
-#: sets mirror `QualityConfig` / `SpamConfig`; `test_curate_overrides.py`
+#: sets mirror `QualityConfig` / `SpamConfig`; `test_config.py`
 #: asserts they stay in lockstep. `repetition` exposes no knobs today, so
 #: it is effectively non-overridable until some are surfaced.
 STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
