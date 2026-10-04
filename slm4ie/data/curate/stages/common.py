@@ -19,8 +19,9 @@ stage; keep anything that changes what a stage writes in that stage's module.
 
 import json
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
+from datatrove.data import DocumentsPipeline
 from datatrove.pipeline.readers import JsonlReader
 from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.stats import PipelineStats
@@ -46,9 +47,34 @@ def jsonl_writer(stage_folder: Path) -> JsonlWriter:
     )
 
 
+class _TaskZeroProgressReader(JsonlReader):
+    """JsonlReader that draws its file progress bar in task 0 only.
+
+    Each task runs in its own worker, so a bar per task would interleave on the
+    console; task 0's share of the files stands in for the whole stage.
+    """
+
+    def run(self, data: Optional[DocumentsPipeline] = None, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
+        """Read this task's shard, showing the file progress bar when `rank` is 0.
+
+        Args:
+            data: Documents from earlier pipeline steps, passed through first.
+            rank: Index of the current task.
+            world_size: Total number of tasks.
+
+        Returns:
+            The documents of this task's shard.
+        """
+        self.file_progress = rank == 0
+        return super().run(data, rank, world_size)
+
+
 def jsonl_reader(folder: Path) -> JsonlReader:
-    """Return a JsonlReader that walks `<folder>/**/*.jsonl.gz` recursively."""
-    return JsonlReader(
+    """Return a JsonlReader that walks `<folder>/**/*.jsonl.gz` recursively.
+
+    Task 0 draws a file progress bar, so a run shows how far its stage has got.
+    """
+    return _TaskZeroProgressReader(
         str(folder),
         glob_pattern="**/*.jsonl.gz",
         shuffle_files=False,

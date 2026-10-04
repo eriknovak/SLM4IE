@@ -327,6 +327,10 @@ checks structure but not semantic agreement with the code.
   only in-code backend registries. Plumbing that knows nothing of the data
   tiers (`io`, `parallel`, `versioning`, `config`) lives in `slm4ie/utils/`,
   which never imports from `slm4ie/data/`.
+- Long-running steps show progress with tqdm, unless the library driving
+  them already draws a bar (datatrove readers). Inside a parallel pool only
+  one task draws it; `workers_quiet()` in `slm4ie/utils/parallel.py` tells
+  worker code to stay silent.
 - Annotated extractors should keep text and annotations split (see Data
   layout). Don't add a "merged" output without a strong reason.
 - Every figure is drawn through `experiments/report_figures.py`: an

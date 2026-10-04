@@ -76,7 +76,7 @@ class TestLanguageStage:
         """The pipeline reads input, applies lingua, writes to 01_language/."""
         execs = build_language_executors(_paths(tmp_path))
         types_ = [type(s) for s in execs[0].pipeline]
-        assert JsonlReader in types_
+        assert any(issubclass(t, JsonlReader) for t in types_)
         assert LinguaLanguageFilter in types_
         assert JsonlWriter in types_
 
@@ -106,7 +106,7 @@ class TestSpamStage:
         """The pipeline reads input, applies SpamFilter, writes shards."""
         execs = build_spam_executors(_paths(tmp_path))
         types_ = [type(s) for s in execs[0].pipeline]
-        assert JsonlReader in types_
+        assert any(issubclass(t, JsonlReader) for t in types_)
         assert SpamFilter in types_
         assert JsonlWriter in types_
 
@@ -265,7 +265,7 @@ class TestStatisticsStage:
         """The map pipeline reads JSONL and runs CorpusStats in partials mode."""
         execs = build_statistics_executors(_paths(tmp_path))
         map_types = [type(s) for s in execs[0].pipeline]
-        assert JsonlReader in map_types
+        assert any(issubclass(t, JsonlReader) for t in map_types)
         assert CorpusStats in map_types
         stats_step = next(s for s in execs[0].pipeline if isinstance(s, CorpusStats))
         assert stats_step.partials_dir is not None
