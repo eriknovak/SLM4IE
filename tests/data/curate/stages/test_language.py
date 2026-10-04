@@ -1,7 +1,8 @@
-"""Tests for slm4ie.data.curate.language.LinguaLanguageFilter."""
+"""Tests for the language stage (`slm4ie.data.curate.stages.language`)."""
 
 import importlib.metadata  # noqa: F401  (datatrove workaround)
 import importlib.util  # noqa: F401  (datatrove workaround)
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
@@ -10,8 +11,14 @@ pytest.importorskip("datatrove")
 pytest.importorskip("lingua")
 
 from datatrove.data import Document  # noqa: E402
+from datatrove.pipeline.readers import JsonlReader  # noqa: E402
+from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 
-from slm4ie.data.curate.stages.language import LinguaLanguageFilter  # noqa: E402
+from slm4ie.data.curate.paths import CuratePaths  # noqa: E402
+from slm4ie.data.curate.stages.language import (  # noqa: E402
+    LinguaLanguageFilter,
+    build_language_executors,
+)
 
 
 def _doc(text: str, doc_id: str = "x") -> Document:
@@ -343,3 +350,42 @@ class TestLinguaLanguageFilter:
         assert "fr" in filt.candidates
         assert "sl" in filt.candidates
         assert "en" in filt.candidates
+
+
+def _paths(tmp_path: Path) -> CuratePaths:
+    """Build a CuratePaths anchored under *tmp_path* for structural tests."""
+    return CuratePaths(
+        input_folder=tmp_path / "datatrove",
+        output_dir=tmp_path / "curated",
+    )
+
+
+class TestLanguageStage:
+    """The language stage is a single parallel executor."""
+
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """The language stage runs as a single executor."""
+        execs = build_language_executors(_paths(tmp_path))
+        assert len(execs) == 1
+        assert execs[0].depends is None
+
+    def test_pipeline_contains_lingua_and_writer(self, tmp_path: Path) -> None:
+        """The pipeline reads input, applies lingua, writes to 01_language/."""
+        execs = build_language_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert any(issubclass(t, JsonlReader) for t in types_)
+        assert LinguaLanguageFilter in types_
+        assert JsonlWriter in types_
+
+    def test_writes_to_language_folder(self, tmp_path: Path) -> None:
+        """The writer's output_folder is `<output_dir>/01_language`."""
+        paths = _paths(tmp_path)
+        execs = build_language_executors(paths)
+        writer = next(s for s in execs[0].pipeline if isinstance(s, JsonlWriter))
+        assert str(paths.stage_dir("language")) in writer.output_folder.path
+
+    def test_lang_minimum_relative_distance_is_threaded(self, tmp_path: Path) -> None:
+        """`minimum_relative_distance` reaches the LinguaLanguageFilter."""
+        execs = build_language_executors(_paths(tmp_path), lang_minimum_relative_distance=0.15)
+        lang = next(s for s in execs[0].pipeline if isinstance(s, LinguaLanguageFilter))
+        assert lang.minimum_relative_distance == 0.15
