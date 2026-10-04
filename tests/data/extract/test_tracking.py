@@ -89,7 +89,7 @@ class TestLogExtractionRun:
         """Point tracking at a throwaway SQLite store, artifacts beside it."""
         pytest.importorskip("mlflow")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
-        # The local artifact root is `./mlruns`, resolved against the working directory.
+        # The artifact root `./mlruns` resolves against the working directory.
         monkeypatch.chdir(tmp_path)
 
     def test_disabled_returns_none(self, extracted: Path):

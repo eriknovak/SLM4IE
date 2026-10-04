@@ -1,10 +1,9 @@
 """Tests for the HTTP download source (slm4ie/data/download/sources/http.py)."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import requests
-
-from unittest.mock import MagicMock, patch
 
 from slm4ie.data.download.config import DatasetConfig
 from slm4ie.data.download.sources import http as http_source

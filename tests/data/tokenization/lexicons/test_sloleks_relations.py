@@ -1,7 +1,9 @@
-"""Tests for slm4ie/data/tokenization/lexicons/sloleks_relations.py."""
+"""Tests for slm4ie/data/tokenization/lexicons/sloleks_relations.py and its reader."""
 
+import zipfile
 from pathlib import Path
 
+from slm4ie.data.tokenization import lexicons
 from slm4ie.data.tokenization.lexicons.sloleks_relations import (
     find_word_relations_tsv,
     iter_word_relation_segmentations,
@@ -101,3 +103,26 @@ class TestFindWordRelationsTsv:
     def test_returns_none_when_absent(self, tmp_path: Path):
         """No matching TSV yields None."""
         assert find_word_relations_tsv(tmp_path) is None
+
+
+class TestReadSloleksRelations:
+    """Tests for the relations reader registered in the lexicons package."""
+
+    def test_read_sloleks_relations_auto_unzips(self, tmp_path: Path):
+        """The relations lexicon unpacks a zip in raw_dir when no TSV is present."""
+        raw_dir = tmp_path / "raw" / "sloleks_relations"
+        raw_dir.mkdir(parents=True)
+        rows = [
+            "original\trelated\torig_dec\trel_dec\tmte_o\tmte_r\toid\trid\tov\trule\tpat\tadq",
+            "pisati\tpisatelj\tpis_ati\tpis_at_elj\tG\tSom\t1\t2\tpis\tG.Som.5\tx\t2",
+        ]
+        with zipfile.ZipFile(raw_dir / "relations.zip", "w") as zf:
+            zf.writestr("nssss_sloleks_word_relations_1.1.tsv", "\n".join(rows) + "\n")
+
+        records = list(lexicons._read_sloleks_relations(raw_dir))
+
+        assert len(records) == 1
+        assert records[0]["lemma"] == "pisatelj"
+        assert records[0]["morphemes"] == ["pis", "at", "elj"]
+        assert records[0]["verified"] is True
+        assert records[0]["dataset"] == "sloleks_relations"

@@ -1,14 +1,10 @@
 """Tests for the HuggingFace download source (slm4ie/data/download/sources/huggingface.py)."""
 
 from pathlib import Path
-
-
 from unittest.mock import MagicMock, patch
 
 from slm4ie.data.download.config import DatasetConfig
-from slm4ie.data.download.run import (
-    DownloaderResult,
-)
+from slm4ie.data.download.run import DownloaderResult
 from slm4ie.data.download.sources import huggingface as hf_source
 
 

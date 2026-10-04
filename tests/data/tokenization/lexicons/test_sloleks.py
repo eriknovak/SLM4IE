@@ -1,9 +1,13 @@
-"""Tests for slm4ie/data/tokenization/lexicons/sloleks.py."""
+"""Tests for slm4ie/data/tokenization/lexicons/sloleks.py and its reader."""
 
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
+from slm4ie.data.tokenization import lexicons
 from slm4ie.data.tokenization.lexicons import sloleks
 
 
@@ -214,3 +218,26 @@ class TestIterSloleksDir:
         assert len(records) == 4
         lemmas = [r["lemma"] for r in records]
         assert lemmas == ["hiša", "biti", "hiša", "biti"]
+
+
+class TestReadSloleks:
+    """Tests for the Sloleks reader registered in the lexicons package."""
+
+    def test_missing_xml_raises(self, tmp_path: Path):
+        """The Sloleks lexicon fails fast when no XML files are found."""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        with pytest.raises(FileNotFoundError):
+            list(lexicons._read_sloleks(empty_dir))
+
+    def test_read_sloleks_auto_unzips(self, tmp_path: Path):
+        """The Sloleks lexicon unpacks a zip in raw_dir when no XML is present."""
+        raw_dir = tmp_path / "raw" / "sloleks"
+        raw_dir.mkdir(parents=True)
+        with zipfile.ZipFile(raw_dir / "Sloleks.zip", "w") as zf:
+            zf.writestr("sloleks_3.1_001.xml", SAMPLE_LEXICON)
+
+        records = list(lexicons._read_sloleks(raw_dir))
+
+        assert len(records) == 2
+        assert all(r["dataset"] == "sloleks" for r in records)

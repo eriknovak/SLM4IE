@@ -1,14 +1,13 @@
-"""Tests for slm4ie/data/tokenization/run.py and the lexicon readers it dispatches to."""
+"""Tests for slm4ie/data/tokenization/run.py."""
 
 import gzip
 import json
-import zipfile
 from pathlib import Path
 
 import pytest
 
-from slm4ie.data.tokenization import lexicons, run as tokenization
-from tests.data.tokenization.lexicons.test_sloleks import SAMPLE_LEXICON, _write_sample
+from slm4ie.data.tokenization import run as tokenization
+from tests.data.tokenization.lexicons.test_sloleks import _write_sample
 
 
 class TestToTokenizerEvalConverter:
@@ -81,41 +80,3 @@ class TestToTokenizerEvalConverter:
             tmp_path / "out",
         )
         assert result is None
-
-    def test_missing_xml_raises(self, tmp_path: Path):
-        """The Sloleks lexicon fails fast when no XML files are found."""
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
-        with pytest.raises(FileNotFoundError):
-            list(lexicons._read_sloleks(empty_dir))
-
-    def test_read_sloleks_auto_unzips(self, tmp_path: Path):
-        """The Sloleks lexicon unpacks a zip in raw_dir when no XML is present."""
-        raw_dir = tmp_path / "raw" / "sloleks"
-        raw_dir.mkdir(parents=True)
-        with zipfile.ZipFile(raw_dir / "Sloleks.zip", "w") as zf:
-            zf.writestr("sloleks_3.1_001.xml", SAMPLE_LEXICON)
-
-        records = list(lexicons._read_sloleks(raw_dir))
-
-        assert len(records) == 2
-        assert all(r["dataset"] == "sloleks" for r in records)
-
-    def test_read_sloleks_relations_auto_unzips(self, tmp_path: Path):
-        """The relations lexicon unpacks a zip in raw_dir when no TSV is present."""
-        raw_dir = tmp_path / "raw" / "sloleks_relations"
-        raw_dir.mkdir(parents=True)
-        rows = [
-            "original\trelated\torig_dec\trel_dec\tmte_o\tmte_r\toid\trid\tov\trule\tpat\tadq",
-            "pisati\tpisatelj\tpis_ati\tpis_at_elj\tG\tSom\t1\t2\tpis\tG.Som.5\tx\t2",
-        ]
-        with zipfile.ZipFile(raw_dir / "relations.zip", "w") as zf:
-            zf.writestr("nssss_sloleks_word_relations_1.1.tsv", "\n".join(rows) + "\n")
-
-        records = list(lexicons._read_sloleks_relations(raw_dir))
-
-        assert len(records) == 1
-        assert records[0]["lemma"] == "pisatelj"
-        assert records[0]["morphemes"] == ["pis", "at", "elj"]
-        assert records[0]["verified"] is True
-        assert records[0]["dataset"] == "sloleks_relations"
