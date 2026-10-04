@@ -13,12 +13,19 @@ tweak one knob without forking the whole config or disturbing the other
 datasets. Only scoped stages are overridable: corpus stages (exact_dedup,
 sentence_dedup, statistics) and global keys (input_dir, output_dir, stopwords)
 operate over the whole corpus and reject per-dataset overrides. The block is
-validated at load time against each stage's known knob set, so a typo fails
-fast instead of silently doing nothing.
+validated against each stage's known knob set, so a typo fails fast instead of
+silently doing nothing.
+
+Every content stage (language, spam, quality, repetition) also takes an
+`enabled` knob: a dataset with `enabled: false` skips the stage as a
+pass-through unit. A top-level `profiles:` block names reusable override sets;
+a dataset references one with `profile: <name>`. Profiles are resolved at load
+time into plain per-dataset overrides, so nothing downstream sees them.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,10 +45,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Knobs each scoped stage accepts as an override. The quality and spam
-#: sets mirror `QualityConfig` / `SpamConfig`; `test_config.py`
-#: asserts they stay in lockstep. `repetition` exposes no knobs today, so
-#: it is effectively non-overridable until some are surfaced.
+#: Knob that switches a content stage off for a dataset (a pass-through unit).
+ENABLED_KNOB: str = "enabled"
+
+#: Knobs each scoped stage accepts as an override. Bar `enabled`, which the
+#: driver consumes, the quality, spam and repetition sets mirror their stage
+#: dataclasses; `test_config.py` asserts they stay in lockstep.
 STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
     "convert": frozenset(
         {
@@ -60,6 +69,7 @@ STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
             "minimum_relative_distance",
             "low_accuracy",
             "max_chars",
+            "enabled",
         }
     ),
     "spam": frozenset(
@@ -72,6 +82,7 @@ STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
             "use_ldnoobw",
             "model",
             "model_threshold",
+            "enabled",
         }
     ),
     "quality": frozenset(
@@ -85,9 +96,20 @@ STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
             "max_ellipsis_lines_ratio",
             "max_non_alpha_words_ratio",
             "min_stop_words",
+            "enabled",
         }
     ),
-    "repetition": frozenset(),
+    "repetition": frozenset(
+        {
+            "dup_line_frac",
+            "dup_para_frac",
+            "dup_line_char_frac",
+            "dup_para_char_frac",
+            "top_n_grams",
+            "dup_n_grams",
+            "enabled",
+        }
+    ),
 }
 
 
@@ -121,6 +143,38 @@ def validate_spam_knobs(knobs: Dict[str, Any], where: str) -> None:
             raise OverrideConfigError(f"{where}.keep_fraction: expected a number in [0, 1], got {value!r}")
 
 
+def _validate_sections(sections: Any, where: str) -> None:
+    """Validate one stage -> knobs mapping, from an override or a profile.
+
+    Args:
+        sections: The mapping to check.
+        where: Config path of the mapping, used in error messages.
+
+    Raises:
+        OverrideConfigError: If a section is not a scoped stage, a knob is
+            unknown for its stage, a section/knob value has the wrong shape,
+            `enabled` is not a boolean, or a spam knob is out of bounds.
+    """
+    if not isinstance(sections, dict):
+        raise OverrideConfigError(f"{where}: expected a mapping of stage -> knobs")
+    for stage, knobs in sections.items():
+        if stage not in SCOPED_STAGES:
+            raise OverrideConfigError(f"{where}.{stage}: only scoped stages {sorted(SCOPED_STAGES)} may be overridden")
+        if not isinstance(knobs, dict):
+            raise OverrideConfigError(f"{where}.{stage}: expected a mapping of knob -> value")
+        unknown = set(knobs) - STAGE_KNOBS[stage]
+        if unknown:
+            raise OverrideConfigError(
+                f"{where}.{stage}: unknown knob(s) {sorted(unknown)}; allowed: {sorted(STAGE_KNOBS[stage])}"
+            )
+        if ENABLED_KNOB in knobs and not isinstance(knobs[ENABLED_KNOB], bool):
+            raise OverrideConfigError(
+                f"{where}.{stage}.{ENABLED_KNOB}: expected true or false, got {knobs[ENABLED_KNOB]!r}"
+            )
+        if stage == "spam":
+            validate_spam_knobs(knobs, f"{where}.spam")
+
+
 def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -> None:
     """Validate the `overrides:` block against the dataset roster.
 
@@ -132,8 +186,8 @@ def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -
     Raises:
         OverrideConfigError: If a dataset key is not in `roster`, a
             section is not a scoped stage, a knob is unknown for its
-            stage, a section/knob value has the wrong shape, or a spam
-            knob is out of bounds.
+            stage, a section/knob value has the wrong shape, `enabled`
+            is not a boolean, or a spam knob is out of bounds.
     """
     if not overrides:
         return
@@ -141,23 +195,48 @@ def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -
     for dataset, sections in overrides.items():
         if dataset not in roster_set:
             raise OverrideConfigError(f"overrides: unknown dataset '{dataset}' (not declared in extract.yaml)")
-        if not isinstance(sections, dict):
-            raise OverrideConfigError(f"overrides.{dataset}: expected a mapping of stage -> knobs")
-        for stage, knobs in sections.items():
-            if stage not in SCOPED_STAGES:
-                raise OverrideConfigError(
-                    f"overrides.{dataset}.{stage}: only scoped stages {sorted(SCOPED_STAGES)} may be overridden"
-                )
-            if not isinstance(knobs, dict):
-                raise OverrideConfigError(f"overrides.{dataset}.{stage}: expected a mapping of knob -> value")
-            unknown = set(knobs) - STAGE_KNOBS[stage]
-            if unknown:
-                raise OverrideConfigError(
-                    f"overrides.{dataset}.{stage}: unknown knob(s) "
-                    f"{sorted(unknown)}; allowed: {sorted(STAGE_KNOBS[stage])}"
-                )
-            if stage == "spam":
-                validate_spam_knobs(knobs, f"overrides.{dataset}.spam")
+        _validate_sections(sections, f"overrides.{dataset}")
+
+
+def resolve_profiles(profiles: Optional[Dict[str, Any]], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Expand `profile:` references into plain per-dataset overrides.
+
+    Each dataset's override starts from its profile's knobs, if it names
+    one, with its own knobs deep-merged on top. The result holds no
+    `profile` keys, so knobs reached through a profile hash exactly like
+    the same knobs written inline.
+
+    Args:
+        profiles: The parsed `profiles:` mapping (name to stage to knobs),
+            or None/empty when absent.
+        overrides: The parsed `overrides:` mapping, or None/empty.
+
+    Returns:
+        A new `overrides` mapping with every profile applied.
+
+    Raises:
+        OverrideConfigError: If `profiles:` is not a mapping, a profile
+            fails the override validation, or a dataset names an unknown
+            profile.
+    """
+    profiles = profiles or {}
+    if not isinstance(profiles, dict):
+        raise OverrideConfigError("profiles: expected a mapping of profile -> stage -> knobs")
+    for name, sections in profiles.items():
+        _validate_sections(sections, f"profiles.{name}")
+    resolved: Dict[str, Any] = {}
+    for dataset, sections in (overrides or {}).items():
+        if not isinstance(sections, dict) or "profile" not in sections:
+            resolved[dataset] = sections
+            continue
+        own = dict(sections)
+        name = own.pop("profile")
+        if not isinstance(name, str) or name not in profiles:
+            raise OverrideConfigError(
+                f"overrides.{dataset}.profile: unknown profile {name!r}; declared: {sorted(profiles)}"
+            )
+        resolved[dataset] = deep_merge(copy.deepcopy(profiles[name]), own)
+    return resolved
 
 
 def effective_stage_config(
@@ -170,8 +249,8 @@ def effective_stage_config(
 
     Deep-merges the dataset's stage override (if any) over the global
     stage section. A dataset with no override yields a fresh copy of the
-    global slice, byte-identical in content to the pre-overrides
-    behavior.
+    global slice. An `enabled: true` is dropped, so it hashes like a
+    dataset that never set the knob.
 
     Args:
         cfg: The parsed pretrain config.
@@ -184,7 +263,11 @@ def effective_stage_config(
     """
     base = dict(cfg.get(stage) or {})
     override = ((overrides or {}).get(dataset) or {}).get(stage) or {}
-    return deep_merge(base, override)
+    effective = deep_merge(base, override)
+    # `enabled: true` is the default; dropping it keeps such a dataset in the default bucket.
+    if effective.get(ENABLED_KNOB) is True:
+        del effective[ENABLED_KNOB]
+    return effective
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -447,6 +530,21 @@ class CurateConfig:
             )
         return config_hash(stage_slice(stage, self.cfg), extra=self.extra(stage))
 
+    def passes_through(self, stage: str, key: str) -> bool:
+        """Return whether *stage* is switched off for *key* (a pass-through unit).
+
+        Args:
+            stage: Stage name.
+            key: Dataset key.
+
+        Returns:
+            True when the effective config of a content stage sets
+            `enabled: false`; always False for convert and corpus stages.
+        """
+        if not is_scoped(stage) or stage == "convert":
+            return False
+        return not effective_stage_config(self.cfg, self.overrides, key, stage).get(ENABLED_KNOB, True)
+
     def include_annotations(self, key: str) -> bool:
         """Return whether convert joins *key*'s annotations sidecar."""
         return bool(effective_stage_config(self.cfg, self.overrides, key, "convert").get("include_annotations", False))
@@ -479,17 +577,19 @@ def load_curate_config(
         The loaded `CurateConfig`.
 
     Raises:
-        OverrideConfigError: If the global `spam:` slice is out of bounds.
+        OverrideConfigError: If the global `spam:` slice is out of bounds,
+            or a profile is invalid or unknown.
     """
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_config)
     validate_spam_knobs(cfg.get("spam") or {}, "spam")
+    overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
     return CurateConfig(
         cfg=cfg,
-        overrides=cfg.get("overrides") or {},
+        overrides=overrides,
         paths=CuratePaths(input_folder=resolved_input, output_dir=resolved_output),
         project_root=project_root,
         lock_path=lock_path_for(pretrain_config),

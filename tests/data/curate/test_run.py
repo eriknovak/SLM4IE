@@ -39,6 +39,7 @@ from slm4ie.data.curate.lineage import (
     INPUT_CHANGED,
     LEGACY,
     OUTPUT_CHANGED,
+    PASS_THROUGH,
     SENTINEL_NAME,
     STAGE_VERSION_CHANGED,
     UNVERSIONED,
@@ -306,6 +307,102 @@ def test_override_rebuilds_only_its_dataset(monkeypatch: pytest.MonkeyPatch, tmp
         ("sentence_dedup", ("d1", "d2")),
         ("statistics", ("d1", "d2")),
     ]
+
+
+def _pass_spam_through(env: _Env, key: str = "d2") -> None:
+    """Make *key* a pass-through unit of the spam stage."""
+    env.cfg["overrides"] = {key: {"spam": {"enabled": False}}}
+
+
+@pytest.fixture
+def pair(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Env:
+    """Return a two-dataset environment with spam switched off for d2."""
+    env = _Env(monkeypatch, tmp_path, roster=["d1", "d2"])
+    _pass_spam_through(env)
+    return env
+
+
+def test_disabled_stage_links_upstream_shards_without_running(pair: _Env) -> None:
+    """A pass-through unit holds symlinks to the upstream shards; the stage never sees the dataset."""
+    pair.run("--all")
+    assert ("spam", ("d1",)) in pair.stub.ran
+    assert not any(stage == "spam" and "d2" in keys for stage, keys in pair.stub.ran)
+    shards = sorted(pair.unit("spam", "d2").glob("*.jsonl.gz"))
+    upstream = sorted(pair.unit("language", "d2").glob("*.jsonl.gz"))
+    assert shards and [s.name for s in shards] == [u.name for u in upstream]
+    assert all(s.is_symlink() and s.resolve() == u.resolve() for s, u in zip(shards, upstream))
+    assert _read_docs(pair.unit("spam", "d2")) == _read_docs(pair.unit("language", "d2"))
+
+
+def test_pass_through_sentinel_carries_full_lineage(pair: _Env) -> None:
+    """The sentinel hashes the effective config, `enabled: false` included, and echoes the upstream digest."""
+    pair.run("--all")
+    sentinel = read_sentinel(pair.unit("spam", "d2"))
+    upstream = read_sentinel(pair.unit("language", "d2"))
+    assert sentinel is not None and upstream is not None
+    assert sentinel.config_slice["enabled"] is False
+    assert sentinel.config_hash != read_sentinel(pair.unit("spam", "d1")).config_hash  # type: ignore[union-attr]
+    assert sentinel.document_digest == upstream.document_digest
+    assert sentinel.records_in == sentinel.records_out == upstream.records_out
+    assert pair.run("--all") == []
+
+
+def test_turning_a_stage_off_keeps_upstream_and_other_datasets(pair: _Env) -> None:
+    """Disabling a stage for one dataset rebuilds that dataset from the stage down, nothing else."""
+    pair.cfg["overrides"] = {}
+    pair.run("--all")
+    _pass_spam_through(pair)
+    pair.run("--all")
+    assert pair.stub.ran == [
+        ("quality", ("d2",)),
+        ("repetition", ("d2",)),
+        ("exact_dedup", ("d1", "d2")),
+        ("sentence_dedup", ("d1", "d2")),
+        ("statistics", ("d1", "d2")),
+    ]
+
+
+def test_turning_a_stage_back_on_rebuilds_exactly_that_unit(pair: _Env) -> None:
+    """Flipping `enabled` back changes the config hash: status shows it stale, the run rebuilds it."""
+    pair.run("--all")
+    pair.cfg["overrides"] = {}
+    code, units = pair.status()
+    assert code == 1
+    assert units[("spam", "d2")] == ("stale", CONFIG_CHANGED)
+    assert units[("spam", "d1")] == ("current", "")
+    pair.run("--all")
+    assert pair.stub.ran[0] == ("spam", ("d2",))
+    assert ("spam", ("d1",)) not in pair.stub.ran
+    assert not any(s.is_symlink() for s in pair.unit("spam", "d2").glob("*.jsonl.gz"))
+
+
+def test_status_names_pass_through_units(pair: _Env) -> None:
+    """`status` reports a pass-through unit as current, named as a pass-through."""
+    pair.run("--all")
+    code, units = pair.status()
+    assert code == 0
+    assert units[("spam", "d2")] == ("current", PASS_THROUGH)
+    assert units[("spam", "d1")] == ("current", "")
+    sentinel_path = pair.unit("language", "d2") / SENTINEL_NAME
+    payload = json.loads(sentinel_path.read_text())
+    payload["document_digest"] = "sum256:changed"
+    sentinel_path.write_text(json.dumps(payload))
+    assert pair.status()[1][("spam", "d2")] == ("stale", f"{INPUT_CHANGED} ({PASS_THROUGH})")
+
+
+def test_run_log_names_pass_through_units(pair: _Env, caplog: pytest.LogCaptureFixture) -> None:
+    """The run log tells a pass-through bucket apart from a built one."""
+    with caplog.at_level("INFO", logger="slm4ie.data.curate.run"):
+        pair.run("--all")
+    assert any("[spam] pass-through for 1 dataset(s)" in r.getMessage() for r in caplog.records)
+
+
+def test_pass_through_of_an_emptied_unit_is_empty(pair: _Env) -> None:
+    """A dataset the upstream stage filtered out entirely passes through as an empty unit."""
+    pair.stub.drop = "language"
+    pair.run("--all")
+    assert _read_docs(pair.unit("spam", "d2")) == []
+    assert read_sentinel(pair.unit("spam", "d2")).records_out == 0  # type: ignore[union-attr]
 
 
 def test_config_buckets_log_into_their_own_folders(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

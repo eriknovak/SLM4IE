@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import List, Set
+from typing import Any, Dict, List, Set
 
 import pytest
 import yaml
@@ -576,3 +576,46 @@ def test_real_stages_rebuild_only_what_changed(tmp_path: Path, monkeypatch: pyte
     rewritten = {p.relative_to(out_dir).parts[0] for p in after if after[p] != before[p]}
     assert rewritten == {"01_language"}
     assert (tmp_path / "pretrain.lock.yaml").is_file()
+
+
+@pytest.mark.slow
+def test_pass_through_unit_dedups_like_a_stage_that_drops_nothing(tmp_path: Path) -> None:
+    """The dedup stages read a pass-through unit's linked shards exactly as built ones.
+
+    One corpus passes `beta` through spam (`enabled: false`); the other runs spam
+    on it with thresholds no document can reach. Both dedup outputs must match.
+    """
+    in_dir = tmp_path / "extracted"
+    _write_extracted(in_dir, "alfa", ALFA_DOCS)
+    _write_extracted(in_dir, "beta", BETA_DOCS)
+    extract_cfg = tmp_path / "extract.yaml"
+    _write_extract_config(extract_cfg)
+
+    def build(name: str, beta_spam: Dict[str, Any]) -> Path:
+        out_dir = tmp_path / name
+        pretrain_cfg = tmp_path / f"{name}.yaml"
+        _write_pretrain_config(pretrain_cfg, in_dir, out_dir)
+        cfg = yaml.safe_load(pretrain_cfg.read_text())
+        cfg["overrides"] = {"beta": {"spam": beta_spam}}
+        pretrain_cfg.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+        curate(
+            datasets=[],
+            run_all=True,
+            stage="all",
+            input_dir=in_dir,
+            output_dir=out_dir,
+            force=False,
+            workers=1,
+            pretrain_config=pretrain_cfg,
+            extract_config=extract_cfg,
+        )
+        return out_dir
+
+    passed = build("passed", {"enabled": False})
+    unreachable = build("unreachable", {"min_adult_hits": 10**9, "min_spam_hits": 10**9, "url_blocklist": False})
+
+    linked = list((passed / "02_spam" / "beta").glob("*.jsonl.gz"))
+    assert linked and all(shard.is_symlink() for shard in linked)
+    for stage_dir in ("05_exact_dedup", "06_sentence_dedup"):
+        rows = _corpus_rows(passed / stage_dir)
+        assert rows and rows == _corpus_rows(unreachable / stage_dir)

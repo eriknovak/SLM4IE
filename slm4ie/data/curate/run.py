@@ -16,7 +16,8 @@ For each requested stage it asks `lineage` which units are stale, builds those
 in their staging folder through the stage's module (`stages.run_stage`), checks
 and promotes them, and finally brings the lock file up to date. Scoped stages
 run per config bucket; corpus stages run once over the roster and resume after
-a crash.
+a crash. A bucket whose stage is switched off (`enabled: false`) is a
+pass-through: its units link the upstream shards instead of running the stage.
 """
 
 import json
@@ -45,6 +46,8 @@ from slm4ie.data.curate.lineage import (
     integrity_failure,
     invalidate_dataset_sentinels,
     legacy_units,
+    PASS_THROUGH,
+    pass_through_label,
     read_sentinel,
     recover_promotion,
     refresh_lock,
@@ -261,13 +264,15 @@ def _run_scoped_bucket(
     workers: int,
     log_dir: Optional[Path],
     info: Dict[str, Any],
+    pass_through: bool = False,
 ) -> Tuple[int, int]:
     """Build one config bucket of a scoped stage into staging, check it, promote it.
 
     Every unit is checked before any is promoted, so a failure keeps every
     old output and sentinel in place. The bucket's executor logs under a
     folder of its own (`bucket_log_scope`), cleared first and recorded in the
-    stage's bucket index before the run.
+    stage's bucket index before the run. A pass-through bucket starts no
+    executor: each unit links its upstream shards into staging instead.
 
     Args:
         setup: The loaded setup.
@@ -279,9 +284,11 @@ def _run_scoped_bucket(
         workers: Worker count, for the stage and for scanning.
         log_dir: Per-task log folder (convert only).
         info: Informational sentinel fields.
+        pass_through: Whether the stage is switched off for the bucket.
 
     Returns:
-        The bucket's aggregate `(records_in, records_out)` from the stage runner.
+        The bucket's aggregate `(records_in, records_out)`: from the stage
+        runner, or from the integrity scan for a pass-through bucket.
 
     Raises:
         RuntimeError: If any unit fails its integrity check.
@@ -297,28 +304,15 @@ def _run_scoped_bucket(
     up_dir = paths.stage_dir(upstream) if upstream is not None else None
     # A key whose upstream unit kept no documents is promoted empty, not skipped.
     with_docs = [k for k in bucket_keys if up_dir is None or has_stage_output(up_dir, k)]
-    if not with_docs:
-        counts = (0, 0)
-    view = filter_stage_subset(up_dir, with_docs) if up_dir is not None and with_docs else None
-    job = StageRun(
-        paths=paths,
-        config=effective,
-        workers=workers,
-        dataset_keys=with_docs,
-        output_folder=staging,
-        input_view=view,
-        log_dir=log_dir,
-        stopwords=setup.stopwords,
-        spam_assets=setup.spam_assets,
-    )
-    try:
-        if with_docs:
-            counts = run_stage(stage, job)
-    finally:
-        if view is not None:
-            shutil.rmtree(view, ignore_errors=True)
+    counts = (0, 0)
+    if pass_through and up_dir is not None:
+        for key in with_docs:
+            _link_shards(up_dir / key, staging / key)
+    elif with_docs:
+        counts = _run_bucket_stage(setup, stage, paths, effective, with_docs, staging, up_dir, workers, log_dir)
 
     errors: Dict[str, str] = {}
+    scanned_in = scanned_out = 0
     for key in bucket_keys:
         if up_dir is None:
             in_scan, out_scan, error = check_unit(
@@ -329,6 +323,8 @@ def _run_scoped_bucket(
         if error:
             errors[key] = error
             continue
+        scanned_in += in_scan.records
+        scanned_out += out_scan.records
         input_digest, input_files = inputs[key]
         write_sentinel(
             staging / key,
@@ -348,7 +344,66 @@ def _run_scoped_bucket(
     for key in bucket_keys:
         swap_into_place(staging / key, paths.stage_dir(stage) / key)
     shutil.rmtree(staging, ignore_errors=True)
-    return counts
+    return (scanned_in, scanned_out) if pass_through else counts
+
+
+def _link_shards(src: Path, dest: Path) -> None:
+    """Fill *dest* with absolute symlinks to every shard under *src*.
+
+    Args:
+        src: The upstream unit's output folder.
+        dest: The pass-through unit's staging folder.
+    """
+    for shard in shard_files(src):
+        link = dest / shard.relative_to(src)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(shard.resolve())
+
+
+def _run_bucket_stage(
+    setup: CurateConfig,
+    stage: str,
+    paths: CuratePaths,
+    effective: Dict[str, Any],
+    keys: List[str],
+    staging: Path,
+    up_dir: Optional[Path],
+    workers: int,
+    log_dir: Optional[Path],
+) -> Tuple[int, int]:
+    """Run a scoped stage's executor for *keys* into *staging*.
+
+    Args:
+        setup: The loaded setup.
+        stage: Scoped stage name.
+        paths: Curation paths scoped to the bucket's log folder.
+        effective: The bucket's effective config slice.
+        keys: Dataset keys with upstream documents.
+        staging: The stage's staging folder.
+        up_dir: The upstream stage's output folder, or `None` for convert.
+        workers: Worker count.
+        log_dir: Per-task log folder (convert only).
+
+    Returns:
+        `(records_in, records_out)` from the stage runner.
+    """
+    view = filter_stage_subset(up_dir, keys) if up_dir is not None else None
+    job = StageRun(
+        paths=paths,
+        config=effective,
+        workers=workers,
+        dataset_keys=keys,
+        output_folder=staging,
+        input_view=view,
+        log_dir=log_dir,
+        stopwords=setup.stopwords,
+        spam_assets=setup.spam_assets,
+    )
+    try:
+        return run_stage(stage, job)
+    finally:
+        if view is not None:
+            shutil.rmtree(view, ignore_errors=True)
 
 
 def _curate_scoped(
@@ -376,6 +431,8 @@ def _curate_scoped(
             continue
         reason, digest, files = scoped_reason(setup, stage, key)
         if reason:
+            if setup.passes_through(stage, key):
+                reason = pass_through_label(reason)
             logger.info("[%s] %s: %s", stage, key, reason)
             todo.append(key)
             inputs[key] = (digest, files)
@@ -394,6 +451,19 @@ def _curate_scoped(
         overridden = [k for k in bucket_keys if (setup.overrides.get(k) or {}).get(stage)]
         if overridden:
             logger.info("[%s] override group %s <- %s", stage, overridden, effective)
+        if setup.passes_through(stage, bucket_keys[0]):
+            records_in, records_out = _run_scoped_bucket(
+                setup, stage, bucket_keys, effective, bucket_hash, inputs, workers, None, info, pass_through=True
+            )
+            logger.info(
+                "[%s] %s for %d dataset(s) (bucket records_in=%d, records_out=%d)",
+                stage,
+                PASS_THROUGH,
+                len(bucket_keys),
+                records_in,
+                records_out,
+            )
+            continue
         if stage == "convert":
             n_datasets, input_bytes = _extracted_input_summary(paths.input_folder, bucket_keys)
             logger.info("[convert] starting (%d dataset(s), %s)", n_datasets, human_bytes(input_bytes))

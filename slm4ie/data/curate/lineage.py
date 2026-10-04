@@ -63,6 +63,21 @@ STAGE_VERSION_CHANGED = "stage version changed"
 INPUT_CHANGED = "input changed"
 OUTPUT_CHANGED = "output changed on disk"
 
+#: Label for a unit whose stage is switched off: its shards are the upstream's, linked.
+PASS_THROUGH = "pass-through"
+
+
+def pass_through_label(reason: Optional[str]) -> str:
+    """Name a unit as a pass-through, keeping its stale reason when it has one.
+
+    Args:
+        reason: The unit's stale reason, or `None` when current.
+
+    Returns:
+        `pass-through` alone, or `<reason> (pass-through)`.
+    """
+    return f"{reason} ({PASS_THROUGH})" if reason else PASS_THROUGH
+
 
 @dataclass(frozen=True)
 class Sentinel:
