@@ -102,7 +102,7 @@ in a lookup table (i.e. everything except `morphpiece`).
 ## Follow-ups
 
 - **Done (this branch):** full statistical parity for the derivational boundary
-  metrics (`analysis.py` generalized 1→N golds).
+  metrics (`evaluate.py`, then named `analysis.py`, generalized 1→N golds).
 - Consider a **verified-only** derivational slice (the ~3.3k linguist-scored
   lemmas) to reduce silver noise.
 - Consider annotating/excluding table-lookup backends (`morphpiece`) from the

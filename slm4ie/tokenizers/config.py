@@ -2,8 +2,8 @@
 
 Parses the sweep config passed to it (with the same sibling
 `*.local.yaml` deep-merge overlay used elsewhere in the project) into a single
-`SweepConfig` consumed by both the training and analysis scripts.
-Owning the config object here keeps `train.py` and `analysis.py` free of a
+`SweepConfig` consumed by both the training and evaluation code.
+Owning the config object here keeps `train.py` and `evaluate.py` free of a
 shared import cycle.
 """
 

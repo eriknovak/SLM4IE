@@ -125,7 +125,7 @@ tokenizers = [
     "tokenizers>=0.20",               # HF BPE / WordPiece trainers + fast runtime
     "sentencepiece>=0.2.1",           # Unigram (SentencePiece) trainer
     "transformers>=4.45",             # PreTrainedTokenizerFast export + offsets
-    "numpy>=2.4.3",                   # tokenizers/stats.py + analysis.py
+    "numpy>=2.4.3",                   # tokenizers/stats.py + evaluate.py
 ]
 
 # The showcase site (mkdocs.yml + website/); Material bundles the blog plugin.
@@ -135,7 +135,7 @@ docs = [
 ]
 
 # Turning tracked runs into an experiment's tables and figures:
-# each experiments/<category>/<slug>/analysis.py, via slm4ie/utils/mlflow_report.py.
+# each experiments/<category>/<slug>/analysis.py, via slm4ie/utils/mlflow.py.
 analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store
