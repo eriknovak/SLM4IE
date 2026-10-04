@@ -342,8 +342,14 @@ checks structure but not semantic agreement with the code.
   file is **not** the labflow skill's vendored copy any more — never overwrite
   it from the skill or switch a chart to another theme; change the palette
   only there, and `tests/experiments/test_report_figures.py` guards the gate.
+- Tests mirror the package: `slm4ie/<path>/<module>.py` is tested by
+  `tests/<path>/test_<module>.py`, and a package's `__init__` by
+  `test_registry.py` in the matching folder. A test that spans modules
+  (`test_e2e.py`) sits in the folder of the package it drives.
 - Tests under `tests/data/` use small fixtures committed in-tree; do not
   point tests at `/vault/data/SLM4IE/`.
+- A test run leaves the repository tree unchanged: MLflow artifacts, run logs
+  and every other output go to `tmp_path`, never to `mlruns/` or `logs/`.
 
 ## Things to avoid
 
