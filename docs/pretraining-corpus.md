@@ -196,8 +196,51 @@ executor, so only overridden datasets pay isolation cost. Each dataset's
 sentinel hashes its effective (merged) config, so adding or editing an override
 re-runs only that dataset's stage plus its downstream and the corpus
 dedup/statistics; a dataset with no override is byte-identical to before and
-never re-runs spuriously. `repetition` exposes no knobs today, so it is
-effectively non-overridable until some are surfaced.
+never re-runs spuriously. The `repetition` knobs are datatrove's Gopher
+repetition parameters (`dup_line_frac`, `dup_para_frac`, `dup_line_char_frac`,
+`dup_para_char_frac`, and `top_n_grams` / `dup_n_grams` as lists of
+`[n, fraction]` pairs).
+
+### Pass-through units
+
+Every content stage (`language`, `spam`, `quality`, `repetition`) takes an
+`enabled` knob, default `true`. A dataset with `enabled: false` on a stage is a
+**pass-through unit**: the stage's executor never sees it, and its output
+folder holds symlinks to the upstream unit's shards plus a sentinel of its own.
+That sentinel hashes the effective config (with `enabled: false` in it) and
+carries the upstream's document digest, so every downstream unit stays current.
+`status` and the run log name such a unit `pass-through`. Setting `enabled`
+back to `true` changes the config hash, so the stage rebuilds that dataset.
+`convert` cannot be skipped.
+
+```yaml
+overrides:
+  kas:
+    spam:
+      enabled: false
+```
+
+### Profiles
+
+Once several datasets share a knob set, name it once under `profiles:` and
+reference it with `profile:`. The profile applies first, then the dataset's own
+knobs deep-merge over it. Profiles are resolved at load time into plain
+overrides, so a dataset's effective config — and its hash — is the same whether
+its knobs came through a profile or were written inline. An unknown profile, a
+corpus stage or an unknown knob inside a profile fails at load.
+
+```yaml
+profiles:
+  curated:
+    spam: {enabled: false}
+
+overrides:
+  coleslaw:
+    profile: curated
+  kas:
+    profile: curated
+    quality: {min_doc_words: 20}
+```
 
 ## Output layout
 

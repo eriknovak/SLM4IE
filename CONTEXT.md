@@ -129,6 +129,12 @@ _Avoid_: step, phase, pass, tier
 A stage that processes one dataset at a time and can run over a subset of them.
 _Avoid_: per-dataset stage, partial stage
 
+**Content stage**:
+A scoped stage that filters documents: language, spam, quality, repetition.
+Every scoped stage except convert, and the only stages a dataset can pass
+through.
+_Avoid_: filter stage
+
 **Corpus stage**:
 A stage that reads every dataset at once and therefore runs only over the full
 roster.
@@ -147,6 +153,18 @@ _Avoid_: dataset list, selection, manifest
 A per-dataset block that deep-merges onto a scoped stage's defaults, so one
 dataset can differ without forking the config. Corpus stages reject them.
 _Avoid_: exception, patch, custom config
+
+**Profile**:
+A named override set under `profiles:` that a dataset references with
+`profile: <name>`, its own knobs merged on top. Resolved into plain overrides
+at load, so nothing downstream sees it.
+_Avoid_: preset, template
+
+**Pass-through unit**:
+A unit whose stage is switched off for its dataset (`enabled: false`): its
+output is the upstream unit's shards linked into place, with a sentinel of its
+own carrying the upstream's document digest.
+_Avoid_: skipped stage, bypass, no-op unit
 
 **Config bucket**:
 The datasets of a scoped stage that resolve to the same effective config and
