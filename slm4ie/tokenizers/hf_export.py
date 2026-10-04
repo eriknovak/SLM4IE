@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from slm4ie.tokenizers.backends.morph_piece import MorphPieceTokenizer
-from slm4ie.tokenizers.hf_morphpiece import SPECIAL_TOKEN_ROLES, MorphPieceHFTokenizer
+from slm4ie.tokenizers.hf_morph_piece import SPECIAL_TOKEN_ROLES, MorphPieceHFTokenizer
 
 logger = logging.getLogger(__name__)
 

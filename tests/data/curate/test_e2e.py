@@ -10,7 +10,15 @@ import yaml
 pytest.importorskip("datatrove")
 pytest.importorskip("lingua")
 
+import slm4ie.data.curate.config as curate_config  # noqa: E402
 from slm4ie.data.curate.run import curate  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _project_root_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Root the run in `tmp_path`, so its `logs/curate/` stays out of the repo."""
+    monkeypatch.setattr(curate_config, "_find_project_root", lambda: tmp_path)
+
 
 # Several clearly-Slovenian sentences per dataset. Distinct topics keep
 # the cross-dataset exact/sentence dedup from collapsing them, and the

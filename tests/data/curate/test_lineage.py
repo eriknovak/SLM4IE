@@ -1,4 +1,4 @@
-"""Tests for the per-stage sentinel I/O + config-hash module."""
+"""Tests for the per-stage sentinel I/O and staleness checks (`slm4ie.data.curate.lineage`)."""
 
 import json
 import os
@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.utils.versioning import config_hash
 from slm4ie.data.curate.lineage import (
     CONFIG_CHANGED,
     INPUT_CHANGED,
@@ -20,33 +19,6 @@ from slm4ie.data.curate.lineage import (
     stale_reason,
     write_sentinel,
 )
-
-
-def test_config_hash_is_deterministic() -> None:
-    """The hash is stable across calls with identical input."""
-    cfg = {"min_doc_words": 50, "max_doc_words": 100000}
-    assert config_hash(cfg) == config_hash(cfg)
-
-
-def test_config_hash_differs_on_value_change() -> None:
-    """Changing any value changes the hash."""
-    a = {"min_doc_words": 50}
-    b = {"min_doc_words": 100}
-    assert config_hash(a) != config_hash(b)
-
-
-def test_config_hash_ignores_key_order() -> None:
-    """Two dicts with the same keys/values in different insertion order hash equal."""
-    a = {"a": 1, "b": 2}
-    b = {"b": 2, "a": 1}
-    assert config_hash(a) == config_hash(b)
-
-
-def test_config_hash_includes_extra_payload() -> None:
-    """Optional extra payload (e.g. stopword file contents) affects the hash."""
-    a = config_hash({"min_doc_words": 50})
-    b = config_hash({"min_doc_words": 50}, extra=b"different bytes")
-    assert a != b
 
 
 def test_write_then_read_sentinel_roundtrip(tmp_path: Path) -> None:
@@ -204,22 +176,6 @@ def test_sentinel_filename_is_complete(tmp_path: Path) -> None:
         records_out=0,
     )
     assert (folder / ".complete").exists()
-
-
-def test_config_hash_handles_yaml_datetime_values(tmp_path: Path) -> None:
-    """config_hash does not raise on YAML-style non-JSON values like datetime."""
-    from datetime import datetime, timezone
-
-    a = config_hash({"created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)})
-    b = config_hash({"created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)})
-    assert a == b
-
-
-def test_config_hash_handles_non_ascii_values() -> None:
-    """Non-ASCII characters in the slice influence the hash predictably."""
-    a = config_hash({"stopwords_path": "stopwords_sl.txt"})
-    b = config_hash({"stopwords_path": "stopwords_žirovski.txt"})
-    assert a != b
 
 
 def test_read_sentinel_returns_none_on_malformed_json(tmp_path: Path) -> None:

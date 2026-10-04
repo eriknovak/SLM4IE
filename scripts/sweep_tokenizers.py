@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from slm4ie.utils.parallel import configure_script_logging
-from slm4ie.tokenizers.analysis import evaluate_sweep
+from slm4ie.tokenizers.evaluate import evaluate_sweep
 from slm4ie.tokenizers.config import SweepConfig, load_sweep_config
 from slm4ie.tokenizers.hf_export import export_sweep_runs
 from slm4ie.tokenizers.train import prepare_inputs, resolve_sweep_runs, train_sweep

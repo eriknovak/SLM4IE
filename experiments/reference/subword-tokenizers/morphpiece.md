@@ -79,7 +79,7 @@ tokenizer.
 - **Paper**: MorphPiece: A Linguistic Tokenizer for Large Language Models, arXiv:2307.07262
 - **Code**:
   - `slm4ie/tokenizers/backends/morph_piece.py`
-  - `slm4ie/tokenizers/hf_morphpiece.py`
+  - `slm4ie/tokenizers/hf_morph_piece.py`
   - `slm4ie/tokenizers/base.py`
 - **Lexicon**: `slm4ie/tokenizers/morphology.py`
 - **Example**: `experiments/reference/subword-tokenizers/examples.py`
@@ -150,13 +150,13 @@ tokenizer.
 \Ensure the text
 \ForAll{tokens $s_i$}
   \If{$s_i$ is in $K'$}
-    \State if the previous token was not in $K'$, decode the pending BPE tokens and start a new word with a space \Comment{`slm4ie/tokenizers/hf_morphpiece.py:130-133`}
-    \State append $s_i$ as it is \Comment{`slm4ie/tokenizers/hf_morphpiece.py:134-135`}
+    \State if the previous token was not in $K'$, decode the pending BPE tokens and start a new word with a space \Comment{`slm4ie/tokenizers/hf_morph_piece.py:130-133`}
+    \State append $s_i$ as it is \Comment{`slm4ie/tokenizers/hf_morph_piece.py:134-135`}
   \Else
-    \State hold $s_i$ for the byte-level decoder \Comment{`slm4ie/tokenizers/hf_morphpiece.py:137-138`}
+    \State hold $s_i$ for the byte-level decoder \Comment{`slm4ie/tokenizers/hf_morph_piece.py:137-138`}
   \EndIf
 \EndFor
-\Return the parts joined, with the pending BPE tokens decoded \Comment{`slm4ie/tokenizers/hf_morphpiece.py:139-140`}
+\Return the parts joined, with the pending BPE tokens decoded \Comment{`slm4ie/tokenizers/hf_morph_piece.py:139-140`}
 ```
 
 - **1-2**: A token is a morpheme token only when it is not also a BPE token. A shared token, such as `a`, is decoded as bytes.

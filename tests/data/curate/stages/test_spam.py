@@ -8,11 +8,15 @@ import pytest
 pytest.importorskip("datatrove")
 
 from datatrove.data import Document  # noqa: E402
+from datatrove.pipeline.readers import JsonlReader  # noqa: E402
+from datatrove.pipeline.writers.jsonl import JsonlWriter  # noqa: E402
 
+from slm4ie.data.curate.paths import CuratePaths  # noqa: E402
 from slm4ie.data.curate.stages import spam as spam_module
 from slm4ie.data.curate.stages.spam import (
     SpamConfig,
     SpamFilter,
+    build_spam_executors,
     collapse_keys,
     load_spam_assets,
     load_spam_domains,
@@ -297,3 +301,49 @@ def test_model_hook_flags_when_score_exceeds_threshold() -> None:
         model_fn=lambda text: 0.9,
     )
     assert _kept(f.filter(_doc("Popolnoma nedolžno besedilo."))) is False
+
+
+def _paths(tmp_path: Path) -> CuratePaths:
+    """Build a CuratePaths anchored under *tmp_path* for structural tests."""
+    return CuratePaths(
+        input_folder=tmp_path / "datatrove",
+        output_dir=tmp_path / "curated",
+    )
+
+
+class TestSpamStage:
+    """The spam stage reads 01_language/ and writes 02_spam/."""
+
+    def test_returns_one_executor(self, tmp_path: Path) -> None:
+        """The spam stage runs as a single executor."""
+        execs = build_spam_executors(_paths(tmp_path))
+        assert len(execs) == 1
+
+    def test_pipeline_contains_spam_filter(self, tmp_path: Path) -> None:
+        """The pipeline reads input, applies SpamFilter, writes shards."""
+        execs = build_spam_executors(_paths(tmp_path))
+        types_ = [type(s) for s in execs[0].pipeline]
+        assert any(issubclass(t, JsonlReader) for t in types_)
+        assert SpamFilter in types_
+        assert JsonlWriter in types_
+
+    def test_writes_to_spam_folder(self, tmp_path: Path) -> None:
+        """The writer's output_folder is `<output_dir>/02_spam`."""
+        paths = _paths(tmp_path)
+        execs = build_spam_executors(paths)
+        writer = next(s for s in execs[0].pipeline if isinstance(s, JsonlWriter))
+        assert str(paths.stage_dir("spam")) in writer.output_folder.path
+
+    def test_config_and_assets_threaded(self, tmp_path: Path) -> None:
+        """SpamConfig and lexicon assets reach the underlying SpamFilter."""
+        cfg = SpamConfig(min_adult_hits=5, use_ldnoobw=False)
+        execs = build_spam_executors(
+            _paths(tmp_path),
+            spam_config=cfg,
+            adult_words={"sl": {"porno"}},
+            spam_words={"sl": {"viagra"}},
+            domains={"pornhub.com"},
+        )
+        spam = next(s for s in execs[0].pipeline if isinstance(s, SpamFilter))
+        assert spam.config.min_adult_hits == 5
+        assert "pornhub.com" in spam.domains

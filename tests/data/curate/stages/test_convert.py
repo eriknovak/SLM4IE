@@ -6,12 +6,15 @@ The convert stage is stage 0 of the curation pipeline. These tests cover
 
 import gzip
 import json
+import os
 from pathlib import Path
 from typing import Dict, List
 
 import pytest
 
 from slm4ie.data.curate.stages.convert import (
+    convert_input_files,
+    input_files_digest,
     lift_dataset,
     convert_record,
     run_convert_stage,
@@ -321,3 +324,55 @@ class TestRunConvertStage:
             workers=1,
         )
         assert results == {"ghost": None}
+
+
+def _write_extracted(input_dir: Path, key: str, text: str = "x") -> Path:
+    """Write a minimal extracted `<key>.jsonl` and return its path."""
+    input_dir.mkdir(parents=True, exist_ok=True)
+    path = input_dir / f"{key}.jsonl"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _digest(input_dir: Path, key: str, annotations: bool = False, previous: object = None) -> str:
+    """Return the convert input digest of *key* under *input_dir*."""
+    return input_files_digest(convert_input_files(input_dir, key, annotations, previous))  # type: ignore[arg-type]
+
+
+def test_convert_input_digest_changes_with_content(tmp_path: Path) -> None:
+    """Rewriting the source with other bytes of the same size changes the digest."""
+    _write_extracted(tmp_path, "news", "abcde")
+    before = _digest(tmp_path, "news")
+    _write_extracted(tmp_path, "news", "vwxyz")
+    assert _digest(tmp_path, "news") != before
+
+
+def test_convert_input_digest_ignores_mtime(tmp_path: Path) -> None:
+    """Touching the source, or rewriting identical bytes, keeps the digest."""
+    path = _write_extracted(tmp_path, "news", "abcde")
+    before = _digest(tmp_path, "news")
+    os.utime(path, ns=(2_000_000_000_000_000_000, 2_000_000_000_000_000_000))
+    assert _digest(tmp_path, "news") == before
+    _write_extracted(tmp_path, "news", "abcde")
+    assert _digest(tmp_path, "news") == before
+
+
+def test_convert_input_files_reuse_hash_when_size_and_mtime_match(tmp_path: Path) -> None:
+    """An untouched file keeps its recorded hash instead of being reread."""
+    _write_extracted(tmp_path, "news", "abcde")
+    files = convert_input_files(tmp_path, "news", False)
+    recorded = {"news.jsonl": {**files["news.jsonl"], "sha256": "recorded"}}  # type: ignore[dict-item]
+    assert convert_input_files(tmp_path, "news", False, recorded)["news.jsonl"]["sha256"] == "recorded"  # type: ignore[index]
+
+
+def test_convert_input_files_mark_absent(tmp_path: Path) -> None:
+    """A missing source file is recorded as absent, not raised."""
+    assert convert_input_files(tmp_path, "missing", False) == {"missing.jsonl": None}
+
+
+def test_convert_input_digest_folds_annotations(tmp_path: Path) -> None:
+    """With annotations on, the sidecar participates in the digest."""
+    _write_extracted(tmp_path, "news", "abc")
+    without = _digest(tmp_path, "news")
+    (tmp_path / "news.annotations.jsonl.gz").write_bytes(b"gz")
+    assert _digest(tmp_path, "news", annotations=True) != without

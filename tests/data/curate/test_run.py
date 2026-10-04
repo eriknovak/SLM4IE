@@ -3,7 +3,7 @@
 The stage executors are replaced by a stub that writes real shards — each
 stage appends a tag derived from its config slice to every document — so the
 sentinel lineage, the document digests, the atomic swap and the integrity
-check all run for real. The real builders are tested in test_curate_pipeline.py.
+check all run for real. The real builders are tested under stages/.
 """
 
 import gzip
@@ -693,3 +693,96 @@ def test_spam_writes_dropped_docs_without_touching_lineage(monkeypatch: pytest.M
     assert with_writer.document_digest == without_writer.document_digest
     assert (with_writer.records_in, with_writer.records_out) == (4, 2)
     assert without_writer.records_out == with_writer.records_out
+
+
+def test_curate_rejects_bad_override(tmp_path: Path) -> None:
+    """_curate fails fast (before any stage) on an invalid override block."""
+    import yaml
+
+    from slm4ie.data.curate.config import OverrideConfigError
+    from slm4ie.data.curate.run import curate
+
+    cfgs = tmp_path / "configs" / "data"
+    cfgs.mkdir(parents=True)
+    (cfgs / "extract.yaml").write_text(yaml.safe_dump({"datasets": {"news": {"extractor": "jsonl", "domain": "news"}}}))
+    (cfgs / "pretrain.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "input_dir": str(tmp_path / "in"),
+                "output_dir": str(tmp_path / "out"),
+                "quality": {"min_doc_words": 20},
+                "overrides": {"news": {"quality": {"max_elipsis_lines_ratio": 0.9}}},
+            }
+        )
+    )
+    with pytest.raises(OverrideConfigError, match="unknown knob"):
+        curate(
+            datasets=["news"],
+            run_all=False,
+            stage="all",
+            input_dir=None,
+            output_dir=None,
+            force=False,
+            workers=1,
+            pretrain_config=cfgs / "pretrain.yaml",
+            extract_config=cfgs / "extract.yaml",
+        )
+
+
+def test_resolve_requested_stages() -> None:
+    """Subset 'all' = scoped stages; --all 'all' = every stage."""
+    from slm4ie.data.curate.run import _resolve_requested_stages
+    from slm4ie.data.curate.stages import (
+        SCOPED_STAGES,
+        STAGE_NAMES,
+    )
+
+    assert _resolve_requested_stages(stage="all", run_all=False) == SCOPED_STAGES
+    assert _resolve_requested_stages(stage="all", run_all=True) == STAGE_NAMES
+    assert _resolve_requested_stages(stage="quality", run_all=False) == ("quality",)
+    assert _resolve_requested_stages(stage="exact_dedup", run_all=True) == ("exact_dedup",)
+
+
+def test_force_subset_stage_drops_only_requested_keys(tmp_path: Path) -> None:
+    """--force gigafida --stage quality drops gigafida's quality sentinel, keeps others."""
+    from slm4ie.data.curate.lineage import (
+        dataset_sentinel_path,
+        write_dataset_sentinel,
+    )
+    from slm4ie.data.curate.run import _apply_force
+
+    out = tmp_path / "pretrain"
+    q = out / "03_quality"
+    for key in ("gigafida", "kas"):
+        write_dataset_sentinel(q, key, config_slice={}, config_hash_value="h", records_in=1, records_out=1)
+    _apply_force(out, stage="quality", run_all=False, dataset_keys=["gigafida"])
+    assert not dataset_sentinel_path(q, "gigafida").exists()
+    assert dataset_sentinel_path(q, "kas").exists()
+
+
+def test_force_corpus_stage_removes_corpus_folders(tmp_path: Path) -> None:
+    """--force --all --stage exact_dedup removes dedup data + sentinel and dedup state."""
+    from slm4ie.data.curate.lineage import write_sentinel
+    from slm4ie.data.curate.run import _apply_force
+
+    out = tmp_path / "pretrain"
+    dedup = out / "05_exact_dedup"
+    write_sentinel(dedup, config_slice={}, config_hash_value="h", records_in=1, records_out=1)
+    (dedup / "alfa").mkdir(parents=True)
+    (dedup / "alfa" / "000.jsonl.gz").write_bytes(b"x")
+    state = out / "_partial" / "05_exact_dedup.scratch"
+    state.mkdir(parents=True)
+    _apply_force(out, stage="exact_dedup", run_all=True, dataset_keys=["alfa"])
+    assert not dedup.exists()
+    assert not state.exists()
+
+
+def test_force_all_stage_all_nukes_output(tmp_path: Path) -> None:
+    """--force --all (default stage all) clears the whole output dir."""
+    from slm4ie.data.curate.run import _apply_force
+
+    out = tmp_path / "pretrain"
+    (out / "00_convert" / "alfa").mkdir(parents=True)
+    (out / "00_convert" / "alfa" / "000.jsonl.gz").write_bytes(b"x")
+    _apply_force(out, stage="all", run_all=True, dataset_keys=["alfa"])
+    assert list(out.iterdir()) == []

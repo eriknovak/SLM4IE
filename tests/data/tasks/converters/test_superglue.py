@@ -10,6 +10,7 @@ import yaml
 
 from slm4ie.data.tasks.run import convert_tasks
 from slm4ie.data.tasks.converters import superglue
+from slm4ie.data.tasks.converters.superglue import coerce_bool
 
 
 def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
@@ -256,3 +257,22 @@ class TestHeldOutSkipsTrainSource:
         assert not (out_dir / "train.jsonl.gz").exists()
         assert len(_read_jsonl_gz(out_dir / "val.jsonl.gz")) == 1
         assert len(_read_jsonl_gz(out_dir / "test.jsonl.gz")) == 1
+
+
+class TestCoerceBool:
+    """Unit tests for `coerce_bool`."""
+
+    @pytest.mark.parametrize("value", [True, 1, "1", "true", "TRUE", " yes ", "y", "t"])
+    def test_truthy(self, value: object) -> None:
+        """Recognized truthy spellings coerce to True."""
+        assert coerce_bool(value) is True
+
+    @pytest.mark.parametrize("value", [False, 0, "0", "false", "FALSE", " no ", "n", "f"])
+    def test_falsy(self, value: object) -> None:
+        """Recognized falsy spellings coerce to False."""
+        assert coerce_bool(value) is False
+
+    @pytest.mark.parametrize("value", [None, "", "maybe", "2", [], {}])
+    def test_unrecognized_returns_none(self, value: object) -> None:
+        """Unrecognized values return None rather than a coerced bool."""
+        assert coerce_bool(value) is None

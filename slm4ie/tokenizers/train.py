@@ -52,7 +52,7 @@ TRAIN_STATS_FILENAME = "train_stats.json"
 #: stable tokenizer identity across reruns.
 TOKENIZER_ARTIFACT_GLOBS: Tuple[str, ...] = ("tokenizer.json", "spm.model", "metadata.json")
 
-#: Sidecar carrying the MLflow run linkage, read by the analysis logger to
+#: Sidecar carrying the MLflow run linkage, read by the evaluation logger to
 #: cross-link each eval run back to the training run that produced it.
 MLFLOW_LINK_FILENAME = "mlflow_train.json"
 
@@ -318,7 +318,7 @@ def _write_mlflow_link(
 ) -> None:
     """Persist the MLflow training-run linkage next to the artifact.
 
-    The analysis logger reads this sidecar to cross-link each eval run back to
+    The evaluation logger reads this sidecar to cross-link each eval run back to
     the training run that produced the artifact.
 
     Args:
@@ -341,9 +341,9 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
     """Log the training sweep to MLflow as a parent run with nested children.
 
     Each child run records the run's training parameters and timing under the
-    `phase=train` tag, mirroring the analysis logger's structure so train and
+    `phase=train` tag, mirroring the evaluation logger's structure so train and
     eval runs share the experiment but stay separate. The per-run MLflow ids are
-    written back to a sidecar so the analysis logger can cross-link eval runs to
+    written back to a sidecar so the evaluation logger can cross-link eval runs to
     their training run. A no-op when tracking is disabled or MLflow is absent.
 
     Args:

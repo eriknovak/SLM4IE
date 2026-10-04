@@ -1,4 +1,4 @@
-"""End-to-end tests for slm4ie/tokenizers/analysis.py."""
+"""End-to-end tests for slm4ie/tokenizers/evaluate.py."""
 
 import dataclasses
 import gzip
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.tokenizers.analysis import (
+from slm4ie.tokenizers.evaluate import (
     _train_link_tags,
     augment_with_statistics,
     build_report,

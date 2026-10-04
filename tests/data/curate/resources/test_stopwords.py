@@ -20,7 +20,7 @@ def test_load_sl_returns_set_and_bytes() -> None:
     assert len(raw) > 0
 
     on_disk = (
-        Path(__file__).resolve().parents[3] / "slm4ie" / "data" / "curate" / "resources" / "stopwords" / "sl.txt"
+        Path(__file__).resolve().parents[4] / "slm4ie" / "data" / "curate" / "resources" / "stopwords" / "sl.txt"
     ).read_bytes()
     assert raw == on_disk
 

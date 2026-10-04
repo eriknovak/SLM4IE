@@ -1,6 +1,6 @@
 """Bootstrap confidence intervals and paired significance for tokenizer metrics.
 
-Pure, numpy-only statistical primitives used by the tokenizer analysis pipeline.
+Pure, numpy-only statistical primitives used by the tokenizer evaluation.
 Decomposable metrics (fertility, compression ratios, MorphScore F1,
 Morph-Edit-Distance) reduce to per-unit sufficient statistics that sum across
 the resampling unit (documents for corpus metrics, forms for morph metrics),
