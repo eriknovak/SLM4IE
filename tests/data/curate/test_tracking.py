@@ -111,9 +111,11 @@ class TestLogPretrainRun:
 
     @pytest.fixture
     def store(self, tmp_path: Path, monkeypatch):
-        """Point tracking at a throwaway SQLite store."""
+        """Point tracking at a throwaway SQLite store, artifacts beside it."""
         pytest.importorskip("mlflow")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+        # The local artifact root is `./mlruns`, resolved against the working directory.
+        monkeypatch.chdir(tmp_path)
 
     def test_disabled_and_missing_corpus_return_none(self, tmp_path: Path):
         """Disabled tracking and an absent final corpus are no-ops."""
