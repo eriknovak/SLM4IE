@@ -97,7 +97,7 @@ Naming derives from one choice, the slug, so it stays consistent everywhere:
 | Thing  | Convention                                       | Example                                    |
 | ------ | ------------------------------------------------ | ------------------------------------------ |
 | Slug   | 2–4 kebab words naming what is under test        | `tokenizer-sweep-slovenian`                |
-| Branch | `exp/<slug>` main-line, `study/<slug>` secondary | `exp/tokenizer-sweep-slovenian`            |
+| Branch | `exp/<slug>`                                     | `exp/tokenizer-sweep-slovenian`            |
 | MLflow | `slm4ie/<category>/<slug>`                       | `slm4ie/methods/tokenizer-sweep-slovenian` |
 | Config | `<type>-<factor>.yaml`, or `<type>-<setting>`    | `sweep-vocab-size.yaml`                    |
 | Figure | `<config-stem>-<quantity>-by-<dimension>`        | `sweep-fertility-by-vocab.svg`             |

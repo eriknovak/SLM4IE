@@ -25,15 +25,13 @@ workflow owns it:
 
 ## Experiment labels
 
-A `lab` issue filed by `labflow:start` also carries its category and its
-line, mirroring the record's frontmatter; a human-filed one gets them at
-triage:
+A `lab` issue filed by `labflow:start` also carries its category, mirroring
+the record's frontmatter; a human-filed one gets it at triage:
 
-| Group    | Labels                              | Meaning                                       |
-| -------- | ----------------------------------- | --------------------------------------------- |
-| Category | `data` / `methods` / `validation`   | What the hypothesis is about                  |
-| Line     | `main-line` / `secondary`           | Merges into main, or record merges and branch freezes |
+| Group    | Labels                            | Meaning                      |
+| -------- | --------------------------------- | ---------------------------- |
+| Category | `data` / `methods` / `validation` | What the hypothesis is about |
 
-The same labels, plus `experiment`, mark the conclusion PR.
+The same label, plus `experiment`, marks the conclusion PR.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
