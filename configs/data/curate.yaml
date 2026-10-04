@@ -135,6 +135,9 @@ quality:
 # top-n-gram saturation, dup-n-gram fractions).  Reads 03_quality/
 # Writes 04_repetition/.  Empty `{}` keeps datatrove's Gopher-paper defaults;
 # the section must still exist to drive this stage's sentinel-hash slice.
+# Knobs: dup_line_frac (0.3), dup_para_frac (0.3), dup_line_char_frac (0.2),
+# dup_para_char_frac (0.2), top_n_grams ([[2, 0.2], [3, 0.18], [4, 0.16]]),
+# dup_n_grams ([[5, 0.15], [6, 0.14], ... [10, 0.1]]).
 repetition: {}
 
 # --- Stage 5: exact dedup (05_exact_dedup) ------------------------------
@@ -168,7 +171,11 @@ statistics:
 # Keyed by dataset, then by scoped stage (convert, language, spam, quality,
 # repetition); each block deep-merges over the matching global section.
 # Corpus stages and global keys cannot be overridden. Editing an entry re-runs
-# only that dataset's stage plus downstream and the corpus dedup/stats. See README.
+# only that dataset's stage plus downstream and the corpus dedup/stats.
+# `enabled: false` on language/spam/quality/repetition makes the dataset a
+# pass-through unit of that stage: its upstream shards are linked, not filtered. A top-level `profiles:` block
+# names reusable knob sets; a dataset takes one with `profile: <name>`, its own
+# knobs merged on top. See docs/pretraining-corpus.md.
 overrides:
   slovenian_news:
     quality:

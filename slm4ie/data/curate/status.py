@@ -9,7 +9,7 @@ rebuild.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
@@ -25,6 +25,7 @@ from slm4ie.data.curate.lineage import (
     dataset_keys_on_disk,
     has_input,
     lock_entry,
+    pass_through_label,
     read_sentinel,
     run_info,
     scoped_reason,
@@ -73,7 +74,8 @@ class UnitStatus:
         dataset: Dataset key, or `None` for a corpus stage.
         state: `current`, `stale` (a run would rebuild it) or `missing`
             (nothing to build it from).
-        reason: Why the unit is stale, else `None`.
+        reason: Why the unit is stale, else `None`; a pass-through unit
+            carries `pass-through` here, alone when current.
     """
 
     stage: str
@@ -155,7 +157,10 @@ def status(
                 buildable = has_input(paths, stage, key)
                 reason = scoped_reason(setup, stage, key)[0] if sentinel is not None else None
                 locked = (lock.get(stage) or {}).get(key)
-                results.append(_unit_status(stage, key, sentinel, reason, buildable, locked, lock_exists))
+                unit = _unit_status(stage, key, sentinel, reason, buildable, locked, lock_exists)
+                if setup.passes_through(stage, key) and unit.state != "missing":
+                    unit = replace(unit, reason=pass_through_label(unit.reason))
+                results.append(unit)
         else:
             sentinel = read_sentinel(paths.stage_dir(stage))
             reason = corpus_reason(setup, stage, corpus_inputs(setup, stage))[0] if sentinel is not None else None

@@ -14,7 +14,7 @@ from datatrove.pipeline.filters import (  # noqa: E402
 )
 
 from slm4ie.data.curate.paths import CuratePaths  # noqa: E402
-from slm4ie.data.curate.stages.repetition import build_repetition_executors  # noqa: E402
+from slm4ie.data.curate.stages.repetition import RepetitionConfig, build_repetition_executors  # noqa: E402
 
 
 def _paths(tmp_path: Path) -> CuratePaths:
@@ -52,3 +52,13 @@ def test_repetition_executor_honors_input_override(tmp_path: Path) -> None:
     execs = build_repetition_executors(paths, tasks=1, input_override=override)
     reader = execs[0].pipeline[0]
     assert str(override) in reader.data_folder.path
+
+
+def test_repetition_executor_passes_its_config_to_the_filter(tmp_path: Path) -> None:
+    """Every RepetitionConfig field reaches GopherRepetitionFilter unchanged."""
+    rc = RepetitionConfig(dup_line_frac=0.5, top_n_grams=((2, 0.3),), dup_n_grams=((5, 0.2),))
+    execs = build_repetition_executors(_paths(tmp_path), repetition_config=rc)
+    flt = next(s for s in execs[0].pipeline if isinstance(s, GopherRepetitionFilter))
+    assert flt.dup_line_frac == 0.5
+    assert flt.top_n_grams == ((2, 0.3),)
+    assert flt.dup_n_grams == ((5, 0.2),)
