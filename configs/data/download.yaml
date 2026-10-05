@@ -87,8 +87,8 @@ datasets:
       utterance-aware TEI extractor. The plain variant (handle
       11356/2004) lacks <w> tokens and would silently fall back to
       paragraph parsing on registry/header content. Contained in siparl
-      (built from siParl; every measured sentence recurs there), so
-      curation's --all skips it in favour of siparl.
+      (built from siParl; every measured sentence recurs there). siparl is
+      disabled so that this newer release is the one curated.
 
   kas:
     enabled: true
@@ -138,7 +138,7 @@ datasets:
       (monographs, articles, theses) from Slovenian universities (2000-2022).
 
   siparl:
-    enabled: true
+    enabled: false
     source: http
     publisher: clarin.si
     name: "siParl 4.0 (Slovenian Parliamentary Corpus)"
@@ -149,6 +149,11 @@ datasets:
     note: >
       239 million words from parliamentary minutes (1990-2022). Annotated TEI XML
       format, text extraction required. Contains ParlaMint-SI 5.0 (parlamint_si).
+      Disabled in favour of that newer release (2025 against 2024): the
+      pretraining selection prefers the newer corpus of a containment group.
+      Costs the 1990-2000 minutes and the working bodies, about 69% of
+      siParl's sentences; set `enabled: true` to make siparl the
+      representative again.
 
   janes_forum:
     enabled: false

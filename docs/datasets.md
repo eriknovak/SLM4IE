@@ -46,6 +46,8 @@ on request; enable it in the gitignored `download.local.yaml`), `Metafida 1.0`
 and `Trendi` (not bulk-downloadable). `KAS 2.0` (CLARIN academic login) and the
 living `slovenian_news` crawl are `manual: true` but enabled: download only
 checks their folders, and curation selects them.
+`siParl 4.0` is off because the newer `ParlaMint-SI 5.0` is curated in its
+place (see the [containment map](#containment-map)).
 
 The Janes corpora (`janes_forum`, `janes_blog`, `janes_news`) are disabled for
 their informal, non-standard register: they are user-generated forum posts,
@@ -72,7 +74,7 @@ disjoint, its figure kept here.
 | -------------------- | ------------------ | ----------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SUK                  | `suk` (benchmark)  | `ssj500k`                                                                           | contains                                       | [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)                                                                                                                                 |
 | SUK and SentiNews    | —                  | `suk`, `sentinews`                                                                  | overlaps: SentiCoref's 837 documents           | [SentiCoref 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1285)                                                                                                                          |
-| Parliament           | `siparl`           | `parlamint_si`                                                                      | contains; measured 100%                        | [siParl 4.0](https://www.clarin.si/repository/xmlui/handle/11356/1936), [ParlaMint paper §2.1.14](https://epubl.ktu.edu/object/elaba:119556500/119556500.pdf)                                       |
+| Parliament | `parlamint_si` | `siparl` (off) | `siparl` contains `parlamint_si`; measured 100% | [siParl 4.0](https://www.clarin.si/repository/xmlui/handle/11356/1936), [ParlaMint paper §2.1.14](https://epubl.ktu.edu/object/elaba:119556500/119556500.pdf) |
 | mC4                  | `c4`               | `legal_mc4`                                                                         | contains; measured 100% of URLs and text       | [Legal-mC4 card](https://huggingface.co/datasets/joelniklaus/legal-mc4), [filter script](https://raw.githubusercontent.com/JoelNiklaus/LegalDatasets/main/pretrain/mc4_legal/filter_mc4.py)         |
 | Web crawls           | none, all selected | `fineweb2`, `culturax`, `c4`, `hplt`, `cc100`, `classla_web_sl`, `macocu_sl`        | overlaps; measured 10–76%                      | [FineWeb-2](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2), [CulturaX](https://huggingface.co/datasets/uonlp/CulturaX), [HPLT 2.0](https://huggingface.co/datasets/HPLT/HPLT2.0_cleaned), [CLASSLA-web 2.0 paper](https://arxiv.org/html/2601.11170) |
 | Wikipedia            | none               | `classlawiki_sl` with `c4`, `cc100`, `culturax`, `fineweb2`, `hplt`, `macocu_sl`    | overlaps; measured 12–63%                      | [FineWeb-2 card](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2)                                                                                                                           |
@@ -92,9 +94,14 @@ isolation check has nothing to enforce there.
 
 **Parliament.** ParlaMint-SI was built from siParl, and its 2000–2022 minutes
 sit inside siParl 4.0's 1990–2022. Every sampled ParlaMint-SI sentence recurs in
-siParl (31% of siParl's recur in ParlaMint-SI), so `siparl` is the
-representative and `--all` reports `parlamint_si` as `skipped: contained in
-siparl`. Name `parlamint_si` positionally to curate it alone.
+siParl (31% of siParl's recur in ParlaMint-SI), so siParl holds ParlaMint-SI
+and only one may enter the corpus. The project prefers the newer release of a
+group, and ParlaMint-SI 5.0 (July 2025) is newer than siParl 4.0 (June 2024),
+so `siparl` is `enabled: false` and `parlamint_si` is curated. This gives up
+the 1990–2000 minutes and the working bodies, about 69% of siParl's sentences
+(239M words against 70M). Setting `siparl` back to `enabled: true` makes it the
+representative again, and `--all` then reports `parlamint_si` as
+`skipped: contained in siparl`.
 
 **mC4.** Legal-mC4's filter script reads the `train` split of `mc4`, now an
 alias of `allenai/c4`; every one of its URLs and sampled sentences recurs in
