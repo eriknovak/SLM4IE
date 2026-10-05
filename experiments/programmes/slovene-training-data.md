@@ -6,11 +6,8 @@ status: open
 members:
   - ../data/data-landscape-slovenian/
   - ../data/curation-quality-slovenian/
+  - ../data/curation-thresholds-slovenian/
 planned:
-  - slug: curation-thresholds-slovenian
-    short: Curation thresholds
-    title: whether per-source filter settings keep curated domain text while still removing web spam, checked on a fresh draw
-    builds_on: [curation-quality-slovenian]
   - slug: medical-ie-slovenian
     short: Medical extraction examples
     title: how to build native Slovene medical examples for information extraction, since open supply has too few
@@ -38,6 +35,7 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 - **Pretraining text per domain**: whether open native text is enough to train tokenizers and models in each domain — [data-landscape-slovenian:H1], [data-landscape-slovenian:H3]
 - **Information-extraction examples**: whether native examples exist to fine-tune and evaluate extraction in each domain — [data-landscape-slovenian:H2], [data-landscape-slovenian:H4]
 - **Curation of the corpus**: whether the pipeline removes bad text while keeping good domain text, per stage and per source — [curation-quality-slovenian:H1], [curation-quality-slovenian:H2], [curation-quality-slovenian:H3], [curation-quality-slovenian:H4]
+- **Filter tuning per source**: whether settings chosen per source let each content filter drop what it targets, and mostly bad text — [curation-thresholds-slovenian:H1], [curation-thresholds-slovenian:H2], [curation-thresholds-slovenian:H3], [curation-thresholds-slovenian:H4], [curation-thresholds-slovenian:H5]
 - **Provenance of the text**: how much of the supply was written in Slovene rather than translated or generated — [data-landscape-slovenian:F1], [data-landscape-slovenian:F6]
 
 ## Open

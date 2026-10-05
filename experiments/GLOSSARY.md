@@ -22,6 +22,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Quadratic-weighted κ** (weighted kappa): Cohen's κ for an ordered scale such as 1-5, where a disagreement costs the square of its distance, so a one-point miss counts far less than a three-point one.
 - **Wilson interval** (Wilson score interval): a confidence interval for a share that, unlike the textbook one, never runs below 0 or above 1, which matters for shares near either end.
 - **Drop precision**: of the documents a curation stage dropped, the share judged bad text; high means the stage removes what it should.
+- **Target precision**: of the documents a content filter dropped, the share judged to carry what that filter is built to catch — not Slovene for the language filter, spam for the spam filter, ill-formed text for the quality filter, repeated furniture for the repetition filter.
 - **Residual bad rate**: of the documents a curation stage kept, the share judged bad text; what the stage failed to catch.
 - **Kept win rate**: of the pairs of one kept and one dropped document from the same source and stage, the share where the judge prefers the kept one in both presentation orders.
 - **Order disagreement**: the share of pairs whose answer changes when the two documents swap places; it measures the judge's position bias.
