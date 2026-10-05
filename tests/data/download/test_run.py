@@ -265,6 +265,16 @@ class TestDownloadDatasets:
             download_datasets(config_file)
         assert "Download manually." in caplog.text
 
+    def test_manual_dataset_needs_no_source(self, tmp_path: Path, caplog):
+        """A manual dataset fed by a pipeline outside the repo may omit `source`."""
+        config_file = self._make_config_file(
+            tmp_path,
+            {"news": {"enabled": True, "manual": True, "output_dir": "news", "note": "Fed weekly."}},
+        )
+        with caplog.at_level(logging.WARNING):
+            download_datasets(config_file)
+        assert "Fed weekly." in caplog.text
+
 
 class TestFailFastValidation:
     """Tests for `_validate_selection` fail-fast behaviour."""

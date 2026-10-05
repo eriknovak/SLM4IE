@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
+import yaml
 
 pytest.importorskip("datatrove")
 
@@ -496,7 +497,7 @@ def test_run_writes_lock_file(env: _Env) -> None:
     """A run records every unit's lineage in the lock file beside the config."""
     env.run("--all")
     lock = read_lock(env.root / "curation.lock.yaml")
-    assert set(lock) == set(STAGE_NAMES)
+    assert set(lock) == {*STAGE_NAMES, "selection"}
     entry = lock["quality"][_DATASET]
     assert entry["document_digest"] == read_sentinel(env.unit("quality")).document_digest  # type: ignore[union-attr]
     assert "completed_at" not in entry
@@ -590,6 +591,80 @@ def test_corpus_stage_reads_only_roster_datasets(env: _Env) -> None:
     assert env.stub.ran == [("exact_dedup", (_DATASET,))]
     assert not (env.unit("exact_dedup") / "benchmark").exists()
     assert not (env.unit("exact_dedup") / curate_runner.PROGRESS_NAME).exists()
+
+
+def _write_catalog(root: Path, datasets: Dict[str, Dict[str, Any]]) -> None:
+    """Write a download catalog under *root*'s `configs/data/`, where curation looks for it."""
+    folder = root / "configs" / "data"
+    folder.mkdir(parents=True, exist_ok=True)
+    entries = {key: {"source": "http", "output_dir": key, **fields} for key, fields in datasets.items()}
+    (folder / "download.yaml").write_text(yaml.safe_dump({"datasets": entries}), encoding="utf-8")
+
+
+@pytest.fixture
+def family(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Env:
+    """Return an environment whose catalog has a superset, its member, an overlap and a disabled entry."""
+    environment = _Env(monkeypatch, tmp_path, roster=["big", "small", "web_a", "web_b", "off"])
+    _write_catalog(
+        tmp_path,
+        {
+            "big": {"contains": ["small"]},
+            "small": {},
+            "web_a": {"overlaps": ["web_b"]},
+            "web_b": {},
+            "off": {"enabled": False},
+            "gold": {"role": "benchmark"},
+        },
+    )
+    return environment
+
+
+def test_all_selects_one_representative_per_group(family: _Env) -> None:
+    """`--all` converts the superset but not its member, nor a disabled entry."""
+    family.run("--all", "--stage", "convert")
+    assert family.stub.ran == [("convert", ("big", "web_a", "web_b"))]
+
+
+def test_positional_member_bypasses_containment(family: _Env) -> None:
+    """A contained member named on the command line still runs."""
+    family.run("small", "--stage", "convert")
+    assert family.stub.ran == [("convert", ("small",))]
+
+
+def test_run_logs_selection_and_overlap_warning(family: _Env, caplog: pytest.LogCaptureFixture) -> None:
+    """Every run starts with the selection, overlaps as warnings naming dedup."""
+    with caplog.at_level("INFO"):
+        family.run("small", "--stage", "convert")
+    assert "skipped: contained in big" in caplog.text
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("web_a overlaps web_b" in m and "dedup" in m for m in warnings)
+
+
+def test_status_lists_every_entry_with_a_reason(family: _Env, capsys: pytest.CaptureFixture[str]) -> None:
+    """`status` prints each catalog entry as selected or skipped with why."""
+    family.run("--all", "--stage", "convert")
+    capsys.readouterr()
+    family.status()
+    out = capsys.readouterr().out
+    lines = {line.split()[0]: " ".join(line.split()[1:]) for line in out.splitlines() if line.split()}
+    assert lines["big"] == "selected"
+    assert lines["small"] == "skipped: contained in big"
+    assert lines["off"] == "skipped: disabled"
+    assert lines["gold"] == "skipped: role benchmark"
+    assert "web_a overlaps web_b" in out
+
+
+def test_lock_records_selection_and_status_reports_a_change(family: _Env, capsys: pytest.CaptureFixture[str]) -> None:
+    """The lock keeps the resolved selection; a containment change shows in `status`."""
+    family.run("--all", "--stage", "convert")
+    lock = read_lock(family.root / "curation.lock.yaml")
+    assert lock["selection"]["selected"] == ["big", "web_a", "web_b"]
+    assert lock["selection"]["skipped"]["small"] == "contained in big"
+
+    _write_catalog(family.root, {"big": {}, "small": {}, "web_a": {}, "web_b": {}, "off": {"enabled": False}})
+    capsys.readouterr()
+    family.status()
+    assert "selection differs from lock: small now selected" in capsys.readouterr().out
 
 
 def _write_stage_shards(stage_dir: Path, key: str, n_shards: int) -> None:

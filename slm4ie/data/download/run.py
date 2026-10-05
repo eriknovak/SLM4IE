@@ -136,7 +136,8 @@ def _validate_selection(
 ) -> None:
     """Raise ConfigError if any selected dataset cannot be processed.
 
-    Always raises on unknown source. Additionally, when `explicit` is
+    Raises on an unknown source, except for a manual dataset, which is never
+    dispatched to a source. Additionally, when `explicit` is
     True, escalates `enabled: false` and missing-manual datasets into
     errors (so a user who explicitly named a key gets a hard failure
     instead of a silent skip).
@@ -157,7 +158,7 @@ def _validate_selection(
         if explicit and not config.enabled:
             problems.append(f"{key}: explicitly selected but disabled in config" + _note_suffix(config.note))
             continue
-        if config.source not in _SOURCE_NAMES:
+        if not config.manual and config.source not in _SOURCE_NAMES:
             problems.append(f"{key}: unknown source '{config.source}'" + _note_suffix(config.note))
             continue
         if explicit and config.manual and not _dir_has_files(Path(base_output_dir) / config.output_dir):

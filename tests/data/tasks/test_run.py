@@ -21,6 +21,7 @@ from slm4ie.data.tasks.run import (
     assign_hash_split,
     convert_tasks,
     get_converter,
+    iter_extracted_records,
     resolve_keys,
     synthesize_id,
     target_splits,
@@ -257,6 +258,22 @@ class TestConvertTasksEndToEnd:
         cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(2))
         with pytest.raises(KeyError):
             convert_tasks(cfg_path, entry_keys=["ner/missing"], max_workers=1)
+
+
+class TestExcludedDocuments:
+    """`source.exclude` drops the excluded source's documents by `doc_id`."""
+
+    def test_excluded_doc_ids_are_dropped(self, tmp_path: Path) -> None:
+        """Records whose `doc_id` appears in the excluded source are skipped."""
+        records = _ner_records(4)
+        tasks_yaml = _make_ner_layout(tmp_path, "big", "held_out", records)
+        _write_jsonl(tmp_path / "extracted" / "small.jsonl", [records[1], records[3]])
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/big"]["source"]["exclude"] = ["small"]
+        tasks_yaml.write_text(yaml.safe_dump(body))
+        cfg = load_tasks_config(tasks_yaml)
+        kept = [r["doc_id"] for r in iter_extracted_records(cfg.entries[0], cfg.roots)]
+        assert kept == ["s0", "s2"]
 
 
 class TestRoleGatingAcceptance:

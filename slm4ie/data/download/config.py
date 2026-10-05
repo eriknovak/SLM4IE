@@ -2,13 +2,16 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from slm4ie.utils.config import load_yaml
 
 #: Allowed `role` values in the download catalog. Unrelated to the `role`
 #: field in configs/data/tasks.yaml (`finetune_and_eval` | `held_out`).
 DATASET_ROLES = frozenset({"pretrain", "benchmark", "lexicon"})
+
+#: Entry fields that name other registry keys: full and partial inclusion.
+RELATIONS = ("contains", "overlaps")
 
 
 class ConfigError(Exception):
@@ -60,6 +63,12 @@ class DatasetConfig:
         publisher: Optional host the dataset is published on, for attribution
             (e.g., 'clarin.si'). Purely descriptive; carries no
             dispatch behaviour.
+        contains: Registry keys whose documents this entry fully includes.
+            Transitive: the pretraining selection keeps only the outermost
+            enabled entry of a containment group.
+        overlaps: Registry keys this entry shares part of its documents
+            with (the same upstream crawl or source). Symmetric and never
+            transitive; it only warns, dedup removes the shared text.
     """
 
     key: str
@@ -75,6 +84,8 @@ class DatasetConfig:
     role: str = "pretrain"
     tasks: List[str] = field(default_factory=list)
     publisher: Optional[str] = None
+    contains: List[str] = field(default_factory=list)
+    overlaps: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, key: str, data: Dict) -> "DatasetConfig":
@@ -89,8 +100,9 @@ class DatasetConfig:
 
         Raises:
             ConfigError: If the entry is enabled and not manual but is
-                missing or has an empty `output_dir`, or if `role` is
-                not one of the allowed values.
+                missing or has an empty `output_dir`, if `role` is not one
+                of the allowed values, or if `contains` / `overlaps` is not
+                a list of keys.
         """
         enabled = data.get("enabled", True)
         manual = data.get("manual", False)
@@ -101,6 +113,11 @@ class DatasetConfig:
         role = data.get("role", "pretrain")
         if role not in DATASET_ROLES:
             raise ConfigError([f"{key}: unknown role '{role}' (expected one of: {', '.join(sorted(DATASET_ROLES))})"])
+
+        relations = {name: data.get(name) or [] for name in RELATIONS}
+        for name, keys in relations.items():
+            if not isinstance(keys, list) or not all(isinstance(k, str) and k for k in keys):
+                raise ConfigError([f"{key}: '{name}' must be a list of dataset keys"])
 
         return cls(
             key=key,
@@ -116,6 +133,8 @@ class DatasetConfig:
             role=role,
             tasks=data.get("tasks", []),
             publisher=data.get("publisher"),
+            contains=relations["contains"],
+            overlaps=relations["overlaps"],
         )
 
 
@@ -148,6 +167,9 @@ def load_download_config(config_path: Path) -> DownloadConfig:
 
     Raises:
         FileNotFoundError: If config file does not exist.
+        ConfigError: If an entry is malformed, or a `contains` / `overlaps`
+            relation names an unknown key, the entry itself, or closes a
+            `contains` cycle.
     """
     raw = load_yaml(config_path)
 
@@ -156,5 +178,134 @@ def load_download_config(config_path: Path) -> DownloadConfig:
 
     for key, data in raw.get("datasets", {}).items():
         datasets[key] = DatasetConfig.from_dict(key, data)
+    validate_relations(datasets)
 
     return DownloadConfig(output_dir=output_dir, datasets=datasets)
+
+
+def validate_relations(datasets: Dict[str, DatasetConfig]) -> None:
+    """Check every `contains` / `overlaps` relation against the registry.
+
+    Args:
+        datasets: The parsed catalog entries.
+
+    Raises:
+        ConfigError: Listing every relation that names an unknown key or the
+            entry itself, and every `contains` cycle.
+    """
+    problems: List[str] = []
+    for key, spec in datasets.items():
+        for name in RELATIONS:
+            for other in getattr(spec, name):
+                if other == key:
+                    problems.append(f"{key}: '{name}' lists the entry itself")
+                elif other not in datasets:
+                    problems.append(f"{key}: '{name}' names unknown dataset '{other}'")
+    if problems:
+        raise ConfigError(problems)
+    for key in datasets:
+        if key in contained_in(datasets, key):
+            problems.append(f"{key}: 'contains' cycle through {key}")
+    if problems:
+        raise ConfigError(problems)
+
+
+def contained_in(datasets: Dict[str, DatasetConfig], key: str) -> Set[str]:
+    """Return every key *key* contains, directly or through another entry.
+
+    Args:
+        datasets: The parsed catalog entries.
+        key: The containing entry.
+
+    Returns:
+        The transitive closure of `key`'s `contains` relation; holds `key`
+        itself only when a cycle runs back to it.
+    """
+    seen: Set[str] = set()
+    stack = list(datasets[key].contains)
+    while stack:
+        other = stack.pop()
+        if other in seen or other not in datasets:
+            continue
+        seen.add(other)
+        stack.extend(datasets[other].contains)
+    return seen
+
+
+#: Status of a catalog entry the pretraining selection keeps.
+SELECTED = "selected"
+
+
+@dataclass
+class Selection:
+    """The pretraining selection resolved from the catalog's containment relations.
+
+    Attributes:
+        status: Every catalog key, in declaration order, mapped to `selected`
+            or `skipped: <reason>` (`contained in <key>`, `disabled`, or
+            `role <role>`).
+        overlaps: Selected pairs declared as `overlaps`, each once, in
+            declaration order; dedup is expected to remove what they share.
+    """
+
+    status: Dict[str, str] = field(default_factory=dict)
+    overlaps: List[Tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def selected(self) -> List[str]:
+        """Keys the selection keeps, in declaration order."""
+        return [key for key, state in self.status.items() if state == SELECTED]
+
+    def report(self) -> List[str]:
+        """Render the selection as the lines `status` and `run` print.
+
+        Returns:
+            One line per catalog entry, then one warning line per overlap.
+        """
+        width = max((len(key) for key in self.status), default=0)
+        lines = [f"{key:<{width}}  {state}" for key, state in self.status.items()]
+        lines += [
+            f"warning: {a} overlaps {b}; exact and sentence dedup are expected to remove the shared documents"
+            for a, b in self.overlaps
+        ]
+        return lines
+
+
+def resolve_selection(datasets: Dict[str, DatasetConfig]) -> Selection:
+    """Pick one representative per containment group among the enabled pretraining entries.
+
+    An enabled `role: pretrain` entry is selected unless another such entry
+    contains it, directly or transitively; it is then skipped in favour of the
+    outermost one, which no eligible entry contains. `overlaps` never changes
+    the selection: a selected pair is only reported for a warning.
+
+    Args:
+        datasets: Catalog entries whose relations passed `validate_relations`.
+
+    Returns:
+        The status of every entry and the selected overlapping pairs.
+    """
+    eligible = [key for key, spec in datasets.items() if spec.enabled and spec.role == "pretrain"]
+    closure = {key: contained_in(datasets, key) for key in eligible}
+    outermost = [key for key in eligible if not any(key in closure[other] for other in eligible)]
+    container = {member: key for key in reversed(outermost) for member in closure[key]}
+    selection = Selection()
+    for key, spec in datasets.items():
+        if spec.role != "pretrain":
+            selection.status[key] = f"skipped: role {spec.role}"
+        elif not spec.enabled:
+            selection.status[key] = "skipped: disabled"
+        elif key in container:
+            selection.status[key] = f"skipped: contained in {container[key]}"
+        else:
+            selection.status[key] = SELECTED
+    order = {key: index for index, key in enumerate(datasets)}
+    chosen = set(selection.selected)
+    pairs: Set[Tuple[str, str]] = {
+        (key, other) if order[key] < order[other] else (other, key)
+        for key in chosen
+        for other in datasets[key].overlaps
+        if other in chosen
+    }
+    selection.overlaps = sorted(pairs, key=lambda pair: (order[pair[0]], order[pair[1]]))
+    return selection

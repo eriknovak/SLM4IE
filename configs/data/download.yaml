@@ -8,7 +8,8 @@
 #   datasets     Map of <dataset key> -> dataset spec.
 #
 # Entry fields:
-#   enabled      If false, --all skips it (still fetchable by key).
+#   enabled      If false, --all skips it (still fetchable by key), and the
+#                curation selection reports it as `skipped: disabled`.
 #   source       http | huggingface — selects the download backend.
 #   name         Human-readable title.
 #   output_dir   Subdirectory under the top-level output_dir.
@@ -24,6 +25,12 @@
 #                `lexicon` marks tokenizer/morphology lexicons. Neither enters
 #                the pretraining corpus. Unrelated to tasks.yaml's `role`.
 #   tasks        [non-pretrain] Downstream tasks supported.
+#   contains     Keys whose documents this entry fully includes. Transitive;
+#                curation's --all keeps only the outermost enabled entry of a
+#                containment group (the representative). See docs/datasets.md.
+#   overlaps     Keys sharing part of this entry's documents (same upstream
+#                crawl). Symmetric, not transitive; curation only warns, dedup
+#                removes the shared text. Declared on one side of the pair.
 #
 # Selection: pass dataset keys positionally, or --all for enabled entries.
 
@@ -39,6 +46,11 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2079/CLASSLA-web.sl.2.0.anno.jsonl.gz?sequence=19&isAllowed=y"
     output_dir: classla_web_sl
+    overlaps: [c4, cc100, coleslaw, culturax, fineweb2, hplt, legal_mc4, macocu_sl, slovenian_news]
+    note: >
+      Crawled in 2024. CLASSLA-web.sl 1.0 was the MaCoCu-sl 2.0 crawl further
+      cleaned; 2.0 is a fresh crawl, so it overlaps macocu_sl without
+      containing it. Overlaps are measured (docs/datasets.md, containment map).
 
   classlawiki_sl:
     enabled: true
@@ -48,6 +60,7 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1427/classlawiki-sl.conllu.gz?sequence=6&isAllowed=y"
     output_dir: classlawiki_sl
+    overlaps: [c4, cc100, culturax, fineweb2, hplt, macocu_sl]
 
   macocu_sl:
     enabled: true
@@ -58,6 +71,7 @@ datasets:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-sl-2.0.xml.zip?sequence=1&isAllowed=y"
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1795/MaCoCu-monolingual.dtd?sequence=2&isAllowed=y"
     output_dir: macocu_sl
+    overlaps: [c4, cc100, coleslaw, culturax, fineweb2, hplt, legal_mc4]
 
   parlamint_si:
     enabled: true
@@ -72,10 +86,14 @@ datasets:
       token annotations inside <u>/<seg> utterances — required by the
       utterance-aware TEI extractor. The plain variant (handle
       11356/2004) lacks <w> tokens and would silently fall back to
-      paragraph parsing on registry/header content.
+      paragraph parsing on registry/header content. Contained in siparl
+      (built from siParl; every measured sentence recurs there), so
+      curation's --all skips it in favour of siparl. The later release date
+      brings metadata, not text: siparl also holds 1990-2000 and the
+      working bodies.
 
   kas:
-    enabled: false
+    enabled: true
     source: http
     publisher: clarin.si
     name: "KAS 2.0 (Academic Writing Corpus)"
@@ -83,6 +101,7 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/handle/11356/1448"
     output_dir: kas
+    overlaps: [finepdf, oss]
     note: >
       Requires CLARIN.SI academic login (Shibboleth). Download kas.tei.tar.gz
       manually from the repository page and place it in data/raw/kas/.
@@ -95,6 +114,7 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2095/COLESLAW.zip?sequence=3&isAllowed=y"
     output_dir: coleslaw
+    overlaps: [c4, finepdf, legal_mc4]
 
   povejmo_vemo_med:
     enabled: true
@@ -127,9 +147,12 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1936/siParl.4.0.TEI.ana.zip?sequence=8&isAllowed=y"
     output_dir: siparl
+    contains: [parlamint_si]
     note: >
       239 million words from parliamentary minutes (1990-2022). Annotated TEI XML
-      format, text extraction required. May overlap with ParlaMint-SI 5.0.
+      format, text extraction required. Contains ParlaMint-SI 5.0 (parlamint_si),
+      a later release that re-encodes the 2000-2022 plenary sittings with
+      speaker and topic metadata but adds no text.
 
   janes_forum:
     enabled: false
@@ -141,7 +164,9 @@ datasets:
     output_dir: janes_forum
     note: >
       47 million tokens from Slovenian forum posts (2001-2015).
-      Informal register, user-generated content.
+      Excluded from pretraining for its informal, non-standard register
+      (user-generated); revisiting it is a separate experiment. Contained in
+      metafida.
 
   janes_blog:
     enabled: false
@@ -153,7 +178,9 @@ datasets:
     output_dir: janes_blog
     note: >
       34.5 million tokens from blog posts and comments (2006-2016).
-      Informal register, user-generated content.
+      Excluded from pretraining for its informal, non-standard register
+      (user-generated); revisiting it is a separate experiment. Contained in
+      metafida.
 
   janes_news:
     enabled: false
@@ -165,7 +192,9 @@ datasets:
     output_dir: janes_news
     note: >
       14.8 million tokens from news article comments (2007-2015).
-      Informal register, user-generated content.
+      Excluded from pretraining for its informal, non-standard register
+      (user-generated); revisiting it is a separate experiment. Contained in
+      metafida.
 
   kzb:
     enabled: true
@@ -175,6 +204,7 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1872/KZB.conll.zip?sequence=1&isAllowed=y"
     output_dir: kzb
+    overlaps: [finepdf]
     note: >
       25 million words / 33.6 million tokens of curated scientific
       monographs and papers (2000-2023).
@@ -199,6 +229,7 @@ datasets:
     configs:
       - "slv_Latn"
     output_dir: finepdf
+    overlaps: [legal_mc4]
 
   fineweb2:
     enabled: true
@@ -208,6 +239,7 @@ datasets:
     configs:
       - "slv_Latn"
     output_dir: fineweb2
+    overlaps: [c4, cc100, culturax, hplt, legal_mc4, slovenian_news]
 
   culturax:
     enabled: true
@@ -217,6 +249,7 @@ datasets:
     configs:
       - "sl"
     output_dir: culturax
+    overlaps: [c4, cc100, hplt, legal_mc4, slovenian_news]
     note: >
       Gated dataset. Requires HF_TOKEN env var with a token that has
       accepted the dataset terms at https://huggingface.co/datasets/uonlp/CulturaX.
@@ -229,8 +262,11 @@ datasets:
       - "https://huggingface.co/datasets/joelniklaus/legal-mc4/resolve/main/data/sl.train.0.jsonl.xz"
       - "https://huggingface.co/datasets/joelniklaus/legal-mc4/resolve/main/data/sl.validation.0.jsonl.xz"
     output_dir: legal_mc4
+    overlaps: [cc100, hplt]
     note: >
       Legal domain text filtered from mC4. ~32.5K documents, ~107M words.
+      Contained in c4 (every URL and measured sentence recurs there), so
+      curation's --all skips it in favour of c4.
       Downloaded directly from the HuggingFace LFS endpoint (the repo's
       loading script is no longer supported by the datasets library).
 
@@ -242,9 +278,11 @@ datasets:
     configs:
       - "sl"
     output_dir: c4
+    contains: [legal_mc4]
+    overlaps: [cc100, hplt, slovenian_news]
     note: >
       Cleaned multilingual Common Crawl corpus. ~5 GB+ for Slovenian.
-      May overlap with other Common Crawl-derived datasets.
+      Contains legal_mc4; overlaps the other Common Crawl-derived corpora.
 
   hplt:
     enabled: true
@@ -254,6 +292,7 @@ datasets:
     configs:
       - "slv_Latn"
     output_dir: hplt
+    overlaps: [cc100, slovenian_news]
     note: >
       HPLT project web-crawled corpus from CommonCrawl + Internet Archive,
       cleaned tier. Parquet-based, loadable by datasets >= 4.0. Replaces the
@@ -278,6 +317,7 @@ datasets:
     name: "Gigafida 2.2"
     source: http
     output_dir: gigafida
+    overlaps: [slovenian_news]
     note: >
       Not publicly downloadable. CJVT distributes it on request as
       presigned MinIO URLs that embed short-lived S3 credentials (expire
@@ -288,7 +328,8 @@ datasets:
       Contact: simon.krek@ijs.si
 
   slovenian_news:
-    enabled: false
+    enabled: true
+    manual: true
     name: "Slovenian News (living corpus)"
     output_dir: slovenian_news
     note: >
@@ -296,8 +337,8 @@ datasets:
       articles, refreshed weekly by a separate collection pipeline
       that is not part of this repo.
       Lands as <YYYY-MM-DD>_<YYYY-MM-DD>.jsonl windows directly under
-      data/raw/slovenian_news/. This stub stays `enabled: false` so
-      `download.py --all` skips it; extraction reads it via its
+      data/raw/slovenian_news/. `manual: true` makes `download --all`
+      only check that the folder holds files; extraction reads it via its
       configs/data/extract.yaml entry (jsonl extractor, body/uri field
       mapping). Re-run extraction with --force after new weekly windows
       arrive to fold them into the corpus.
@@ -305,16 +346,21 @@ datasets:
   metafida:
     enabled: false
     name: "Metafida 1.0"
+    contains: [janes_blog, janes_forum, janes_news, solar, oss, classlawiki_sl]
+    overlaps: [siparl, gigafida]
     note: >
       Not available for bulk download. Access via concordancers only
-      (KonText, NoSketch Engine).
+      (KonText, NoSketch Engine). Bundles 34 corpora, paragraph-deduplicated;
+      siParl and Gigafida enter in other versions (3.0, 2.0 dedup), hence
+      `overlaps`. Disabled, so its members stay their own representatives.
 
   trendi:
     enabled: false
     name: "Trendi"
     note: >
       Not available for download due to copyright restrictions.
-      Contact: iztok.kosem@ijs.si.
+      Contact: iztok.kosem@ijs.si. Starts in January 2019, continuing
+      Gigafida (to 2018), so the two are disjoint by date.
 
   # --- Non-pretraining datasets (role: benchmark | lexicon) --------------
   # Downstream evaluation benchmarks and tokenizer lexicons, not pretraining.
@@ -330,6 +376,8 @@ datasets:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.TEI.zip?sequence=1&isAllowed=y"
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1959/SUK.CoNLL-U.zip?sequence=2&isAllowed=y"
     output_dir: suk
+    contains: [ssj500k]
+    overlaps: [sentinews]
     tasks:
       - POS
       - LEMMA
@@ -342,7 +390,8 @@ datasets:
     note: >
       ~1M tokens / 881K words / 48,594 sentences / 2,913 texts. Manually annotated
       with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3,
-      Ambiga, ElexisWSD, and SentiCoref subcorpora. Gold-standard evaluation corpus
+      Ambiga, ElexisWSD, and SentiCoref subcorpora; SentiCoref's 837 documents come
+      from SentiNews, hence `overlaps: [sentinews]`. Gold-standard evaluation corpus
       for IE tasks. License: CC BY-SA 4.0.
 
   ssj500k:
@@ -363,8 +412,10 @@ datasets:
       - SRL
     note: >
       ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8),
-      named entities, and semantic role labels. Foundation corpus for SUK 1.1
-      (subset). Standalone version useful for direct comparison with prior work.
+      named entities, and semantic role labels. Contained in SUK 1.1 (suk), which
+      keeps its document ids; ner/suk excludes them so its held-out splits hold
+      no ner/ssj500k training documents. Standalone version useful for direct
+      comparison with prior work.
       License: CC BY-NC-SA 4.0.
 
   superglue_sl:
@@ -419,6 +470,7 @@ datasets:
     urls:
       - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/2080/Sloleks.3.1.zip?sequence=1&isAllowed=y"
     output_dir: sloleks
+    overlaps: [sloleks_relations]
     tasks:
       - TOKENIZER
     note: >

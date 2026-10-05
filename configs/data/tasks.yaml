@@ -14,7 +14,12 @@
 #   role         finetune_and_eval | held_out — enforces train/test isolation.
 #                held_out drops the train split (writes only val/test); the
 #                converter never emits a train.jsonl.gz for a held_out entry.
-#   source       kind (extracted | raw) + keys (source dataset keys).
+#   source       kind (extracted | raw) + keys (source dataset keys) + optional
+#                exclude (catalog keys whose documents are dropped by doc_id;
+#                extracted only). A finetune_and_eval and a held_out entry of
+#                one task may not share a key, nor may one side's key contain
+#                (download.yaml `contains`) the other's unless excluded; the
+#                registry fails to load otherwise.
 #   splits       Split name -> output filename.
 #   labels       Label set for the task.
 #   suite        Parent benchmark suite, or null.
@@ -67,7 +72,8 @@ entries:
 
   ner/suk:
     role: held_out               # held_out -> train dropped (val/test only)
-    source: { kind: extracted, keys: [suk] }
+    # SUK integrates ssj500k, which ner/ssj500k trains on; drop those documents.
+    source: { kind: extracted, keys: [suk], exclude: [ssj500k] }
     splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
