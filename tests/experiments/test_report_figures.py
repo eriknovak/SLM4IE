@@ -1,37 +1,39 @@
-"""The project theme: registered on import, active, and colour-blind safe."""
+"""The project theme: datachart starts in it, and it is colour-blind safe on the report plate."""
 
 import sys
 from pathlib import Path
 
 import pytest
 
-pytest.importorskip("datachart")
+pytest.importorskip("datachart_themes.slm4ie")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
 import report_figures  # noqa: E402  — path set above so the shared helper resolves
 
 
-def test_theme_is_active_after_import() -> None:
-    """Importing the module makes the slm4ie theme the one every chart draws in."""
+def test_session_starts_in_the_project_theme() -> None:
+    """The installed default theme is slm4ie, so every chart draws in its palette."""
     from datachart.config import config
-    from datachart.config.configuration import THEMES
+    from datachart_themes.slm4ie import PALETTE
 
-    assert report_figures.THEME in THEMES
-    assert config["color_general_multiple"] == report_figures.SERIES
-    assert config["plot_heatmap_cmap"] == report_figures.SEQUENTIAL
-    assert config["plot_heatmap_cmap_diverging"] == report_figures.DIVERGING
+    assert config.theme == report_figures.THEME
+    assert config["color_general_multiple"] == PALETTE
 
 
 def test_series_palette_passes_the_gate() -> None:
-    """Every pair of series stays apart for colour-blind readers and reaches 3:1 on the plate."""
-    from datachart.themes import score_palette
+    """Every pair of series stays apart for colour-blind readers on the report plate.
 
-    score = score_palette(report_figures.SERIES, "#fbfcfd")
+    The soft fills sit under 3:1 against the plate by design; the theme's ink
+    outline on every filled mark carries that contrast instead.
+    """
+    from datachart.themes import score_palette
+    from datachart_themes.slm4ie import PALETTE
+
+    score = score_palette(PALETTE, "#fbfcfd")
     assert score.verdict == "pass", str(score)
-    assert score.low_contrast == 0, str(score)
 
 
 def test_save_figure_takes_a_figure_or_a_builder(tmp_path: Path) -> None:
-    """Both call shapes write a dated-free SVG in the report's font stack."""
+    """Both call shapes write a date-free SVG in the report's font stack."""
     from datachart.charts import BarChart
 
     def build():

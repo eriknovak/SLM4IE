@@ -578,16 +578,20 @@ wheels = [
 [[package]]
 name = "datachart"
 version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/eriknovak/datachart.git?branch=main#389bc37b4440b2e6231b94e2e674ce37aa9d1d9e" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pypalettes" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c3/c0/508108f0d810227ba74d99df27fbc2b2b3bf7cdcdc4f0168863f55040447/datachart-1.0.0.tar.gz", hash = "sha256:ae74ccdec6a5771d1fda802656731fa5f80c6f6b7a0dfbfc7f59bb88227ea1a7", size = 551955, upload-time = "2026-09-29T06:42:42.502Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/db/52ea3f559ba5ab4cb0609c8b57f0303c205b280c549565f1bf41cd81bdd3/datachart-1.0.0-py3-none-any.whl", hash = "sha256:98f8a1822e02cf2e4a7a61c4d1653414f7a2e643af96d5cfabc71a84503db619", size = 407498, upload-time = "2026-09-29T06:42:40.671Z" },
+
+[[package]]
+name = "datachart-themes"
+version = "0.1.0"
+source = { git = "https://github.com/eriknovak/datachart-themes.git?branch=main#dc9548024492c27c3bd64533ae2ecf3e8269f387" }
+dependencies = [
+    { name = "datachart" },
 ]
 
 [[package]]
@@ -3253,6 +3257,7 @@ dependencies = [
 analysis = [
     { name = "anthropic" },
     { name = "datachart" },
+    { name = "datachart-themes" },
     { name = "marimo" },
     { name = "mlflow" },
     { name = "pandas" },
@@ -3309,7 +3314,8 @@ requires-dist = [
 [package.metadata.requires-dev]
 analysis = [
     { name = "anthropic", specifier = ">=1.6.0" },
-    { name = "datachart", specifier = ">=1.0.0" },
+    { name = "datachart", git = "https://github.com/eriknovak/datachart.git?branch=main" },
+    { name = "datachart-themes", git = "https://github.com/eriknovak/datachart-themes.git?branch=main" },
     { name = "marimo", specifier = ">=0.24.2" },
     { name = "mlflow", specifier = ">=3.13.0" },
     { name = "pandas", specifier = ">=2.2" },

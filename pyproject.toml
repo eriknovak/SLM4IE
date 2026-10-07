@@ -15,9 +15,19 @@ dependencies = [
                                       #   which every group's code goes through
 ]
 
+# datachart starts every session in the slm4ie theme from datachart-themes
+[project.entry-points."datachart.default_theme"]
+slm4ie = "datachart_themes.slm4ie:theme"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# the theme entry-point hook is on datachart's main and not yet in a PyPI
+# release; drop the datachart line and raise its floor once it ships
+[tool.uv.sources]
+datachart = { git = "https://github.com/eriknovak/datachart.git", branch = "main" }
+datachart-themes = { git = "https://github.com/eriknovak/datachart-themes.git", branch = "main" }
 
 [tool.ruff]
 line-length = 120
@@ -140,6 +150,7 @@ analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store
     "datachart>=1.0.0",               # publication figures -> figures/*.svg
+    "datachart-themes",               # the slm4ie theme (session default via entry point above)
     "anthropic>=1.6.0",
     "marimo>=0.24.2",
     "pypdf>=5",                       # PDF text for the medical sizing pass

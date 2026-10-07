@@ -590,6 +590,20 @@ def profile_rows(profiles: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(rows, key=lambda row: -row["words_p50"])
 
 
+def _block_seconds(block: Dict) -> float:
+    """Returns a pipeline block's total CPU seconds from its datatrove stats.
+
+    Args:
+        block: One entry of a task's `stats/<rank>.json`.
+
+    Returns:
+        The block's `time_stats.total`, or 0.0 when datatrove wrote a bare
+        zero because the task processed nothing.
+    """
+    time_stats = block.get("time_stats")
+    return float(time_stats["total"]) if isinstance(time_stats, dict) else 0.0
+
+
 def _block_label(name: str) -> str:
     """Reduce a datatrove block name to the part worth reading.
 
@@ -636,10 +650,12 @@ def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
     documents = 0
     for path in executor_task_stats(logging_dir):
         stats = json.loads(path.read_text(encoding="utf-8"))
-        durations.append(max(block["time_stats"]["total"] for block in stats))
+        # a task that saw no document records `time_stats: 0` instead of a dict
+        seconds = [_block_seconds(block) for block in stats]
+        durations.append(max(seconds))
         ends.append(path.stat().st_mtime)
-        for block in stats:
-            blocks[_block_label(block["name"])] += block["time_stats"]["total"]
+        for block, total in zip(stats, seconds):
+            blocks[_block_label(block["name"])] += total
         documents += int(stats[0]["stats"].get("documents", {}).get("total", 0))
     if not ends:
         return None

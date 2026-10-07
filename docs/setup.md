@@ -34,7 +34,7 @@ group, not an extra, so you install only what you are about to run:
 | `data`       | `uv sync --group data`       | download → extract → task conversion (`prepare_datasets.py`)                       |
 | `corpus`     | `uv sync --group corpus`     | building the pretraining corpus (`curate_pretraining_corpus.py`, datatrove stack)  |
 | `tokenizers` | `uv sync --group tokenizers` | training and scoring tokenizers (`sweep_tokenizers.py`)                            |
-| `analysis`   | `uv sync --group analysis`   | an experiment's `analysis.py` — MLflow tables + datachart figures                  |
+| `analysis`   | `uv sync --group analysis`   | an experiment's `analysis.py` — MLflow tables + datachart figures; pulls the private `datachart-themes` repo over HTTPS |
 
 `uv sync --all-groups` installs everything.
 
