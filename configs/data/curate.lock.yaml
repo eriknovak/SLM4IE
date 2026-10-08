@@ -128,55 +128,6 @@ convert:
     document_digest: sum256:279f190a9beab04197884f5b224533f5ebdf547c72c1491f389e0de223bf1488
     records_in: 736267
     records_out: 736267
-  janes_blog:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:18ebe985793ee015a5d4dbe4fa135d6ebafda2a7dedc6af7243838f73d101f95
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  janes_forum:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:0b0c15d13840c093b83b82cf3bc110eac78b5f4da7d418f99a54085f81af813d
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  janes_news:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:5dd8ade9b1e168af04042f5836d8395d4099fc56e4b656370c89b1c2979c32a1
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  legal_mc4:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:b7fbb37df33f0e46e88befbfcf154566760258afdd651be663d455dd158c9a35
-    document_digest: sum256:30d2f2d790d785132711c4452b5d2e4e40b182a7af67c7668b99ad1b98440705
-    records_in: 16297
-    records_out: 16297
-  parlamint_si:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:0e0ca39b85e44f6526285e29ffc90851fdfe0ad680ceb8633b3c65769d2b2f56
-    document_digest: sum256:5859a3d48387477864dab437bd925e3e178e13f6de5f8ff677889705d1f8f7df
-    records_in: 311347
-    records_out: 311347
-  ssj500k:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:9e53eba7d72729dc9270240b68b146fb7e3908b9918970c79223743a12497ffb
-    document_digest: sum256:1f767687b1e6648ca230d2a302dd93cc8daa29608250938f38110237ecfadf28
-    records_in: 1658
-    records_out: 1658
-  suk:
-    config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
-    stage_version: sha256:c880ce951ca826c4fcc1160d4b6cdc9589dd497db5de209bfd882e4e5ea69b55
-    input_digest: sha256:ef3e7e27bc1dd16e0097cb837efa5747e8a3f7a6cfa597bd65606c58d72340a3
-    document_digest: sum256:64a0306ccb53f9e1eb936413f084b98ab651df0230bb3eb871b619043d9f02c8
-    records_in: 5816
-    records_out: 5816
 language:
   classla_web_sl:
     config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
@@ -304,55 +255,6 @@ language:
     document_digest: sum256:7007d7c67db6f2407996193e8c9b342ac85a4f81f3869cd66bd874eb59957f11
     records_in: 736267
     records_out: 732452
-  janes_blog:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  janes_forum:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  janes_news:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  legal_mc4:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:30d2f2d790d785132711c4452b5d2e4e40b182a7af67c7668b99ad1b98440705
-    document_digest: sum256:b130c4725cd020682f5b6598c95552892adcaf34934f29a01d1bb5932f20593a
-    records_in: 16297
-    records_out: 16257
-  parlamint_si:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:5859a3d48387477864dab437bd925e3e178e13f6de5f8ff677889705d1f8f7df
-    document_digest: sum256:e8dd9c89507ca02b5adf297598b200c26e923a273ff863ed7344ed7708780b75
-    records_in: 311347
-    records_out: 293482
-  ssj500k:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:1f767687b1e6648ca230d2a302dd93cc8daa29608250938f38110237ecfadf28
-    document_digest: sum256:d4b048cb0f22764b1a585919f719cdb81c6de6b4c49d76918044548454abccbc
-    records_in: 1658
-    records_out: 3300
-  suk:
-    config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
-    stage_version: sha256:7d8111b962e8e706ea5f77880f58d77cee10a215f3c47bf412b9619db8320268
-    input_digest: sum256:64a0306ccb53f9e1eb936413f084b98ab651df0230bb3eb871b619043d9f02c8
-    document_digest: sum256:181d83a7625f12c8f1c4f10645f8dc91a19f26ca41eba0a907b75b79834a499c
-    records_in: 5816
-    records_out: 11564
 spam:
   classla_web_sl:
     config_hash: sha256:dcdb60059839f517d67cf17c274712cce3eb985abc789d696a68bc8f4b46dfca
@@ -480,55 +382,6 @@ spam:
     document_digest: sum256:54890b773c581ca26111a83f59c250b252c29ad1638882b531f1b2f98c59a704
     records_in: 732452
     records_out: 722848
-  janes_blog:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  janes_forum:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  janes_news:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    document_digest: sum256:0000000000000000000000000000000000000000000000000000000000000000
-    records_in: 0
-    records_out: 0
-  legal_mc4:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:b130c4725cd020682f5b6598c95552892adcaf34934f29a01d1bb5932f20593a
-    document_digest: sum256:3bd278c47f291f9d2835c1f4ee8c8c39832f86846b40208c73cfcc91b4712699
-    records_in: 16257
-    records_out: 15822
-  parlamint_si:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:e8dd9c89507ca02b5adf297598b200c26e923a273ff863ed7344ed7708780b75
-    document_digest: sum256:589db8045a31b972cad7dc5694dc07d6513f2191631cacc35748aa29b720c290
-    records_in: 293482
-    records_out: 292865
-  ssj500k:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:d4b048cb0f22764b1a585919f719cdb81c6de6b4c49d76918044548454abccbc
-    document_digest: sum256:a4d6395374d58cf1cb1e8fe20254550fa57ce9a30c8ebfc49feda153a271a0ce
-    records_in: 3300
-    records_out: 3280
-  suk:
-    config_hash: sha256:be66c5048558ce80e983b10da8a76d016b130ccb34ac02d67cd3aef7a94c314a
-    stage_version: sha256:59ed58963654f5021dcefab0d86c3f2a7eac72c0124dec94fe3c2cc3c780e052
-    input_digest: sum256:181d83a7625f12c8f1c4f10645f8dc91a19f26ca41eba0a907b75b79834a499c
-    document_digest: sum256:24f23606a6ed1e8879beb2538cc8039d886aff6ff2448ff927f00acdd53c0a5c
-    records_in: 11564
-    records_out: 11512
 quality:
   classla_web_sl:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
@@ -656,34 +509,6 @@ quality:
     document_digest: sum256:b550e53eff04d68cd316fa723a379faf0fbefd2cc02299650abec77fcc2cd22c
     records_in: 722848
     records_out: 619681
-  legal_mc4:
-    config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:5c555bcb015428a3f8bfbf6fe2471694d3176e78c607a1ccd3908e11146b28a8
-    input_digest: sum256:77a4f188fe523f3a506b83e9dd191873065f0d08d6804118e79f992368e24d32
-    document_digest: sum256:a69a85473d00993c6bda891b421925f0187e7984eb9e2b99865ff8b36556825e
-    records_in: 31644
-    records_out: 24678
-  parlamint_si:
-    config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:5c555bcb015428a3f8bfbf6fe2471694d3176e78c607a1ccd3908e11146b28a8
-    input_digest: sum256:589db8045a31b972cad7dc5694dc07d6513f2191631cacc35748aa29b720c290
-    document_digest: sum256:386be8a2d45b31e85e7d0cb7dba0249be732661499fea91d8af375022e4abdd1
-    records_in: 292865
-    records_out: 169944
-  ssj500k:
-    config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:5c555bcb015428a3f8bfbf6fe2471694d3176e78c607a1ccd3908e11146b28a8
-    input_digest: sum256:a4d6395374d58cf1cb1e8fe20254550fa57ce9a30c8ebfc49feda153a271a0ce
-    document_digest: sum256:c2626bd887607aeb32ea5ac4ba330729fc82051a1ec37bd4761c7c83cead240a
-    records_in: 3280
-    records_out: 2812
-  suk:
-    config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:5c555bcb015428a3f8bfbf6fe2471694d3176e78c607a1ccd3908e11146b28a8
-    input_digest: sum256:24f23606a6ed1e8879beb2538cc8039d886aff6ff2448ff927f00acdd53c0a5c
-    document_digest: sum256:92aa40aee07836eb8a21211e82079d9c684e70dfa70c7ba96425c721686df038
-    records_in: 11512
-    records_out: 9612
 repetition:
   classla_web_sl:
     config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
@@ -811,34 +636,6 @@ repetition:
     document_digest: sum256:24a4ba5e27123c5f0c6c1179d624d9643b68f997d44b89328f995612ba513019
     records_in: 619681
     records_out: 616924
-  legal_mc4:
-    config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
-    stage_version: sha256:7aae5b2a9f4ebee28a64058f04d2f0468aca2ab6e362a9d23b1579041499ab40
-    input_digest: sum256:a69a85473d00993c6bda891b421925f0187e7984eb9e2b99865ff8b36556825e
-    document_digest: sum256:df49016f9c636f04cf20648af261c2ad3b8d36122835c0cce789eacbb257a4a6
-    records_in: 24678
-    records_out: 22266
-  parlamint_si:
-    config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
-    stage_version: sha256:7aae5b2a9f4ebee28a64058f04d2f0468aca2ab6e362a9d23b1579041499ab40
-    input_digest: sum256:386be8a2d45b31e85e7d0cb7dba0249be732661499fea91d8af375022e4abdd1
-    document_digest: sum256:bc04a237e9f266f70d1cc27ed4e158c4d16376bf70aa5c35108c2ae118a12311
-    records_in: 169944
-    records_out: 166656
-  ssj500k:
-    config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
-    stage_version: sha256:7aae5b2a9f4ebee28a64058f04d2f0468aca2ab6e362a9d23b1579041499ab40
-    input_digest: sum256:c2626bd887607aeb32ea5ac4ba330729fc82051a1ec37bd4761c7c83cead240a
-    document_digest: sum256:a0df7b318a8c4886864a190d8062ad2cdfa9491c87e9fba293960b30049cbeba
-    records_in: 2812
-    records_out: 2790
-  suk:
-    config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
-    stage_version: sha256:7aae5b2a9f4ebee28a64058f04d2f0468aca2ab6e362a9d23b1579041499ab40
-    input_digest: sum256:92aa40aee07836eb8a21211e82079d9c684e70dfa70c7ba96425c721686df038
-    document_digest: sum256:33b282412d3d35089d9d82ed9710ebef6b18b066b78bd3756650c3a15b9e8564
-    records_in: 9612
-    records_out: 9344
 exact_dedup:
   config_hash: sha256:456590fb2537f569991f0f52c3150003add4631de385536078a9f26d4d27594e
   stage_version: sha256:e6a2efe7481110b19eedc347ab08a875a1f992c5fdd7b67c9b2fc95b0e86c91c
