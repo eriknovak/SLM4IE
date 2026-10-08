@@ -5,7 +5,7 @@ short: Curation thresholds
 category: data
 branch: exp/curation-thresholds-slovenian
 base_commit: 2ece205
-status: draft
+status: running
 ticket: "#5"
 pr:
 mlflow:
@@ -23,7 +23,7 @@ concluded:
 ## TL;DR
 
 - **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, on a draw held back from tuning.
-- **Next**: draw the fresh sample, restate the baseline from the rebuilt corpus, and set up the three routes.
+- **Next**: the baseline is restated from the rebuilt corpus, which clears every volume target; set up the three routes and tune their thresholds on the earlier audit's verdicts.
 
 ## Hypothesis
 
@@ -61,6 +61,8 @@ concluded:
 - **External dependency**: Anthropic's Claude for the first judge; a second judge from another model family through OpenRouter, the model chosen by the project lead.
 
 ## Datasets
+
+- **Baseline corpus**: the shared pretraining corpus rebuilt with the pipeline as it stands on main ([D5], the baseline build), one row per source with its domain, kind, licence and size before and after curation. Built 2026-10-05 to 2026-10-08 at commit 2ece205 from 18 Slovene sources. [Sources of the baseline corpus, before and after curation](tables/dataset-corpus-statistics.csv)
 
 ## Methods
 
@@ -115,6 +117,33 @@ concluded:
   - 2026-10-05 first version, at the project lead's call
 
 ## Findings
+
+### F1 — Removing the double counting leaves each source's retention almost unchanged · minor
+
+- **Summary**: Every source keeps within three points of the share it kept in the earlier audit's build, except the student-essay source solar.
+- **Runs**: 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over its stage sentinels and the earlier audit's source funnel table.
+- **Result**: ![Share of each source's converted documents that reaches the finished corpus, in the earlier audit's build and in the baseline rebuild. Sources marked with an asterisk were doubled by stale output files in the audit's build, so their old share was taken over the language filter's output.](figures/curate-retention-by-build-and-source.svg)
+- **Reading**: The earlier audit's per-source picture still holds as the starting point for tuning, since solar's rise only undoes the doubled converted count its old share was computed on.
+- **History**:
+  - 2026-10-08 first result, from the baseline rebuild ([D5])
+
+### F2 — The quality filter still removes most of the curated domain text · minor
+
+- **Summary**: The quality filter drops four in five of the medical source's documents, the largest loss of any source at any stage.
+- **Runs**: 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over its stage sentinels and the statistics stage.
+- **Result**: ![Where each source's converted documents went, stage by stage, in the baseline rebuild. The grey band is what reaches the finished corpus, and the sources are ordered by that share.](figures/curate-losses-by-source.svg)
+- **Reading**: The quality filter is the largest single loss on the curated domain sources, so the medical and academic route is where retuning its floors can win back the most text.
+- **History**:
+  - 2026-10-08 first result, from the baseline rebuild ([D5])
+
+### F3 — The baseline corpus clears every volume target · minor
+
+- **Summary**: About 14.8B estimated tokens remain, nearly three times the corpus target, and every domain clears the per-domain target.
+- **Runs**: 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over the statistics stage.
+- **Result**: [Estimated tokens per domain in the baseline corpus and in the earlier audit's build, against the KPI threshold each is held to](tables/curate-tokens-by-domain.csv)
+- **Reading**: The volume rule that bounds tuning ([D4], the corpus and per-domain token floors) binds only on medicine, whose single source could lose about two thirds of what it keeps before falling under its floor.
+- **History**:
+  - 2026-10-08 first result, from the baseline rebuild ([D5])
 
 ## Verdict
 
