@@ -102,6 +102,7 @@ STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
             "max_ellipsis_lines_ratio",
             "max_non_alpha_words_ratio",
             "min_stop_words",
+            "alpha_words_skip_punctuation",
             "enabled",
         }
     ),

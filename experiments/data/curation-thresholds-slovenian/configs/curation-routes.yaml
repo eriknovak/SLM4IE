@@ -1,0 +1,221 @@
+# curation-routes.yaml — the shared curation pipeline with each source on a route.
+#
+# Pipeline: curate_pretraining_corpus.py run  extracted/<key>.jsonl -> <output_dir>/00_convert/ .. 07_statistics/
+#
+# The factor under test is the route: a named set of content-filter settings
+# (`profiles:`) that every selected source takes (`overrides:`). Stage
+# sections below are the shared registry's (configs/data/curate.yaml) as of
+# the baseline build, plus one repair every route shares: the quality
+# filter's letter-share rule ignores punctuation tokens. The raw-crawl route
+# changes nothing else.
+#
+# Candidate builds go to the experiment's own data folder, never over the
+# shared corpus, and log to the experiment's MLflow experiment. See the
+# shared registry for the meaning of every stage knob.
+
+input_dir: ./data/extracted
+output_dir: ./data/experiments/data/curation-thresholds-slovenian/interim/pretrain
+
+# --- MLflow -------------------------------------------------------------
+mlflow:
+  enabled: false                  # opt in per run; toggle --mlflow / --no-mlflow
+  experiment: slm4ie/data/curation-thresholds-slovenian
+  tracking_uri: null              # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
+
+stopwords: sl                     # bundled stopword list
+
+# --- Stage 0: convert (00_convert) --------------------------------------
+# Lift extracted <key>.jsonl into datatrove Document-shaped shards.
+# Reads: <input_dir>/<key>.jsonl (+ optional .annotations.jsonl.gz)
+convert:
+  text_field: text                   # source field copied into `text`
+  id_field: doc_id                   # source field kept verbatim as document id
+  metadata_fields: [domain, doc_id]  # kept under Document.metadata (`source` auto-renamed to `dataset`; never list it)
+  include_annotations: false         # join .annotations sidecar (desyncs after any text rewrite)
+  max_shard_bytes: 200000000         # ~200 MB compressed per output shard
+
+# --- Stage 1: language (01_language) ------------------------------------
+# lingua-py language detection.  Reads 00_convert/  Writes 01_language/
+language:
+  targets: [sl]                   # ISO 639-1 codes treated as in-language
+  candidates:                     # candidate set lingua chooses among (see Notes: candidates)
+    [
+      be,
+      bg,
+      bs,
+      ca,
+      cs,
+      cy,
+      da,
+      de,
+      el,
+      en,
+      es,
+      et,
+      eu,
+      fi,
+      fr,
+      ga,
+      hr,
+      hu,
+      is,
+      it,
+      lt,
+      lv,
+      mk,
+      nb,
+      nl,
+      nn,
+      pl,
+      pt,
+      ro,
+      ru,
+      sk,
+      sl,
+      sq,
+      sr,
+      sv,
+      tr,
+      uk,
+    ]
+  minimum_relative_distance: 0.1  # confidence gap before lingua commits (0.0 disables)
+  mode: filter                    # filter=drop out-of-target docs; tag=keep + annotate
+  low_accuracy: true              # use lingua's lighter trigram-only model
+  max_chars: 2048                 # truncate text before detection (null disables)
+
+# --- Stage 2: spam (02_spam) --------------------------------------------
+# Adult / SEO-spam removal via curated lexicons + URL blocklist + optional
+# model.  High precision by design.  Reads 01_language/  Writes 02_spam/
+# Lexicons under slm4ie/data/curate/resources/spam/ fold into this stage's sentinel hash.
+spam:
+  languages: [sl, en]             # codes whose curated adult.txt + spam.txt load eagerly
+  use_ldnoobw: true               # auto-load an LDNOOBW list when no curated list ships
+  url_blocklist: true             # enable the URL/domain blocklist signal
+  min_adult_hits: 2               # drop once this many distinct adult stems match
+  min_spam_hits: 2                # drop once this many distinct SEO/scam stems match
+  keep_fraction: 0.0              # fraction of flagged docs retained anyway (seeded sample)
+  default_language: sl            # assumed for docs without metadata.language
+  model: null                    # optional classifier spec; null = lexicon + URL only
+  model_threshold: 0.5            # score at/above which the model flags a document
+
+# --- Stage 3: quality (03_quality) --------------------------------------
+# Gopher WITHIN-DOCUMENT quality heuristics; never compares across docs.
+# Reads 02_spam/  Writes 03_quality/.  Also reads the shared `stopwords`.
+quality:
+  min_doc_words: 20               # drop docs shorter than this
+  max_doc_words: 1000000          # drop docs longer than this
+  min_avg_word_length: 2          # drop docs below this mean word length
+  max_avg_word_length: 12         # drop docs above this mean word length
+  max_symbol_word_ratio: 0.1      # max fraction of word-like tokens that are pure symbols
+  max_bullet_lines_ratio: 0.9     # max fraction of lines starting with a bullet glyph
+  max_ellipsis_lines_ratio: 0.3   # max fraction of lines ending in an ellipsis
+  max_non_alpha_words_ratio: 0.8  # MIN fraction of words with an alpha char (legacy name)
+  alpha_words_skip_punctuation: true  # Gopher split on whitespace; datatrove makes each mark a word
+  min_stop_words: 2               # min stopword tokens a doc must contain (uses `stopwords`)
+
+# --- Stage 4: repetition (04_repetition) --------------------------------
+# Gopher WITHIN-DOCUMENT repetition heuristics (dup paragraphs/lines,
+# top-n-gram saturation, dup-n-gram fractions).  Reads 03_quality/
+# Writes 04_repetition/.  Empty `{}` keeps datatrove's Gopher-paper defaults;
+# the section must still exist to drive this stage's sentinel-hash slice.
+# Knobs: dup_line_frac (0.3), dup_para_frac (0.3), dup_line_char_frac (0.2),
+# dup_para_char_frac (0.2), top_n_grams ([[2, 0.2], [3, 0.18], [4, 0.16]]),
+# dup_n_grams ([[5, 0.15], [6, 0.14], ... [10, 0.1]]).
+repetition: {}
+
+# --- Stage 5: exact dedup (05_exact_dedup) ------------------------------
+# Whole-document exact dedup ACROSS THE CORPUS (signature -> find -> filter).
+# Reads 04_repetition/  Writes 05_exact_dedup/
+exact_dedup:
+  precision: 64                   # hash width in bits (64 collision-safe to ~10B docs; 32 tiny corpora)
+  hash_fc: xxhash                 # hash function (xxhash faster; sha1 strong but unnecessary)
+  only_dedup_in_index: true       # true=dedup within this run's index; false=extend an existing index
+
+# --- Stage 6: sentence dedup (06_sentence_dedup) ------------------------
+# N-sentence sliding-window dedup ACROSS THE CORPUS, then drops docs whose
+# surviving text falls below the floors.  This folder is the final corpus.
+# Reads 05_exact_dedup/  Writes 06_sentence_dedup/
+sentence_dedup:
+  n_sentences: 3                  # sentences per sliding window compared across docs
+  min_doc_words: 50               # drop a doc whose surviving text has fewer words
+  min_num_sentences: 2            # drop a doc with fewer surviving sentences
+  split_sentences: true           # split into sentences (vs. lines) before building windows
+
+# --- Stage 7: statistics (07_statistics) --------------------------------
+# Corpus totals, per-domain / per-dataset distributions, and a global top-K
+# word-frequency table (map-reduce; read-only, no filtering).  Reads
+# 06_sentence_dedup/  Writes 07_statistics/ (aggregate.json + per_dataset/).
+# Also reads the shared `stopwords`.
+statistics:
+  top_k_words: 200                # size of the word-frequency table
+
+# --- Routes -------------------------------------------------------------
+# Starting points from the earlier audit (curation-quality-slovenian): the
+# share of each filter's sampled drops the judge found to be its target.
+profiles:
+  # Web crawls: the spam and language filters mostly hit real targets there.
+  raw_crawl: {}
+
+  # Edited Slovene text: the language and spam filters dropped almost no
+  # foreign text or spam here (audit target share 0.0-0.125), only prose.
+  curated_prose:
+    language:
+      enabled: false
+    spam:
+      enabled: false
+    repetition:
+      # Gopher's web limits, widened by half: short edited texts repeat
+      # their top 4-gram or a few lines without being furniture.
+      dup_line_frac: 0.45
+      dup_para_frac: 0.45
+      dup_line_char_frac: 0.3
+      dup_para_char_frac: 0.3
+      top_n_grams: [[2, 0.3], [3, 0.27], [4, 0.24]]
+      dup_n_grams: [[5, 0.225], [6, 0.21], [7, 0.195], [8, 0.18], [9, 0.165], [10, 0.15]]
+
+  # Medical and academic text: keeps the language filter (the scientific
+  # sources carry real English abstracts) but repeats lines by design.
+  medical_academic:
+    spam:
+      enabled: false
+    repetition:
+      # Patient leaflets repeat dosage and warning lines: line limits doubled.
+      dup_line_frac: 0.6
+      dup_para_frac: 0.45
+      dup_line_char_frac: 0.4
+      dup_para_char_frac: 0.3
+      top_n_grams: [[2, 0.3], [3, 0.27], [4, 0.24]]
+      dup_n_grams: [[5, 0.225], [6, 0.21], [7, 0.195], [8, 0.18], [9, 0.165], [10, 0.15]]
+
+# --- Per-source route ---------------------------------------------------
+# Every selected source names its route; a source's own knobs merge on top.
+overrides:
+  c4: {profile: raw_crawl}
+  cc100: {profile: raw_crawl}
+  classla_web_sl: {profile: raw_crawl}
+  culturax: {profile: raw_crawl}
+  fineweb2: {profile: raw_crawl}
+  hplt: {profile: raw_crawl}
+  macocu_sl: {profile: raw_crawl}
+
+  classlawiki_sl: {profile: curated_prose}
+  finepdf:
+    profile: curated_prose
+    language:
+      # A crawl of PDFs: edited text, but 0.7 of its audited language drops
+      # were really not Slovene.
+      enabled: true
+  coleslaw: {profile: curated_prose}
+  gigafida: {profile: curated_prose}
+  siparl: {profile: curated_prose}
+  solar: {profile: curated_prose}
+  slovenian_news:
+    profile: curated_prose
+    quality:
+      # Kept from the shared registry: news prose ends lines in "…" mid-article.
+      max_ellipsis_lines_ratio: 0.9
+
+  kas: {profile: medical_academic}
+  kzb: {profile: medical_academic}
+  oss: {profile: medical_academic}
+  povejmo_vemo_med: {profile: medical_academic}

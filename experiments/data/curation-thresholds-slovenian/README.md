@@ -66,6 +66,45 @@ concluded:
 
 ## Methods
 
+### M1 — Send each source through one of three routes of filter settings
+
+- **Input**: the 18 selected Slovene sources, each a set of documents converted from its extracted text. One item is a source with its name, such as `gigafida`.
+- **Output**: per source, the settings each content filter applies to its documents. They drive the language, spam, quality and repetition filters of every candidate build.
+- **How**: a route is a named set of content-filter settings that every source of one kind shares.
+  1. Assign each source to a route by how the earlier audit's filters fared on it. Seven web crawls take the raw-crawl route. Seven edited-text sources (wiki, legal, reference corpus, parliament, news, student essays, and the crawl of PDF documents) take the curated-prose route. The four medical and academic sources take the medical-and-academic route.
+  2. Start from the shared pipeline's settings, with the quality filter's letter rule counting only tokens that are not punctuation ([M2]). The raw-crawl route changes nothing else.
+  3. On the curated-prose route, switch the language and spam filters off and widen every repetition limit by half.
+  4. On the medical-and-academic route, switch the spam filter off and keep the language filter. Widen the repetition limits by half, and double the limits on repeated lines.
+  5. Merge a source's own settings over its route's. The news source tolerates lines ending in an ellipsis. The PDF crawl keeps the language filter on.
+- **Code**: `slm4ie/data/curate/config.py::resolve_profiles`
+- **Settings**: `profiles` (the three routes, each a set of filter settings), `overrides` (the route each source takes, and its own settings on top), `dup_line_frac` (maximum share of lines repeated in the document), `top_n_grams` (maximum share of characters covered by the most frequent word pair, triple and quadruple), `dup_n_grams` (maximum share of characters inside repeated 5- to 10-word sequences), `enabled` (whether a filter runs on the source at all); in `configs/curation-routes.yaml`
+
+### M2 — Count only words, not punctuation marks, in the quality filter's letter rule
+
+- **Input**: one document reaching the quality filter, as plain text. The filter's settings come from the document's route ([M1]).
+- **Output**: the document kept or dropped, with the first rule it failed. Kept documents go on to the repetition filter.
+- **How**: the quality filter applies the Gopher heuristics, rule-based checks published with DeepMind's Gopher model. One of them requires most words to contain a letter, which is meant to catch tables of numbers and symbol junk.
+  1. Split the text into tokens with datatrove's Slovene word splitter, which makes every punctuation mark its own token.
+  2. Set aside the tokens made only of punctuation. The length and word-length rules already read only the remaining tokens.
+  3. Apply every other Gopher rule unchanged, in datatrove's order.
+  4. Compute the letter share over the remaining tokens, $s = a / w$, where $w$ is the number of tokens that are not pure punctuation and $a$ is how many of them contain a letter. Drop the document when $s$ is below the floor.
+- **Code**: `slm4ie/data/curate/stages/quality.py::LetterShareGopherQualityFilter`
+- **Settings**: `max_non_alpha_words_ratio` (the floor on the letter share, 0.8), `alpha_words_skip_punctuation` (whether punctuation tokens are set aside before the letter share is taken); in `configs/curation-routes.yaml`
+
+### M3 — Score each content filter's drops on its own target and on bad text
+
+- **Input**: a judged sample of documents, each with its source, the filters that kept or dropped it, and one judge verdict. A verdict gives the language, a coherence score from 1 to 5, a text type such as prose, boilerplate or garbage, and an adult-or-spam flag.
+- **Output**: one row per filter, pooled over sources and then per source, with the target precision and the drop precision at the lenient bar. Each rate carries its Wilson interval and its call against the record's bars ([D2]). Written to `tables/audit-precision-by-filter-and-source.csv` for the earlier audit's sample.
+- **How**: each filter is scored only on the documents it dropped.
+  1. Keep the documents from the 18 selected sources that a content filter dropped and the judge read. A document dropped by one filter counts only for that filter.
+  2. Mark a drop as on target by the filter's own test ([D1]). Language: the judge does not call it Slovene. Spam: flagged adult or spam. Quality: coherence 2 or lower, or garbage. Repetition: boilerplate or garbage.
+  3. Mark a drop as bad text when it has coherence 2 or lower, is garbage or boilerplate, or is flagged adult or spam. The language filter is not scored on bad text.
+  4. For a filter and a group of drops, compute the precision $p = h / n$, where $n$ is the number of judged drops in the group and $h$ how many pass the test, with its 95% Wilson interval.
+  5. Pool by concatenating every source's drops, so each source weighs by its judged drops, not by its volume.
+  6. Call a rate "holds" at 0.6 or more, "fails" below 0.5, and "open" between. A source with fewer than 20 judged drops gets no call.
+- **Code**: `analysis.py::precision_rows`
+- **Settings**: none; the bars are the record's ([D2])
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
@@ -115,6 +154,25 @@ concluded:
   - Rerun only the filters on the earlier audit's judged documents: fast, but blind to dedup and to corpus totals.
 - **History**:
   - 2026-10-05 first version, at the project lead's call
+
+### D7 — Switch the language and spam filters off on curated sources
+
+- **Decision**: The curated-prose route runs neither the language nor the spam filter, except that the crawl of PDF documents keeps its language filter. The medical-and-academic route runs no spam filter but keeps the language filter. These sources leave the H1 and H2 clauses for filters they skip ([M1]).
+- **Why**: In the earlier audit, none of the 40 judged language drops on any of the six edited-prose sources was judged not Slovene. At most one of 40 spam drops on any curated source was spam ([M3]). These sources are edited Slovene text, so the filters there remove only usable prose.
+- **Alternatives**:
+  - Keep both filters and raise their thresholds: the wrong language drops are confident calls (Romanian, Dutch, Czech for Slovene), so no confidence threshold separates them.
+- **History**:
+  - 2026-10-08 first version, as the routes' starting point
+  - 2026-10-08 the PDF crawl joins the curated-prose route with its language filter on: in the earlier audit none of its 40 judged spam drops was spam, and 0.375 of its language drops were not Slovene ([M3])
+
+### D8 — Repair the quality filter's letter rule rather than lower its floor
+
+- **Decision**: On every route, the quality filter's rule that most words contain a letter counts only tokens that are not punctuation marks, at the Gopher floor of 0.8 ([M2]).
+- **Why**: datatrove splits each punctuation mark into its own word, so comma-dense prose fails a rule meant for numbers and symbols. In the earlier audit's sample, this rule caused most quality drops on nearly every source. With punctuation set aside, those dropped documents had a median letter share of 0.87 to 1.00.
+- **Alternatives**:
+  - Lower the floor per route, to 0.65: the floor would then track how much punctuation a source uses, not how much junk it holds.
+- **History**:
+  - 2026-10-08 first version, at the project lead's call
 
 ## Findings
 

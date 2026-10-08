@@ -196,6 +196,7 @@ _QUALITY_OVERRIDES = {
     "max_ellipsis_lines_ratio": 0.9,
     "max_non_alpha_words_ratio": 0.33,
     "min_stop_words": 4,
+    "alpha_words_skip_punctuation": True,
 }
 
 #: Distinct non-default value per spam knob except `model` (field == knob).

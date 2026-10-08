@@ -41,6 +41,7 @@ import yaml
 from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.inspect.judge import interleave
 from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
+from slm4ie.utils.stats import wilson
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -131,31 +132,6 @@ def is_bad(verdict: Dict[str, Any], strict: bool = False, stage: Optional[str] =
     if stage == "language" and verdict.get("language", "sl") != "sl":
         return True
     return verdict["coherence"] <= floor or verdict["text_type"] in BAD_TEXT_TYPES or bool(verdict["adult_or_spam"])
-
-
-def wilson(successes: int, total: int, z: float = 1.96) -> Tuple[float, float]:
-    """Return a Wilson score interval for a share.
-
-    The Wilson interval is used rather than the textbook normal one because
-    several cells sit near 0 or 1, where the normal interval runs past the
-    ends of the scale.
-
-    Args:
-        successes: Count of documents with the property.
-        total: Count of documents in the cell.
-        z: Standard-normal quantile; the default is the 95% interval.
-
-    Returns:
-        The interval's lower and upper bounds, or `(0.0, 0.0)` when the cell
-        is empty.
-    """
-    if total == 0:
-        return 0.0, 0.0
-    share = successes / total
-    denominator = 1 + z**2 / total
-    centre = (share + z**2 / (2 * total)) / denominator
-    spread = z * math.sqrt(share * (1 - share) / total + z**2 / (4 * total**2)) / denominator
-    return max(0.0, centre - spread), min(1.0, centre + spread)
 
 
 def _cells(

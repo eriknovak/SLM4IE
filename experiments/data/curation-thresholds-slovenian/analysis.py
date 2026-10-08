@@ -8,6 +8,13 @@ from the stage sentinels and the statistics stage; the one stage without a
 per-source sentinel, exact dedup, is counted once from its output and cached
 under `interim/`.
 
+The second pass scores each content filter on judged documents it dropped:
+the share that is the filter's own target (D1) and, for the spam, quality and
+repetition filters, the share that is bad text at the lenient bar. Rates are
+read pooled over sources and per source, and called against the record's
+bars (D2). By default it reads the earlier audit's sample and verdicts, the
+evidence thresholds are tuned on (D3).
+
 Run it with:
 
     uv run --group corpus --group analysis python experiments/data/curation-thresholds-slovenian/analysis.py
@@ -19,7 +26,7 @@ import json
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 
@@ -27,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
 
 from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
+from slm4ie.utils.stats import wilson  # noqa: E402
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-thresholds-slovenian")
@@ -57,6 +65,32 @@ KPI3_TOKENS = 5_000_000_000
 
 #: KPI 4, estimated tokens each domain must exceed.
 KPI4_TOKENS = 500_000
+
+#: The earlier audit's derived data: its judged sample and frozen verdicts.
+AUDIT_DATA = Path("data/experiments/data/curation-quality-slovenian")
+
+#: Text shapes that are bad whatever the coherence score says.
+BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
+
+#: What each content filter is built to remove, as a test on one verdict (D1).
+TARGETS: Dict[str, Callable[[Dict[str, Any]], bool]] = {
+    "language": lambda verdict: verdict.get("language", "sl") != "sl",
+    "spam": lambda verdict: bool(verdict["adult_or_spam"]),
+    "quality": lambda verdict: verdict["coherence"] <= 2 or verdict["text_type"] == "garbage",
+    "repetition": lambda verdict: verdict["text_type"] in BAD_TEXT_TYPES,
+}
+
+#: Filters also scored on bad text; whether text is Slovene says nothing of its quality (D1).
+BAD_TEXT_STAGES = frozenset({"spam", "quality", "repetition"})
+
+#: Judged drops a source needs before its own rate is read (D2).
+MIN_SOURCE_DROPS = 20
+
+#: A rate at or above this holds (D2).
+CONFIRM_RATE = 0.6
+
+#: A rate below this fails; between the two bars it is open (D2).
+REFUTE_RATE = 0.5
 
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
@@ -353,6 +387,108 @@ def corpus_dataset_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
+def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+    """Read a JSONL file written by the sampler or the judge.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        One dict per non-empty line, in file order.
+    """
+    # split("\n"), not splitlines(): document text carries U+2028, which
+    # splitlines() would honour and so tear a JSON row in half.
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
+
+
+def is_bad_text(verdict: Dict[str, Any]) -> bool:
+    """Decide whether a judged document is bad text at the lenient bar.
+
+    Args:
+        verdict: One judge verdict, carrying `coherence`, `text_type` and
+            `adult_or_spam`.
+
+    Returns:
+        True for coherence 2 or lower, garbage, boilerplate, or adult or spam.
+    """
+    return verdict["coherence"] <= 2 or verdict["text_type"] in BAD_TEXT_TYPES or bool(verdict["adult_or_spam"])
+
+
+def judged_drops(
+    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
+) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
+    """Collect the verdicts on documents each content filter dropped, per source.
+
+    Args:
+        sample: Sample rows, each carrying `id`, `dataset` and its `cells`
+            (`stage`, `decision`).
+        verdicts: Judge verdicts by document id.
+        sources: The selected sources; a sampled source outside them is skipped.
+
+    Returns:
+        Verdicts keyed by stage and source.
+    """
+    drops: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for row in sample:
+        verdict = verdicts.get(row["id"])
+        if verdict is None or row["dataset"] not in sources:
+            continue
+        for cell in row["cells"]:
+            if cell["decision"] == "dropped" and cell["stage"] in TARGETS:
+                drops[(cell["stage"], row["dataset"])].append(verdict)
+    return drops
+
+
+def call_rate(share: float) -> str:
+    """Call a rate against the record's bars (D2).
+
+    Args:
+        share: The rate.
+
+    Returns:
+        `holds` at or above the confirm bar, `fails` below the refute bar,
+        `open` between them.
+    """
+    if share >= CONFIRM_RATE:
+        return "holds"
+    return "fails" if share < REFUTE_RATE else "open"
+
+
+def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Score each content filter's drops on its target and on bad text.
+
+    Args:
+        drops: Verdicts keyed by stage and source, from `judged_drops`.
+
+    Returns:
+        Per filter, a pooled row then one row per source, in pipeline order.
+        A source with fewer than `MIN_SOURCE_DROPS` judged drops is listed
+        with `read` false and no call; the language filter has no bad-text
+        columns.
+    """
+    rows: List[Dict[str, Any]] = []
+    for stage, is_target in TARGETS.items():
+        per_source = sorted((source, verdicts) for (stg, source), verdicts in drops.items() if stg == stage)
+        pooled = [verdict for _, verdicts in per_source for verdict in verdicts]
+        for source, verdicts in [("pooled", pooled), *per_source]:
+            read = source == "pooled" or len(verdicts) >= MIN_SOURCE_DROPS
+            row: Dict[str, Any] = {"stage": stage, "source": source, "drops_judged": len(verdicts), "read": read}
+            bad_test = is_bad_text if stage in BAD_TEXT_STAGES else None
+            for name, test in (("target", is_target), ("bad_text", bad_test)):
+                if test is None or not verdicts:
+                    row.update({f"{name}_{key}": "" for key in ("hits", "precision", "low", "high", "call")})
+                    continue
+                hits = sum(1 for verdict in verdicts if test(verdict))
+                low, high = wilson(hits, len(verdicts))
+                row[f"{name}_hits"] = hits
+                row[f"{name}_precision"] = round(hits / len(verdicts), 4)
+                row[f"{name}_low"] = round(low, 4)
+                row[f"{name}_high"] = round(high, 4)
+                row[f"{name}_call"] = call_rate(hits / len(verdicts)) if read else ""
+            rows.append(row)
+    return rows
+
+
 def draw_figures(figures_dir: Path, losses: List[Dict[str, Any]], comparison: List[Dict[str, Any]]) -> List[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
@@ -439,6 +575,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
     parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
     parser.add_argument("--workers", type=int, default=30, help="Shards counted at once for exact dedup.")
+    parser.add_argument("--sample", type=Path, default=AUDIT_DATA / "interim" / "sample.jsonl", help="Judged sample.")
+    parser.add_argument(
+        "--verdicts",
+        type=Path,
+        default=AUDIT_DATA / "final" / "judge-verdicts-sample.jsonl",
+        help="Judge verdicts on that sample.",
+    )
     return parser.parse_args(argv)
 
 
@@ -457,12 +600,23 @@ def main() -> None:
 
     for row in domains:
         print(f"{row['domain']:14s}{row['tokens_estimated']:>16,d} tokens  clears KPI: {row['clears_kpi']}")
+
+    verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.verdicts)}
+    sources = {row["source"] for row in funnel if row["source"] != "TOTAL"}
+    precision = precision_rows(judged_drops(read_jsonl(args.sample), verdicts, sources))
+    for row in precision:
+        if row["source"] == "pooled":
+            print(
+                f"{row['stage']:12s} target {row['target_precision']} ({row['target_call']})"
+                f"  bad text {row['bad_text_precision']} ({row['bad_text_call']})  n={row['drops_judged']}"
+            )
     written = [
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),
         write_csv(args.tables / "curate-tokens-by-domain.csv", domains),
         write_csv(args.tables / "dataset-corpus-statistics.csv", corpus_dataset_rows(funnel)),
+        write_csv(args.tables / "audit-precision-by-filter-and-source.csv", precision),
     ]
     written += draw_figures(args.figures, losses, comparison)
     for path in written:
