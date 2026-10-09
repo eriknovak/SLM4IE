@@ -1,0 +1,23 @@
+layer,attention,RoPE base,tokens a middle token sees at length 8192
+1,global,160000,8192
+2,local,10000,129
+3,local,10000,129
+4,global,160000,8192
+5,local,10000,129
+6,local,10000,129
+7,global,160000,8192
+8,local,10000,129
+9,local,10000,129
+10,global,160000,8192
+11,local,10000,129
+12,local,10000,129
+13,global,160000,8192
+14,local,10000,129
+15,local,10000,129
+16,global,160000,8192
+17,local,10000,129
+18,local,10000,129
+19,global,160000,8192
+20,local,10000,129
+21,local,10000,129
+22,global,160000,8192

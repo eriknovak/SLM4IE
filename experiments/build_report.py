@@ -2897,7 +2897,7 @@ REF_CSS = """
 .algrow>.sh,.algrow>.alg{grid-column:1}.algrow>.sh{margin:0 0 8px}.algrow>.reading{grid-column:2;grid-row:1/span 2}
 .reading .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
 .walk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;font-size:var(--t-sm);line-height:1.55}.walk .tag{align-self:start;margin-top:1px;white-space:nowrap}
-.diff{font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:16px;line-height:1.6;border:1px solid var(--line);border-radius:8px;overflow-x:auto;background:var(--fig)}
+.diff{font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:16px;line-height:1.6;border:1px solid var(--line);border-radius:8px;overflow-x:auto;background:var(--fig);display:grid;grid-template-columns:minmax(100%,max-content)}
 .diff>div{display:grid;grid-template-columns:150px max-content minmax(max-content,1fr);gap:0 10px;padding:4px 14px;align-items:baseline}.diff .who{font-family:var(--sans);font-size:var(--t-sm);color:var(--muted)}.diff .ln{font-size:13px;color:var(--muted)}
 .diff .old{background:var(--bad-soft)}.diff .new{background:var(--ok-soft)}.effect{margin:8px 0 0;font-size:var(--t-sm);color:var(--muted)}
 .lim{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.lim .card{padding:14px 18px}.lim h3{margin:0 0 4px;font-size:var(--t-body)}.lim p{margin:0;font-size:var(--t-sm)}
