@@ -1,0 +1,11 @@
+Candidate,Type,Score,Greedy,Beam
+Ana Novak,person,0.2,kept,kept
+Novak,organisation,0.1,,
+Krko,organisation,0.2,kept,kept
+Lek,organisation,0.2,kept,kept
+Maja Kos,person,0.2,kept,kept
+Ana Novak → Lek,works_for,1.2,kept,
+Ana Novak → Krko,works_for,1.0,,kept
+Maja Kos → Lek,works_for,1.0,,kept
+Krko → Lek,works_for,0.6,,
+total,,,2.0,2.8

@@ -1,0 +1,7 @@
+Model,Task,Input sequence
+GLiNER,entities,"<<ENT>> person <<ENT>> organisation <<SEP>> Ana Novak vodi Krko , Lek pa vodi Maja Kos ."
+GLiNER2,entities,"( [P] entities ( [E] person [E] organisation ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."
+GLiNER2,classification,"( [P] sentiment ( [L] positive [L] negative ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."
+GLiNER2,structure,"( [P] employment ( [C] employee [C] employer ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."
+GLiNER2.5,relation,"( [P] works_for ( [R] head [R] tail ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."
+GLiNER2.5,entities + classification + relation,"( [P] entities ( [E] person [E] organisation ) ) [SEP_STRUCT] ( [P] sentiment ( [L] positive [L] negative ) ) [SEP_STRUCT] ( [P] works_for ( [R] head [R] tail ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."

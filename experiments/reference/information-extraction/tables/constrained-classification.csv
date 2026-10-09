@@ -1,0 +1,7 @@
+Task,Label,Probability,Independent,Constrained
+safety,safe,0.82,selected,
+safety,unsafe,0.52,,selected
+harm,violence,0.88,selected,selected
+harm,fraud,0.12,,
+utility,,,3.5,2.1
+violations,,,1,0
