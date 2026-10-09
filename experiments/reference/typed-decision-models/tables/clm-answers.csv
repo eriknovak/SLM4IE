@@ -1,0 +1,8 @@
+Question,Type,Option,Scaled cosine,Probability,Answer,Confidence
+department,choice,billing,99.6,0.996,billing,0.993
+department,choice,technical,94.0,0.004,billing,0.993
+urgent,noul,false,97.0,0.190,0.810,
+urgent,noul,true,98.5,0.810,0.810,
+frustration,score,0,90.6,0.000,1.619,0.429
+frustration,score,1,98.8,0.381,1.619,0.429
+frustration,score,2,99.3,0.619,1.619,0.429

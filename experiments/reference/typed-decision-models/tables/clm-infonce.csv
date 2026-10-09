@@ -1,0 +1,4 @@
+Temperature,State 1 → action loss,State 2 → action loss,State 3 → action loss,Batch loss
+1,0.783,0.901,0.705,0.795
+0.1,0.241,0.181,0.008,0.145
+0.01,0.000,0.000,0.000,0.000
