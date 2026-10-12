@@ -198,8 +198,10 @@ concluded:
 - **Why**: datatrove splits each punctuation mark into its own word, so comma-dense prose fails a rule meant for numbers and symbols. In the earlier audit's sample, this rule caused most quality drops on nearly every source. With punctuation set aside, those dropped documents had a median letter share of 0.87 to 1.00.
 - **Alternatives**:
   - Lower the floor per route, to 0.65: the floor would then track how much punctuation a source uses, not how much junk it holds.
+  - Raise the floor on the raw crawls to drop the junk the repair keeps: that junk has the same letter share as good text.
 - **History**:
   - 2026-10-08 first version, at the project lead's call
+  - 2026-10-12 raw crawls keep the floor at 0.8, at the project lead's call: about one in six audit drops the repair keeps there is junk ([M4]), but no letter floor, stopword share or line measure tested drops it without as much good text
 
 ### D9 — Loosen the curated-prose quality filter only where its drops were usable text
 

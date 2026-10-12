@@ -58,6 +58,9 @@ from slm4ie.data.curate.resources.stopwords import load_stopwords  # noqa: E402
 from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _build_quality_config  # noqa: E402
 from slm4ie.utils.stats import wilson  # noqa: E402
 
+# No tqdm monitor thread: process pools fork after a bar, and forking a threaded parent can deadlock.
+tqdm.monitor_interval = 0
+
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-thresholds-slovenian")
 
