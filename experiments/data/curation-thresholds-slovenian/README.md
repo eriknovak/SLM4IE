@@ -75,11 +75,11 @@ concluded:
 - **How**: a route is a named set of content-filter settings that every source of one kind shares.
   1. Assign each source to a route by how the earlier audit's filters fared on it. Seven web crawls take the raw-crawl route. Seven edited-text sources (wiki, legal, reference corpus, parliament, news, student essays, and the crawl of PDF documents) take the curated-prose route. The four medical and academic sources take the medical-and-academic route.
   2. Start from the shared pipeline's settings, with the quality filter's letter rule counting only tokens that are not punctuation ([M2]). The raw-crawl route changes nothing else.
-  3. On the curated-prose route, switch the language and spam filters off and widen every repetition limit by half.
+  3. On the curated-prose route, switch the language and spam filters off and widen every repetition limit by half. Lower the letter floor of the quality filter from 0.8 to 0.55 ([D9]).
   4. On the medical-and-academic route, switch the spam filter off and keep the language filter. Widen the repetition limits by half, and double the limits on repeated lines.
-  5. Merge a source's own settings over its route's. The news source tolerates lines ending in an ellipsis. The PDF crawl keeps the language filter on.
+  5. Merge a source's own settings over its route's. The news source skips the rule on lines ending in an ellipsis ([D9]). The PDF crawl keeps the language filter on.
 - **Code**: `slm4ie/data/curate/config.py::resolve_profiles`
-- **Settings**: `profiles` (the three routes, each a set of filter settings), `overrides` (the route each source takes, and its own settings on top), `dup_line_frac` (maximum share of lines repeated in the document), `top_n_grams` (maximum share of characters covered by the most frequent word pair, triple and quadruple), `dup_n_grams` (maximum share of characters inside repeated 5- to 10-word sequences), `enabled` (whether a filter runs on the source at all); in `configs/curation-routes.yaml`
+- **Settings**: `profiles` (the three routes, each a set of filter settings), `overrides` (the route each source takes, and its own settings on top), `max_non_alpha_words_ratio` (minimum share of words containing a letter), `max_ellipsis_lines_ratio` (maximum share of lines ending in an ellipsis; 0 switches the rule off), `dup_line_frac` (maximum share of lines repeated in the document), `top_n_grams` (maximum share of characters covered by the most frequent word pair, triple and quadruple), `dup_n_grams` (maximum share of characters inside repeated 5- to 10-word sequences), `enabled` (whether a filter runs on the source at all); in `configs/curation-routes.yaml`
 
 ### M2 — Count only words, not punctuation marks, in the quality filter's letter rule
 
@@ -200,6 +200,16 @@ concluded:
   - Lower the floor per route, to 0.65: the floor would then track how much punctuation a source uses, not how much junk it holds.
 - **History**:
   - 2026-10-08 first version, at the project lead's call
+
+### D9 — Loosen the curated-prose quality filter only where its drops were usable text
+
+- **Decision**: On the curated-prose route, the letter floor drops from 0.8 to 0.55, and the news source skips the rule on lines ending in an ellipsis. The 20-word floor stays, so short parliament turns are still dropped ([M1]).
+- **Why**: The repaired filter still drops 106 of the audit's judged documents here ([M5]). Of these, 39 news teasers fail the ellipsis rule and 16 tables and listings fail the letter rule first; the judge found none of them broken text. Three listings also lack stopwords and stay dropped. The 32 parliament turns are mostly a few words of procedure.
+- **Alternatives**:
+  - Switch the quality filter off on curated prose: it would also keep the number-only PDF tables, at letter shares near 0.2.
+  - Lower the 20-word floor for the parliament source: four-word procedural turns add little text a model can learn from.
+- **History**:
+  - 2026-10-12 first version, at the project lead's call
 
 ## Findings
 

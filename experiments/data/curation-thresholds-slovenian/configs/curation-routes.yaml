@@ -7,7 +7,7 @@
 # sections below are the shared registry's (configs/data/curate.yaml) as of
 # the baseline build, plus one repair every route shares: the quality
 # filter's letter-share rule ignores punctuation tokens. The raw-crawl route
-# changes nothing else.
+# changes nothing else; the curated-prose route also lowers the letter floor.
 #
 # Candidate builds go to the experiment's own data folder, never over the
 # shared corpus, and log to the experiment's MLflow experiment. See the
@@ -163,6 +163,10 @@ profiles:
       enabled: false
     spam:
       enabled: false
+    quality:
+      # Results tables and listings hold 0.56-0.79 letter words; none of the
+      # audit's judged drops below 0.8 here was broken text (M5, D9).
+      max_non_alpha_words_ratio: 0.55
     repetition:
       # Gopher's web limits, widened by half: short edited texts repeat
       # their top 4-gram or a few lines without being furniture.
@@ -212,8 +216,8 @@ overrides:
   slovenian_news:
     profile: curated_prose
     quality:
-      # Kept from the shared registry: news prose ends lines in "…" mid-article.
-      max_ellipsis_lines_ratio: 0.9
+      # Off (0): one-line agency teasers end in "…", so every line does (M5, D9).
+      max_ellipsis_lines_ratio: 0
 
   kas: {profile: medical_academic}
   kzb: {profile: medical_academic}

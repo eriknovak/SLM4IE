@@ -47,7 +47,12 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
 
-from slm4ie.data.curate.config import effective_stage_config, lock_path_for, resolve_profiles  # noqa: E402
+from slm4ie.data.curate.config import (  # noqa: E402
+    effective_stage_config,
+    load_curate_config,
+    lock_path_for,
+    resolve_profiles,
+)
 from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
 from slm4ie.data.curate.resources.stopwords import load_stopwords  # noqa: E402
 from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _build_quality_config  # noqa: E402
@@ -539,19 +544,23 @@ def loss_change_rows(
 
 
 def check_lock(pretrain_dir: Path, config: Path) -> None:
-    """Check that a build on disk is the one its config's lock file records.
+    """Check that a build on disk is the one its config's lock file records, at the config's settings.
 
     A candidate config writes to one fixed folder, so a later build overwrites
-    it; tables named after the config must come from the build it locked.
+    it; tables named after the config must come from the build it locked. The
+    config may also have changed since that build, while the audit re-score
+    applies the config's settings as they stand.
 
     Args:
         pretrain_dir: The build's `output_dir`.
         config: The config that made it; its lock file sits beside it.
 
     Raises:
-        ValueError: If a unit on disk differs from its lock entry, or is missing.
+        ValueError: If a unit on disk differs from its lock entry, is missing,
+            or was built at settings other than the config's.
     """
     lock = yaml.safe_load(lock_path_for(config).read_text(encoding="utf-8"))
+    curate = load_curate_config(None, None, config, None)
     folders = {folder[3:]: folder for folder in (*SCOPED_STAGES, COUNTED_STAGE, *CORPUS_STAGES)}
     mismatched: List[str] = []
     for stage, folder in folders.items():
@@ -559,7 +568,8 @@ def check_lock(pretrain_dir: Path, config: Path) -> None:
         for source, entry in entries.items():
             sentinel_path = pretrain_dir / folder / source / ".complete"
             sentinel = json.loads(sentinel_path.read_text(encoding="utf-8")) if sentinel_path.is_file() else {}
-            if any(sentinel.get(key) != entry[key] for key in ("document_digest", "records_in", "records_out")):
+            differs = any(sentinel.get(key) != entry[key] for key in ("document_digest", "records_in", "records_out"))
+            if differs or entry["config_hash"] != curate.expected_hash(stage, source or None):
                 mismatched.append(f"{stage}/{source}" if source else stage)
     if mismatched:
         raise ValueError(f"{pretrain_dir} is not the build {lock_path_for(config).name} records: {mismatched}")
