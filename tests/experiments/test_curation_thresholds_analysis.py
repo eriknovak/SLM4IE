@@ -118,6 +118,46 @@ def test_refilter_rescues_everything_where_the_filter_is_off() -> None:
     assert next(row for row in rows if row["source"] == "kzb")["rescued"] == 1
 
 
+def _strict_filter() -> Any:
+    """Build a quality filter needing 5 words and the stopword `in`.
+
+    Returns:
+        The filter, its other rules at datatrove's defaults.
+    """
+    return analysis.LetterShareGopherQualityFilter(
+        language=analysis.Languages.slovenian, stop_words=["in"], min_doc_words=5, min_stop_words=1
+    )
+
+
+def test_failing_rules_lists_every_rule_past_the_first() -> None:
+    """A short text without stopwords fails the length rule, then the stopword rule."""
+    doc = analysis.Document(text="mačka pes", id="a")
+
+    assert analysis.failing_rules(_strict_filter(), doc) == ["min_doc_words", "min_stop_words"]
+
+
+def test_failing_rules_leaves_the_filter_unchanged() -> None:
+    """Switching rules off works on copies, so the filter keeps dropping."""
+    quality_filter = _strict_filter()
+    analysis.failing_rules(quality_filter, analysis.Document(text="mačka pes", id="a"))
+
+    assert quality_filter.min_doc_words == 5
+
+
+def test_drop_rule_rows_groups_still_dropped_documents_by_their_failed_rules() -> None:
+    """Kept documents are left out; dropped ones are counted per failed set with their target hits."""
+    texts = {"a": "mačka pes", "b": "mačka in lisica in medved in", "c": "lisica volk"}
+    verdicts = {"a": _verdict(coherence=1), "b": _verdict(), "c": _verdict()}
+
+    rows = analysis.drop_rule_rows(
+        {"siparl": dict.fromkeys(texts, "")}, texts, verdicts, {"siparl": _strict_filter()}, {"siparl": "curated_prose"}
+    )
+
+    assert [(row["failed_rules"], row["still_dropped"], row["target_hits"]) for row in rows] == [
+        ("min_doc_words+min_stop_words", 2, 1)
+    ]
+
+
 def test_fetch_full_texts_reads_compact_and_spaced_shards(tmp_path: Path) -> None:
     """Ids are found in datatrove's compact lines and in convert's spaced, escaped ones."""
     stage = tmp_path / "02_spam"

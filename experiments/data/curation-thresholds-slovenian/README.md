@@ -121,6 +121,17 @@ concluded:
 - **Code**: `analysis.py::refilter_rows`
 - **Settings**: none; the filter settings are the candidate's, in `configs/curation-routes.yaml`
 
+### M5 — List every quality rule each still-dropped document fails
+
+- **Input**: the documents the candidate's quality filter still drops in [M4], each with its judge verdict. One item is such a document, with its source and route.
+- **Output**: per route, source and set of failed rules, the first rule failed, how many documents fail exactly that set, and how many of them the judge found to be the quality target or bad text. Each rule is named by the setting that steers it; one setting, the symbol ratio, steers both the hash and the ellipsis rule. Written to `tables/curation-routes-audit-quality-drops-by-rule-and-source.csv`.
+- **How**: the quality filter stops at the first rule a document fails, so a document that fails two rules would still be dropped if only the first were loosened.
+  1. Run the source's quality filter on the document and note the rule it fails.
+  2. Switch that rule off, by setting it to 0 on a copy of the filter, and run it again; repeat until the document is kept.
+  3. Group the documents by the set of rules they failed. A set of one rule counts the documents that switching that rule off alone would keep; loosening it only part of the way may keep fewer.
+- **Code**: `analysis.py::drop_rule_rows`
+- **Settings**: none; the filter settings are the candidate's, in `configs/curation-routes.yaml`
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text

@@ -26,6 +26,7 @@ Run it with:
 """
 
 import argparse
+import copy
 import csv
 import gzip
 import hashlib
@@ -78,6 +79,20 @@ ID_PATTERN = re.compile(r'"id":\s*"((?:[^"\\]|\\.)*)"')
 
 #: Version of the text-fetch cache layout; bump it when the lookup changes.
 FETCH_FORMAT = 2
+
+#: The quality setting behind each drop reason; setting it to 0 switches that rule off.
+REASON_SETTINGS = {
+    "gopher_short_doc": "min_doc_words",
+    "gopher_long_doc": "max_doc_words",
+    "gopher_below_avg_threshold": "min_avg_word_length",
+    "gopher_above_avg_threshold": "max_avg_word_length",
+    "gopher_too_many_hashes": "max_symbol_word_ratio",
+    "gopher_too_many_ellipsis": "max_symbol_word_ratio",
+    "gopher_too_many_bullets": "max_bullet_lines_ratio",
+    "gopher_too_many_end_ellipsis": "max_ellipsis_lines_ratio",
+    "gopher_below_alpha_threshold": "max_non_alpha_words_ratio",
+    "gopher_enough_stop_words": "min_stop_words",
+}
 
 #: The corpus-wide stages after exact dedup, each with one sentinel for the whole corpus.
 CORPUS_STAGES: Tuple[str, ...] = ("06_sentence_dedup", "07_statistics")
@@ -879,6 +894,77 @@ def refilter_rows(
     return rows
 
 
+def failing_rules(quality_filter: Any, doc: Document) -> List[str]:
+    """List every quality setting a document fails, in the filter's order.
+
+    The filter stops at the first rule a document fails, so each failing rule
+    is switched off in turn and the filter run again.
+
+    Args:
+        quality_filter: The quality filter; its rules are switched off on copies.
+        doc: The document.
+
+    Returns:
+        The settings behind the failed rules, first failure first; empty for
+        a kept document.
+    """
+    failed: List[str] = []
+    result = quality_filter.filter(doc)
+    while result is not True:
+        setting = REASON_SETTINGS[result[1]]
+        failed.append(setting)
+        quality_filter = copy.copy(quality_filter)
+        setattr(quality_filter, setting, 0)
+        result = quality_filter.filter(doc)
+    return failed
+
+
+def drop_rule_rows(
+    openings: Dict[str, Dict[str, str]],
+    texts: Dict[str, str],
+    verdicts: Dict[str, Dict[str, Any]],
+    filters: Dict[str, Optional[LetterShareGopherQualityFilter]],
+    routes: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    """Group the documents a candidate's quality filter still drops by the rules they fail.
+
+    Args:
+        openings: Per source, the audit's judged quality drops, from `quality_drops`.
+        texts: Their full text, from `fetch_full_texts`; other ids are skipped.
+        verdicts: Judge verdicts by document id.
+        filters: The candidate's quality filter per source, from `quality_filters`.
+        routes: The route per source, from `read_routes`.
+
+    Returns:
+        One row per route, source and set of failed rules, with how many
+        documents fail exactly that set and how many of them the judge found
+        to be the quality target or bad text. A set of one rule counts the
+        documents that loosening that rule alone would keep.
+    """
+    groups: Dict[Tuple[str, str, Tuple[str, ...]], List[Dict[str, Any]]] = defaultdict(list)
+    for source, ids in sorted(openings.items()):
+        if filters[source] is None:
+            continue
+        for doc_id in sorted(ids):
+            if doc_id not in texts:
+                continue
+            failed = failing_rules(filters[source], Document(text=texts[doc_id], id=doc_id))
+            if failed:
+                groups[(routes.get(source, ""), source, tuple(failed))].append(verdicts[doc_id])
+    return [
+        {
+            "route": route,
+            "source": source,
+            "first_rule": failed[0],
+            "failed_rules": "+".join(failed),
+            "still_dropped": len(group),
+            "target_hits": sum(1 for verdict in group if TARGETS["quality"](verdict)),
+            "bad_text_hits": sum(1 for verdict in group if is_bad_text(verdict)),
+        }
+        for (route, source, failed), group in sorted(groups.items())
+    ]
+
+
 def draw_figures(
     figures_dir: Path,
     losses: List[Dict[str, Any]],
@@ -1061,7 +1147,9 @@ def main() -> None:
     openings = quality_drops(sample, verdicts, sources)
     texts_cache = args.data_root / "interim" / f"{stem}-audit-quality-drops.json"
     texts, changed = fetch_full_texts(candidate_dir / QUALITY_INPUT, openings, texts_cache, args.workers)
-    refilter = refilter_rows(openings, texts, changed, verdicts, quality_filters(args.routes_config, openings), routes)
+    filters = quality_filters(args.routes_config, openings)
+    refilter = refilter_rows(openings, texts, changed, verdicts, filters, routes)
+    drop_rules = drop_rule_rows(openings, texts, verdicts, filters, routes)
     for row in refilter:
         if row["source"] == "pooled":
             print(
@@ -1076,6 +1164,7 @@ def main() -> None:
         write_csv(args.tables / f"{stem}-loss-change-by-stage-and-source.csv", loss_changes),
         write_csv(args.tables / f"{stem}-tokens-by-domain.csv", candidate_domains),
         write_csv(args.tables / f"{stem}-audit-quality-refilter-by-route-and-source.csv", refilter),
+        write_csv(args.tables / f"{stem}-audit-quality-drops-by-rule-and-source.csv", drop_rules),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),
