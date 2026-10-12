@@ -27,19 +27,29 @@ Run it with:
 
 import argparse
 import csv
+import gzip
+import hashlib
 import json
+import re
 import sys
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
+from datatrove.data import Document
+from datatrove.utils.typeshelper import Languages
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
 
-from slm4ie.data.curate.config import lock_path_for  # noqa: E402
+from slm4ie.data.curate.config import effective_stage_config, lock_path_for, resolve_profiles  # noqa: E402
 from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
+from slm4ie.data.curate.resources.stopwords import load_stopwords  # noqa: E402
+from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _build_quality_config  # noqa: E402
 from slm4ie.utils.stats import wilson  # noqa: E402
 
 #: Where this experiment's derived data lives, relative to the repository root.
@@ -59,6 +69,15 @@ SCOPED_STAGES: Tuple[str, ...] = ("00_convert", "01_language", "02_spam", "03_qu
 
 #: The corpus-wide stage whose per-source output has to be counted.
 COUNTED_STAGE = "05_exact_dedup"
+
+#: The stage folder the quality filter reads, holding every document that reaches it.
+QUALITY_INPUT = "02_spam"
+
+#: A document's id in a shard line, compact (datatrove) or spaced (convert), escapes kept.
+ID_PATTERN = re.compile(r'"id":\s*"((?:[^"\\]|\\.)*)"')
+
+#: Version of the text-fetch cache layout; bump it when the lookup changes.
+FETCH_FORMAT = 2
 
 #: The corpus-wide stages after exact dedup, each with one sentinel for the whole corpus.
 CORPUS_STAGES: Tuple[str, ...] = ("06_sentence_dedup", "07_statistics")
@@ -598,6 +617,34 @@ def call_rate(share: float) -> str:
     return "fails" if share < REFUTE_RATE else "open"
 
 
+def rate_columns(
+    name: str, verdicts: List[Dict[str, Any]], test: Optional[Callable[[Dict[str, Any]], bool]], call: bool
+) -> Dict[str, Any]:
+    """Score a group of verdicts on one test, with its Wilson interval.
+
+    Args:
+        name: Prefix of the column names, such as `target`.
+        verdicts: The judged documents in the group.
+        test: Whether one verdict counts as a hit; None leaves the columns empty.
+        call: Whether to call the rate against the record's bars (D2).
+
+    Returns:
+        `<name>_hits`, `_precision`, `_low`, `_high` and `_call`, all empty
+        when there is no test or no verdict.
+    """
+    if test is None or not verdicts:
+        return {f"{name}_{key}": "" for key in ("hits", "precision", "low", "high", "call")}
+    hits = sum(1 for verdict in verdicts if test(verdict))
+    low, high = wilson(hits, len(verdicts))
+    return {
+        f"{name}_hits": hits,
+        f"{name}_precision": round(hits / len(verdicts), 4),
+        f"{name}_low": round(low, 4),
+        f"{name}_high": round(high, 4),
+        f"{name}_call": call_rate(hits / len(verdicts)) if call else "",
+    }
+
+
 def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """Score each content filter's drops on its target and on bad text.
 
@@ -616,20 +663,219 @@ def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[D
         pooled = [verdict for _, verdicts in per_source for verdict in verdicts]
         for source, verdicts in [("pooled", pooled), *per_source]:
             read = source == "pooled" or len(verdicts) >= MIN_SOURCE_DROPS
-            row: Dict[str, Any] = {"stage": stage, "source": source, "drops_judged": len(verdicts), "read": read}
             bad_test = is_bad_text if stage in BAD_TEXT_STAGES else None
-            for name, test in (("target", is_target), ("bad_text", bad_test)):
-                if test is None or not verdicts:
-                    row.update({f"{name}_{key}": "" for key in ("hits", "precision", "low", "high", "call")})
-                    continue
-                hits = sum(1 for verdict in verdicts if test(verdict))
-                low, high = wilson(hits, len(verdicts))
-                row[f"{name}_hits"] = hits
-                row[f"{name}_precision"] = round(hits / len(verdicts), 4)
-                row[f"{name}_low"] = round(low, 4)
-                row[f"{name}_high"] = round(high, 4)
-                row[f"{name}_call"] = call_rate(hits / len(verdicts)) if read else ""
-            rows.append(row)
+            rows.append(
+                {
+                    "stage": stage,
+                    "source": source,
+                    "drops_judged": len(verdicts),
+                    "read": read,
+                    **rate_columns("target", verdicts, is_target, read),
+                    **rate_columns("bad_text", verdicts, bad_test, read),
+                }
+            )
+    return rows
+
+
+def quality_drops(
+    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
+) -> Dict[str, Dict[str, str]]:
+    """Pick the judged documents the quality filter dropped in the earlier audit.
+
+    Args:
+        sample: Sample rows, each carrying `id`, `dataset`, `text` and its `cells`.
+        verdicts: Judge verdicts by document id.
+        sources: The selected sources; a sampled source outside them is skipped.
+
+    Returns:
+        Per source, the text the judge read (the document's opening) by document id.
+    """
+    picked: Dict[str, Dict[str, str]] = defaultdict(dict)
+    for row in sample:
+        if row["id"] not in verdicts or row["dataset"] not in sources:
+            continue
+        if any(cell["stage"] == "quality" and cell["decision"] == "dropped" for cell in row["cells"]):
+            picked[row["dataset"]][row["id"]] = row["text"]
+    return dict(picked)
+
+
+def _documents_in_shard(task: Tuple[Path, Dict[str, str]]) -> List[Tuple[str, Optional[str]]]:
+    """Read the wanted documents out of one shard.
+
+    Args:
+        task: The shard, and the opening the judge read per wanted id.
+
+    Returns:
+        Per wanted document the shard holds, repeats included, its id and its
+        full text, or None for the text when it does not start with the opening.
+    """
+    path, openings = task
+    found: List[Tuple[str, Optional[str]]] = []
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            # A quote inside text is escaped, so the first match is the id key.
+            match = ID_PATTERN.search(line)
+            if match is None or json.loads(f'"{match.group(1)}"') not in openings:
+                continue
+            document = json.loads(line)
+            opening = openings.get(document["id"])
+            if opening is not None:
+                found.append((document["id"], document["text"] if document["text"].startswith(opening) else None))
+    return found
+
+
+def fetch_full_texts(
+    stage_dir: Path, openings: Dict[str, Dict[str, str]], cache: Path, workers: int
+) -> Tuple[Dict[str, str], Set[str]]:
+    """Fetch the full text of documents the judge read only the opening of.
+
+    The sampler cut long documents short, and a filter has to see the whole
+    text, so each one is read again from a stage folder. A document missing
+    there was dropped before that stage. The result is cached and reused
+    while every source's sentinel and the wanted openings are unchanged.
+
+    Args:
+        stage_dir: The stage folder to read, one subfolder per source.
+        openings: Per source, the text the judge read by document id.
+        cache: JSON file holding the result and the inputs it was read from.
+        workers: Shards read at once.
+
+    Returns:
+        Full text by document id, for the documents the folder holds with the
+        text the judge read; and the ids the folder holds only with other text.
+    """
+    key = {
+        "format": FETCH_FORMAT,
+        "openings": hashlib.sha256(json.dumps(openings, sort_keys=True).encode("utf-8")).hexdigest(),
+        "digests": {
+            source: json.loads((stage_dir / source / ".complete").read_text(encoding="utf-8"))["document_digest"]
+            for source in sorted(openings)
+        },
+    }
+    if cache.is_file():
+        cached = json.loads(cache.read_text(encoding="utf-8"))
+        if cached["key"] == key:
+            return cached["texts"], set(cached["changed"])
+    tasks = [
+        (shard, openings[source])
+        for source in sorted(openings)
+        for shard in sorted((stage_dir / source).glob("*.jsonl.gz"))
+    ]
+    texts: Dict[str, str] = {}
+    seen: Set[str] = set()
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for found in tqdm(pool.map(_documents_in_shard, tasks), total=len(tasks), desc=f"reading {stage_dir.name}"):
+            for doc_id, text in found:
+                seen.add(doc_id)
+                # One id can carry several texts (issue #6); keep the one the judge read.
+                if text is not None:
+                    texts.setdefault(doc_id, text)
+    changed = seen - set(texts)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    partial = cache.with_suffix(".partial")
+    partial.write_text(
+        json.dumps({"key": key, "texts": texts, "changed": sorted(changed)}, ensure_ascii=False), encoding="utf-8"
+    )
+    partial.replace(cache)
+    return texts, changed
+
+
+def quality_filters(config: Path, sources: Iterable[str]) -> Dict[str, Optional[LetterShareGopherQualityFilter]]:
+    """Build the quality filter each source meets in a candidate build.
+
+    Args:
+        config: The candidate build's curation config.
+        sources: The sources to build a filter for.
+
+    Returns:
+        Per source, its quality filter with its route's and its own settings;
+        None where the route switches the filter off.
+    """
+    cfg = yaml.safe_load(config.read_text(encoding="utf-8"))
+    overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
+    stopwords, _ = load_stopwords(cfg["stopwords"])
+    filters: Dict[str, Optional[LetterShareGopherQualityFilter]] = {}
+    for source in sources:
+        knobs = effective_stage_config(cfg, overrides, source, "quality")
+        if knobs.get("enabled") is False:
+            filters[source] = None
+            continue
+        # The stage's own builder, so defaults and casts match the build exactly.
+        settings = _build_quality_config(knobs)
+        filters[source] = LetterShareGopherQualityFilter(
+            language=Languages.slovenian, stop_words=sorted(stopwords), **asdict(settings)
+        )
+    return filters
+
+
+def refilter_rows(
+    openings: Dict[str, Dict[str, str]],
+    texts: Dict[str, str],
+    changed: Set[str],
+    verdicts: Dict[str, Dict[str, Any]],
+    filters: Dict[str, Optional[LetterShareGopherQualityFilter]],
+    routes: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    """Re-apply a candidate's quality filter to the documents it dropped in the earlier audit.
+
+    A document the candidate filter keeps is rescued; the rest are its drops,
+    scored on the quality target and on bad text as `precision_rows` scores
+    the audit's own drops.
+
+    Args:
+        openings: Per source, the audit's judged quality drops, from `quality_drops`.
+        texts: Their full text, from `fetch_full_texts`.
+        changed: The ids the candidate holds only with text other than the
+            judged one; they are counted and left out, since the verdict was
+            on other text. Any other id missing from `texts` is absent: an
+            earlier filter drops it, or the source's ids changed since the audit.
+        verdicts: Judge verdicts by document id.
+        filters: The candidate's quality filter per source, from `quality_filters`.
+        routes: The route per source, from `read_routes`.
+
+    Returns:
+        A row pooled over every source, one per route, then one per source,
+        each with the rescued documents' bad-text share and the remaining
+        drops' rates. A group with fewer than `MIN_SOURCE_DROPS` remaining
+        drops gets no call.
+    """
+    rescued: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    dropped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for source, ids in sorted(openings.items()):
+        quality_filter = filters[source]
+        for doc_id in sorted(ids):
+            if doc_id not in texts:
+                continue
+            kept = quality_filter is None or quality_filter.filter(Document(text=texts[doc_id], id=doc_id)) is True
+            (rescued if kept else dropped)[source].append(verdicts[doc_id])
+
+    def group(route: str, source: str, members: List[str]) -> Dict[str, Any]:
+        """Score one group of sources pooled together."""
+        saved = [verdict for member in members for verdict in rescued[member]]
+        still_dropped = [verdict for member in members for verdict in dropped[member]]
+        read = len(still_dropped) >= MIN_SOURCE_DROPS
+        return {
+            "route": route,
+            "source": source,
+            "drops_judged": sum(len(openings[member]) for member in members),
+            "text_changed": sum(1 for member in members for doc_id in openings[member] if doc_id in changed),
+            "absent": sum(
+                1 for member in members for doc_id in openings[member] if doc_id not in texts and doc_id not in changed
+            ),
+            "reach_quality": len(saved) + len(still_dropped),
+            "rescued": len(saved),
+            **rate_columns("rescued_bad_text", saved, is_bad_text, call=False),
+            "still_dropped": len(still_dropped),
+            **rate_columns("target", still_dropped, TARGETS["quality"], read),
+            **rate_columns("bad_text", still_dropped, is_bad_text, read),
+        }
+
+    by_route: Dict[str, List[str]] = defaultdict(list)
+    for source in sorted(openings):
+        by_route[routes.get(source, "")].append(source)
+    rows = [group("all", "pooled", sorted(openings))]
+    rows += [group(route, "pooled", members) for route, members in sorted(by_route.items())]
+    rows += [group(route, source, [source]) for route, members in sorted(by_route.items()) for source in members]
     return rows
 
 
@@ -754,7 +1000,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--extract-config", type=Path, default=Path("configs/data/extract.yaml"))
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
     parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
-    parser.add_argument("--workers", type=int, default=30, help="Shards counted at once for exact dedup.")
+    parser.add_argument(
+        "--workers", type=int, default=30, help="Shards read at once (exact-dedup counts, audit texts)."
+    )
     parser.add_argument("--sample", type=Path, default=AUDIT_DATA / "interim" / "sample.jsonl", help="Judged sample.")
     parser.add_argument(
         "--verdicts",
@@ -784,7 +1032,8 @@ def main() -> None:
 
     verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.verdicts)}
     sources = {row["source"] for row in funnel if row["source"] != "TOTAL"}
-    precision = precision_rows(judged_drops(read_jsonl(args.sample), verdicts, sources))
+    sample = read_jsonl(args.sample)
+    precision = precision_rows(judged_drops(sample, verdicts, sources))
     for row in precision:
         if row["source"] == "pooled":
             print(
@@ -809,11 +1058,24 @@ def main() -> None:
     for row in candidate_domains:
         print(f"{stem}: {row['domain']:14s}{row['tokens_estimated']:>16,d} tokens  clears KPI: {row['clears_kpi']}")
 
+    openings = quality_drops(sample, verdicts, sources)
+    texts_cache = args.data_root / "interim" / f"{stem}-audit-quality-drops.json"
+    texts, changed = fetch_full_texts(candidate_dir / QUALITY_INPUT, openings, texts_cache, args.workers)
+    refilter = refilter_rows(openings, texts, changed, verdicts, quality_filters(args.routes_config, openings), routes)
+    for row in refilter:
+        if row["source"] == "pooled":
+            print(
+                f"{stem}: quality re-applied, {row['route']:16s} rescued {row['rescued']}/{row['reach_quality']}"
+                f" (bad text {row['rescued_bad_text_precision']}), still dropped {row['still_dropped']}"
+                f" target {row['target_precision']} ({row['target_call']})"
+            )
+
     written = [
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
         write_csv(args.tables / f"{stem}-retention-by-build-and-source.csv", route_comparison),
         write_csv(args.tables / f"{stem}-loss-change-by-stage-and-source.csv", loss_changes),
         write_csv(args.tables / f"{stem}-tokens-by-domain.csv", candidate_domains),
+        write_csv(args.tables / f"{stem}-audit-quality-refilter-by-route-and-source.csv", refilter),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),

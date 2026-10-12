@@ -107,6 +107,20 @@ concluded:
 - **Code**: `analysis.py::precision_rows`
 - **Settings**: none; the bars are the record's ([D2])
 
+### M4 — Re-apply a candidate's quality filter to the documents the earlier audit saw it drop
+
+- **Input**: the documents from the 18 selected sources that the quality filter dropped in the earlier audit's judged sample, each with its judge verdict. One item is such a document, with its source.
+- **Output**: per source, per route and pooled, how many of those documents the candidate's quality filter now keeps, the share of them that is bad text, and the target and bad-text precision of the ones it still drops ([M3]). Written to `tables/curation-routes-audit-quality-refilter-by-route-and-source.csv` for the candidate-routes build.
+- **How**: the judge read only each document's opening, so the filter is re-applied to the full text.
+  1. Read each document's full text from the candidate build's input to the quality filter, matching the opening the judge read. A document is counted once even when the sample lists it twice, so a source can show fewer documents here than drops in the earlier audit's scoring ([M3]).
+  2. Leave out, and count apart, two kinds of document. One is absent from that input, because an earlier filter of the candidate build drops it or because its source's document ids changed since the audit's build. The other is present only with text that no longer starts with the judged opening, so its verdict does not describe it.
+  3. Build each source's quality filter with its route's settings and its own on top ([M1]), including the repaired letter rule ([M2]).
+  4. Run the filter on each document. A kept document is rescued; the rest are the candidate filter's drops.
+  5. Over the rescued documents, compute the share judged bad text, $b = r_{bad} / r$, where $r$ is the number rescued and $r_{bad}$ how many of them are bad text, with its 95% Wilson interval.
+  6. Score the documents still dropped on the quality target and on bad text, as for the earlier audit's drops ([M3]). A group with fewer than 20 still dropped gets no call.
+- **Code**: `analysis.py::refilter_rows`
+- **Settings**: none; the filter settings are the candidate's, in `configs/curation-routes.yaml`
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
