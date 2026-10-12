@@ -15,6 +15,11 @@ read pooled over sources and per source, and called against the record's
 bars (D2). By default it reads the earlier audit's sample and verdicts, the
 evidence thresholds are tuned on (D3).
 
+The third pass reads a candidate build, the corpus rebuilt with every source on
+its route (M1), beside the baseline: how much of each source survives, which
+stage gained or lost it, and whether the corpus and every domain still clear
+the volume targets (D4).
+
 Run it with:
 
     uv run --group corpus --group analysis python experiments/data/curation-thresholds-slovenian/analysis.py
@@ -33,6 +38,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
 
+from slm4ie.data.curate.config import lock_path_for  # noqa: E402
 from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
 from slm4ie.utils.stats import wilson  # noqa: E402
 
@@ -54,6 +60,9 @@ SCOPED_STAGES: Tuple[str, ...] = ("00_convert", "01_language", "02_spam", "03_qu
 #: The corpus-wide stage whose per-source output has to be counted.
 COUNTED_STAGE = "05_exact_dedup"
 
+#: The corpus-wide stages after exact dedup, each with one sentinel for the whole corpus.
+CORPUS_STAGES: Tuple[str, ...] = ("06_sentence_dedup", "07_statistics")
+
 #: The stages that drop documents, named as in the record.
 DROP_STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_dedup", "sentence_dedup")
 
@@ -65,6 +74,12 @@ KPI3_TOKENS = 5_000_000_000
 
 #: KPI 4, estimated tokens each domain must exceed.
 KPI4_TOKENS = 500_000
+
+#: The candidate build's config; its stem names the tables and figures read from that build.
+ROUTES_CONFIG = Path(__file__).resolve().parent / "configs" / "curation-routes.yaml"
+
+#: Each route's name in the record's words, for figure labels.
+ROUTE_NAMES = {"raw_crawl": "raw crawl", "curated_prose": "curated prose", "medical_academic": "medical, academic"}
 
 #: The earlier audit's derived data: its judged sample and frozen verdicts.
 AUDIT_DATA = Path("data/experiments/data/curation-quality-slovenian")
@@ -243,6 +258,24 @@ def funnel_rows(pretrain_dir: Path, exact_counts: Dict[str, int], access: Dict[s
     return rows
 
 
+def loss_shares(row: Dict[str, Any]) -> Dict[str, float]:
+    """Share of one source's converted documents that each drop stage removed, unrounded.
+
+    Args:
+        row: One source's row from `funnel_rows`.
+
+    Returns:
+        The share per stage in `DROP_STAGES`.
+    """
+    shares: Dict[str, float] = {}
+    previous = row["convert"]
+    for stage in DROP_STAGES:
+        current = row["final"] if stage == "sentence_dedup" else row[stage]
+        shares[stage] = (previous - current) / row["convert"]
+        previous = current
+    return shares
+
+
 def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Split each source's converted documents by the stage that dropped them.
 
@@ -253,19 +286,15 @@ def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         One row per source, in the funnel's order, with one share per stage and
         the share kept, summing to one.
     """
-    rows: List[Dict[str, Any]] = []
-    for row in funnel:
-        if row["source"] == "TOTAL":
-            continue
-        loss: Dict[str, Any] = {"source": row["source"]}
-        previous = row["convert"]
-        for stage in DROP_STAGES:
-            current = row["final"] if stage == "sentence_dedup" else row[stage]
-            loss[stage] = round((previous - current) / row["convert"], 4)
-            previous = current
-        loss["kept"] = row["retained"]
-        rows.append(loss)
-    return rows
+    return [
+        {
+            "source": row["source"],
+            **{stage: round(share, 4) for stage, share in loss_shares(row).items()},
+            "kept": row["retained"],
+        }
+        for row in funnel
+        if row["source"] != "TOTAL"
+    ]
 
 
 def build_comparison_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str, str]]) -> List[Dict[str, Any]]:
@@ -306,7 +335,9 @@ def build_comparison_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[
     return rows
 
 
-def domain_token_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def domain_token_rows(
+    funnel: List[Dict[str, Any]], earlier_funnel: List[Dict[str, Any]], earlier: str = "audit"
+) -> List[Dict[str, Any]]:
     """Total the finished corpus per domain in estimated tokens, against the KPIs.
 
     Domains are the labels each source declares (D4). Each domain is held to
@@ -314,7 +345,8 @@ def domain_token_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str,
 
     Args:
         funnel: Rows from `funnel_rows`.
-        audit_funnel: The earlier audit's `source-funnel.csv`, for its totals.
+        earlier_funnel: The funnel of the build compared against, for its totals.
+        earlier: Name of that build, suffixed to its token column.
 
     Returns:
         One row per domain, fewest tokens first, then the corpus total.
@@ -322,16 +354,16 @@ def domain_token_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str,
     tokens: Dict[str, int] = defaultdict(int)
     documents: Dict[str, int] = defaultdict(int)
     sources: Dict[str, int] = defaultdict(int)
-    audit_tokens: Dict[str, int] = defaultdict(int)
+    earlier_tokens: Dict[str, int] = defaultdict(int)
     for row in funnel:
         if row["source"] == "TOTAL":
             continue
         tokens[row["domain"]] += row["tokens_estimated"]
         documents[row["domain"]] += row["final"]
         sources[row["domain"]] += 1
-    for row in audit_funnel:
+    for row in earlier_funnel:
         if row["source"] != "TOTAL":
-            audit_tokens[row["domain"]] += TOKENS_PER_WORD * int(row["final_words"])
+            earlier_tokens[row["domain"]] += TOKENS_PER_WORD * int(row["final_words"])
 
     total = sum(tokens.values())
     rows = [
@@ -340,7 +372,7 @@ def domain_token_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str,
             "sources": sources[domain],
             "documents": documents[domain],
             "tokens_estimated": tokens[domain],
-            "tokens_estimated_audit": audit_tokens.get(domain, ""),
+            f"tokens_estimated_{earlier}": earlier_tokens.get(domain, ""),
             "token_share": round(tokens[domain] / total, 4),
             "kpi_threshold": KPI4_TOKENS,
             "clears_kpi": tokens[domain] > KPI4_TOKENS,
@@ -353,7 +385,7 @@ def domain_token_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str,
             "sources": sum(sources.values()),
             "documents": sum(documents.values()),
             "tokens_estimated": total,
-            "tokens_estimated_audit": sum(audit_tokens.values()),
+            f"tokens_estimated_{earlier}": sum(earlier_tokens.values()),
             "token_share": 1.0,
             "kpi_threshold": KPI3_TOKENS,
             "clears_kpi": total > KPI3_TOKENS,
@@ -385,6 +417,118 @@ def corpus_dataset_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for row in sorted(funnel, key=lambda row: row["source"])
         if row["source"] != "TOTAL"
     ]
+
+
+def read_routes(config: Path) -> Dict[str, str]:
+    """Read the route each source takes in a candidate build's config.
+
+    Args:
+        config: A curation config whose `overrides:` block names a `profile`
+            per source.
+
+    Returns:
+        The route name per source; a source without one is absent.
+    """
+    overrides = (yaml.safe_load(config.read_text(encoding="utf-8")) or {}).get("overrides") or {}
+    return {source: entry["profile"] for source, entry in overrides.items() if (entry or {}).get("profile")}
+
+
+def route_comparison_rows(
+    baseline: List[Dict[str, Any]], candidate: List[Dict[str, Any]], routes: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """Set each source's retention in a candidate build beside the baseline's.
+
+    Args:
+        baseline: Rows from `funnel_rows` over the baseline corpus.
+        candidate: Rows from `funnel_rows` over the candidate build.
+        routes: The route per source, from `read_routes`.
+
+    Returns:
+        One row per source, the largest change in retention first, then the
+        corpus total.
+
+    Raises:
+        ValueError: If the two builds hold different sources, or a source
+            converted to a different number of documents in each.
+    """
+    before = {row["source"]: row for row in baseline}
+    after = {row["source"]: row for row in candidate}
+    if set(before) != set(after):
+        raise ValueError(f"the builds hold different sources: {sorted(set(before) ^ set(after))}")
+    unequal = sorted(source for source in after if after[source]["convert"] != before[source]["convert"])
+    if unequal:
+        raise ValueError(f"the builds converted different documents for {unequal}")
+    rows = [
+        {
+            "source": source,
+            "domain": row["domain"],
+            "route": routes.get(source, ""),
+            "retained_baseline": before[source]["retained"],
+            "retained_candidate": row["retained"],
+            "change": round((row["final"] - before[source]["final"]) / row["convert"], 4),
+            "words_baseline": before[source]["final_words"],
+            "words_candidate": row["final_words"],
+        }
+        for source, row in after.items()
+    ]
+    rows.sort(key=lambda row: (row["source"] == "TOTAL", -abs(row["change"])))
+    return rows
+
+
+def loss_change_rows(
+    baseline: List[Dict[str, Any]], candidate: List[Dict[str, Any]], routes: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """Report how much more or less of each source every stage drops in a candidate build.
+
+    Shares are over the source's converted documents, which both builds share
+    (`route_comparison_rows` checks it), so a negative value is text the stage
+    no longer drops, and a source's changes sum to minus its change in retention.
+
+    Args:
+        baseline: Rows from `funnel_rows` over the baseline corpus.
+        candidate: Rows from `funnel_rows` over the candidate build.
+        routes: The route per source, from `read_routes`.
+
+    Returns:
+        One row per source, in the candidate's funnel order, with the change
+        per drop stage.
+    """
+    before = {row["source"]: loss_shares(row) for row in baseline if row["source"] != "TOTAL"}
+    rows: List[Dict[str, Any]] = []
+    for row in candidate:
+        if row["source"] == "TOTAL":
+            continue
+        after = loss_shares(row)
+        changes = {stage: round(after[stage] - before[row["source"]][stage], 4) for stage in DROP_STAGES}
+        rows.append({"source": row["source"], "route": routes.get(row["source"], ""), **changes})
+    return rows
+
+
+def check_lock(pretrain_dir: Path, config: Path) -> None:
+    """Check that a build on disk is the one its config's lock file records.
+
+    A candidate config writes to one fixed folder, so a later build overwrites
+    it; tables named after the config must come from the build it locked.
+
+    Args:
+        pretrain_dir: The build's `output_dir`.
+        config: The config that made it; its lock file sits beside it.
+
+    Raises:
+        ValueError: If a unit on disk differs from its lock entry, or is missing.
+    """
+    lock = yaml.safe_load(lock_path_for(config).read_text(encoding="utf-8"))
+    folders = {folder[3:]: folder for folder in (*SCOPED_STAGES, COUNTED_STAGE, *CORPUS_STAGES)}
+    mismatched: List[str] = []
+    for stage, folder in folders.items():
+        entries = lock[stage] if stage in (name[3:] for name in SCOPED_STAGES) else {"": lock[stage]}
+        for source, entry in entries.items():
+            sentinel_path = pretrain_dir / folder / source / ".complete"
+            sentinel = json.loads(sentinel_path.read_text(encoding="utf-8")) if sentinel_path.is_file() else {}
+            if any(sentinel.get(key) != entry[key] for key in ("document_digest", "records_in", "records_out")):
+                mismatched.append(f"{stage}/{source}" if source else stage)
+    if mismatched:
+        raise ValueError(f"{pretrain_dir} is not the build {lock_path_for(config).name} records: {mismatched}")
 
 
 def read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -489,13 +633,21 @@ def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[D
     return rows
 
 
-def draw_figures(figures_dir: Path, losses: List[Dict[str, Any]], comparison: List[Dict[str, Any]]) -> List[Path]:
+def draw_figures(
+    figures_dir: Path,
+    losses: List[Dict[str, Any]],
+    comparison: List[Dict[str, Any]],
+    route_comparison: List[Dict[str, Any]],
+    stem: str,
+) -> List[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
     Args:
         figures_dir: Where the SVGs go.
         losses: Rows from `loss_rows`.
         comparison: Rows from `build_comparison_rows`.
+        route_comparison: Rows from `route_comparison_rows`.
+        stem: The candidate config's stem, naming its figures.
 
     Returns:
         The paths written.
@@ -551,6 +703,27 @@ def draw_figures(figures_dir: Path, losses: List[Dict[str, Any]], comparison: Li
         **below(2),
     )
 
+    sources = sorted((row for row in route_comparison if row["source"] != "TOTAL"), key=lambda row: row["change"])
+    figures[f"{stem}-retention-by-build-and-source"] = DumbbellChart(
+        [
+            {
+                "label": f"{row['source']} ({ROUTE_NAMES.get(row['route'], row['route'])})",
+                "start": row["retained_baseline"],
+                "end": row["retained_candidate"],
+            }
+            for row in sources
+        ],
+        title="Retention per source under routes",
+        start_name="baseline build",
+        end_name="build with routes",
+        xlabel="share of converted documents kept",
+        ylabel="source (route)",
+        xmin=0.0,
+        xmax=1.0,
+        figsize=FIG_SIZE.FULL_TALL,
+        **below(2),
+    )
+
     written = []
     for name, figure in figures.items():
         path = figures_dir / f"{name}.svg"
@@ -571,6 +744,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Write the curation-thresholds record's tables and figures.")
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT, help="This experiment's derived-data folder.")
     parser.add_argument("--pretrain-dir", type=Path, default=Path("data/pretrain"), help="The baseline corpus.")
+    parser.add_argument(
+        "--candidate-dir",
+        type=Path,
+        default=None,
+        help="The candidate build; defaults to --routes-config's output_dir.",
+    )
+    parser.add_argument("--routes-config", type=Path, default=ROUTES_CONFIG, help="The candidate build's config.")
     parser.add_argument("--extract-config", type=Path, default=Path("configs/data/extract.yaml"))
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
     parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
@@ -591,8 +771,9 @@ def main() -> None:
     _, commits = scoped_counts(args.pretrain_dir)
     print(f"baseline corpus built at {', '.join(sorted(commits))}")
 
+    access = read_access(args.extract_config)
     exact_counts = counted_stage(args.pretrain_dir, args.data_root / "interim" / "stage-counts.json", args.workers)
-    funnel = funnel_rows(args.pretrain_dir, exact_counts, read_access(args.extract_config))
+    funnel = funnel_rows(args.pretrain_dir, exact_counts, access)
     audit_funnel = read_csv(AUDIT_TABLES / "source-funnel.csv")
     losses = loss_rows(funnel)
     comparison = build_comparison_rows(funnel, audit_funnel)
@@ -610,7 +791,29 @@ def main() -> None:
                 f"{row['stage']:12s} target {row['target_precision']} ({row['target_call']})"
                 f"  bad text {row['bad_text_precision']} ({row['bad_text_call']})  n={row['drops_judged']}"
             )
+    stem = args.routes_config.stem
+    routes = read_routes(args.routes_config)
+    candidate_dir = args.candidate_dir or Path(
+        yaml.safe_load(args.routes_config.read_text(encoding="utf-8"))["output_dir"]
+    )
+    check_lock(candidate_dir, args.routes_config)
+    _, candidate_commits = scoped_counts(candidate_dir)
+    print(
+        f"{stem} build matches {lock_path_for(args.routes_config).name}; built at {', '.join(sorted(candidate_commits))}"
+    )
+    candidate_cache = args.data_root / "interim" / f"{stem}-stage-counts.json"
+    candidate = funnel_rows(candidate_dir, counted_stage(candidate_dir, candidate_cache, args.workers), access)
+    route_comparison = route_comparison_rows(funnel, candidate, routes)
+    loss_changes = loss_change_rows(funnel, candidate, routes)
+    candidate_domains = domain_token_rows(candidate, funnel, earlier="baseline")
+    for row in candidate_domains:
+        print(f"{stem}: {row['domain']:14s}{row['tokens_estimated']:>16,d} tokens  clears KPI: {row['clears_kpi']}")
+
     written = [
+        write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
+        write_csv(args.tables / f"{stem}-retention-by-build-and-source.csv", route_comparison),
+        write_csv(args.tables / f"{stem}-loss-change-by-stage-and-source.csv", loss_changes),
+        write_csv(args.tables / f"{stem}-tokens-by-domain.csv", candidate_domains),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),
@@ -618,7 +821,7 @@ def main() -> None:
         write_csv(args.tables / "dataset-corpus-statistics.csv", corpus_dataset_rows(funnel)),
         write_csv(args.tables / "audit-precision-by-filter-and-source.csv", precision),
     ]
-    written += draw_figures(args.figures, losses, comparison)
+    written += draw_figures(args.figures, losses, comparison, route_comparison, stem)
     for path in written:
         print(f"wrote {path}")
 
