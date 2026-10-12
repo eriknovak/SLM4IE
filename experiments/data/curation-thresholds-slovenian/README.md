@@ -23,7 +23,8 @@ concluded:
 ## TL;DR
 
 - **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, on a draw held back from tuning.
-- **Next**: the baseline is restated from the rebuilt corpus, which clears every volume target; set up the three routes and tune their thresholds on the earlier audit's verdicts.
+- **Where we stand**: the first candidate build, every source on one of three routes with the quality filter's letter rule repaired, keeps 0.58 of the converted documents against the baseline's 0.46 and clears every volume target. Nearly all of that gain is the letter-rule repair, not the route settings, and on the medical source exact dedup now removes most of what the quality filter stopped dropping.
+- **Next**: check on the earlier audit's judged drops whether the repaired rule keeps junk on the raw web crawls, then tune each route's thresholds on those verdicts, freeze them and draw the fresh sample.
 
 ## Hypothesis
 
@@ -54,7 +55,7 @@ concluded:
   - Judge the fresh draw with the earlier rubric, then with a judge from another model family.
   - Factors: the route each source takes, the Gopher quality and repetition floors, the language-identification threshold, and the spam thresholds on the repaired spam signal. The dedup stages stay fixed.
 - **Metrics**: primary target precision per content filter and source, and drop precision at the lenient bar for the spam, quality and repetition filters. Secondary: residual bad rate, retention per source, corpus and domain totals in estimated tokens, and Cohen's κ between the two judges. Each metric is defined in `experiments/GLOSSARY.md`.
-- **Protocol**: analysis-only for the judging: `analysis.py` recomputes every table from the corpus counts and the verdict files. Each corpus rebuild logs to MLflow under `slm4ie/data/curate`. Findings rest on one judge run, and its agreement with the hand labels is read on that same run ([D3]).
+- **Protocol**: analysis-only for the judging: `analysis.py` recomputes every table from the corpus counts and the verdict files. Each corpus rebuild logs to MLflow: the baseline under `slm4ie/data/curate`, since it is the shared corpus, and each candidate build under `slm4ie/data/curation-thresholds-slovenian`. Findings rest on one judge run, and its agreement with the hand labels is read on that same run ([D3]).
 - **Compute**: one local machine with 40 cores; each candidate rebuild reruns only the units whose effective settings changed.
 - **People**: the project lead chooses the second judge and reviews the routes; no new hand labels are planned.
 - **Data access**: four licence-restricted sources (culturax, gigafida, kas, solar) are used internally, as in the earlier audit.
@@ -63,6 +64,7 @@ concluded:
 ## Datasets
 
 - **Baseline corpus**: the shared pretraining corpus rebuilt with the pipeline as it stands on main ([D5], the baseline build), one row per source with its domain, kind, licence and size before and after curation. Built 2026-10-05 to 2026-10-08 at commit 2ece205 from 18 Slovene sources. [Sources of the baseline corpus, before and after curation](tables/dataset-corpus-statistics.csv)
+- **Candidate-routes build**: the same 18 sources rebuilt with every source on its route ([M1]) and the letter rule repaired ([M2]), the first candidate of the tuning pass, in this experiment's own data folder ([D6]). Built 2026-10-08 to 2026-10-11 at commit a03f2dd from the baseline's converted documents. [Documents per source at each stage of the candidate-routes build](tables/curation-routes-documents-by-source.csv)
 
 ## Methods
 
@@ -202,6 +204,42 @@ concluded:
 - **Reading**: The volume rule that bounds tuning ([D4], the corpus and per-domain token floors) binds only on medicine, whose single source could lose about two thirds of what it keeps before falling under its floor.
 - **History**:
   - 2026-10-08 first result, from the baseline rebuild ([D5])
+
+### F4 — Every source keeps more of its documents under the routes · minor
+
+- **Summary**: Every source keeps a larger share of its converted documents under the routes, and the corpus keeps 0.58 of what it converted.
+- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its stage sentinels beside the baseline rebuild's.
+- **Result**: ![Share of each source's converted documents that reaches the finished corpus, in the baseline rebuild and in the candidate-routes build. Each line runs from the baseline's share to the candidate's, the sources are ordered by the size of that change, and the label names the route the source took.](figures/curation-routes-retention-by-build-and-source.svg)
+- **Reading**: The largest rises sit on the medical-and-academic and curated-prose routes, where the scientific source oss goes from keeping one document in five to seven in eight. The routes win back text where the earlier audit found the filters most wrong, before any threshold is tuned.
+- **History**:
+  - 2026-10-12 first result, from the candidate-routes build with the committed routes as the first candidate ([M1])
+
+### F5 — The repaired letter rule, not the route settings, drives the gain · minor
+
+- **Summary**: On every source the quality filter is the stage that drops less; each route's filter switches and widened limits move a few points at most.
+- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its stage sentinels and the baseline rebuild's.
+- **Result**: [Change in the share of each source's converted documents that every stage drops, candidate-routes build minus baseline. A negative value is text the stage no longer drops.](tables/curation-routes-loss-change-by-stage-and-source.csv)
+- **Reading**: The quality filter drops between 0.10 and 0.82 less of each source, on the raw web crawls too, whose route changes nothing but the letter rule ([D8], counting only tokens that are not punctuation). The repair alone decides most of what the quality filter keeps, so the tuning pass has to check that it keeps no junk on the crawls.
+- **History**:
+  - 2026-10-12 first result, from the candidate-routes build ([M1])
+
+### F6 — Exact dedup now removes the medical copies the quality filter used to hide · minor
+
+- **Summary**: On the medical source, exact dedup drops 0.61 of the converted documents, most of what the quality filter stopped dropping.
+- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its stage sentinels and the exact-dedup output.
+- **Result**: [Change in the share of each source's converted documents that every stage drops, candidate-routes build minus baseline; on the medical source the quality column falls by as much as the exact-dedup column rises](tables/curation-routes-loss-change-by-stage-and-source.csv)
+- **Reading**: The medical source's rise in retention is far smaller than the quality stage alone suggests, since the documents that stage now passes are byte-identical copies that exact dedup catches. Whether they are copies within the source or of another source must be known before the medical-and-academic route can be judged.
+- **History**:
+  - 2026-10-12 first result, from the candidate-routes build ([M1])
+
+### F7 — The candidate corpus clears every volume target · minor
+
+- **Summary**: About 20.8B estimated tokens remain, and every domain clears its per-domain floor.
+- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its statistics stage.
+- **Result**: [Estimated tokens per domain in the candidate-routes build and in the baseline rebuild, against the KPI threshold each is held to](tables/curation-routes-tokens-by-domain.csv)
+- **Reading**: The volume rule that bounds tuning ([D4], the corpus and per-domain token floors) now binds on no route. Medicine, the only domain near its floor in the baseline, holds about 21M estimated tokens against a floor of 500k.
+- **History**:
+  - 2026-10-12 first result, from the candidate-routes build ([M1])
 
 ## Verdict
 
