@@ -23,8 +23,8 @@ concluded:
 ## TL;DR
 
 - **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, on a draw held back from tuning.
-- **Where we stand**: the first candidate build, every source on one of three routes with the quality filter's letter rule repaired, keeps 0.58 of the converted documents against the baseline's 0.46 and clears every volume target. Nearly all of that gain is the letter-rule repair, not the route settings, and on the medical source exact dedup now removes most of what the quality filter stopped dropping.
-- **Next**: check on the earlier audit's judged drops whether the repaired rule keeps junk on the raw web crawls, then tune each route's thresholds on those verdicts, freeze them and draw the fresh sample.
+- **Where we stand**: the tuned candidate build, every source on one of three routes, keeps 0.60 of the converted documents against the baseline's 0.46 and clears every volume target. The quality filter accounts for that gain, through the repaired letter rule on every route and lower floors on curated prose. On the medical source, exact dedup now removes most of what the quality filter stopped dropping. On the news source, one-line teasers now reach the corpus.
+- **Next**: freeze the thresholds and draw the fresh sample under a new seed, whose verdicts also decide whether the news teasers need a length floor.
 
 ## Hypothesis
 
@@ -64,7 +64,7 @@ concluded:
 ## Datasets
 
 - **Baseline corpus**: the shared pretraining corpus rebuilt with the pipeline as it stands on main ([D5], the baseline build), one row per source with its domain, kind, licence and size before and after curation. Built 2026-10-05 to 2026-10-08 at commit 2ece205 from 18 Slovene sources. [Sources of the baseline corpus, before and after curation](tables/dataset-corpus-statistics.csv)
-- **Candidate-routes build**: the same 18 sources rebuilt with every source on its route ([M1]) and the letter rule repaired ([M2]), the first candidate of the tuning pass, in this experiment's own data folder ([D6]). Built 2026-10-08 to 2026-10-11 at commit a03f2dd from the baseline's converted documents. [Documents per source at each stage of the candidate-routes build](tables/curation-routes-documents-by-source.csv)
+- **Candidate-routes build**: the same 18 sources rebuilt with every source on its route ([M1]) and the letter rule repaired ([M2]), in this experiment's own data folder ([D6]). The second candidate of the tuning pass, with the curated-prose quality settings of [D9], built 2026-10-12 to 2026-10-14 at commit 4425f23. It replaced the first candidate, built 2026-10-08 to 2026-10-11 at commit a03f2dd from the baseline's converted documents, whose counts stay in MLflow. [Documents per source at each stage of the candidate-routes build](tables/curation-routes-documents-by-source.csv)
 
 ## Methods
 
@@ -244,39 +244,52 @@ concluded:
 
 ### F4 — Every source keeps more of its documents under the routes · minor
 
-- **Summary**: Every source keeps a larger share of its converted documents under the routes, and the corpus keeps 0.58 of what it converted.
-- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its stage sentinels beside the baseline rebuild's.
+- **Summary**: Every source keeps a larger share of its converted documents under the routes, and the corpus keeps 0.60 of what it converted.
+- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its stage sentinels beside the baseline rebuild's.
 - **Result**: ![Share of each source's converted documents that reaches the finished corpus, in the baseline rebuild and in the candidate-routes build. Each line runs from the baseline's share to the candidate's, the sources are ordered by the size of that change, and the label names the route the source took.](figures/curation-routes-retention-by-build-and-source.svg)
 - **Reading**: The largest rises sit on the medical-and-academic and curated-prose routes, where the scientific source oss goes from keeping one document in five to seven in eight. The routes win back text where the earlier audit found the filters most wrong, before any threshold is tuned.
 - **History**:
   - 2026-10-12 first result, from the candidate-routes build with the committed routes as the first candidate ([M1])
+  - 2026-10-14 revised from the second candidate build (run f7810f13…, replacing daca0abb…), with the curated-prose quality settings of [D9]; the corpus share rose from 0.58 to 0.60, all of it on curated prose
 
-### F5 — The repaired letter rule, not the route settings, drives the gain · minor
+### F5 — The quality filter drives the gain, through the repaired letter rule and the curated-prose floors · minor
 
-- **Summary**: On every source the quality filter is the stage that drops less; each route's filter switches and widened limits move a few points at most.
-- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its stage sentinels and the baseline rebuild's.
+- **Summary**: On every source the quality filter is the stage that drops less; the language, spam and repetition filters move a few points at most.
+- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its stage sentinels and the baseline rebuild's.
 - **Result**: [Change in the share of each source's converted documents that every stage drops, candidate-routes build minus baseline. A negative value is text the stage no longer drops.](tables/curation-routes-loss-change-by-stage-and-source.csv)
-- **Reading**: The quality filter drops between 0.10 and 0.82 less of each source, on the raw web crawls too, whose route changes nothing but the letter rule ([D8], counting only tokens that are not punctuation). The repair alone decides most of what the quality filter keeps, so the tuning pass has to check that it keeps no junk on the crawls.
+- **Reading**: The repaired letter rule ([D8], counting only tokens that are not punctuation) alone makes the quality filter drop 0.10 to 0.31 less on the raw web crawls. On curated prose, the lower letter floor and the news source's switched-off ellipsis rule ([D9]) add to that.
 - **History**:
   - 2026-10-12 first result, from the candidate-routes build ([M1])
+  - 2026-10-14 revised from the second candidate build (run f7810f13…, replacing daca0abb…); retitled, since the curated-prose letter floor is now a route setting ([D9]) and the repair alone no longer explains that route's gain
 
 ### F6 — Exact dedup now removes the medical copies the quality filter used to hide · minor
 
 - **Summary**: On the medical source, exact dedup drops 0.61 of the converted documents, most of what the quality filter stopped dropping.
-- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its stage sentinels and the exact-dedup output.
+- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its stage sentinels and the exact-dedup output.
 - **Result**: [Change in the share of each source's converted documents that every stage drops, candidate-routes build minus baseline; on the medical source the quality column falls by as much as the exact-dedup column rises](tables/curation-routes-loss-change-by-stage-and-source.csv)
 - **Reading**: The medical source's rise in retention is far smaller than the quality stage alone suggests, since the documents that stage now passes are byte-identical copies that exact dedup catches. Whether they are copies within the source or of another source must be known before the medical-and-academic route can be judged.
 - **History**:
   - 2026-10-12 first result, from the candidate-routes build ([M1])
+  - 2026-10-14 runs moved to the second candidate build (run f7810f13…, replacing daca0abb…); the medical source's route did not change, nor did its numbers
 
 ### F7 — The candidate corpus clears every volume target · minor
 
-- **Summary**: About 20.8B estimated tokens remain, and every domain clears its per-domain floor.
-- **Runs**: daca0abbed6f4f6580df78394b2073a4, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 5b99a12 over its statistics stage.
+- **Summary**: About 21.0B estimated tokens remain, and every domain clears its per-domain floor.
+- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its statistics stage.
 - **Result**: [Estimated tokens per domain in the candidate-routes build and in the baseline rebuild, against the KPI threshold each is held to](tables/curation-routes-tokens-by-domain.csv)
 - **Reading**: The volume rule that bounds tuning ([D4], the corpus and per-domain token floors) now binds on no route. Medicine, the only domain near its floor in the baseline, holds about 21M estimated tokens against a floor of 500k.
 - **History**:
   - 2026-10-12 first result, from the candidate-routes build ([M1])
+  - 2026-10-14 revised from the second candidate build (run f7810f13…, replacing daca0abb…); the total rose from about 20.8B to 21.0B estimated tokens
+
+### F8 — Switching off the ellipsis rule lets one-line news teasers into the corpus · minor
+
+- **Summary**: Against the baseline, the news source keeps a fifth more of its converted documents but barely more words: the added documents are one-line agency teasers.
+- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its stage sentinels and statistics stage beside the baseline rebuild's.
+- **Result**: [Share of each source's converted documents that reaches the finished corpus, and the words it keeps, in the baseline rebuild and in the candidate-routes build](tables/curation-routes-retention-by-build-and-source.csv)
+- **Reading**: The quality filter now keeps these teasers, since the news source skips the rule on lines ending in "…" ([D9]), and the earlier audit judged them usable text. Sentence dedup re-checks its 50-word floor only on documents it shortens, so they reach the finished corpus. The fresh draw's verdicts decide whether the news source needs a length floor.
+- **History**:
+  - 2026-10-14 first result, from the second candidate build ([D9])
 
 ## Verdict
 
