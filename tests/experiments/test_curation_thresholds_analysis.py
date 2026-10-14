@@ -158,6 +158,67 @@ def test_drop_rule_rows_groups_still_dropped_documents_by_their_failed_rules() -
     ]
 
 
+def _leaflet(doc_id: str, text_id: str, text: str) -> Dict[str, Any]:
+    """Build a medical-source document as a stage shard holds it.
+
+    Args:
+        doc_id: The document id.
+        text_id: The release's own text id.
+        text: The text.
+
+    Returns:
+        A document dict.
+    """
+    return {"id": doc_id, "text": text, "metadata": {"text_id": text_id}}
+
+
+def test_copy_origin_rows_splits_exact_dedup_drops_by_text_id() -> None:
+    """A drop sharing its copy's text id counts apart from one filed under another text id."""
+    entering = [
+        _leaflet("a", "t1", "navodilo"),
+        _leaflet("b", "t1", "navodilo"),
+        _leaflet("c", "t2", "navodilo"),
+        _leaflet("d", "t3", "drugo"),
+    ]
+
+    rows = analysis.copy_origin_rows(entering, {"a", "d"}, {"a", "d"})
+
+    assert [(row["origin"], row["documents"]) for row in rows] == [
+        ("dropped: same text under the same text id", 1),
+        ("dropped: same text under another text id", 1),
+        ("dropped: no copy kept in the source", 0),
+        ("kept: one text per record", 2),
+        ("kept: a second text of a kept record", 0),
+    ]
+
+
+def test_copy_origin_rows_counts_a_repeated_record_once_under_another_text_id() -> None:
+    """Two copies under a text id other than the kept one's are one repeat and one other-id drop."""
+    entering = [_leaflet("a", "t1", "navodilo"), _leaflet("b", "t2", "navodilo"), _leaflet("c", "t2", "navodilo")]
+
+    rows = analysis.copy_origin_rows(entering, {"a"}, {"a"})
+
+    assert [row["documents"] for row in rows[:2]] == [1, 1]
+
+
+def test_copy_origin_rows_counts_a_text_with_no_kept_copy_as_another_sources() -> None:
+    """A text exact dedup keeps no copy of in the source counts wholly as kept from another source."""
+    entering = [_leaflet("a", "t1", "navodilo"), _leaflet("b", "t2", "navodilo")]
+
+    rows = analysis.copy_origin_rows(entering, set(), set())
+
+    assert [row["documents"] for row in rows[:3]] == [0, 0, 2]
+
+
+def test_copy_origin_rows_counts_a_second_text_of_one_record_and_whether_both_finish() -> None:
+    """Two kept texts under one text id are a second text; it counts as finished only beside its twin."""
+    entering = [_leaflet("a", "t1", "'navodilo'"), _leaflet("b", "t1", "‘navodilo’"), _leaflet("c", "t2", "drugo")]
+
+    rows = analysis.copy_origin_rows(entering, {"a", "b", "c"}, {"b", "c"})
+
+    assert [(row["documents"], row["finished_corpus"]) for row in rows[3:]] == [(2, 2), (1, 0)]
+
+
 def test_fetch_full_texts_reads_compact_and_spaced_shards(tmp_path: Path) -> None:
     """Ids are found in datatrove's compact lines and in convert's spaced, escaped ones."""
     stage = tmp_path / "02_spam"

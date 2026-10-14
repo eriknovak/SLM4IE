@@ -132,6 +132,18 @@ concluded:
 - **Code**: `analysis.py::drop_rule_rows`
 - **Settings**: none; the filter settings are the candidate's, in `configs/curation-routes.yaml`
 
+### M6 — Trace the medical source's exact-dedup drops to where their copies come from
+
+- **Input**: the medical source's documents that reach exact dedup in the candidate build, each with the text id its release gives it, plus which of them exact dedup keeps and which reach the finished corpus, the output of sentence dedup. One item is such a document.
+- **Output**: one row per origin, with how many documents it holds, their share of the documents entering exact dedup, and how many reach the finished corpus. Written to `tables/curation-routes-medical-exact-dedup-documents-by-copy-origin.csv`.
+- **How**: exact dedup keeps one document per distinct text, so each drop has a kept copy somewhere.
+  1. Group the documents by their exact text.
+  2. A group with no kept document was kept from another source; all its documents count as copies of another source.
+  3. Otherwise, every document past the first under one text id is the same record held again; every further text id the text is filed under adds one drop under another text id.
+  4. Among the kept documents, one past the first under its text id is a second text of one record. It differs from the first, so exact dedup cannot see it as a copy. In the finished corpus it counts only while its record still has another text there.
+- **Code**: `analysis.py::copy_origin_rows`
+- **Settings**: none; the source is fixed in the script
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text

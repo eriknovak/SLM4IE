@@ -102,6 +102,16 @@ REASON_SETTINGS = {
     "gopher_enough_stop_words": "min_stop_words",
 }
 
+#: The medical source, whose exact-dedup drops are traced to where their copies come from (F6).
+MEDICAL_SOURCE = "povejmo_vemo_med"
+
+#: The origins a document at exact dedup can have, as the copy-origin table names them.
+SAME_RECORD_DROP = "dropped: same text under the same text id"
+OTHER_RECORD_DROP = "dropped: same text under another text id"
+OTHER_SOURCE_DROP = "dropped: no copy kept in the source"
+FIRST_TEXT_KEPT = "kept: one text per record"
+SECOND_TEXT_KEPT = "kept: a second text of a kept record"
+
 #: The corpus-wide stages after exact dedup, each with one sentinel for the whole corpus.
 CORPUS_STAGES: Tuple[str, ...] = ("06_sentence_dedup", "07_statistics")
 
@@ -978,6 +988,94 @@ def drop_rule_rows(
     ]
 
 
+def read_documents(folder: Path) -> List[Dict[str, Any]]:
+    """Read every document in one source's stage folder.
+
+    Args:
+        folder: The source's folder under a stage, holding `*.jsonl.gz` shards.
+
+    Returns:
+        The documents, shard by shard in name order.
+    """
+    documents: List[Dict[str, Any]] = []
+    for shard in sorted(folder.glob("*.jsonl.gz")):
+        with gzip.open(shard, "rt", encoding="utf-8") as handle:
+            documents.extend(json.loads(line) for line in handle)
+    return documents
+
+
+def _repeats_per_text_id(documents: Iterable[Dict[str, Any]]) -> int:
+    """Count the documents past the first under each text id.
+
+    Args:
+        documents: Documents, each with `metadata.text_id`.
+
+    Returns:
+        How many documents share their text id with an earlier one.
+    """
+    documents = list(documents)
+    return len(documents) - len({document["metadata"]["text_id"] for document in documents})
+
+
+def copy_origin_rows(entering: List[Dict[str, Any]], kept: Set[str], finished: Set[str]) -> List[Dict[str, Any]]:
+    """Sort one source's documents at exact dedup by where their copies come from.
+
+    Per distinct text, every document past the first under one text id is
+    the same record held again; every further text id the text is filed
+    under adds one more drop. A text with no kept copy in the source was
+    kept from another source. Among the kept documents, one past the first
+    under its text id is a second text of one record, which differs from the
+    first, so exact dedup cannot see it as a copy.
+
+    Args:
+        entering: The source's documents that reach exact dedup, each with
+            `metadata.text_id`.
+        kept: The ids exact dedup keeps.
+        finished: The ids that reach the finished corpus.
+
+    Returns:
+        One row per origin with its document count, its share of the
+        documents entering exact dedup, and how many reach the finished corpus
+        (for second texts, those whose record still has another text there);
+        the drops first, then the kept documents.
+    """
+    by_text: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for document in entering:
+        by_text[document["text"]].append(document)
+    counts = dict.fromkeys(
+        (
+            SAME_RECORD_DROP,
+            OTHER_RECORD_DROP,
+            OTHER_SOURCE_DROP,
+        ),
+        0,
+    )
+    for group in by_text.values():
+        kept_copies = sum(1 for document in group if document["id"] in kept)
+        if not kept_copies:
+            counts[OTHER_SOURCE_DROP] += len(group)
+            continue
+        repeats = _repeats_per_text_id(group)
+        counts[SAME_RECORD_DROP] += repeats
+        counts[OTHER_RECORD_DROP] += len(group) - kept_copies - repeats
+    kept_documents = [document for document in entering if document["id"] in kept]
+    finished_documents = [document for document in kept_documents if document["id"] in finished]
+    second_texts = _repeats_per_text_id(kept_documents)
+    second_finished = _repeats_per_text_id(finished_documents)
+    rows = [(origin, n, 0) for origin, n in counts.items()]
+    rows.append((FIRST_TEXT_KEPT, len(kept_documents) - second_texts, len(finished_documents) - second_finished))
+    rows.append((SECOND_TEXT_KEPT, second_texts, second_finished))
+    return [
+        {
+            "origin": origin,
+            "documents": n,
+            "share": round(n / len(entering), 4) if entering else 0.0,
+            "finished_corpus": reached,
+        }
+        for origin, n, reached in rows
+    ]
+
+
 def draw_figures(
     figures_dir: Path,
     losses: List[Dict[str, Any]],
@@ -1171,6 +1269,14 @@ def main() -> None:
                 f" target {row['target_precision']} ({row['target_call']})"
             )
 
+    copy_origins = copy_origin_rows(
+        read_documents(candidate_dir / SCOPED_STAGES[-1] / MEDICAL_SOURCE),
+        {document["id"] for document in read_documents(candidate_dir / COUNTED_STAGE / MEDICAL_SOURCE)},
+        {document["id"] for document in read_documents(candidate_dir / CORPUS_STAGES[0] / MEDICAL_SOURCE)},
+    )
+    for row in copy_origins:
+        print(f"{stem}: {MEDICAL_SOURCE} {row['origin']:45s}{row['documents']:>8,d}")
+
     written = [
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
         write_csv(args.tables / f"{stem}-retention-by-build-and-source.csv", route_comparison),
@@ -1178,6 +1284,7 @@ def main() -> None:
         write_csv(args.tables / f"{stem}-tokens-by-domain.csv", candidate_domains),
         write_csv(args.tables / f"{stem}-audit-quality-refilter-by-route-and-source.csv", refilter),
         write_csv(args.tables / f"{stem}-audit-quality-drops-by-rule-and-source.csv", drop_rules),
+        write_csv(args.tables / f"{stem}-medical-exact-dedup-documents-by-copy-origin.csv", copy_origins),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),
