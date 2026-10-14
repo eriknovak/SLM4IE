@@ -23,7 +23,7 @@ concluded:
 ## TL;DR
 
 - **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, on a draw held back from tuning.
-- **Where we stand**: the tuned candidate build, every source on one of three routes, keeps 0.60 of the converted documents against the baseline's 0.46 and clears every volume target. The quality filter accounts for that gain, through the repaired letter rule on every route and lower floors on curated prose. On the medical source, exact dedup now removes most of what the quality filter stopped dropping. On the news source, one-line teasers now reach the corpus.
+- **Where we stand**: the tuned candidate build, every source on one of three routes, keeps 0.60 of the converted documents against the baseline's 0.46 and clears every volume target. The quality filter accounts for that gain, through the repaired letter rule on every route and lower floors on curated prose. On the medical source, exact dedup now removes most of what the quality filter stopped dropping, all of it copies within the source that extraction itself creates. On the news source, one-line teasers now reach the corpus.
 - **Next**: freeze the thresholds and draw the fresh sample under a new seed, whose verdicts also decide whether the news teasers need a length floor.
 
 ## Hypothesis
@@ -134,7 +134,7 @@ concluded:
 
 ### M6 — Trace the medical source's exact-dedup drops to where their copies come from
 
-- **Input**: the medical source's documents that reach exact dedup in the candidate build, each with the text id its release gives it, plus which of them exact dedup keeps and which reach the finished corpus, the output of sentence dedup. One item is such a document.
+- **Input**: the medical source's documents that reach exact dedup in the candidate build, each with the text id its release gives it. Beside them, which of them exact dedup keeps and which reach the finished corpus, the output of sentence dedup. One item is such a document.
 - **Output**: one row per origin, with how many documents it holds, their share of the documents entering exact dedup, and how many reach the finished corpus. Written to `tables/curation-routes-medical-exact-dedup-documents-by-copy-origin.csv`.
 - **How**: exact dedup keeps one document per distinct text, so each drop has a kept copy somewhere.
   1. Group the documents by their exact text.
@@ -274,15 +274,16 @@ concluded:
   - 2026-10-12 first result, from the candidate-routes build ([M1])
   - 2026-10-14 revised from the second candidate build (run f7810f13…, replacing daca0abb…); retitled, since the curated-prose letter floor is now a route setting ([D9]) and the repair alone no longer explains that route's gain
 
-### F6 — Exact dedup now removes the medical copies the quality filter used to hide · minor
+### F6 — Exact dedup now removes medical copies that all come from within the source · minor
 
-- **Summary**: On the medical source, exact dedup drops 0.61 of the converted documents, most of what the quality filter stopped dropping.
-- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its stage sentinels and the exact-dedup output.
-- **Result**: [Change in the share of each source's converted documents that every stage drops, candidate-routes build minus baseline; on the medical source the quality column falls by as much as the exact-dedup column rises](tables/curation-routes-loss-change-by-stage-and-source.csv)
-- **Reading**: The medical source's rise in retention is far smaller than the quality stage alone suggests, since the documents that stage now passes are byte-identical copies that exact dedup catches. Whether they are copies within the source or of another source must be known before the medical-and-academic route can be judged.
+- **Summary**: Every medical document exact dedup drops copies another document of the same source; none copies another source.
+- **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at d57739b over its exact-dedup input and output and the finished corpus ([M6]).
+- **Result**: [The medical source's documents at exact dedup, by where their copies come from, with how many of each reach the finished corpus. A record is one text id of the source's release; a second text of a record differs from the first only in quote style.](tables/curation-routes-medical-exact-dedup-documents-by-copy-origin.csv)
+- **Reading**: Extraction reads both the release's original and its deduplicated version, and the drug database files one leaflet per registration number. So every share for this source, in [F2] and [F4], rests on a starting count about three times too large.
 - **History**:
   - 2026-10-12 first result, from the candidate-routes build ([M1])
   - 2026-10-14 runs moved to the second candidate build (run f7810f13…, replacing daca0abb…); the medical source's route did not change, nor did its numbers
+  - 2026-10-14 the open question answered by tracing each drop to its copy ([M6]); retitled from "Exact dedup now removes the medical copies the quality filter used to hide", and the result moved from the loss-change table to the copy-origin table
 
 ### F7 — The candidate corpus clears every volume target · minor
 
