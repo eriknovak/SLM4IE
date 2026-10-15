@@ -225,6 +225,16 @@ concluded:
 - **History**:
   - 2026-10-12 first version, at the project lead's call
 
+### D10 — Freeze the thresholds of the second candidate build and draw the fresh sample from it
+
+- **Decision**: The thresholds freeze as `configs/curation-routes.yaml` stands at commit 4425f23, the settings of the second candidate build. The fresh draw comes from that build with the earlier audit's sampler settings, 40 documents per source, stage and decision at every stage, under the new seed 20261014.
+- **Why**: That build already ran at exactly the frozen settings, so a rebuild would reproduce it ([D6], a full build per candidate setting). Keeping every sampler setting but the seed keeps the fresh verdicts comparable with the earlier audit's, stage by stage, while no document choice rests on the tuning evidence ([D3]).
+- **Alternatives**:
+  - Sample only the four content filters: about a third less judging, but no fresh reading of the dedup stages beside the audit's.
+  - Wait for the medical extraction fix first: it changes one source and its fix lies outside this experiment.
+- **History**:
+  - 2026-10-14 first version, at the project lead's call
+
 ## Findings
 
 ### F1 — Removing the double counting leaves each source's retention almost unchanged · minor
