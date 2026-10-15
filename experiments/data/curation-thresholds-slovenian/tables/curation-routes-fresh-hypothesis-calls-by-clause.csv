@@ -1,0 +1,6 @@
+clause,rates_read,holds,open,fails,lowest_rate,lowest_at,call,gate_passed
+H1,10,3,1,6,0.0,language / culturax,refuted,False
+H2,8,4,3,1,0.075,spam / classla_web_sl,refuted,False
+H3,17,1,1,15,0.0,quality / coleslaw,refuted,False
+H4,17,0,0,17,0.0,repetition / classla_web_sl,refuted,False
+H5,42,7,4,31,0.0,quality / coleslaw,refuted,False

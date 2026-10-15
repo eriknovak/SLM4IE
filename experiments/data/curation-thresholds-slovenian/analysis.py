@@ -56,7 +56,7 @@ from slm4ie.data.curate.config import (  # noqa: E402
 from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
 from slm4ie.data.curate.resources.stopwords import load_stopwords  # noqa: E402
 from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _build_quality_config  # noqa: E402
-from slm4ie.utils.stats import wilson  # noqa: E402
+from slm4ie.utils.stats import cohen_kappa, wilson  # noqa: E402
 
 # No tqdm monitor thread: process pools fork after a bar, and forking a threaded parent can deadlock.
 tqdm.monitor_interval = 0
@@ -164,6 +164,15 @@ CONFIRM_RATE = 0.6
 
 #: A rate below this fails; between the two bars it is open (D2).
 REFUTE_RATE = 0.5
+
+#: Sonnet 5's verdicts on the fresh draw with the calibration documents spread through it (D11).
+FRESH_VERDICTS = DATA_ROOT / "interim" / "verdicts-fresh-sonnet.jsonl"
+
+#: Judge-person kappa at the lenient bar the findings need on their own run (D3).
+GATE_KAPPA = 0.6
+
+#: The filter and the rate each target clause reads; H5 reads bad text instead (Predictions).
+TARGET_CLAUSES = {"H1": "language", "H2": "spam", "H3": "quality", "H4": "repetition"}
 
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
@@ -783,6 +792,89 @@ def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[D
     return rows
 
 
+def agreement_rows(labels: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Measure how far the judge agrees with the person on each test a finding reads.
+
+    Args:
+        labels: The person's calibration labels, on the rubric's fields.
+        verdicts: The judge run's verdicts by document id, holding every labelled document.
+
+    Returns:
+        One row per test: bad text at the lenient bar, which alone carries the
+        gate (D3), then each filter's target (D1), with Cohen's kappa, raw
+        agreement and how often each side says yes.
+
+    Raises:
+        KeyError: If a labelled document has no verdict in the run.
+    """
+    missing = [label["id"] for label in labels if label["id"] not in verdicts]
+    if missing:
+        raise KeyError(f"calibration ids {missing} have no verdict in the judge run")
+    pairs = [(label, verdicts[label["id"]]) for label in labels]
+    rows: List[Dict[str, Any]] = []
+    for test_name, test in [("bad text", is_bad_text), *TARGETS.items()]:
+        calls = [(test(label), test(verdict)) for label, verdict in pairs]
+        kappa, raw = cohen_kappa(calls)
+        rows.append(
+            {
+                "test": test_name,
+                "documents": len(calls),
+                "person_yes": sum(person for person, _ in calls),
+                "judge_yes": sum(judge for _, judge in calls),
+                "kappa": round(kappa, 3),
+                "raw_agreement": round(raw, 3),
+                "passes_gate": kappa >= GATE_KAPPA if test_name == "bad text" else "",
+            }
+        )
+    return rows
+
+
+def clause_rows(precision: List[Dict[str, Any]], gate_passed: bool) -> List[Dict[str, Any]]:
+    """Call each hypothesis clause from the rates it reads (Predictions, D2).
+
+    Args:
+        precision: Rows from `precision_rows`.
+        gate_passed: Whether the judge run passed the agreement gate (D3),
+            carried on every row so no call is read without it.
+
+    Returns:
+        One row per clause, H1 to H5, with how many of its rates were read and
+        how each was called, its lowest rate, and the clause's call: confirmed
+        when every rate holds, refuted when any fails, inconclusive otherwise.
+    """
+    # A filter with no judged drops has a pooled row but no rate to read.
+    read = [row for row in precision if row["read"] and row["drops_judged"]]
+    rates_by_clause = {
+        clause: [(row, "target") for row in read if row["stage"] == stage] for clause, stage in TARGET_CLAUSES.items()
+    }
+    rates_by_clause["H5"] = [(row, "bad_text") for row in read if row["stage"] in BAD_TEXT_STAGES]
+    rows: List[Dict[str, Any]] = []
+    for clause, scored in rates_by_clause.items():
+        calls = [row[f"{column}_call"] for row, column in scored]
+        if calls and all(call == "holds" for call in calls):
+            verdict = "confirmed"
+        else:
+            verdict = "refuted" if "fails" in calls else "inconclusive"
+        lowest_rate, lowest_at = "", ""
+        if scored:
+            lowest, column = min(scored, key=lambda pair: pair[0][f"{pair[1]}_precision"])
+            lowest_rate, lowest_at = lowest[f"{column}_precision"], f"{lowest['stage']} / {lowest['source']}"
+        rows.append(
+            {
+                "clause": clause,
+                "rates_read": len(calls),
+                "holds": calls.count("holds"),
+                "open": calls.count("open"),
+                "fails": calls.count("fails"),
+                "lowest_rate": lowest_rate,
+                "lowest_at": lowest_at,
+                "call": verdict,
+                "gate_passed": gate_passed,
+            }
+        )
+    return rows
+
+
 def quality_drops(
     sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
 ) -> Dict[str, Dict[str, str]]:
@@ -1276,6 +1368,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Judge verdicts on that sample.",
     )
     parser.add_argument(
+        "--fresh-verdicts",
+        type=Path,
+        default=FRESH_VERDICTS,
+        help="Judge verdicts on the fresh draw and the calibration documents, from one run.",
+    )
+    parser.add_argument(
         "--write-judge-input",
         type=Path,
         default=None,
@@ -1354,6 +1452,20 @@ def main() -> None:
     for row in copy_origins:
         print(f"{stem}: {MEDICAL_SOURCE} {row['origin']:45s}{row['documents']:>8,d}")
 
+    fresh_verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.fresh_verdicts)}
+    agreement = agreement_rows(read_jsonl(CALIBRATION_LABELS), fresh_verdicts)
+    for row in agreement:
+        print(
+            f"{stem}: fresh judge vs person, {row['test']:12s} kappa {row['kappa']:.3f}  raw {row['raw_agreement']:.3f}"
+        )
+    if not agreement[0]["passes_gate"]:
+        print(f"{stem}: WARNING the fresh judge run fails the agreement gate; its clause calls are not findings (D3)")
+    candidate_sources = {row["source"] for row in candidate if row["source"] != "TOTAL"}
+    fresh_precision = precision_rows(judged_drops(read_jsonl(FRESH_SAMPLE), fresh_verdicts, candidate_sources))
+    clauses = clause_rows(fresh_precision, agreement[0]["passes_gate"])
+    for row in clauses:
+        print(f"{stem}: fresh {row['clause']} {row['call']:12s} lowest {row['lowest_rate']} at {row['lowest_at']}")
+
     written = [
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
         write_csv(args.tables / f"{stem}-retention-by-build-and-source.csv", route_comparison),
@@ -1362,6 +1474,9 @@ def main() -> None:
         write_csv(args.tables / f"{stem}-audit-quality-refilter-by-route-and-source.csv", refilter),
         write_csv(args.tables / f"{stem}-audit-quality-drops-by-rule-and-source.csv", drop_rules),
         write_csv(args.tables / f"{stem}-medical-exact-dedup-documents-by-copy-origin.csv", copy_origins),
+        write_csv(args.tables / f"{stem}-fresh-judge-agreement-with-person-by-test.csv", agreement),
+        write_csv(args.tables / f"{stem}-fresh-precision-by-filter-and-source.csv", fresh_precision),
+        write_csv(args.tables / f"{stem}-fresh-hypothesis-calls-by-clause.csv", clauses),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),

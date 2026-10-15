@@ -313,3 +313,72 @@ def test_quality_filters_apply_the_route_settings(tmp_path: Path) -> None:
 
     settings = [(f.max_non_alpha_words_ratio, f.alpha_words_skip_punctuation) for f in (filters["oss"], filters["c4"])]
     assert settings == [(0.5, True), (0.8, False)]
+
+
+def _label(doc_id: str, coherence: int, language: str = "sl") -> Dict[str, Any]:
+    """Build a calibration label or verdict on the rubric for one document.
+
+    Args:
+        doc_id: The document id.
+        coherence: Coherence on the 1-5 scale.
+        language: The language code.
+
+    Returns:
+        A label dict.
+    """
+    return {"id": doc_id, **_verdict(coherence), "language": language}
+
+
+def test_agreement_rows_gate_passes_when_judge_and_person_agree() -> None:
+    """Matching calls at the lenient bar give kappa 1 and pass the gate."""
+    labels = [_label("a", 1), _label("b", 5)]
+    rows = analysis.agreement_rows(labels, {label["id"]: label for label in labels})
+    assert (rows[0]["test"], rows[0]["kappa"], rows[0]["passes_gate"]) == ("bad text", 1.0, True)
+
+
+def test_agreement_rows_gate_fails_below_the_bar() -> None:
+    """A judge that calls bad what the person keeps falls below the gate."""
+    labels = [_label("a", 1), _label("b", 5)]
+    rows = analysis.agreement_rows(labels, {"a": _label("a", 5), "b": _label("b", 1)})
+    assert rows[0]["passes_gate"] is False
+
+
+def test_agreement_rows_rejects_a_labelled_document_without_a_verdict() -> None:
+    """A calibration document the run skipped stops the gate reading."""
+    with pytest.raises(KeyError):
+        analysis.agreement_rows([_label("a", 1)], {})
+
+
+def _drops(stage: str, source: str, bad: int, good: int) -> Dict[Any, List[Dict[str, Any]]]:
+    """Build one filter's judged drops on one source.
+
+    Args:
+        stage: The filter.
+        source: The source.
+        bad: How many drops are garbage at coherence 1.
+        good: How many are coherent prose.
+
+    Returns:
+        Verdicts keyed by stage and source, as `judged_drops` gives them.
+    """
+    return {(stage, source): [_verdict(1, "garbage")] * bad + [_verdict(5)] * good}
+
+
+def test_clause_rows_confirms_when_every_read_rate_holds() -> None:
+    """A clause whose pooled and per-source rates all reach 0.6 is confirmed."""
+    precision = analysis.precision_rows(_drops("quality", "a", 20, 5))
+    h3 = next(row for row in analysis.clause_rows(precision, True) if row["clause"] == "H3")
+    assert (h3["call"], h3["rates_read"]) == ("confirmed", 2)
+
+
+def test_clause_rows_refutes_when_one_source_fails() -> None:
+    """One read source below 0.5 refutes the clause even when the pool holds."""
+    precision = analysis.precision_rows({**_drops("quality", "a", 60, 0), **_drops("quality", "b", 5, 20)})
+    h3 = next(row for row in analysis.clause_rows(precision, True) if row["clause"] == "H3")
+    assert (h3["call"], h3["lowest_at"]) == ("refuted", "quality / b")
+
+
+def test_clause_rows_leaves_a_filter_without_drops_inconclusive() -> None:
+    """A filter with no judged drops has nothing to confirm."""
+    h1 = next(row for row in analysis.clause_rows(analysis.precision_rows({}), True) if row["clause"] == "H1")
+    assert (h1["call"], h1["rates_read"]) == ("inconclusive", 0)

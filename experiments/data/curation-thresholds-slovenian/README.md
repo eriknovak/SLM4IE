@@ -144,6 +144,19 @@ concluded:
 - **Code**: `analysis.py::copy_origin_rows`
 - **Settings**: none; the source is fixed in the script
 
+### M7 — Read the judge's agreement with the person and call each clause on the fresh draw
+
+- **Input**: one judge run over the fresh draw with the 116 hand-labelled documents spread through it ([D11]). One item is a document with its verdict, and for a hand-labelled document also the person's label on the same rubric.
+- **Output**: the judge's agreement with the person per test, the fresh draw's precision per filter and source ([M3]), and a call per hypothesis clause. Written to `tables/curation-routes-fresh-judge-agreement-with-person-by-test.csv`, `tables/curation-routes-fresh-precision-by-filter-and-source.csv` and `tables/curation-routes-fresh-hypothesis-calls-by-clause.csv`.
+- **How**: the gate and the findings read the same run ([D3]).
+  1. Pair each hand-labelled document's label with the run's verdict on it; a labelled document without a verdict stops the reading.
+  2. For each test, bad text at the lenient bar and each filter's target ([D1]), turn both sides into yes-or-no calls and compute Cohen's κ, $\kappa = (p_o - p_e) / (1 - p_e)$, where $p_o$ is the share of documents both call alike and $p_e$ the share chance would give from how often each says yes.
+  3. The gate passes when κ on bad text at the lenient bar is at least 0.6. The other tests' κ show which verdict fields the person and the judge read alike.
+  4. Score the fresh draw's drops as for the earlier audit's ([M3]). Hand-labelled documents the draw did not hold are left out.
+  5. Call a clause confirmed when every rate it reads holds, refuted when any fails, and inconclusive otherwise. H1 to H4 read their filter's target precision; H5 reads bad-text precision on the spam, quality and repetition filters. A rate counts when it is pooled or its source has at least 20 judged drops. Every call carries whether the run passed the gate.
+- **Code**: `analysis.py::agreement_rows`, `analysis.py::clause_rows`
+- **Settings**: none; the gate and the bars are the record's ([D2], [D3])
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
@@ -243,6 +256,32 @@ concluded:
   - Sonnet 5.5: possibly closer to the person, but the judge would change along with the thresholds.
   - Opus 5.5: the strongest model, slowest and heaviest on quota, with the same confound.
   - Judge the 116 documents in a run of their own: the gate would again read on a run the findings do not use.
+- **History**:
+  - 2026-10-15 first version, at the project lead's call
+
+### D12 — Keep a filter on a source only where at least half of what it drops is bad text
+
+- **Decision**: One good document lost weighs as much as one bad document removed. A filter, or one of its rules, stays on a source when at least half of the documents it drops there are bad text at the lenient bar, estimated over the source's whole volume.
+- **Why**: The fresh draw shows the filters trading good text for bad at very different rates per source. Settings need one exchange rate to be chosen against, and 1:1 is neutral between corpus size and cleanliness. It matches the record's refute line of 0.5 ([D2]).
+- **Alternatives**:
+  - Two good documents per bad one removed: a cleaner corpus at a large loss of usable text.
+  - One good document per two bad ones: favours volume, keeps more spam.
+- **History**:
+  - 2026-10-15 first version, at the project lead's call
+
+### D13 — Retune on both judged samples, check on a third draw limited to what changed
+
+- **Decision**: The next settings are tuned on the earlier audit's and the fresh draw's verdicts together. The fresh draw thereby becomes tuning evidence. A third draw under a new seed then checks the result, limited to the filters and sources whose settings change.
+- **Why**: The fresh draw is the best evidence on the frozen settings, and it shows where they lose good text. Keeping it held back would tune on the older, less informative sample. A third draw restores a check that no setting was tuned on ([D3]).
+- **Alternatives**:
+  - Tune on the earlier audit's sample only and keep the fresh draw for checking: clean, but tunes on evidence the fresh draw showed to mislead.
+- **History**:
+  - 2026-10-15 first version, at the project lead's call
+
+### D14 — Leave a learned quality classifier to a follow-up experiment
+
+- **Decision**: This experiment changes only which filters and rules run on each source, and their thresholds. A classifier trained on the judge's verdicts, to catch the spam and boilerplate the rules cannot separate from good text, is left to an experiment of its own.
+- **Why**: A classifier changes the pipeline's design and needs its own hypothesis, training data and evaluation. The rule settings can be fixed with the evidence already judged.
 - **History**:
   - 2026-10-15 first version, at the project lead's call
 

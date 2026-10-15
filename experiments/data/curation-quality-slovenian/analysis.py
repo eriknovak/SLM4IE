@@ -41,7 +41,7 @@ import yaml
 from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.inspect.judge import interleave
 from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
-from slm4ie.utils.stats import wilson
+from slm4ie.utils.stats import cohen_kappa, wilson
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -927,23 +927,6 @@ def draw_figures(
     return written
 
 
-def _kappa(pairs: List[Tuple[bool, bool]]) -> Tuple[float, float]:
-    """Return Cohen's kappa and raw agreement for two raters' yes-or-no calls.
-
-    Args:
-        pairs: One (first rater, second rater) pair per document.
-
-    Returns:
-        Kappa and the share of documents both raters called alike.
-    """
-    total = len(pairs)
-    observed = sum(first == second for first, second in pairs) / total
-    first_yes = sum(first for first, _ in pairs) / total
-    second_yes = sum(second for _, second in pairs) / total
-    expected = first_yes * second_yes + (1 - first_yes) * (1 - second_yes)
-    return ((observed - expected) / (1 - expected) if expected < 1 else 1.0), observed
-
-
 def agreement_rows(
     labels: List[Dict[str, Any]], runs: Dict[str, Dict[str, Dict[str, Any]]], reference: str
 ) -> List[Dict[str, Any]]:
@@ -975,8 +958,8 @@ def agreement_rows(
 
     rows: List[Dict[str, Any]] = []
     for name, against, pairs in comparisons:
-        lenient, raw = _kappa([(is_bad(first), is_bad(second)) for first, second in pairs])
-        strict, _ = _kappa([(is_bad(first, strict=True), is_bad(second, strict=True)) for first, second in pairs])
+        lenient, raw = cohen_kappa([(is_bad(first), is_bad(second)) for first, second in pairs])
+        strict, _ = cohen_kappa([(is_bad(first, strict=True), is_bad(second, strict=True)) for first, second in pairs])
         gaps = [abs(first["coherence"] - second["coherence"]) for first, second in pairs]
         rows.append(
             {
