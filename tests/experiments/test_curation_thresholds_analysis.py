@@ -382,3 +382,72 @@ def test_clause_rows_leaves_a_filter_without_drops_inconclusive() -> None:
     """A filter with no judged drops has nothing to confirm."""
     h1 = next(row for row in analysis.clause_rows(analysis.precision_rows({}), True) if row["clause"] == "H1")
     assert (h1["call"], h1["rates_read"]) == ("inconclusive", 0)
+
+
+def _funnel(source: str, dropped: int, stage: str = "quality") -> Dict[str, Any]:
+    """Build one source's funnel row in which only one filter drops documents.
+
+    Args:
+        source: The source.
+        dropped: How many documents the filter drops out of 1,000.
+        stage: The filter that drops them.
+
+    Returns:
+        A row shaped as `funnel_rows` gives it.
+    """
+    order = ["convert", "language", "spam", "quality", "repetition"]
+    after = order.index(stage)
+    return {"source": source, **{name: 1000 - dropped * (i >= after) for i, name in enumerate(order)}}
+
+
+def _trade(rows: List[Dict[str, Any]], stage: str, source: str) -> Dict[str, Any]:
+    """Pick one row of the trade-off table.
+
+    Args:
+        rows: Rows from `trade_off_rows`.
+        stage: The filter.
+        source: The source, or `pooled`.
+
+    Returns:
+        The matching row.
+    """
+    return next(row for row in rows if (row["stage"], row["source"]) == (stage, source))
+
+
+def test_trade_off_rows_scales_the_judged_share_to_the_source_drops() -> None:
+    """Three in four judged drops bad turns 400 drops into 300 bad removed and 100 good lost."""
+    rows = analysis.trade_off_rows([_funnel("a", 400)], _drops("quality", "a", 15, 5), True)
+    row = _trade(rows, "quality", "a")
+    assert (row["dropped"], row["bad_removed"], row["good_lost"], row["call"]) == (400, 300, 100, "keep")
+
+
+def test_trade_off_rows_switches_off_where_less_than_half_is_bad() -> None:
+    """A filter on a source dropping more good than bad text is called off at the 1:1 rate."""
+    rows = analysis.trade_off_rows([_funnel("a", 400)], _drops("quality", "a", 9, 11), True)
+    assert _trade(rows, "quality", "a")["call"] == "switch off"
+
+
+def test_trade_off_rows_leaves_a_source_with_few_judged_drops_uncalled() -> None:
+    """Below 20 judged drops the estimate is listed without a call."""
+    rows = analysis.trade_off_rows([_funnel("a", 400)], _drops("quality", "a", 15, 4), True)
+    assert _trade(rows, "quality", "a")["call"] == ""
+
+
+def test_trade_off_rows_pools_by_volume_not_by_judged_drops() -> None:
+    """The pooled share weighs each source by what it drops, not by how many drops were judged."""
+    drops = {**_drops("quality", "a", 20, 0), **_drops("quality", "b", 0, 20)}
+    rows = analysis.trade_off_rows([_funnel("a", 100), _funnel("b", 300)], drops, True)
+    assert _trade(rows, "quality", "pooled")["bad_share"] == 0.25
+
+
+def test_trade_off_rows_gives_the_pooled_row_no_call() -> None:
+    """The 1:1 call is made per source only (D12)."""
+    rows = analysis.trade_off_rows([_funnel("a", 400)], _drops("quality", "a", 20, 0), True)
+    assert _trade(rows, "quality", "pooled")["call"] == ""
+
+
+def test_trade_off_rows_counts_a_language_drop_as_bad_only_when_not_slovene() -> None:
+    """Slovene garbage dropped by the language filter is good text lost, by the filter's own target (D1)."""
+    verdicts = [{**_verdict(1, "garbage"), "language": "sl"}] * 10 + [{**_verdict(), "language": "hr"}] * 30
+    rows = analysis.trade_off_rows([_funnel("a", 400, "language")], {("language", "a"): verdicts}, True)
+    assert _trade(rows, "language", "a")["bad_removed"] == 300

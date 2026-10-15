@@ -174,6 +174,9 @@ GATE_KAPPA = 0.6
 #: The filter and the rate each target clause reads; H5 reads bad text instead (Predictions).
 TARGET_CLAUSES = {"H1": "language", "H2": "spam", "H3": "quality", "H4": "repetition"}
 
+#: Share of a filter's drops on a source that must be bad text for it to stay on (D12, one good per bad).
+KEEP_BAD_SHARE = 0.5
+
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     """Write rows as a CSV with the first row's keys as the header.
@@ -875,6 +878,87 @@ def clause_rows(precision: List[Dict[str, Any]], gate_passed: bool) -> List[Dict
     return rows
 
 
+def _trade_off_row(
+    stage: str, source: str, dropped: int, judged: int, bad_share: float, call: bool, gate_passed: bool
+) -> Dict[str, Any]:
+    """Turn one filter's drops on one group into bad text removed and good text lost.
+
+    Args:
+        stage: The filter.
+        source: The source, or `pooled`.
+        dropped: Documents the filter drops in the build.
+        judged: How many of its drops the judge read.
+        bad_share: The share of the drops estimated to be bad.
+        call: Whether to call the group at the 1:1 rate (D12).
+        gate_passed: Whether the judge run passed the agreement gate (D3).
+
+    Returns:
+        One row of `trade_off_rows`.
+    """
+    bad_removed = round(dropped * bad_share)
+    return {
+        "stage": stage,
+        "source": source,
+        "dropped": dropped,
+        "drops_judged": judged,
+        "bad_share": round(bad_share, 4),
+        "bad_removed": bad_removed,
+        "good_lost": dropped - bad_removed,
+        "call": ("keep" if bad_share >= KEEP_BAD_SHARE else "switch off") if call else "",
+        "gate_passed": gate_passed,
+    }
+
+
+def trade_off_rows(
+    funnel: List[Dict[str, Any]], drops: Dict[Tuple[str, str], List[Dict[str, Any]]], gate_passed: bool
+) -> List[Dict[str, Any]]:
+    """Estimate, per filter and source, how much bad text a filter removes and how much good text it loses.
+
+    Args:
+        funnel: Rows from `funnel_rows` for the build the drops were sampled from.
+        drops: Verdicts keyed by stage and source, from `judged_drops`, every
+            source among the funnel's.
+        gate_passed: Whether the judge run passed the agreement gate (D3),
+            carried on every row so no call is read without it.
+
+    Returns:
+        Per filter, in pipeline order, a pooled row then one row per source
+        with judged drops, most good text lost first. A drop counts as bad by
+        the filter's bad-text test, and for the language filter by its target,
+        not Slovene (D1). The pooled row sums the sources with judged drops,
+        each weighing by what it drops, and carries no call. A source with at
+        least `MIN_SOURCE_DROPS` judged drops is called `keep` or `switch off`
+        at the 1:1 rate (D12).
+
+    Raises:
+        KeyError: If a source with judged drops is missing from the funnel.
+    """
+    stage_columns = [stage[3:] for stage in SCOPED_STAGES]
+    counts = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
+    rows: List[Dict[str, Any]] = []
+    for previous, stage in zip(stage_columns, stage_columns[1:]):
+        is_bad = is_bad_text if stage in BAD_TEXT_STAGES else TARGETS[stage]
+        per_source = []
+        for (filter_stage, source), verdicts in drops.items():
+            if filter_stage != stage:
+                continue
+            dropped = counts[source][previous] - counts[source][stage]
+            share = sum(is_bad(verdict) for verdict in verdicts) / len(verdicts)
+            judged = len(verdicts)
+            per_source.append((source, dropped, judged, share))
+        total_dropped = sum(dropped for _, dropped, _, _ in per_source)
+        if total_dropped:
+            pooled_share = sum(dropped * share for _, dropped, _, share in per_source) / total_dropped
+            total_judged = sum(judged for _, _, judged, _ in per_source)
+            rows.append(_trade_off_row(stage, "pooled", total_dropped, total_judged, pooled_share, False, gate_passed))
+        source_rows = [
+            _trade_off_row(stage, source, dropped, judged, share, judged >= MIN_SOURCE_DROPS, gate_passed)
+            for source, dropped, judged, share in per_source
+        ]
+        rows.extend(sorted(source_rows, key=lambda row: -row["good_lost"]))
+    return rows
+
+
 def quality_drops(
     sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
 ) -> Dict[str, Dict[str, str]]:
@@ -1461,10 +1545,18 @@ def main() -> None:
     if not agreement[0]["passes_gate"]:
         print(f"{stem}: WARNING the fresh judge run fails the agreement gate; its clause calls are not findings (D3)")
     candidate_sources = {row["source"] for row in candidate if row["source"] != "TOTAL"}
-    fresh_precision = precision_rows(judged_drops(read_jsonl(FRESH_SAMPLE), fresh_verdicts, candidate_sources))
+    fresh_drops = judged_drops(read_jsonl(FRESH_SAMPLE), fresh_verdicts, candidate_sources)
+    fresh_precision = precision_rows(fresh_drops)
     clauses = clause_rows(fresh_precision, agreement[0]["passes_gate"])
     for row in clauses:
         print(f"{stem}: fresh {row['clause']} {row['call']:12s} lowest {row['lowest_rate']} at {row['lowest_at']}")
+    trade_off = trade_off_rows(candidate, fresh_drops, agreement[0]["passes_gate"])
+    for row in trade_off:
+        if row["source"] == "pooled":
+            print(
+                f"{stem}: fresh {row['stage']:11s} dropped {row['dropped']:>11,d}  bad removed {row['bad_removed']:>11,d}"
+                f"  good lost {row['good_lost']:>11,d}"
+            )
 
     written = [
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
@@ -1477,6 +1569,7 @@ def main() -> None:
         write_csv(args.tables / f"{stem}-fresh-judge-agreement-with-person-by-test.csv", agreement),
         write_csv(args.tables / f"{stem}-fresh-precision-by-filter-and-source.csv", fresh_precision),
         write_csv(args.tables / f"{stem}-fresh-hypothesis-calls-by-clause.csv", clauses),
+        write_csv(args.tables / f"{stem}-fresh-bad-removed-and-good-lost-by-filter-and-source.csv", trade_off),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),

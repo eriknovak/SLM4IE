@@ -157,6 +157,19 @@ concluded:
 - **Code**: `analysis.py::agreement_rows`, `analysis.py::clause_rows`
 - **Settings**: none; the gate and the bars are the record's ([D2], [D3])
 
+### M8 — Estimate how much bad text each filter removes and how much good text it loses on each source
+
+- **Input**: the candidate build's document counts per source after every stage, and the fresh draw's judged drops ([M7]). One item is a filter on a source.
+- **Output**: per filter, a pooled row then one row per source, with the documents the filter drops in the whole build, how many of its drops were judged, the share of them estimated bad, the bad documents removed, the good documents lost, a call at the 1:1 rate ([D12]), and whether the judge run passed the agreement gate ([D3]). For the language filter, "bad" in these columns means not Slovene. Written to `tables/curation-routes-fresh-bad-removed-and-good-lost-by-filter-and-source.csv`, most good text lost first within each filter.
+- **How**: the draw takes 40 drops per filter and source whatever the source's size, so its shares are scaled back to each source's volume.
+  1. The documents a filter drops on a source, $d$, are its count before the filter minus its count after.
+  2. The bad share $s$ is the share of the source's judged drops that are bad text at the lenient bar; for the language filter it is the share the judge does not call Slovene ([D1]).
+  3. Bad removed is $d \cdot s$, rounded to a whole document; good lost is $d$ minus bad removed.
+  4. The pooled row sums $d$ over the sources with judged drops, and its share weighs each source by its drops, $s_{pool} = \sum_i d_i s_i / \sum_i d_i$, where $i$ runs over those sources. A source the draw sampled no drops from is left out of both.
+  5. Call a source "keep" when $s \geq 0.5$ and "switch off" below. A source with fewer than 20 judged drops gets no call, nor does the pooled row, since the setting is chosen per source.
+- **Code**: `analysis.py::trade_off_rows`
+- **Settings**: none; the exchange rate is the record's ([D12])
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
@@ -282,6 +295,16 @@ concluded:
 
 - **Decision**: This experiment changes only which filters and rules run on each source, and their thresholds. A classifier trained on the judge's verdicts, to catch the spam and boilerplate the rules cannot separate from good text, is left to an experiment of its own.
 - **Why**: A classifier changes the pipeline's design and needs its own hypothesis, training data and evaluation. The rule settings can be fixed with the evidence already judged.
+- **History**:
+  - 2026-10-15 first version, at the project lead's call
+
+### D15 — Keep the Slovenian slices of the multilingual collections in the corpus
+
+- **Decision**: fineweb2, culturax and finepdf stay in the corpus; their bad text is handled by per-source filter settings like any other source.
+- **Why**: They are the Slovenian slices of multilingual collections: the language filter drops under 1% of each. Exact and sentence dedup already remove what they share with other sources, and what remains is about 36% of the finished corpus's words, with bad-text shares within the other web crawls' range.
+- **Alternatives**:
+  - Drop fineweb2 and culturax: loses about 24% of the words, mostly unique web text.
+  - Drop all three: loses about 36% of the words, including PDF text no other source holds.
 - **History**:
   - 2026-10-15 first version, at the project lead's call
 
