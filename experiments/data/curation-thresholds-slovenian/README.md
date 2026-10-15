@@ -170,6 +170,19 @@ concluded:
 - **Code**: `analysis.py::trade_off_rows`
 - **Settings**: none; the exchange rate is the record's ([D12])
 
+### M9 — Split each source's quality and repetition drops by the rules they fail, on both judged samples
+
+- **Input**: the judged documents the quality or repetition filter dropped, in the earlier audit's sample and in the fresh draw, from the 18 selected sources ([D13]). One item is such a document with its verdict; a document judged in both keeps its fresh verdict.
+- **Output**: per filter, source and set of failed rules, how many judged documents fail exactly that set and how many of them come from the fresh draw, their bad-text share, the documents, bad documents removed and good documents lost that set stands for in the candidate build, and whether the fresh judge run passed the agreement gate ([D3]). Every set is listed, most good text lost first within each filter; which rules to loosen is decided from it in the next step, so no row carries a call. Written to `tables/curation-routes-judged-bad-removed-and-good-lost-by-rule-and-source.csv`.
+- **How**: the rules are read on the full text under the candidate's settings, so both samples describe the same build.
+  1. Read each document's full text from the candidate build's input to the filter, as for the quality re-score ([M4]); documents absent there, or present with other text, are left out.
+  2. Build each source's filter with its route's settings and its own ([M1]).
+  3. List every rule the document fails, as for the quality rules ([M5]), each named by the setting that steers it. The repetition filter's line and paragraph limits are switched off one at a time; each of its two n-gram families, the most frequent 2- to 4-word phrase and the repeated 5- to 10-word phrases, is one setting and is switched off whole. A document the candidate filter keeps is left out: it is not one of its drops.
+  4. For a source, let $n$ be its judged documents still dropped and $d$ the documents the filter drops there in the build ([M8]). A set failed by $k$ of them, $b$ of which are bad text, stands for $d \cdot k / n$ documents, of which $d \cdot b / n$ are bad removed, each rounded to a whole document, and the rest good lost.
+  5. The earlier audit's documents were drawn from its own build's drops; those the candidate still drops count as a sample of the candidate's drops, weighing the same as fresh ones.
+- **Code**: `analysis.py::rule_trade_off_rows`, `analysis.py::failing_rules`
+- **Settings**: none; the filter settings are the candidate's, in `configs/curation-routes.yaml`
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text

@@ -37,10 +37,11 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import yaml
 from datatrove.data import Document
+from datatrove.pipeline.filters import GopherRepetitionFilter
 from datatrove.utils.typeshelper import Languages
 from tqdm import tqdm
 
@@ -56,6 +57,7 @@ from slm4ie.data.curate.config import (  # noqa: E402
 from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
 from slm4ie.data.curate.resources.stopwords import load_stopwords  # noqa: E402
 from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _build_quality_config  # noqa: E402
+from slm4ie.data.curate.stages.repetition import _build_repetition_config  # noqa: E402
 from slm4ie.utils.stats import cohen_kappa, wilson  # noqa: E402
 
 # No tqdm monitor thread: process pools fork after a bar, and forking a threaded parent can deadlock.
@@ -82,8 +84,14 @@ SCOPED_STAGES: Tuple[str, ...] = ("00_convert", "01_language", "02_spam", "03_qu
 #: The corpus-wide stage whose per-source output has to be counted.
 COUNTED_STAGE = "05_exact_dedup"
 
-#: The stage folder the quality filter reads, holding every document that reaches it.
-QUALITY_INPUT = "02_spam"
+#: A filter whose rules are read one by one.
+StageFilter = Union[LetterShareGopherQualityFilter, GopherRepetitionFilter]
+
+#: The stage folder each rule-based filter reads, holding every document that reaches it.
+FILTER_INPUTS = {"quality": "02_spam", "repetition": "03_quality"}
+
+#: Rows per filter the run prints from the rule breakdown.
+PRINTED_RULE_ROWS = 5
 
 #: A document's id in a shard line, compact (datatrove) or spaced (convert), escapes kept.
 ID_PATTERN = re.compile(r'"id":\s*"((?:[^"\\]|\\.)*)"')
@@ -959,15 +967,16 @@ def trade_off_rows(
     return rows
 
 
-def quality_drops(
-    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
+def filter_drops(
+    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str], stage: str
 ) -> Dict[str, Dict[str, str]]:
-    """Pick the judged documents the quality filter dropped in the earlier audit.
+    """Pick the judged documents one filter dropped in a sample.
 
     Args:
         sample: Sample rows, each carrying `id`, `dataset`, `text` and its `cells`.
         verdicts: Judge verdicts by document id.
         sources: The selected sources; a sampled source outside them is skipped.
+        stage: The filter, such as `quality`.
 
     Returns:
         Per source, the text the judge read (the document's opening) by document id.
@@ -976,7 +985,7 @@ def quality_drops(
     for row in sample:
         if row["id"] not in verdicts or row["dataset"] not in sources:
             continue
-        if any(cell["stage"] == "quality" and cell["decision"] == "dropped" for cell in row["cells"]):
+        if any(cell["stage"] == stage and cell["decision"] == "dropped" for cell in row["cells"]):
             picked[row["dataset"]][row["id"]] = row["text"]
     return dict(picked)
 
@@ -1062,31 +1071,36 @@ def fetch_full_texts(
     return texts, changed
 
 
-def quality_filters(config: Path, sources: Iterable[str]) -> Dict[str, Optional[LetterShareGopherQualityFilter]]:
-    """Build the quality filter each source meets in a candidate build.
+def candidate_filters(config: Path, sources: Iterable[str], stage: str) -> Dict[str, Optional[StageFilter]]:
+    """Build the quality or repetition filter each source meets in a candidate build.
 
     Args:
         config: The candidate build's curation config.
         sources: The sources to build a filter for.
+        stage: `quality` or `repetition`.
 
     Returns:
-        Per source, its quality filter with its route's and its own settings;
-        None where the route switches the filter off.
+        Per source, its filter with its route's and its own settings; None
+        where the route switches the filter off.
     """
     cfg = yaml.safe_load(config.read_text(encoding="utf-8"))
     overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
     stopwords, _ = load_stopwords(cfg["stopwords"])
-    filters: Dict[str, Optional[LetterShareGopherQualityFilter]] = {}
+    filters: Dict[str, Optional[StageFilter]] = {}
     for source in sources:
-        knobs = effective_stage_config(cfg, overrides, source, "quality")
+        knobs = effective_stage_config(cfg, overrides, source, stage)
         if knobs.get("enabled") is False:
             filters[source] = None
             continue
-        # The stage's own builder, so defaults and casts match the build exactly.
-        settings = _build_quality_config(knobs)
-        filters[source] = LetterShareGopherQualityFilter(
-            language=Languages.slovenian, stop_words=sorted(stopwords), **asdict(settings)
-        )
+        # The stages' own builders, so defaults and casts match the build exactly.
+        if stage == "repetition":
+            filters[source] = GopherRepetitionFilter(
+                **asdict(_build_repetition_config(knobs)), language=Languages.slovenian
+            )
+        else:
+            filters[source] = LetterShareGopherQualityFilter(
+                language=Languages.slovenian, stop_words=sorted(stopwords), **asdict(_build_quality_config(knobs))
+            )
     return filters
 
 
@@ -1105,14 +1119,14 @@ def refilter_rows(
     the audit's own drops.
 
     Args:
-        openings: Per source, the audit's judged quality drops, from `quality_drops`.
+        openings: Per source, the audit's judged quality drops, from `filter_drops`.
         texts: Their full text, from `fetch_full_texts`.
         changed: The ids the candidate holds only with text other than the
             judged one; they are counted and left out, since the verdict was
             on other text. Any other id missing from `texts` is absent: an
             earlier filter drops it, or the source's ids changed since the audit.
         verdicts: Judge verdicts by document id.
-        filters: The candidate's quality filter per source, from `quality_filters`.
+        filters: The candidate's quality filter per source, from `candidate_filters`.
         routes: The route per source, from `read_routes`.
 
     Returns:
@@ -1161,28 +1175,55 @@ def refilter_rows(
     return rows
 
 
-def failing_rules(quality_filter: Any, doc: Document) -> List[str]:
-    """List every quality setting a document fails, in the filter's order.
+def _switch_off(stage_filter: StageFilter, reason: str) -> Tuple[str, StageFilter]:
+    """Name the setting behind a drop reason and switch it off on a copy of the filter.
+
+    Args:
+        stage_filter: A quality or repetition filter.
+        reason: The drop reason the filter returned.
+
+    Returns:
+        The setting's name and the copy without it. Each n-gram family of the
+        repetition filter, `top_n_grams` or `dup_n_grams`, is one setting, so
+        all its sizes are switched off together.
+    """
+    switched = copy.copy(stage_filter)
+    if not isinstance(stage_filter, GopherRepetitionFilter):
+        setting = REASON_SETTINGS[reason]
+        setattr(switched, setting, 0)
+    elif reason.startswith("top_"):
+        setting = "top_n_grams"
+        switched.top_n_grams = ()
+    elif reason.startswith("duplicated_"):
+        setting = "dup_n_grams"
+        switched.dup_n_grams = ()
+    else:
+        # The line and paragraph reasons are named after their own settings.
+        setting = reason
+        setattr(switched, setting, None)
+    return setting, switched
+
+
+def failing_rules(stage_filter: StageFilter, doc: Document) -> List[str]:
+    """List every rule of a quality or repetition filter a document fails, in the filter's order.
 
     The filter stops at the first rule a document fails, so each failing rule
     is switched off in turn and the filter run again.
 
     Args:
-        quality_filter: The quality filter; its rules are switched off on copies.
+        stage_filter: The filter; its rules are switched off on copies.
         doc: The document.
 
     Returns:
-        The settings behind the failed rules, first failure first; empty for
-        a kept document.
+        The failed rules, first failure first, named as `_switch_off` names
+        them; empty for a kept document.
     """
     failed: List[str] = []
-    result = quality_filter.filter(doc)
+    result = stage_filter.filter(doc)
     while result is not True:
-        setting = REASON_SETTINGS[result[1]]
-        failed.append(setting)
-        quality_filter = copy.copy(quality_filter)
-        setattr(quality_filter, setting, 0)
-        result = quality_filter.filter(doc)
+        rule, stage_filter = _switch_off(stage_filter, result[1])
+        failed.append(rule)
+        result = stage_filter.filter(doc)
     return failed
 
 
@@ -1196,10 +1237,10 @@ def drop_rule_rows(
     """Group the documents a candidate's quality filter still drops by the rules they fail.
 
     Args:
-        openings: Per source, the audit's judged quality drops, from `quality_drops`.
+        openings: Per source, the audit's judged quality drops, from `filter_drops`.
         texts: Their full text, from `fetch_full_texts`; other ids are skipped.
         verdicts: Judge verdicts by document id.
-        filters: The candidate's quality filter per source, from `quality_filters`.
+        filters: The candidate's quality filter per source, from `candidate_filters`.
         routes: The route per source, from `read_routes`.
 
     Returns:
@@ -1230,6 +1271,87 @@ def drop_rule_rows(
         }
         for (route, source, failed), group in sorted(groups.items())
     ]
+
+
+def merge_drops(*picked: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+    """Merge several samples' judged drops of one filter, a later sample's opening winning.
+
+    Args:
+        *picked: Per sample, the openings by document id per source, from `filter_drops`.
+
+    Returns:
+        Per source, every sample's openings by document id.
+    """
+    merged: Dict[str, Dict[str, str]] = defaultdict(dict)
+    for openings in picked:
+        for source, source_openings in openings.items():
+            merged[source].update(source_openings)
+    return dict(merged)
+
+
+def rule_trade_off_rows(
+    stage: str,
+    openings: Dict[str, Dict[str, str]],
+    texts: Dict[str, str],
+    verdicts: Dict[str, Dict[str, Any]],
+    fresh_ids: Set[str],
+    filters: Dict[str, Optional[StageFilter]],
+    funnel: List[Dict[str, Any]],
+    gate_passed: bool,
+) -> List[Dict[str, Any]]:
+    """Estimate, per source and set of failed rules, the bad text a filter removes and the good text it loses.
+
+    Args:
+        stage: `quality` or `repetition`.
+        openings: Per source, the judged drops of this filter from both samples.
+        texts: Their full text, from `fetch_full_texts`; other ids are skipped.
+        verdicts: Judge verdicts by document id, from both samples.
+        fresh_ids: The ids judged in the fresh draw.
+        filters: The candidate's filter per source, from `candidate_filters`.
+        funnel: Rows from `funnel_rows` for the candidate build.
+        gate_passed: Whether the fresh judge run passed the agreement gate
+            (D3), carried on every row.
+
+    Returns:
+        One row per source and set of failed rules, most good text lost first.
+        A source's judged documents the candidate filter still drops stand for
+        all the documents it drops there, each weighing the same, so a set's
+        share of them scales to the build. Documents it keeps are left out.
+    """
+    stage_columns = [name[3:] for name in SCOPED_STAGES]
+    previous = stage_columns[stage_columns.index(stage) - 1]
+    counts = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
+    rows: List[Dict[str, Any]] = []
+    for source, ids in sorted(openings.items()):
+        if filters[source] is None:
+            continue
+        groups: Dict[Tuple[str, ...], List[str]] = defaultdict(list)
+        for doc_id in sorted(ids):
+            if doc_id in texts:
+                failed = failing_rules(filters[source], Document(text=texts[doc_id], id=doc_id))
+                if failed:
+                    groups[tuple(failed)].append(doc_id)
+        judged = sum(len(members) for members in groups.values())
+        dropped = counts[source][previous] - counts[source][stage]
+        for failed, members in groups.items():
+            bad = sum(is_bad_text(verdicts[doc_id]) for doc_id in members)
+            estimated = round(dropped * len(members) / judged)
+            bad_removed = round(dropped * bad / judged)
+            rows.append(
+                {
+                    "stage": stage,
+                    "source": source,
+                    "failed_rules": "+".join(failed),
+                    "judged": len(members),
+                    "judged_fresh": sum(doc_id in fresh_ids for doc_id in members),
+                    "bad_share": round(bad / len(members), 4),
+                    "dropped": estimated,
+                    "bad_removed": bad_removed,
+                    "good_lost": estimated - bad_removed,
+                    "gate_passed": gate_passed,
+                }
+            )
+    return sorted(rows, key=lambda row: -row["good_lost"])
 
 
 def read_documents(folder: Path) -> List[Dict[str, Any]]:
@@ -1514,10 +1636,10 @@ def main() -> None:
     for row in candidate_domains:
         print(f"{stem}: {row['domain']:14s}{row['tokens_estimated']:>16,d} tokens  clears KPI: {row['clears_kpi']}")
 
-    openings = quality_drops(sample, verdicts, sources)
+    openings = filter_drops(sample, verdicts, sources, "quality")
     texts_cache = args.data_root / "interim" / f"{stem}-audit-quality-drops.json"
-    texts, changed = fetch_full_texts(candidate_dir / QUALITY_INPUT, openings, texts_cache, args.workers)
-    filters = quality_filters(args.routes_config, openings)
+    texts, changed = fetch_full_texts(candidate_dir / FILTER_INPUTS["quality"], openings, texts_cache, args.workers)
+    filters = candidate_filters(args.routes_config, openings, "quality")
     refilter = refilter_rows(openings, texts, changed, verdicts, filters, routes)
     drop_rules = drop_rule_rows(openings, texts, verdicts, filters, routes)
     for row in refilter:
@@ -1545,7 +1667,8 @@ def main() -> None:
     if not agreement[0]["passes_gate"]:
         print(f"{stem}: WARNING the fresh judge run fails the agreement gate; its clause calls are not findings (D3)")
     candidate_sources = {row["source"] for row in candidate if row["source"] != "TOTAL"}
-    fresh_drops = judged_drops(read_jsonl(FRESH_SAMPLE), fresh_verdicts, candidate_sources)
+    fresh_sample = read_jsonl(FRESH_SAMPLE)
+    fresh_drops = judged_drops(fresh_sample, fresh_verdicts, candidate_sources)
     fresh_precision = precision_rows(fresh_drops)
     clauses = clause_rows(fresh_precision, agreement[0]["passes_gate"])
     for row in clauses:
@@ -1557,6 +1680,31 @@ def main() -> None:
                 f"{stem}: fresh {row['stage']:11s} dropped {row['dropped']:>11,d}  bad removed {row['bad_removed']:>11,d}"
                 f"  good lost {row['good_lost']:>11,d}"
             )
+
+    # Both samples' verdicts tune the next settings (D13); a document judged twice keeps its fresh verdict.
+    both_verdicts = {**verdicts, **fresh_verdicts}
+    gate_passed = agreement[0]["passes_gate"]
+    fresh_ids = {row["id"] for row in fresh_sample}
+    rule_trade_off: List[Dict[str, Any]] = []
+    for stage in FILTER_INPUTS:
+        both_openings = merge_drops(
+            filter_drops(sample, verdicts, candidate_sources, stage),
+            filter_drops(fresh_sample, fresh_verdicts, candidate_sources, stage),
+        )
+        stage_cache = args.data_root / "interim" / f"{stem}-judged-{stage}-drops.json"
+        stage_texts, _ = fetch_full_texts(
+            candidate_dir / FILTER_INPUTS[stage], both_openings, stage_cache, args.workers
+        )
+        stage_filters = candidate_filters(args.routes_config, both_openings, stage)
+        stage_rows = rule_trade_off_rows(
+            stage, both_openings, stage_texts, both_verdicts, fresh_ids, stage_filters, candidate, gate_passed
+        )
+        for row in stage_rows[:PRINTED_RULE_ROWS]:
+            print(
+                f"{stem}: {stage:11s}{row['source']:16s}{row['failed_rules']:40s} good lost {row['good_lost']:>9,d}"
+                f"  bad removed {row['bad_removed']:>9,d}"
+            )
+        rule_trade_off += stage_rows
 
     written = [
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
@@ -1570,6 +1718,7 @@ def main() -> None:
         write_csv(args.tables / f"{stem}-fresh-precision-by-filter-and-source.csv", fresh_precision),
         write_csv(args.tables / f"{stem}-fresh-hypothesis-calls-by-clause.csv", clauses),
         write_csv(args.tables / f"{stem}-fresh-bad-removed-and-good-lost-by-filter-and-source.csv", trade_off),
+        write_csv(args.tables / f"{stem}-judged-bad-removed-and-good-lost-by-rule-and-source.csv", rule_trade_off),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),

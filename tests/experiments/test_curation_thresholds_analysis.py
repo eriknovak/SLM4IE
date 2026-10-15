@@ -293,7 +293,7 @@ def test_fetch_full_texts_rereads_when_the_wanted_documents_change(tmp_path: Pat
     assert texts == {"a": "one", "b": "two"}
 
 
-def test_quality_filters_apply_the_route_settings(tmp_path: Path) -> None:
+def test_candidate_filters_apply_the_route_quality_settings(tmp_path: Path) -> None:
     """A source's filter carries its route's quality settings, the letter-rule repair included."""
     loose = {"max_non_alpha_words_ratio": 0.5, "alpha_words_skip_punctuation": True}
     config = tmp_path / "routes.yaml"
@@ -309,10 +309,95 @@ def test_quality_filters_apply_the_route_settings(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    filters = analysis.quality_filters(config, ["oss", "c4"])
+    filters = analysis.candidate_filters(config, ["oss", "c4"], "quality")
 
     settings = [(f.max_non_alpha_words_ratio, f.alpha_words_skip_punctuation) for f in (filters["oss"], filters["c4"])]
     assert settings == [(0.5, True), (0.8, False)]
+
+
+def test_candidate_filters_apply_the_route_repetition_settings(tmp_path: Path) -> None:
+    """A source's repetition filter carries its route's limits, and another source keeps the defaults."""
+    config = tmp_path / "routes.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "stopwords": "sl",
+                "repetition": {},
+                "profiles": {"loose": {"repetition": {"dup_line_frac": 0.6, "top_n_grams": [[2, 0.3]]}}},
+                "overrides": {"oss": {"profile": "loose"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    filters = analysis.candidate_filters(config, ["oss", "c4"], "repetition")
+
+    settings = [(f.dup_line_frac, f.top_n_grams[0]) for f in (filters["oss"], filters["c4"])]
+    assert settings == [(0.6, (2, 0.3)), (0.3, (2, 0.2))]
+
+
+def _line_filter() -> Any:
+    """Build a repetition filter checking only duplicate lines and the top 2-gram.
+
+    Returns:
+        The filter.
+    """
+    return analysis.GopherRepetitionFilter(
+        dup_line_frac=0.3,
+        dup_para_frac=None,
+        dup_line_char_frac=None,
+        dup_para_char_frac=None,
+        top_n_grams=((2, 0.2),),
+        dup_n_grams=(),
+        language=analysis.Languages.slovenian,
+    )
+
+
+def test_failing_rules_switches_off_repetition_rules_one_by_one() -> None:
+    """A text repeating one line fails the duplicate-line rule, then the top n-gram family."""
+    doc = analysis.Document(text="mačka pes\nmačka pes\nmačka pes\nlisica", id="a")
+
+    assert analysis.failing_rules(_line_filter(), doc) == ["dup_line_frac", "top_n_grams"]
+
+
+def test_rule_trade_off_rows_scales_each_rule_set_to_the_source_drops() -> None:
+    """Two of four judged drops failing only the length rule stand for half of the 400 the source drops."""
+    texts = {"a": "mačka pes", "b": "lisica volk", "c": "mačka", "d": "pes"}
+    verdicts = {"a": _verdict(coherence=1), "b": _verdict(), "c": _verdict(), "d": _verdict()}
+    quality_filter = analysis.LetterShareGopherQualityFilter(
+        language=analysis.Languages.slovenian, stop_words=["in"], min_doc_words=5, min_stop_words=0
+    )
+
+    rows = analysis.rule_trade_off_rows(
+        "quality",
+        {"a": dict.fromkeys(texts, "")},
+        texts,
+        verdicts,
+        {"a"},
+        {"a": quality_filter},
+        [_funnel("a", 400)],
+        True,
+    )
+
+    row = rows[0]
+    assert (row["failed_rules"], row["judged"], row["dropped"], row["bad_removed"]) == ("min_doc_words", 4, 400, 100)
+
+
+def test_rule_trade_off_rows_leaves_out_what_the_candidate_filter_keeps() -> None:
+    """An earlier audit's drop the candidate filter keeps is not one of its drops."""
+    texts = {"a": "mačka pes", "b": "mačka in lisica in medved"}
+    rows = analysis.rule_trade_off_rows(
+        "quality",
+        {"a": dict.fromkeys(texts, "")},
+        texts,
+        {"a": _verdict(), "b": _verdict()},
+        set(),
+        {"a": _strict_filter()},
+        [_funnel("a", 400)],
+        True,
+    )
+
+    assert [(row["judged"], row["dropped"]) for row in rows] == [(1, 400)]
 
 
 def _label(doc_id: str, coherence: int, language: str = "sl") -> Dict[str, Any]:
@@ -451,3 +536,9 @@ def test_trade_off_rows_counts_a_language_drop_as_bad_only_when_not_slovene() ->
     verdicts = [{**_verdict(1, "garbage"), "language": "sl"}] * 10 + [{**_verdict(), "language": "hr"}] * 30
     rows = analysis.trade_off_rows([_funnel("a", 400, "language")], {("language", "a"): verdicts}, True)
     assert _trade(rows, "language", "a")["bad_removed"] == 300
+
+
+def test_merge_drops_lets_the_later_sample_win_a_shared_id() -> None:
+    """A document in both samples keeps the later sample's opening; others are pooled per source."""
+    merged = analysis.merge_drops({"c4": {"a": "old", "b": "b"}}, {"c4": {"a": "new"}, "hplt": {"c": "c"}})
+    assert merged == {"c4": {"a": "new", "b": "b"}, "hplt": {"c": "c"}}
