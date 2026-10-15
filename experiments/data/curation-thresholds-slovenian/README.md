@@ -235,6 +235,17 @@ concluded:
 - **History**:
   - 2026-10-14 first version, at the project lead's call
 
+### D11 — Judge the fresh draw with the earlier audit's judge, the 116 hand-labelled documents in the same run
+
+- **Decision**: Sonnet 5 judges the fresh draw on the earlier rubric, through the Claude Code command line in groups of 10, as in the earlier audit. The 116 documents the person labelled are spread evenly through the draw, so each is judged among fresh documents in the run the findings use. They keep their ids, so nothing marks them to the judge; one the draw already holds is judged once.
+- **Why**: The same judge keeps the fresh verdicts comparable with the tuning evidence, so only the thresholds change between the two readings. The second judge tests whether the result depends on the model ([D3]). Reading the agreement gate on this very run avoids the earlier audit's split between a calibration run and a findings run.
+- **Alternatives**:
+  - Sonnet 5.5: possibly closer to the person, but the judge would change along with the thresholds.
+  - Opus 5.5: the strongest model, slowest and heaviest on quota, with the same confound.
+  - Judge the 116 documents in a run of their own: the gate would again read on a run the findings do not use.
+- **History**:
+  - 2026-10-15 first version, at the project lead's call
+
 ## Findings
 
 ### F1 — Removing the double counting leaves each source's retention almost unchanged · minor

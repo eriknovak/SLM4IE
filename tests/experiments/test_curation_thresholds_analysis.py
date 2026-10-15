@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List
 
+import pytest
 import yaml
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "experiments" / "data" / "curation-thresholds-slovenian" / "analysis.py"
@@ -217,6 +218,38 @@ def test_copy_origin_rows_counts_a_second_text_of_one_record_and_whether_both_fi
     rows = analysis.copy_origin_rows(entering, {"a", "b", "c"}, {"b", "c"})
 
     assert [(row["documents"], row["finished_corpus"]) for row in rows[3:]] == [(2, 2), (1, 0)]
+
+
+def test_judge_input_rows_spreads_calibration_documents_evenly() -> None:
+    """Two calibration documents among six fresh ones land after the second and the fourth, ids unchanged."""
+    sample = [{"id": f"f{index}", "text": "x"} for index in range(6)]
+    calibration = [{"id": "c1", "text": "y"}, {"id": "c2", "text": "z"}]
+
+    rows = analysis.judge_input_rows(sample, calibration)
+
+    assert [row["id"] for row in rows] == ["f0", "f1", "c1", "f2", "f3", "c2", "f4", "f5"]
+
+
+def test_judge_input_rows_judges_a_document_the_draw_holds_once() -> None:
+    """A calibration document already in the draw with the same text is not added again."""
+    rows = analysis.judge_input_rows(
+        [{"id": "f0", "text": "x"}, {"id": "f1", "text": "y"}], [{"id": "f1", "text": "y"}]
+    )
+
+    assert [row["id"] for row in rows] == ["f0", "f1"]
+
+
+def test_judge_input_rows_rejects_a_shared_id_with_other_text() -> None:
+    """A calibration id the draw holds with other text cannot share one verdict."""
+    with pytest.raises(ValueError, match="f0"):
+        analysis.judge_input_rows([{"id": "f0", "text": "x"}], [{"id": "f0", "text": "old"}])
+
+
+def test_judge_input_rows_appends_what_a_short_draw_cannot_hold() -> None:
+    """A draw shorter than the calibration set still carries every calibration document."""
+    rows = analysis.judge_input_rows([{"id": "f0", "text": "x"}], [{"id": "a", "text": "y"}, {"id": "b", "text": "z"}])
+
+    assert [row["id"] for row in rows] == ["f0", "a", "b"]
 
 
 def test_fetch_full_texts_reads_compact_and_spaced_shards(tmp_path: Path) -> None:

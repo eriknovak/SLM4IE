@@ -64,6 +64,9 @@ tqdm.monitor_interval = 0
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-thresholds-slovenian")
 
+#: The fresh draw from the frozen build (D10), the sample the findings are judged on.
+FRESH_SAMPLE = DATA_ROOT / "interim" / "sample.jsonl"
+
 #: Where the committed tables go, beside this script.
 TABLES_DIR = Path(__file__).resolve().parent / "tables"
 
@@ -135,6 +138,9 @@ ROUTE_NAMES = {"raw_crawl": "raw crawl", "curated_prose": "curated prose", "medi
 
 #: The earlier audit's derived data: its judged sample and frozen verdicts.
 AUDIT_DATA = Path("data/experiments/data/curation-quality-slovenian")
+
+#: The person's calibration labels, re-judged in the fresh draw's run so the gate reads on it (D3).
+CALIBRATION_LABELS = AUDIT_DATA / "final" / "human-labels-calibration.jsonl"
 
 #: Text shapes that are bad whatever the coherence score says.
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
@@ -600,6 +606,68 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     # split("\n"), not splitlines(): document text carries U+2028, which
     # splitlines() would honour and so tear a JSON row in half.
     return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
+
+
+def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Spread the calibration documents evenly through the fresh draw for one judge run.
+
+    The judge reads documents in groups in file order, so spreading them puts
+    each calibration document among fresh ones, judged in the same context as
+    the documents the findings rest on. Ids stay as they are, so nothing marks
+    a calibration document to the judge; one the draw already holds with the
+    same text is judged once, there.
+
+    Args:
+        sample: The fresh draw's documents, in file order.
+        calibration: The hand-labelled documents, as the earlier audit's sample holds them.
+
+    Returns:
+        The fresh documents in their order, with the calibration documents the
+        draw lacks placed at an even interval.
+
+    Raises:
+        ValueError: If the draw holds a calibration document's id with other text.
+    """
+    texts = {document["id"]: document["text"] for document in sample}
+    clashing = [doc["id"] for doc in calibration if doc["id"] in texts and texts[doc["id"]] != doc["text"]]
+    if clashing:
+        raise ValueError(f"calibration ids {clashing} are in the fresh draw with other text")
+    marked = [document for document in calibration if document["id"] not in texts]
+    step = max(1, len(sample) // (len(marked) + 1))
+    rows: List[Dict[str, Any]] = []
+    placed = 0
+    for index, document in enumerate(sample, start=1):
+        rows.append(document)
+        if index % step == 0 and placed < len(marked):
+            rows.append(marked[placed])
+            placed += 1
+    # A draw too short to hold every calibration document gets the rest at its end.
+    rows.extend(marked[placed:])
+    return rows
+
+
+def write_judge_input(sample_path: Path, destination: Path) -> None:
+    """Write the fresh draw with the calibration documents spread through it, for one judge run.
+
+    Args:
+        sample_path: The fresh draw, as the sampler wrote it.
+        destination: The judge input file to write.
+
+    Raises:
+        KeyError: If a calibration label's document is missing from the earlier audit's sample.
+    """
+    audit_path = AUDIT_DATA / "interim" / "sample.jsonl"
+    audit_sample = {document["id"]: document for document in read_jsonl(audit_path)}
+    labels = read_jsonl(CALIBRATION_LABELS)
+    missing = [label["id"] for label in labels if label["id"] not in audit_sample]
+    if missing:
+        raise KeyError(f"calibration ids {missing} are not in {audit_path}")
+    calibration = [audit_sample[label["id"]] for label in labels]
+    sample = read_jsonl(sample_path)
+    rows = judge_input_rows(sample, calibration)
+    with destination.open("w", encoding="utf-8") as handle:
+        handle.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+    print(f"wrote {len(rows)} documents ({len(rows) - len(sample)} calibration added) to {destination}")
 
 
 def is_bad_text(verdict: Dict[str, Any]) -> bool:
@@ -1207,12 +1275,21 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=AUDIT_DATA / "final" / "judge-verdicts-sample.jsonl",
         help="Judge verdicts on that sample.",
     )
+    parser.add_argument(
+        "--write-judge-input",
+        type=Path,
+        default=None,
+        help="Write the fresh draw with the calibration documents spread through it to this file, then stop.",
+    )
     return parser.parse_args(argv)
 
 
 def main() -> None:
     """Write the record's tables and figures and print the headline numbers."""
     args = parse_args()
+    if args.write_judge_input:
+        write_judge_input(FRESH_SAMPLE, args.write_judge_input)
+        return
     _, commits = scoped_counts(args.pretrain_dir)
     print(f"baseline corpus built at {', '.join(sorted(commits))}")
 
