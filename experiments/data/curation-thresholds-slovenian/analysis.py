@@ -35,9 +35,9 @@ import re
 import sys
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Union
 
 import yaml
 from datatrove.data import Document
@@ -184,6 +184,21 @@ TARGET_CLAUSES = {"H1": "language", "H2": "spam", "H3": "quality", "H4": "repeti
 
 #: Share of a filter's drops on a source that must be bad text for it to stay on (D12, one good per bad).
 KEEP_BAD_SHARE = 0.5
+
+#: The setting changes tried on each route (M10).
+SETTING_CHANGES = Path(__file__).resolve().parent / "configs" / "tuning-filter-settings.yaml"
+
+#: The variant that applies every change of a route at once, tried where a route has several.
+ALL_CHANGES = "all changes together"
+
+
+class FilterRescue(NamedTuple):
+    """What one filter drops on one source and how much of it a setting variant keeps."""
+
+    dropped: int
+    judged: int
+    kept: int
+    bad: int
 
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
@@ -1071,13 +1086,17 @@ def fetch_full_texts(
     return texts, changed
 
 
-def candidate_filters(config: Path, sources: Iterable[str], stage: str) -> Dict[str, Optional[StageFilter]]:
+def candidate_filters(
+    config: Path, sources: Iterable[str], stage: str, settings: Optional[Dict[str, Any]] = None
+) -> Dict[str, Optional[StageFilter]]:
     """Build the quality or repetition filter each source meets in a candidate build.
 
     Args:
         config: The candidate build's curation config.
         sources: The sources to build a filter for.
         stage: `quality` or `repetition`.
+        settings: Knobs merged over every source's own, as a setting change
+            tried on top of the build; None builds the filters as built.
 
     Returns:
         Per source, its filter with its route's and its own settings; None
@@ -1088,7 +1107,7 @@ def candidate_filters(config: Path, sources: Iterable[str], stage: str) -> Dict[
     stopwords, _ = load_stopwords(cfg["stopwords"])
     filters: Dict[str, Optional[StageFilter]] = {}
     for source in sources:
-        knobs = effective_stage_config(cfg, overrides, source, stage)
+        knobs = {**effective_stage_config(cfg, overrides, source, stage), **(settings or {})}
         if knobs.get("enabled") is False:
             filters[source] = None
             continue
@@ -1354,6 +1373,200 @@ def rule_trade_off_rows(
     return sorted(rows, key=lambda row: -row["good_lost"])
 
 
+def read_setting_changes(path: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Read the setting changes tried on each route.
+
+    Args:
+        path: A YAML file with a `changes` map: route, then change name, then
+            its `stage` and `settings`.
+
+    Returns:
+        Per route, each variant's settings per filter: every change by name,
+        then, where the route has several, all of them merged under `ALL_CHANGES`.
+
+    Raises:
+        ValueError: If a change names a filter other than quality or
+            repetition, or a setting that filter does not have.
+    """
+    knobs = {
+        "quality": {field.name for field in fields(_build_quality_config({}))} | {"enabled"},
+        "repetition": {field.name for field in fields(_build_repetition_config({}))} | {"enabled"},
+    }
+    changes = yaml.safe_load(path.read_text(encoding="utf-8"))["changes"]
+    variants: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for route, route_changes in changes.items():
+        variants[route] = {}
+        merged: Dict[str, Dict[str, Any]] = defaultdict(dict)
+        for name, change in route_changes.items():
+            stage = change["stage"]
+            if stage not in knobs:
+                raise ValueError(f"setting change {name!r} on route {route!r} names stage {stage!r}")
+            unknown = sorted(set(change["settings"]) - knobs[stage])
+            if unknown:
+                raise ValueError(f"setting change {name!r} on route {route!r} sets unknown {stage} knobs {unknown}")
+            variants[route][name] = {stage: change["settings"]}
+            merged[stage].update(change["settings"])
+        if len(route_changes) > 1:
+            variants[route][ALL_CHANGES] = dict(merged)
+    return variants
+
+
+def _rescued_by_variant(
+    task: Tuple[str, str, StageFilter, List[Tuple[Optional[StageFilter], Optional[StageFilter]]]],
+) -> Optional[List[bool]]:
+    """Run one judged drop through the filters as built and under each variant.
+
+    Args:
+        task: The document's id and full text, the filter that drops it in
+            the build, and per variant its filter at that stage and the
+            filter after it (None for one switched off or for none).
+
+    Returns:
+        None when the built filter keeps the document; else per variant
+        whether both its filters keep it.
+    """
+    doc_id, text, built, variants = task
+    doc = Document(text=text, id=doc_id)
+    if built.filter(doc) is True:
+        return None
+    return [all(stage_filter is None or stage_filter.filter(doc) is True for stage_filter in pair) for pair in variants]
+
+
+def rescue_outcomes(
+    config: Path,
+    variants: Dict[str, Dict[str, Dict[str, Any]]],
+    routes: Dict[str, str],
+    openings: Dict[str, Dict[str, Dict[str, str]]],
+    texts: Dict[str, Dict[str, str]],
+    workers: int,
+) -> Dict[Tuple[str, str, str], Dict[str, bool]]:
+    """Find which judged drops each setting variant would keep.
+
+    A quality drop a variant keeps must also pass that variant's repetition
+    filter, the next one it meets; a repetition drop already passed quality.
+
+    Args:
+        config: The candidate build's curation config.
+        variants: Per route, each variant's settings per filter, from `read_setting_changes`.
+        routes: The route per source, from `read_routes`.
+        openings: Per filter, then per source, the judged drops of both samples.
+        texts: Per filter, their full text by id; other ids are skipped.
+        workers: Documents filtered at once.
+
+    Returns:
+        Per filter, source and document id the build drops, whether each of
+        its route's variants keeps it. Sources on a route without changes,
+        and those whose filter the build switches off, are left out.
+    """
+    tasks: List[Tuple[str, str, StageFilter, List[Tuple[Optional[StageFilter], Optional[StageFilter]]]]] = []
+    keys: List[Tuple[Tuple[str, str, str], List[str]]] = []
+    for stage, stage_openings in openings.items():
+        for route, route_variants in variants.items():
+            sources = sorted(source for source in stage_openings if routes.get(source) == route)
+            built = candidate_filters(config, sources, stage)
+            pairs = {source: [] for source in sources}
+            for settings in route_variants.values():
+                stage_filters = candidate_filters(config, sources, stage, settings.get(stage))
+                after = candidate_filters(config, sources, "repetition", settings.get("repetition"))
+                for source in sources:
+                    pairs[source].append((stage_filters[source], after[source] if stage == "quality" else None))
+            for source in sources:
+                if built[source] is None:
+                    continue
+                for doc_id in sorted(stage_openings[source]):
+                    if doc_id in texts[stage]:
+                        tasks.append((doc_id, texts[stage][doc_id], built[source], pairs[source]))
+                        keys.append(((stage, source, doc_id), list(route_variants)))
+    outcomes: Dict[Tuple[str, str, str], Dict[str, bool]] = {}
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(_rescued_by_variant, tasks)
+        for (key, names), rescued in tqdm(zip(keys, results), total=len(tasks), desc="trying setting changes"):
+            if rescued is not None:
+                outcomes[key] = dict(zip(names, rescued))
+    return outcomes
+
+
+def _rescue_row(route: str, variant: str, source: str, parts: List[FilterRescue], gate_passed: bool) -> Dict[str, Any]:
+    """Scale one group's rescued judged drops to the documents a variant would keep.
+
+    Args:
+        route: The route.
+        variant: The change, or `ALL_CHANGES`.
+        source: The source, or `pooled`.
+        parts: Per source and filter, what the variant keeps of its drops.
+        gate_passed: Whether the fresh judge run passed the agreement gate (D3).
+
+    Returns:
+        One row of `setting_change_rows`; only a pooled row with at least
+        `MIN_SOURCE_DROPS` rescued judged drops is called.
+    """
+    rescued = sum(round(part.dropped * part.kept / part.judged) for part in parts)
+    bad = sum(round(part.dropped * part.bad / part.judged) for part in parts)
+    kept_judged = sum(part.kept for part in parts)
+    bad_share = bad / rescued if rescued else 0.0
+    called = source == "pooled" and kept_judged >= MIN_SOURCE_DROPS
+    return {
+        "route": route,
+        "change": variant,
+        "source": source,
+        "drops_judged": sum(part.judged for part in parts),
+        "rescued_judged": kept_judged,
+        "rescued_bad_share": round(bad_share, 4),
+        "rescued": rescued,
+        "bad_gained": bad,
+        "good_gained": rescued - bad,
+        "call": ("adopt" if bad_share < KEEP_BAD_SHARE else "reject") if called else "",
+        "gate_passed": gate_passed,
+    }
+
+
+def setting_change_rows(
+    outcomes: Dict[Tuple[str, str, str], Dict[str, bool]],
+    routes: Dict[str, str],
+    verdicts: Dict[str, Dict[str, Any]],
+    funnel: List[Dict[str, Any]],
+    gate_passed: bool,
+) -> List[Dict[str, Any]]:
+    """Estimate, per route and setting change, the good and bad text it would keep.
+
+    Args:
+        outcomes: From `rescue_outcomes`.
+        routes: The route per source, from `read_routes`.
+        verdicts: Judge verdicts by document id, from both samples.
+        funnel: Rows from `funnel_rows` for the candidate build.
+        gate_passed: Whether the fresh judge run passed the agreement gate
+            (D3), carried on every row.
+
+    Returns:
+        Per route and variant, a pooled row then one row per source, most
+        good text gained first. A source's judged drops at a filter stand for
+        everything that filter drops there, as in `rule_trade_off_rows`, so
+        the share a variant keeps scales to the build. The pooled row sums
+        its sources and is called `adopt` when less than half of what it
+        keeps is bad (D12, D16).
+    """
+    stage_columns = [name[3:] for name in SCOPED_STAGES]
+    counts = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
+    judged: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+    for stage, source, doc_id in outcomes:
+        judged[(stage, source)].append(doc_id)
+    parts: Dict[Tuple[str, str], Dict[str, List[FilterRescue]]] = defaultdict(lambda: defaultdict(list))
+    for (stage, source), ids in sorted(judged.items()):
+        previous = stage_columns[stage_columns.index(stage) - 1]
+        dropped = counts[source][previous] - counts[source][stage]
+        for variant in outcomes[(stage, source, ids[0])]:
+            kept = [doc_id for doc_id in ids if outcomes[(stage, source, doc_id)][variant]]
+            bad = sum(is_bad_text(verdicts[doc_id]) for doc_id in kept)
+            parts[(routes[source], variant)][source].append(FilterRescue(dropped, len(ids), len(kept), bad))
+    rows: List[Dict[str, Any]] = []
+    for (route, variant), by_source in parts.items():
+        pooled = [part for source_parts in by_source.values() for part in source_parts]
+        rows.append(_rescue_row(route, variant, "pooled", pooled, gate_passed))
+        source_rows = [_rescue_row(route, variant, source, by_source[source], gate_passed) for source in by_source]
+        rows.extend(sorted(source_rows, key=lambda row: -row["good_gained"]))
+    return rows
+
+
 def read_documents(folder: Path) -> List[Dict[str, Any]]:
     """Read every document in one source's stage folder.
 
@@ -1560,6 +1773,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="The candidate build; defaults to --routes-config's output_dir.",
     )
     parser.add_argument("--routes-config", type=Path, default=ROUTES_CONFIG, help="The candidate build's config.")
+    parser.add_argument(
+        "--setting-changes", type=Path, default=SETTING_CHANGES, help="Setting changes tried on each route."
+    )
     parser.add_argument("--extract-config", type=Path, default=Path("configs/data/extract.yaml"))
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
     parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
@@ -1686,18 +1902,27 @@ def main() -> None:
     gate_passed = agreement[0]["passes_gate"]
     fresh_ids = {row["id"] for row in fresh_sample}
     rule_trade_off: List[Dict[str, Any]] = []
+    stage_openings: Dict[str, Dict[str, Dict[str, str]]] = {}
+    stage_texts: Dict[str, Dict[str, str]] = {}
     for stage in FILTER_INPUTS:
-        both_openings = merge_drops(
+        stage_openings[stage] = merge_drops(
             filter_drops(sample, verdicts, candidate_sources, stage),
             filter_drops(fresh_sample, fresh_verdicts, candidate_sources, stage),
         )
         stage_cache = args.data_root / "interim" / f"{stem}-judged-{stage}-drops.json"
-        stage_texts, _ = fetch_full_texts(
-            candidate_dir / FILTER_INPUTS[stage], both_openings, stage_cache, args.workers
+        stage_texts[stage], _ = fetch_full_texts(
+            candidate_dir / FILTER_INPUTS[stage], stage_openings[stage], stage_cache, args.workers
         )
-        stage_filters = candidate_filters(args.routes_config, both_openings, stage)
+        stage_filters = candidate_filters(args.routes_config, stage_openings[stage], stage)
         stage_rows = rule_trade_off_rows(
-            stage, both_openings, stage_texts, both_verdicts, fresh_ids, stage_filters, candidate, gate_passed
+            stage,
+            stage_openings[stage],
+            stage_texts[stage],
+            both_verdicts,
+            fresh_ids,
+            stage_filters,
+            candidate,
+            gate_passed,
         )
         for row in stage_rows[:PRINTED_RULE_ROWS]:
             print(
@@ -1705,6 +1930,22 @@ def main() -> None:
                 f"  bad removed {row['bad_removed']:>9,d}"
             )
         rule_trade_off += stage_rows
+
+    outcomes = rescue_outcomes(
+        args.routes_config,
+        read_setting_changes(args.setting_changes),
+        routes,
+        stage_openings,
+        stage_texts,
+        args.workers,
+    )
+    setting_changes = setting_change_rows(outcomes, routes, both_verdicts, candidate, gate_passed)
+    for row in setting_changes:
+        if row["source"] == "pooled":
+            print(
+                f"{args.setting_changes.stem}: {row['route']:17s}{row['change']:28s} good {row['good_gained']:>10,d}"
+                f"  bad {row['bad_gained']:>10,d}  {row['call']}"
+            )
 
     written = [
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
@@ -1719,6 +1960,9 @@ def main() -> None:
         write_csv(args.tables / f"{stem}-fresh-hypothesis-calls-by-clause.csv", clauses),
         write_csv(args.tables / f"{stem}-fresh-bad-removed-and-good-lost-by-filter-and-source.csv", trade_off),
         write_csv(args.tables / f"{stem}-judged-bad-removed-and-good-lost-by-rule-and-source.csv", rule_trade_off),
+        write_csv(
+            args.tables / f"{args.setting_changes.stem}-good-and-bad-kept-by-change-and-source.csv", setting_changes
+        ),
         write_csv(args.tables / "curate-documents-by-source.csv", funnel),
         write_csv(args.tables / "curate-losses-by-source.csv", losses),
         write_csv(args.tables / "curate-retention-by-build-and-source.csv", comparison),

@@ -542,3 +542,137 @@ def test_merge_drops_lets_the_later_sample_win_a_shared_id() -> None:
     """A document in both samples keeps the later sample's opening; others are pooled per source."""
     merged = analysis.merge_drops({"c4": {"a": "old", "b": "b"}}, {"c4": {"a": "new"}, "hplt": {"c": "c"}})
     assert merged == {"c4": {"a": "new", "b": "b"}, "hplt": {"c": "c"}}
+
+
+def test_read_setting_changes_adds_every_change_of_a_route_together(tmp_path: Path) -> None:
+    """Each change stands alone, and the route's changes merge per filter under one more variant."""
+    path = tmp_path / "changes.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "changes": {
+                    "raw": {
+                        "short": {"stage": "quality", "settings": {"min_doc_words": 10}},
+                        "stop": {"stage": "quality", "settings": {"min_stop_words": 0}},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    variants = analysis.read_setting_changes(path)
+
+    assert variants["raw"][analysis.ALL_CHANGES] == {"quality": {"min_doc_words": 10, "min_stop_words": 0}}
+
+
+def test_read_setting_changes_rejects_a_filter_without_rules(tmp_path: Path) -> None:
+    """Only the quality and repetition filters have settings a change can loosen."""
+    path = tmp_path / "changes.yaml"
+    path.write_text(
+        yaml.safe_dump({"changes": {"raw": {"off": {"stage": "spam", "settings": {"enabled": False}}}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="'spam'"):
+        analysis.read_setting_changes(path)
+
+
+def test_rescue_outcomes_keeps_a_quality_drop_only_if_repetition_passes_it(tmp_path: Path) -> None:
+    """Lifting the length floor rescues a short text, but not one the repetition filter then drops."""
+    config = tmp_path / "routes.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "stopwords": "sl",
+                "quality": {"min_doc_words": 5, "min_stop_words": 0},
+                "repetition": {"top_n_grams": [], "dup_n_grams": []},
+                "profiles": {"raw": {}},
+                "overrides": {"c4": {"profile": "raw"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    texts = {"a": "mačka in pes", "b": "pes\npes\npes"}
+    variants = {"raw": {"short": {"quality": {"min_doc_words": 0}}}}
+
+    outcomes = analysis.rescue_outcomes(
+        config, variants, {"c4": "raw"}, {"quality": {"c4": dict.fromkeys(texts, "")}}, {"quality": texts}, 1
+    )
+
+    assert outcomes == {("quality", "c4", "a"): {"short": True}, ("quality", "c4", "b"): {"short": False}}
+
+
+def _outcomes(kept_bad: int, kept_good: int, dropped: int) -> Dict[Any, Dict[str, bool]]:
+    """Build one source's quality drops and whether a change keeps each.
+
+    Args:
+        kept_bad: Bad drops the change keeps.
+        kept_good: Good drops the change keeps.
+        dropped: Good drops it still drops.
+
+    Returns:
+        Outcomes as `rescue_outcomes` gives them, for source `a`, ids prefixed by their group.
+    """
+    groups = {"bad": (kept_bad, True), "good": (kept_good, True), "still": (dropped, False)}
+    return {("quality", "a", f"{name}{i}"): {"x": kept} for name, (count, kept) in groups.items() for i in range(count)}
+
+
+def _change_verdicts(outcomes: Dict[Any, Dict[str, bool]]) -> Dict[str, Dict[str, Any]]:
+    """Give each id from `_outcomes` a verdict, bad for the `bad` group.
+
+    Args:
+        outcomes: From `_outcomes`.
+
+    Returns:
+        Verdicts by document id.
+    """
+    return {doc_id: _verdict(1, "garbage") if doc_id.startswith("bad") else _verdict() for _, _, doc_id in outcomes}
+
+
+def test_setting_change_rows_scales_what_a_change_keeps_to_the_source_drops() -> None:
+    """One bad and one good kept of four judged drops stand for 100 bad and 100 good of 400."""
+    outcomes = _outcomes(1, 1, 2)
+    rows = analysis.setting_change_rows(outcomes, {"a": "raw"}, _change_verdicts(outcomes), [_funnel("a", 400)], True)
+
+    row = next(row for row in rows if row["source"] == "a")
+    assert (row["rescued"], row["bad_gained"], row["good_gained"]) == (200, 100, 100)
+
+
+def test_setting_change_rows_adopts_a_route_keeping_more_good_than_bad() -> None:
+    """A route's pooled change keeping 20 judged drops, 5 of them bad, is adopted at the 1:1 rate."""
+    outcomes = _outcomes(5, 15, 20)
+    rows = analysis.setting_change_rows(outcomes, {"a": "raw"}, _change_verdicts(outcomes), [_funnel("a", 400)], True)
+
+    assert [(row["source"], row["call"]) for row in rows] == [("pooled", "adopt"), ("a", "")]
+
+
+def test_setting_change_rows_rejects_a_route_keeping_as_much_bad_as_good() -> None:
+    """At half bad a change gains nothing at the 1:1 rate, so the filter stays as built."""
+    outcomes = _outcomes(10, 10, 20)
+    rows = analysis.setting_change_rows(outcomes, {"a": "raw"}, _change_verdicts(outcomes), [_funnel("a", 400)], True)
+
+    assert rows[0]["call"] == "reject"
+
+
+def test_read_setting_changes_rejects_a_setting_the_filter_lacks(tmp_path: Path) -> None:
+    """A misspelt knob would silently change nothing, so it stops the run."""
+    path = tmp_path / "changes.yaml"
+    path.write_text(
+        yaml.safe_dump({"changes": {"raw": {"short": {"stage": "quality", "settings": {"min_words": 10}}}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="min_words"):
+        analysis.read_setting_changes(path)
+
+
+def test_read_setting_changes_tries_a_lone_change_only_once(tmp_path: Path) -> None:
+    """A route with one change gets no second variant repeating it."""
+    path = tmp_path / "changes.yaml"
+    path.write_text(
+        yaml.safe_dump({"changes": {"med": {"off": {"stage": "repetition", "settings": {"enabled": False}}}}}),
+        encoding="utf-8",
+    )
+
+    assert list(analysis.read_setting_changes(path)["med"]) == ["off"]

@@ -183,6 +183,18 @@ concluded:
 - **Code**: `analysis.py::rule_trade_off_rows`, `analysis.py::failing_rules`
 - **Settings**: none; the filter settings are the candidate's, in `configs/curation-routes.yaml`
 
+### M10 — Estimate the good and bad text each route's setting changes would keep
+
+- **Input**: the judged quality and repetition drops of both samples with their full text and verdicts, as for the rule breakdown ([M9]), and a list of setting changes per route. One item is a judged document the candidate build drops.
+- **Output**: per route and variant, where a variant is one change alone or, on a route with several, all its changes together, a pooled row then one row per source: judged drops, how many of them the variant keeps, the documents it would keep in the build and the bad share of those, how many of those are bad and good, a call at the 1:1 rate ([D12]), and whether the fresh judge run passed the agreement gate ([D3]). Written to `tables/tuning-filter-settings-good-and-bad-kept-by-change-and-source.csv`, most good text gained first within each variant.
+- **How**: each change is tried on the documents the candidate build drops, so only what it would rescue is counted.
+  1. Merge the change's settings over each source's own ([M1]) and build its quality and repetition filters.
+  2. A judged drop is rescued when the variant's filter at that stage keeps it. A quality drop must also pass the variant's repetition filter, the next one it meets. Exact and sentence dedup are not run, so some rescued documents would still be removed there.
+  3. Scale as in the rule breakdown: with $n$ judged drops still dropped at a filter on a source, $d$ documents dropped there in the build, and $k$ of the $n$ rescued, $b$ of them bad, the variant keeps $d \cdot k / n$ documents, of which $d \cdot b / n$ are bad, each rounded to a whole document. A source's two filters are summed.
+  4. The pooled row sums a route's sources. It is called "adopt" when under half of what it keeps is bad and at least 20 judged drops are rescued, and "reject" otherwise ([D16]); source rows carry no call. The 20 are counted over the route, so a large source may rest on a few of them.
+- **Code**: `analysis.py::read_setting_changes`, `analysis.py::rescue_outcomes`, `analysis.py::setting_change_rows`
+- **Settings**: `configs/tuning-filter-settings.yaml`: `changes` (per route, each change's `stage`, the filter it loosens, and `settings`, the knobs merged over the route's, where 0 switches a quality rule off and an empty n-gram list switches that repetition family off)
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
@@ -320,6 +332,18 @@ concluded:
   - Drop all three: loses about 36% of the words, including PDF text no other source holds.
 - **History**:
   - 2026-10-15 first version, at the project lead's call
+
+### D16 — Loosen the filters per route, judged on each route's pooled drops
+
+- **Decision**: The changes tried are set per route: on web crawls, the ellipsis-line rule off and the repeated-phrase rule off; on curated prose, the 20-word floor lowered to 10, the stopword rule off and the repetition filter off; on medical and academic text, the repetition filter off. Each route is called on its sources' drops pooled ([M10]).
+- **Why**: Tried one at a time, each change kept more good text than bad on its route. Most sources have fewer than 20 rescued judged drops, too few for a call of their own, and routes already group sources by text type ([M1]). The fresh judge run failed the agreement gate, so the calls hold only until the third draw ([D13]).
+- **Alternatives**:
+  - Repetition filter off on every route: in the scratch run, it also kept about 0.5M more bad web documents, mostly from c4 and cc100.
+  - Only the repeated-phrase rule off everywhere: keeps the repetition filter on where almost nothing it drops is bad.
+  - Call each source on its own figure: unsteady below 20 judged drops.
+- **History**:
+  - 2026-10-16 first version, at the project lead's call, from a scratch run trying each change alone
+  - 2026-10-16 the project lead kept the three quality-rule changes (ellipsis-line rule, 20-word floor, stopword rule) beside the repetition changes
 
 ## Findings
 
