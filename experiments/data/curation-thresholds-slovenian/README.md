@@ -78,8 +78,9 @@ concluded:
   3. On the curated-prose route, switch the language and spam filters off and widen every repetition limit by half. Lower the letter floor of the quality filter from 0.8 to 0.55 ([D9]).
   4. On the medical-and-academic route, switch the spam filter off and keep the language filter. Widen the repetition limits by half, and double the limits on repeated lines.
   5. Merge a source's own settings over its route's. The news source skips the rule on lines ending in an ellipsis ([D9]). The PDF crawl keeps the language filter on.
+  6. For the loosened build, which goes to its own folder beside the frozen one, apply the per-route changes chosen on the judged samples ([D16]). Raw crawls switch off the rule on lines ending in an ellipsis and the limits on repeated 5- to 10-word phrases. Curated prose lowers the 20-word floor to 10 and switches the stopword rule and the repetition filter off. Medical and academic text switches the repetition filter off.
 - **Code**: `slm4ie/data/curate/config.py::resolve_profiles`
-- **Settings**: `profiles` (the three routes, each a set of filter settings), `overrides` (the route each source takes, and its own settings on top), `max_non_alpha_words_ratio` (minimum share of words containing a letter), `max_ellipsis_lines_ratio` (maximum share of lines ending in an ellipsis; 0 switches the rule off), `dup_line_frac` (maximum share of lines repeated in the document), `top_n_grams` (maximum share of characters covered by the most frequent word pair, triple and quadruple), `dup_n_grams` (maximum share of characters inside repeated 5- to 10-word sequences), `enabled` (whether a filter runs on the source at all); in `configs/curation-routes.yaml`
+- **Settings**: `profiles` (the three routes, each a set of filter settings), `overrides` (the route each source takes, and its own settings on top), `max_non_alpha_words_ratio` (minimum share of words containing a letter), `max_ellipsis_lines_ratio` (maximum share of lines ending in an ellipsis; 0 switches the rule off), `min_doc_words` (fewest words a document may have), `min_stop_words` (fewest stopwords a document must contain; 0 switches the rule off), `dup_line_frac` (maximum share of lines repeated in the document), `top_n_grams` (maximum share of characters covered by the most frequent word pair, triple and quadruple), `dup_n_grams` (maximum share of characters inside repeated 5- to 10-word sequences; an empty list switches the rule off), `enabled` (whether a filter runs on the source at all); in `configs/curation-routes.yaml`, and for the loosened build in `configs/curation-routes-loosened.yaml`
 
 ### M2 — Count only words, not punctuation marks, in the quality filter's letter rule
 
@@ -268,13 +269,14 @@ concluded:
 
 ### D9 — Loosen the curated-prose quality filter only where its drops were usable text
 
-- **Decision**: On the curated-prose route, the letter floor drops from 0.8 to 0.55, and the news source skips the rule on lines ending in an ellipsis. The 20-word floor stays, so short parliament turns are still dropped ([M1]).
-- **Why**: The repaired filter still drops 106 of the audit's judged documents here ([M5]). Of these, 39 news teasers fail the ellipsis rule and 16 tables and listings fail the letter rule first; the judge found none of them broken text. Three listings also lack stopwords and stay dropped. The 32 parliament turns are mostly a few words of procedure.
+- **Decision**: On the curated-prose route, the letter floor drops from 0.8 to 0.55, and the news source skips the rule on lines ending in an ellipsis. The 20-word floor and the stopword rule, first kept, were loosened on the judged samples ([D16]).
+- **Why**: The repaired filter still drops 106 of the audit's judged documents here ([M5]). Of these, 39 news teasers fail the ellipsis rule and 16 tables and listings fail the letter rule first; the judge found none of them broken text. Three listings also lack stopwords, and the 32 parliament turns are mostly a few words of procedure; both stayed dropped until the judged samples showed such drops mostly good ([D16]).
 - **Alternatives**:
   - Switch the quality filter off on curated prose: it would also keep the number-only PDF tables, at letter shares near 0.2.
-  - Lower the 20-word floor for the parliament source: four-word procedural turns add little text a model can learn from.
+  - Lower the 20-word floor for the parliament source alone: the judged samples later favoured lowering it route-wide ([D16]).
 - **History**:
   - 2026-10-12 first version, at the project lead's call
+  - 2026-10-16 the 20-word floor lowered to 10 and the stopword rule switched off on this route ([D16])
 
 ### D10 — Freeze the thresholds of the second candidate build and draw the fresh sample from it
 
@@ -315,6 +317,7 @@ concluded:
   - Tune on the earlier audit's sample only and keep the fresh draw for checking: clean, but tunes on evidence the fresh draw showed to mislead.
 - **History**:
   - 2026-10-15 first version, at the project lead's call
+  - 2026-10-16 the loosened settings ([D16]) build into their own folder, so the frozen second build stays for comparison, at the project lead's call
 
 ### D14 — Leave a learned quality classifier to a follow-up experiment
 
