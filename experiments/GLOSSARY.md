@@ -34,6 +34,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Out-of-vocabulary rate** (OOV rate): the share of alphabetic tokens a lexicon does not list; names, foreign words, code and encoding damage all count as out of vocabulary.
 - **CPU hours**: processor time a step consumed, summed over its tasks; comparable between steps and machines.
 - **Wall hours** (wall clock): elapsed time a step took on the machine that ran it, at the worker count it was given.
+- **Agresti–Coull interval** (Agresti–Coull adjustment): a normal-approximation confidence interval for a share that first adds about two successes and two failures, so a share of 0 or 1 still gets a width; summed over independent shares, it gives the interval on a total such as bad text gained.
 
 ## Terms
 
@@ -78,3 +79,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **MLflow**: the experiment-tracking server the project logs every run to, with its parameters, metrics and output files.
 - **Lineage run** (lineage): an MLflow run that trains or scores nothing and only records which data and code produced a set of outputs, keeping them as attached files.
 - **Download registry** (registry): the project's list of datasets it downloads and builds its corpus from, kept in `configs/data/download.yaml`.
+- **Agreement gate** (gate): the rule that a judge run's verdicts count as findings only when the judge agrees with the person on bad text at a Cohen's κ of at least 0.6 on the calibration set judged in that same run.
+- **Fresh draw** (third draw): a stratified sample drawn after the settings were frozen, held back from tuning; the third draw is a later one from the loosened build, limited to the filters and sources whose settings changed.
+- **Frozen build** (loosened build): the frozen build is the candidate corpus built with the settings frozen before the fresh draw; the loosened build relaxes its quality and repetition settings per route and is built into its own folder beside it.
+- **1:1 rate** (exchange rate): the rule that a filter is worth keeping on a source only where at least half of what it drops is bad text, so one bad document removed is worth one good document lost.

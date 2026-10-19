@@ -23,8 +23,8 @@ concluded:
 ## TL;DR
 
 - **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, on a draw held back from tuning.
-- **Where we stand**: the tuned candidate build, every source on one of three routes, keeps 0.60 of the converted documents against the baseline's 0.46 and clears every volume target. The quality filter accounts for that gain, through the repaired letter rule on every route and lower floors on curated prose. On the medical source, exact dedup now removes most of what the quality filter stopped dropping, all of it copies within the source that extraction itself creates. On the news source, one-line teasers now reach the corpus.
-- **Next**: freeze the thresholds and draw the fresh sample under a new seed, whose verdicts also decide whether the news teasers need a length floor.
+- **Where we stand**: the judge's agreement with the person stays below the agreement gate on both judged draws, so no clause can be called yet ([F9]). Loosening the quality and repetition settings per route, on the evidence of both draws, gained about the good text it was estimated to gain ([F10]). What the loosened quality filter still drops is mostly bad text, while most repetition drops are still good text ([F11]).
+- **Next**: the open amendment of the hypothesis, read on one judge whose agreement with the person stays below the gate; no second judge is run ([D3]).
 
 ## Hypothesis
 
@@ -52,14 +52,14 @@ concluded:
   - Give each source one of three routes through the content filters, a starting point taken from the earlier audit's per-source numbers.
   - Tune the thresholds of each route against the earlier judge verdicts and hand labels.
   - Freeze the thresholds, rebuild the corpus, and draw a fresh sample under a new seed.
-  - Judge the fresh draw with the earlier rubric, then with a judge from another model family.
+  - Judge the fresh draw with the earlier rubric.
   - Factors: the route each source takes, the Gopher quality and repetition floors, the language-identification threshold, and the spam thresholds on the repaired spam signal. The dedup stages stay fixed.
-- **Metrics**: primary target precision per content filter and source, and drop precision at the lenient bar for the spam, quality and repetition filters. Secondary: residual bad rate, retention per source, corpus and domain totals in estimated tokens, and Cohen's κ between the two judges. Each metric is defined in `experiments/GLOSSARY.md`.
+- **Metrics**: primary target precision per content filter and source, and drop precision at the lenient bar for the spam, quality and repetition filters. Secondary: residual bad rate, retention per source, corpus and domain totals in estimated tokens, and Cohen's κ between the judge and the person. Each metric is defined in `experiments/GLOSSARY.md`.
 - **Protocol**: analysis-only for the judging: `analysis.py` recomputes every table from the corpus counts and the verdict files. Each corpus rebuild logs to MLflow: the baseline under `slm4ie/data/curate`, since it is the shared corpus, and each candidate build under `slm4ie/data/curation-thresholds-slovenian`. Findings rest on one judge run, and its agreement with the hand labels is read on that same run ([D3]).
 - **Compute**: one local machine with 40 cores; each candidate rebuild reruns only the units whose effective settings changed.
-- **People**: the project lead chooses the second judge and reviews the routes; no new hand labels are planned.
+- **People**: the project lead reviews the routes; no new hand labels are planned.
 - **Data access**: four licence-restricted sources (culturax, gigafida, kas, solar) are used internally, as in the earlier audit.
-- **External dependency**: Anthropic's Claude for the first judge; a second judge from another model family through OpenRouter, the model chosen by the project lead.
+- **External dependency**: Anthropic's Claude for the judge.
 
 ## Datasets
 
@@ -198,14 +198,15 @@ concluded:
 
 ### M11 — Measure the good and bad text the loosened build gained, beside the estimate
 
-- **Input**: the frozen build ([D10]) and the loosened build ([D16]), each with its document counts per source and stage, and two judged draws of their quality and repetition drops: the fresh draw's from the frozen build, and the third draw's from the loosened build ([D13]), judged with the 116 hand-labelled documents spread through it ([D11]). One item is a judged document one of the two builds drops at one of the two filters.
-- **Output**: per route, a pooled row then one row per source: documents gained, bad and good text gained, the low and high end of a 95% interval on bad text gained, step 10's estimate of good and bad text gained ([M10]), and whether the third draw's judge run passed the agreement gate ([D3]). Written to `tables/curation-routes-loosened-good-and-bad-gained-by-route-and-source.csv`, most good text gained first within each route. Beside it, the judge's agreement with the person on that run, in `tables/curation-routes-loosened-judge-agreement-with-person-by-test.csv`, and the loosened build's remaining drops scored as in [M8], in `tables/curation-routes-loosened-bad-removed-and-good-lost-by-filter-and-source.csv`.
-- **How**: both builds feed the same documents into the quality filter, so what the loosened build gains before dedup is what the frozen build's two filters drop together minus what the loosened build's drop together. Exact and sentence dedup are not counted, as in [M10].
-  1. Check that each source enters the quality filter with the same count in both builds; a source that does not stops the reading.
-  2. A filter its route leaves unchanged drops the same documents in both builds and adds nothing; a different count there stops the reading. Medical and academic text changes only the repetition filter.
-  3. For each changed filter on a source, with $d$ documents dropped in a build and $b$ of its $n$ judged drops bad, that build's filter drops $d \cdot b / n$ bad documents. Documents gained are the frozen build's drops minus the loosened build's, bad text gained the same difference of bad documents, and good text gained the rest. A repetition term can be negative, since the loosened build feeds that filter more documents.
-  4. Bad text gained carries a 95% interval, $\pm 1.96 \sqrt{V}$ with $V = \sum d^2 \tilde p (1 - \tilde p) / n$ over every estimated filter of both builds, where $\tilde p = (b + 1.92) / (n + 3.84)$ is the bad share nudged toward a half (Agresti–Coull) so a share of 0 or 1 still counts as uncertain. Neither the estimate nor its interval is cut: each share comes from its own draw, so a source's can fall below zero by chance, and the pooled rows sum such noise out.
-  5. The pooled row sums a route's sources. The estimate beside it is step 10's variant applying every change of the route, or its one change where it has only one. The frozen build's bad shares come from the fresh draw, which also fed that estimate, so the comparison tests the loosened build's side and the build counts, not the frozen side's evidence.
+- **Input**: the frozen build ([D10]) and the loosened build ([D16]), with document counts per source and stage. Each comes with a judged draw of its quality and repetition drops: the fresh draw for the frozen build, the third draw for the loosened one ([D13]). One item is a judged document one build drops at one of the two filters.
+- **Output**: per route, a pooled row then one row per source, most good text gained first. Each row holds the documents gained, bad and good text gained, a 95% interval on bad text gained, and step 10's estimate ([M10]). Written to `tables/curation-routes-loosened-good-and-bad-gained-by-route-and-source.csv`, beside the third run's agreement with the person (`tables/curation-routes-loosened-judge-agreement-with-person-by-test.csv`) and the loosened build's remaining drops scored as in [M8] (`tables/curation-routes-loosened-bad-removed-and-good-lost-by-filter-and-source.csv`).
+- **How**: both builds feed the same documents into the quality filter. So what the loosened build gains before dedup is what the frozen build's two filters drop minus what the loosened build's drop.
+  1. Each source must enter the quality filter with the same count in both builds, or the reading stops.
+  2. A filter its route leaves unchanged must drop the same count in both builds, or the reading stops; it adds nothing and is skipped.
+  3. For a changed filter, with $d$ documents dropped in a build and $b$ of its $n$ judged drops bad, it drops $d \cdot b / n$ bad documents. Gains are frozen minus loosened, for documents and for bad text; good text is the rest. A repetition term can be negative, since the loosened build feeds that filter more documents.
+  4. The interval on bad text is $\pm 1.96 \sqrt{V}$, with $V = \sum d^2 \tilde p (1 - \tilde p) / n$ over every estimated filter of both builds. Here $\tilde p = (b + 1.92) / (n + 3.84)$, the Agresti–Coull share, so a share of 0 or 1 still counts as uncertain.
+  5. Nothing is cut at zero, so a source can show negative bad text by chance; pooled rows sum such noise out.
+  6. The estimate beside a route is step 10's variant applying all its changes. It used the fresh draw too, so the comparison tests the loosened side and the counts.
 - **Code**: `analysis.py::gain_rows`
 - **Settings**: `configs/tuning-filter-settings.yaml` names the filters each route changes; the bad-text bar is [D1]'s lenient bar
 
@@ -229,12 +230,13 @@ concluded:
 - **History**:
   - 2026-10-05 first version, at record creation
 
-### D3 — Tune on the old evidence, claim only on a fresh draw read by two judges
+### D3 — Tune on the old evidence, claim only on a fresh draw
 
-- **Decision**: Thresholds are tuned on the earlier audit's judge verdicts and 116 hand labels. Every claim rests on a fresh draw under a new seed, judged only after the thresholds freeze, and confirmed by a judge from another model family. The agreement gate is read on the judge run the findings use.
+- **Decision**: Thresholds are tuned on the earlier audit's judge verdicts and 116 hand labels. Every claim rests on a fresh draw under a new seed, judged only after the thresholds freeze. The agreement gate is read on the judge run the findings use. No second judge from another model family is run.
 - **Why**: Thresholds fitted to one judge's verdicts on one sample stop being neutral evidence. The earlier audit read its gate on one run and its findings on another, which weakened every number it reported.
 - **History**:
   - 2026-10-05 first version, at record creation; second judge through OpenRouter, model chosen later by the project lead
+  - 2026-10-19 second judge dropped at the project lead's call: a run costs too much for what it would add, since the judged draws already show the dataset's quality; retitled from "… read by two judges"
 
 ### D4 — Keep the corpus above the volume targets while tuning
 
@@ -304,7 +306,7 @@ concluded:
 ### D11 — Judge the fresh draw with the earlier audit's judge, the 116 hand-labelled documents in the same run
 
 - **Decision**: Sonnet 5 judges the fresh draw on the earlier rubric, through the Claude Code command line in groups of 10, as in the earlier audit. The 116 documents the person labelled are spread evenly through the draw, so each is judged among fresh documents in the run the findings use. They keep their ids, so nothing marks them to the judge; one the draw already holds is judged once.
-- **Why**: The same judge keeps the fresh verdicts comparable with the tuning evidence, so only the thresholds change between the two readings. The second judge tests whether the result depends on the model ([D3]). Reading the agreement gate on this very run avoids the earlier audit's split between a calibration run and a findings run.
+- **Why**: The same judge keeps the fresh verdicts comparable with the tuning evidence, so only the thresholds change between the two readings. Reading the agreement gate on this very run avoids the earlier audit's split between a calibration run and a findings run.
 - **Alternatives**:
   - Sonnet 5.5: possibly closer to the person, but the judge would change along with the thresholds.
   - Opus 5.5: the strongest model, slowest and heaviest on quota, with the same confound.
@@ -440,6 +442,33 @@ concluded:
 - **Reading**: The quality filter now keeps these teasers, since the news source skips the rule on lines ending in "…" ([D9]), and the earlier audit judged them usable text. Sentence dedup re-checks its 50-word floor only on documents it shortens, so they reach the finished corpus. The fresh draw's verdicts decide whether the news source needs a length floor.
 - **History**:
   - 2026-10-14 first result, from the second candidate build ([D9])
+
+### F9 — The judge's agreement with the person stays below the gate on the third draw · minor
+
+- **Summary**: On the third draw, the judge and the person agree on bad text at a Cohen's κ of 0.39, below the agreement gate.
+- **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 3a4e748 over the third draw's judge run and the person's 116 labels ([M7]).
+- **Result**: [The judge's agreement with the person on the 116 hand-labelled documents spread through the third draw, per test: Cohen's κ, raw agreement, and how often each side says yes. Only the bad-text test carries the gate, which asks for a κ of at least 0.6.](tables/curation-routes-loosened-judge-agreement-with-person-by-test.csv)
+- **Reading**: Agreement fell from 0.51 on the fresh draw to 0.39 here with the same judge, rubric and labelled documents, so no rate from either run can call a clause ([D3]).
+- **History**:
+  - 2026-10-19 first result, from the third draw's judge run ([D11], [D13])
+
+### F10 — The loosened build keeps about the good text the per-route estimate predicted · minor
+
+- **Summary**: Before dedup, the loosened build gains within two percent of the good text the per-route estimate predicted, on every route.
+- **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build, and f7810f13462d4f089b7814b359be3feb, the frozen build, both under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 3a4e748 over both builds' counts and the fresh and third draws' verdicts ([M11]).
+- **Result**: [Documents, bad text and good text the loosened build gains over the frozen build before dedup, per route and source, with a 95% interval on bad text and the per-route estimate beside it. A source's bad text can fall below zero by chance, since its two shares come from separate draws.](tables/curation-routes-loosened-good-and-bad-gained-by-route-and-source.csv)
+- **Reading**: On the raw web crawls the bad text gained lands inside its interval around the estimate, though both rest on a judge below the agreement gate ([F9]).
+- **History**:
+  - 2026-10-19 first result, from the loosened build and the third draw ([D13], [D16])
+
+### F11 — Most of the loosened build's remaining quality drops are bad text, most repetition drops are not · minor
+
+- **Summary**: Weighted by volume, most of what the loosened quality filter drops is bad text, and most of what its repetition filter drops is not.
+- **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 3a4e748 over its counts and the third draw's verdicts ([M8]).
+- **Result**: [Bad text removed and good text lost by each filter of the loosened build, per source, with the call at the 1:1 rate: keep the filter on a source where at least half of its judged drops are bad text.](tables/curation-routes-loosened-bad-removed-and-good-lost-by-filter-and-source.csv)
+- **Reading**: Under the rule of keeping a filter only where most of its drops are bad ([D12]), the judge would switch off 16 source-and-filter pairs, though that judge is below the agreement gate ([F9]).
+- **History**:
+  - 2026-10-19 first result, from the third draw ([D13], [D16])
 
 ## Verdict
 
