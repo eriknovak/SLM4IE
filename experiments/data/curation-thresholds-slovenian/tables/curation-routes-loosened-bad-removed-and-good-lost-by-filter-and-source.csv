@@ -1,0 +1,28 @@
+stage,source,dropped,drops_judged,bad_share,bad_removed,good_lost,call,gate_passed
+quality,pooled,2998875,628,0.6154,1845495,1153380,,False
+quality,cc100,1335729,40,0.65,868224,467505,keep,False
+quality,siparl,280210,40,0.175,49037,231173,switch off,False
+quality,c4,713382,40,0.7,499367,214015,keep,False
+quality,macocu_sl,563268,40,0.7,394288,168980,keep,False
+quality,hplt,35827,40,0.375,13435,22392,switch off,False
+quality,finepdf,24981,40,0.35,8743,16238,switch off,False
+quality,culturax,16136,40,0.2,3227,12909,switch off,False
+quality,classla_web_sl,13027,40,0.3,3908,9119,switch off,False
+quality,gigafida,4250,40,0.1,425,3825,switch off,False
+quality,slovenian_news,6387,40,0.55,3513,2874,keep,False
+quality,oss,3106,40,0.175,544,2562,switch off,False
+quality,classlawiki_sl,1159,40,0.35,406,753,switch off,False
+quality,coleslaw,787,40,0.075,59,728,switch off,False
+quality,kas,249,40,0.1,25,224,switch off,False
+quality,povejmo_vemo_med,349,40,0.825,288,61,keep,False
+quality,fineweb2,15,15,0.4,6,9,,False
+quality,solar,8,8,0.125,1,7,,False
+quality,kzb,5,5,0.0,0,5,,False
+repetition,pooled,1344758,280,0.3853,518074,826684,,False
+repetition,hplt,360941,40,0.2,72188,288753,switch off,False
+repetition,macocu_sl,299122,40,0.375,112171,186951,switch off,False
+repetition,cc100,259280,40,0.4,103712,155568,switch off,False
+repetition,c4,304048,40,0.675,205232,98816,keep,False
+repetition,culturax,42778,40,0.1,4278,38500,switch off,False
+repetition,classla_web_sl,44768,40,0.25,11192,33576,switch off,False
+repetition,fineweb2,33821,40,0.275,9301,24520,switch off,False

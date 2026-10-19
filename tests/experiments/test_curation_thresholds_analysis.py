@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
@@ -676,3 +676,147 @@ def test_read_setting_changes_tries_a_lone_change_only_once(tmp_path: Path) -> N
     )
 
     assert list(analysis.read_setting_changes(path)["med"]) == ["off"]
+
+
+def _predicted(route: str, change: str, source: str, good: int, bad: int) -> Dict[str, Any]:
+    """Build one row of the step-10 estimate, as `setting_change_rows` gives it.
+
+    Args:
+        route: The route.
+        change: The setting change, or `ALL_CHANGES`.
+        source: The source, or `pooled`.
+        good: Good text the change was predicted to keep.
+        bad: Bad text it was predicted to keep.
+
+    Returns:
+        A row carrying the columns `gain_rows` reads.
+    """
+    return {"route": route, "change": change, "source": source, "good_gained": good, "bad_gained": bad}
+
+
+#: One route, `raw`, whose one change loosens the quality filter.
+_QUALITY_CHANGED = {"raw": {"looser": {"quality": {"min_doc_words": 10}}}}
+
+
+def _gains(
+    frozen: List[Dict[str, Any]],
+    loosened: List[Dict[str, Any]],
+    frozen_drops: Dict[Any, List[Dict[str, Any]]],
+    loosened_drops: Dict[Any, List[Dict[str, Any]]],
+    variants: Dict[str, Any] = _QUALITY_CHANGED,
+    predicted: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Run `gain_rows` with every source on route `raw`.
+
+    Args:
+        frozen: Funnel rows of the frozen build.
+        loosened: Funnel rows of the looser build.
+        frozen_drops: Judged drops of the frozen build.
+        loosened_drops: Judged drops of the looser build.
+        variants: The setting changes per route.
+        predicted: Step-10 rows; none by default.
+
+    Returns:
+        The rows `gain_rows` gives.
+    """
+    routes = {row["source"]: "raw" for row in frozen}
+    return analysis.gain_rows(frozen, loosened, frozen_drops, loosened_drops, routes, variants, predicted or [], True)
+
+
+def test_gain_rows_counts_what_the_frozen_build_drops_and_the_looser_one_keeps() -> None:
+    """400 frozen drops at 3/4 bad minus 100 looser drops all bad gains 300 documents, 200 of them bad."""
+    rows = _gains(
+        [_funnel("a", 400)], [_funnel("a", 100)], _drops("quality", "a", 15, 5), _drops("quality", "a", 20, 0)
+    )
+    source_row = next(row for row in rows if row["source"] == "a")
+
+    assert (source_row["gained"], source_row["bad_gained"], source_row["good_gained"]) == (300, 200, 100)
+
+
+def test_gain_rows_reads_the_repetition_filter_against_the_quality_output() -> None:
+    """A repetition filter dropping 400 of the quality filter's output gains those 400 when switched off."""
+    variants = {"raw": {"off": {"repetition": {"enabled": False}}}}
+    rows = _gains([_funnel("a", 400, "repetition")], [_funnel("a", 0)], _drops("repetition", "a", 0, 20), {}, variants)
+
+    assert (rows[0]["gained"], rows[0]["good_gained"]) == (400, 400)
+
+
+def test_gain_rows_gives_bad_text_an_interval_around_the_estimate() -> None:
+    """All 20 judged drops good still leaves room for some bad text, from the adjusted share's variance."""
+    rows = _gains([_funnel("a", 400)], [_funnel("a", 0)], _drops("quality", "a", 0, 20), {})
+
+    assert rows[0]["bad_gained_low"] < rows[0]["bad_gained"] == 0 < rows[0]["bad_gained_high"]
+
+
+def test_gain_rows_lets_a_source_estimate_fall_below_zero_by_chance() -> None:
+    """A looser draw with a higher bad share than the frozen one gives negative bad text, left uncut."""
+    rows = _gains(
+        [_funnel("a", 200)], [_funnel("a", 100)], _drops("quality", "a", 0, 20), _drops("quality", "a", 20, 0)
+    )
+    source_row = next(row for row in rows if row["source"] == "a")
+
+    assert source_row["bad_gained"] == -100 and source_row["bad_gained_low"] < -100 < source_row["bad_gained_high"]
+
+
+def test_gain_rows_pools_each_route_by_volume() -> None:
+    """A route's pooled row sums its sources' documents and bad text gained."""
+    drops = {**_drops("quality", "a", 20, 0), **_drops("quality", "b", 0, 20)}
+    rows = _gains([_funnel("a", 100), _funnel("b", 300)], [_funnel("a", 0), _funnel("b", 0)], drops, {})
+
+    assert (rows[0]["source"], rows[0]["gained"], rows[0]["bad_gained"]) == ("pooled", 400, 100)
+
+
+def test_gain_rows_skips_a_filter_its_route_leaves_unchanged() -> None:
+    """Quality drops alike in both builds add nothing, even with no judged drop to score them."""
+    variants = {"raw": {"off": {"repetition": {"enabled": False}}}}
+    rows = _gains([_funnel("a", 100)], [_funnel("a", 100)], {}, {}, variants)
+
+    assert (rows[0]["gained"], rows[0]["bad_gained"]) == (0, 0)
+
+
+def test_gain_rows_rejects_an_unchanged_filter_dropping_differently() -> None:
+    """A filter whose settings did not change must drop the same documents in both builds."""
+    variants = {"raw": {"off": {"repetition": {"enabled": False}}}}
+
+    with pytest.raises(ValueError, match="unchanged"):
+        _gains([_funnel("a", 100)], [_funnel("a", 50)], {}, {}, variants)
+
+
+def test_gain_rows_sets_the_estimate_with_every_change_of_the_route_beside_it() -> None:
+    """Where a route tried several changes, the prediction is the one applying them all."""
+    variants = {
+        "raw": {
+            "one": {"quality": {"min_doc_words": 10}},
+            "two": {"quality": {"min_stop_words": 0}},
+            analysis.ALL_CHANGES: {"quality": {"min_doc_words": 10, "min_stop_words": 0}},
+        }
+    }
+    predicted = [
+        _predicted("raw", "one", "pooled", 5, 1),
+        _predicted("raw", analysis.ALL_CHANGES, "pooled", 50, 10),
+    ]
+    rows = _gains([_funnel("a", 100)], [_funnel("a", 0)], _drops("quality", "a", 20, 0), {}, variants, predicted)
+
+    assert (rows[0]["predicted_good_gained"], rows[0]["predicted_bad_gained"]) == (50, 10)
+
+
+def test_gain_rows_rejects_several_changes_without_one_applying_them_all() -> None:
+    """With no variant applying every change, no single estimate stands for the looser build."""
+    variants = {"raw": {"one": {"quality": {"min_doc_words": 10}}, "two": {"quality": {"min_stop_words": 0}}}}
+
+    with pytest.raises(ValueError, match="no 'all changes together' variant"):
+        _gains([_funnel("a", 100)], [_funnel("a", 0)], _drops("quality", "a", 20, 0), {}, variants)
+
+
+def test_gain_rows_rejects_builds_feeding_different_documents_to_the_quality_filter() -> None:
+    """Gains read as drop differences only when both builds start the filters from the same documents."""
+    looser = {**_funnel("a", 0), "spam": 999}
+
+    with pytest.raises(ValueError, match="different count"):
+        _gains([_funnel("a", 100)], [looser], _drops("quality", "a", 20, 0), {})
+
+
+def test_gain_rows_rejects_drops_with_no_judged_document() -> None:
+    """A changed filter that drops documents nobody judged leaves its bad share unknown, so the run stops."""
+    with pytest.raises(ValueError, match="none of them was judged"):
+        _gains([_funnel("a", 100)], [_funnel("a", 0)], {}, {})

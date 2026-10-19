@@ -31,6 +31,7 @@ import csv
 import gzip
 import hashlib
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -147,6 +148,15 @@ ROUTE_NAMES = {"raw_crawl": "raw crawl", "curated_prose": "curated prose", "medi
 #: The earlier audit's derived data: its judged sample and frozen verdicts.
 AUDIT_DATA = Path("data/experiments/data/curation-quality-slovenian")
 
+#: The looser build's config (D16), whose third draw (D13) is judged with the calibration documents.
+LOOSENED_CONFIG = Path(__file__).resolve().parent / "configs" / "curation-routes-loosened.yaml"
+
+#: The third draw from the looser build, limited to the filters its settings change (D13).
+LOOSENED_SAMPLE = DATA_ROOT / "interim" / "sample-loosened.jsonl"
+
+#: Sonnet 5's verdicts on the third draw with the calibration documents spread through it (D11).
+LOOSENED_VERDICTS = DATA_ROOT / "interim" / "verdicts-loosened-sonnet.jsonl"
+
 #: The person's calibration labels, re-judged in the fresh draw's run so the gate reads on it (D3).
 CALIBRATION_LABELS = AUDIT_DATA / "final" / "human-labels-calibration.jsonl"
 
@@ -184,6 +194,9 @@ TARGET_CLAUSES = {"H1": "language", "H2": "spam", "H3": "quality", "H4": "repeti
 
 #: Share of a filter's drops on a source that must be bad text for it to stay on (D12, one good per bad).
 KEEP_BAD_SHARE = 0.5
+
+#: Standard normal quantile of a two-sided 95% interval.
+INTERVAL_Z = 1.96
 
 #: The setting changes tried on each route (M10).
 SETTING_CHANGES = Path(__file__).resolve().parent / "configs" / "tuning-filter-settings.yaml"
@@ -1567,6 +1580,186 @@ def setting_change_rows(
     return rows
 
 
+class Gain(NamedTuple):
+    """Documents a looser build gains on one group, the bad text among them, and that estimate's variance."""
+
+    gained: float
+    bad: float
+    variance: float
+
+
+def _gain_row(
+    route: str, source: str, gain: Gain, predicted: Optional[Dict[str, Any]], gate_passed: bool
+) -> Dict[str, Any]:
+    """Turn one group's measured gain into a row beside what step 10 predicted.
+
+    Args:
+        route: The route.
+        source: The source, or `pooled`.
+        gain: The group's measured gain.
+        predicted: The group's row from `setting_change_rows`, or None.
+        gate_passed: Whether the judge run on the looser build's draw passed the agreement gate (D3).
+
+    Returns:
+        One row of `gain_rows`.
+    """
+    margin = INTERVAL_Z * math.sqrt(gain.variance)
+    return {
+        "route": route,
+        "source": source,
+        "gained": round(gain.gained),
+        "bad_gained": round(gain.bad),
+        "bad_gained_low": round(gain.bad - margin),
+        "bad_gained_high": round(gain.bad + margin),
+        "good_gained": round(gain.gained - gain.bad),
+        "predicted_good_gained": predicted["good_gained"] if predicted else "",
+        "predicted_bad_gained": predicted["bad_gained"] if predicted else "",
+        "gate_passed": gate_passed,
+    }
+
+
+def _route_variant(route: str, route_variants: Dict[str, Dict[str, Any]]) -> str:
+    """Name the variant that applies every setting change of a route.
+
+    Args:
+        route: The route.
+        route_variants: Its variants, from `read_setting_changes`.
+
+    Returns:
+        `ALL_CHANGES` where the route has several changes, else its one change.
+
+    Raises:
+        ValueError: If the route has several changes but no variant applying them all.
+    """
+    if ALL_CHANGES in route_variants:
+        return ALL_CHANGES
+    if len(route_variants) != 1:
+        raise ValueError(f"route {route!r} has changes {sorted(route_variants)} but no {ALL_CHANGES!r} variant")
+    return next(iter(route_variants))
+
+
+def _filter_gain(
+    stage: str,
+    source: str,
+    counts: Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]],
+    drops: Tuple[Dict[Tuple[str, str], List[Dict[str, Any]]], Dict[Tuple[str, str], List[Dict[str, Any]]]],
+) -> Gain:
+    """Measure what one filter drops on one source in the frozen build less what it drops in the looser one.
+
+    Args:
+        stage: The filter.
+        source: The source.
+        counts: Funnel rows by source, frozen build first.
+        drops: Judged drops by stage and source, frozen build first.
+
+    Returns:
+        The difference, which may be negative where the looser build feeds
+        the filter more documents.
+
+    Raises:
+        ValueError: If a build's filter drops documents of the source none of
+            whose drops was judged.
+    """
+    gain = Gain(0.0, 0.0, 0.0)
+    for sign, build, build_drops in zip((1, -1), counts, drops):
+        dropped = build[source][FILTER_INPUTS[stage][3:]] - build[source][stage]
+        if not dropped:
+            continue
+        verdicts = build_drops.get((stage, source))
+        if not verdicts:
+            raise ValueError(f"{stage} drops {dropped} documents of {source} but none of them was judged")
+        hits = sum(is_bad_text(verdict) for verdict in verdicts)
+        adjusted = (hits + INTERVAL_Z**2 / 2) / (len(verdicts) + INTERVAL_Z**2)
+        gain = Gain(
+            gain.gained + sign * dropped,
+            gain.bad + sign * dropped * hits / len(verdicts),
+            gain.variance + dropped**2 * adjusted * (1 - adjusted) / len(verdicts),
+        )
+    return gain
+
+
+def gain_rows(
+    frozen: List[Dict[str, Any]],
+    loosened: List[Dict[str, Any]],
+    frozen_drops: Dict[Tuple[str, str], List[Dict[str, Any]]],
+    loosened_drops: Dict[Tuple[str, str], List[Dict[str, Any]]],
+    routes: Dict[str, str],
+    variants: Dict[str, Dict[str, Dict[str, Any]]],
+    predicted: List[Dict[str, Any]],
+    gate_passed: bool,
+) -> List[Dict[str, Any]]:
+    """Measure the good and bad text a looser build keeps that the frozen build dropped.
+
+    Both builds feed the same documents into the quality filter, so what the
+    looser build gains before dedup is what the frozen build's quality and
+    repetition filters drop together minus what the looser ones drop
+    together, and the bad text gained is the same difference of bad
+    documents dropped: each filter's drops times the bad share of its judged
+    drops. A filter a route leaves unchanged drops the same documents in
+    both builds, so it adds nothing and is not estimated.
+
+    Args:
+        frozen: Rows from `funnel_rows` for the frozen build.
+        loosened: Rows from `funnel_rows` for the looser build.
+        frozen_drops: Verdicts on the frozen build's drops by stage and source, from `judged_drops`.
+        loosened_drops: The same for the looser build's drops.
+        routes: The route per source, from `read_routes`.
+        variants: Per route, each variant's settings per filter, from
+            `read_setting_changes`; the variant with every change of a route
+            names the filters it changes and stands for the looser build.
+        predicted: Rows from `setting_change_rows` for those variants.
+        gate_passed: Whether the judge run on the looser build's draw passed the agreement gate (D3).
+
+    Returns:
+        Per route, a pooled row then one row per source, most good text gained
+        first. Bad text gained carries a 95% normal-approximation interval:
+        each judged share adds its binomial variance, at the Agresti-Coull
+        adjusted share so a share of 0 or 1 still counts, scaled by its drops
+        squared. Neither the estimate nor its interval is cut, so a source's
+        may fall below zero by chance.
+
+    Raises:
+        ValueError: If a source enters the quality filter with a different
+            count in each build, or a filter its route leaves unchanged drops
+            a different count in each build.
+    """
+    counts = (
+        {row["source"]: row for row in frozen if row["source"] != "TOTAL"},
+        {row["source"]: row for row in loosened if row["source"] != "TOTAL"},
+    )
+    chosen = {route: _route_variant(route, route_variants) for route, route_variants in variants.items()}
+    predicted_by = {(row["route"], row["source"]): row for row in predicted if row["change"] == chosen[row["route"]]}
+
+    by_route: Dict[str, List[Tuple[str, Gain]]] = defaultdict(list)
+    for source, route in sorted(routes.items()):
+        if counts[0][source]["spam"] != counts[1][source]["spam"]:
+            raise ValueError(f"{source} enters the quality filter with a different count in each build")
+        changed = variants[route][chosen[route]] if route in chosen else {}
+        parts = []
+        for stage, input_stage in FILTER_INPUTS.items():
+            if stage in changed:
+                parts.append(_filter_gain(stage, source, counts, (frozen_drops, loosened_drops)))
+                continue
+            frozen_dropped, loosened_dropped = (
+                build[source][input_stage[3:]] - build[source][stage] for build in counts
+            )
+            if frozen_dropped != loosened_dropped:
+                raise ValueError(
+                    f"{stage} on {source} is unchanged on route {route!r} yet drops {frozen_dropped} and {loosened_dropped}"
+                )
+        by_route[route].append((source, Gain(*(sum(values) for values in zip(Gain(0.0, 0.0, 0.0), *parts)))))
+
+    rows: List[Dict[str, Any]] = []
+    for route, measured in sorted(by_route.items()):
+        pooled = Gain(*(sum(values) for values in zip(*(gain for _, gain in measured))))
+        rows.append(_gain_row(route, "pooled", pooled, predicted_by.get((route, "pooled")), gate_passed))
+        source_rows = [
+            _gain_row(route, source, gain, predicted_by.get((route, source)), gate_passed) for source, gain in measured
+        ]
+        rows.extend(sorted(source_rows, key=lambda row: -row["good_gained"]))
+    return rows
+
+
 def read_documents(folder: Path) -> List[Dict[str, Any]]:
     """Read every document in one source's stage folder.
 
@@ -1795,6 +1988,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=FRESH_VERDICTS,
         help="Judge verdicts on the fresh draw and the calibration documents, from one run.",
     )
+    parser.add_argument("--loosened-config", type=Path, default=LOOSENED_CONFIG, help="The looser build's config.")
+    parser.add_argument("--loosened-sample", type=Path, default=LOOSENED_SAMPLE, help="The third draw.")
+    parser.add_argument(
+        "--loosened-verdicts",
+        type=Path,
+        default=LOOSENED_VERDICTS,
+        help="Judge verdicts on the third draw and the calibration documents, from one run.",
+    )
     parser.add_argument(
         "--write-judge-input",
         type=Path,
@@ -1937,9 +2138,10 @@ def main() -> None:
             )
         rule_trade_off += stage_rows
 
+    variants = read_setting_changes(args.setting_changes)
     outcomes = rescue_outcomes(
         args.routes_config,
-        read_setting_changes(args.setting_changes),
+        variants,
         routes,
         stage_openings,
         stage_texts,
@@ -1953,7 +2155,36 @@ def main() -> None:
                 f"  bad {row['bad_gained']:>10,d}  {row['call']}"
             )
 
+    loosened_stem = args.loosened_config.stem
+    loosened_dir = Path(yaml.safe_load(args.loosened_config.read_text(encoding="utf-8"))["output_dir"])
+    check_lock(loosened_dir, args.loosened_config)
+    loosened_cache = args.data_root / "interim" / f"{loosened_stem}-stage-counts.json"
+    loosened = funnel_rows(loosened_dir, counted_stage(loosened_dir, loosened_cache, args.workers), access)
+    loosened_verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.loosened_verdicts)}
+    loosened_agreement = agreement_rows(read_jsonl(CALIBRATION_LABELS), loosened_verdicts)
+    loosened_gate = loosened_agreement[0]["passes_gate"]
+    for row in loosened_agreement:
+        print(f"{loosened_stem}: judge vs person, {row['test']:12s} kappa {row['kappa']:.3f}")
+    loosened_drops = judged_drops(read_jsonl(args.loosened_sample), loosened_verdicts, candidate_sources)
+    loosened_trade_off = trade_off_rows(loosened, loosened_drops, loosened_gate)
+    gains = gain_rows(
+        candidate, loosened, fresh_drops, loosened_drops, routes, variants, setting_changes, loosened_gate
+    )
+    for row in gains:
+        if row["source"] == "pooled":
+            print(
+                f"{loosened_stem}: {row['route']:17s} good {row['good_gained']:>10,d}"
+                f" (predicted {row['predicted_good_gained']!s:>8})  bad {row['bad_gained']:>10,d}"
+                f" [{row['bad_gained_low']:,d}, {row['bad_gained_high']:,d}]"
+                f" (predicted {row['predicted_bad_gained']!s:>8})"
+            )
+
     written = [
+        write_csv(args.tables / f"{loosened_stem}-judge-agreement-with-person-by-test.csv", loosened_agreement),
+        write_csv(
+            args.tables / f"{loosened_stem}-bad-removed-and-good-lost-by-filter-and-source.csv", loosened_trade_off
+        ),
+        write_csv(args.tables / f"{loosened_stem}-good-and-bad-gained-by-route-and-source.csv", gains),
         write_csv(args.tables / f"{stem}-documents-by-source.csv", candidate),
         write_csv(args.tables / f"{stem}-retention-by-build-and-source.csv", route_comparison),
         write_csv(args.tables / f"{stem}-loss-change-by-stage-and-source.csv", loss_changes),

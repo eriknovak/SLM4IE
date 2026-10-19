@@ -196,6 +196,19 @@ concluded:
 - **Code**: `analysis.py::read_setting_changes`, `analysis.py::rescue_outcomes`, `analysis.py::setting_change_rows`
 - **Settings**: `configs/tuning-filter-settings.yaml`: `changes` (per route, each change's `stage`, the filter it loosens, and `settings`, the knobs merged over the route's, where 0 switches a quality rule off and an empty n-gram list switches that repetition family off)
 
+### M11 — Measure the good and bad text the loosened build gained, beside the estimate
+
+- **Input**: the frozen build ([D10]) and the loosened build ([D16]), each with its document counts per source and stage, and two judged draws of their quality and repetition drops: the fresh draw's from the frozen build, and the third draw's from the loosened build ([D13]), judged with the 116 hand-labelled documents spread through it ([D11]). One item is a judged document one of the two builds drops at one of the two filters.
+- **Output**: per route, a pooled row then one row per source: documents gained, bad and good text gained, the low and high end of a 95% interval on bad text gained, step 10's estimate of good and bad text gained ([M10]), and whether the third draw's judge run passed the agreement gate ([D3]). Written to `tables/curation-routes-loosened-good-and-bad-gained-by-route-and-source.csv`, most good text gained first within each route. Beside it, the judge's agreement with the person on that run, in `tables/curation-routes-loosened-judge-agreement-with-person-by-test.csv`, and the loosened build's remaining drops scored as in [M8], in `tables/curation-routes-loosened-bad-removed-and-good-lost-by-filter-and-source.csv`.
+- **How**: both builds feed the same documents into the quality filter, so what the loosened build gains before dedup is what the frozen build's two filters drop together minus what the loosened build's drop together. Exact and sentence dedup are not counted, as in [M10].
+  1. Check that each source enters the quality filter with the same count in both builds; a source that does not stops the reading.
+  2. A filter its route leaves unchanged drops the same documents in both builds and adds nothing; a different count there stops the reading. Medical and academic text changes only the repetition filter.
+  3. For each changed filter on a source, with $d$ documents dropped in a build and $b$ of its $n$ judged drops bad, that build's filter drops $d \cdot b / n$ bad documents. Documents gained are the frozen build's drops minus the loosened build's, bad text gained the same difference of bad documents, and good text gained the rest. A repetition term can be negative, since the loosened build feeds that filter more documents.
+  4. Bad text gained carries a 95% interval, $\pm 1.96 \sqrt{V}$ with $V = \sum d^2 \tilde p (1 - \tilde p) / n$ over every estimated filter of both builds, where $\tilde p = (b + 1.92) / (n + 3.84)$ is the bad share nudged toward a half (Agresti–Coull) so a share of 0 or 1 still counts as uncertain. Neither the estimate nor its interval is cut: each share comes from its own draw, so a source's can fall below zero by chance, and the pooled rows sum such noise out.
+  5. The pooled row sums a route's sources. The estimate beside it is step 10's variant applying every change of the route, or its one change where it has only one. The frozen build's bad shares come from the fresh draw, which also fed that estimate, so the comparison tests the loosened build's side and the build counts, not the frozen side's evidence.
+- **Code**: `analysis.py::gain_rows`
+- **Settings**: `configs/tuning-filter-settings.yaml` names the filters each route changes; the bad-text bar is [D1]'s lenient bar
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
