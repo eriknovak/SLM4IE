@@ -644,7 +644,7 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
 
 
 def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Spread the calibration documents evenly through the fresh draw for one judge run.
+    """Spread the calibration documents evenly through a draw for one judge run.
 
     The judge reads documents in groups in file order, so spreading them puts
     each calibration document among fresh ones, judged in the same context as
@@ -653,7 +653,7 @@ def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, A
     same text is judged once, there.
 
     Args:
-        sample: The fresh draw's documents, in file order.
+        sample: The draw's documents, in file order.
         calibration: The hand-labelled documents, as the earlier audit's sample holds them.
 
     Returns:
@@ -666,7 +666,7 @@ def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, A
     texts = {document["id"]: document["text"] for document in sample}
     clashing = [doc["id"] for doc in calibration if doc["id"] in texts and texts[doc["id"]] != doc["text"]]
     if clashing:
-        raise ValueError(f"calibration ids {clashing} are in the fresh draw with other text")
+        raise ValueError(f"calibration ids {clashing} are in the draw with other text")
     marked = [document for document in calibration if document["id"] not in texts]
     step = max(1, len(sample) // (len(marked) + 1))
     rows: List[Dict[str, Any]] = []
@@ -682,10 +682,10 @@ def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, A
 
 
 def write_judge_input(sample_path: Path, destination: Path) -> None:
-    """Write the fresh draw with the calibration documents spread through it, for one judge run.
+    """Write a draw with the calibration documents spread through it, for one judge run.
 
     Args:
-        sample_path: The fresh draw, as the sampler wrote it.
+        sample_path: The draw, as the sampler wrote it.
         destination: The judge input file to write.
 
     Raises:
@@ -1799,7 +1799,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--write-judge-input",
         type=Path,
         default=None,
-        help="Write the fresh draw with the calibration documents spread through it to this file, then stop.",
+        help="Write --judge-sample with the calibration documents spread through it to this file, then stop.",
+    )
+    parser.add_argument(
+        "--judge-sample",
+        type=Path,
+        default=FRESH_SAMPLE,
+        help="Draw --write-judge-input spreads the calibration documents through (third draw: sample-loosened.jsonl).",
     )
     return parser.parse_args(argv)
 
@@ -1808,7 +1814,7 @@ def main() -> None:
     """Write the record's tables and figures and print the headline numbers."""
     args = parse_args()
     if args.write_judge_input:
-        write_judge_input(FRESH_SAMPLE, args.write_judge_input)
+        write_judge_input(args.judge_sample, args.write_judge_input)
         return
     _, commits = scoped_counts(args.pretrain_dir)
     print(f"baseline corpus built at {', '.join(sorted(commits))}")

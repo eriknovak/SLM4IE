@@ -298,6 +298,7 @@ concluded:
   - Judge the 116 documents in a run of their own: the gate would again read on a run the findings do not use.
 - **History**:
   - 2026-10-15 first version, at the project lead's call
+  - 2026-10-19 the 116 documents also spread through the third draw ([D13]), at the project lead's call
 
 ### D12 — Keep a filter on a source only where at least half of what it drops is bad text
 
