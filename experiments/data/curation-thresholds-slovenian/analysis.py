@@ -204,6 +204,15 @@ SETTING_CHANGES = Path(__file__).resolve().parent / "configs" / "tuning-filter-s
 #: The variant that applies every change of a route at once, tried where a route has several.
 ALL_CHANGES = "all changes together"
 
+#: The stage whose kept documents stand for a build's kept corpus: the last one all three draws sample.
+KEPT_STAGE = "repetition"
+
+#: How far a build's residual bad rate may rise above the baseline's and still answer yes (D17).
+MAX_BAD_RATE_RISE = 0.02
+
+#: The build every residual bad rate is compared against (D17).
+BASELINE_BUILD = "baseline"
+
 
 class FilterRescue(NamedTuple):
     """What one filter drops on one source and how much of it a setting variant keeps."""
@@ -1760,6 +1769,193 @@ def gain_rows(
     return rows
 
 
+def judged_kept(
+    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Collect the verdicts on documents a draw took from a build's kept corpus, per source.
+
+    Args:
+        sample: Sample rows, each carrying `id`, `dataset` and its `cells`.
+        verdicts: Judge verdicts by document id.
+        sources: The selected sources; a sampled source outside them is skipped.
+
+    Returns:
+        Verdicts on the documents drawn as kept at `KEPT_STAGE`, keyed by source.
+
+    Raises:
+        KeyError: If a kept document of a selected source has no verdict.
+    """
+    kept: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    unjudged = []
+    for row in sample:
+        is_kept = any(cell["stage"] == KEPT_STAGE and cell["decision"] == "kept" for cell in row["cells"])
+        if not is_kept or row["dataset"] not in sources:
+            continue
+        if row["id"] not in verdicts:
+            unjudged.append(row["id"])
+            continue
+        kept[row["dataset"]].append(verdicts[row["id"]])
+    if unjudged:
+        raise KeyError(f"kept documents {unjudged[:5]} ({len(unjudged)} in all) have no verdict")
+    return kept
+
+
+class Residual(NamedTuple):
+    """A build's documents kept on one group, the bad documents among them, and that estimate's variance."""
+
+    kept: int
+    bad: float
+    variance: float
+
+    @property
+    def rate(self) -> float:
+        """The residual bad rate, bad documents over kept documents."""
+        return self.bad / self.kept
+
+
+def _source_residual(kept: int, verdicts: List[Dict[str, Any]]) -> Residual:
+    """Scale one source's judged kept documents to everything it keeps.
+
+    Args:
+        kept: Documents the source keeps at `KEPT_STAGE` in the build.
+        verdicts: The judged documents drawn from them.
+
+    Returns:
+        The bad documents estimated among those kept, with the variance of
+        that estimate at the Agresti-Coull adjusted share.
+    """
+    hits = sum(is_bad_text(verdict) for verdict in verdicts)
+    adjusted = (hits + INTERVAL_Z**2 / 2) / (len(verdicts) + INTERVAL_Z**2)
+    return Residual(kept, kept * hits / len(verdicts), kept**2 * adjusted * (1 - adjusted) / len(verdicts))
+
+
+def _pooled_residuals(
+    builds: Dict[str, Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]],
+) -> Dict[str, Tuple[Residual, Dict[str, Residual]]]:
+    """Estimate each build's residual bad documents per source and summed over its sources.
+
+    Args:
+        builds: Per build, its rows from `funnel_rows` and its judged kept
+            documents from `judged_kept`.
+
+    Returns:
+        Per build, the sum over its sources, then each source's estimate.
+
+    Raises:
+        ValueError: If a source keeps documents in a build but none of them was judged.
+    """
+    estimates: Dict[str, Tuple[Residual, Dict[str, Residual]]] = {}
+    for build, (funnel, kept) in builds.items():
+        per_source: Dict[str, Residual] = {}
+        for row in funnel:
+            if row["source"] == "TOTAL" or not row[KEPT_STAGE]:
+                continue
+            if not kept.get(row["source"]):
+                raise ValueError(f"{build} keeps {row[KEPT_STAGE]} documents of {row['source']} but none was judged")
+            per_source[row["source"]] = _source_residual(row[KEPT_STAGE], kept[row["source"]])
+        estimates[build] = (Residual(*(sum(values) for values in zip(*per_source.values()))), per_source)
+    return estimates
+
+
+def residual_rows(
+    builds: Dict[str, Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]],
+) -> List[Dict[str, Any]]:
+    """Estimate the share of bad text among the documents each build keeps, per source and weighted by volume.
+
+    Args:
+        builds: Per build, in the order rows are wanted, its rows from
+            `funnel_rows` and its judged kept documents from `judged_kept`.
+
+    Returns:
+        Every build's volume-weighted row first, then one row per source with
+        the builds side by side. A source row carries its share's Wilson
+        interval; a weighted row sums each source's kept documents times its
+        judged bad share, with a 95% normal-approximation interval from the
+        Agresti-Coull variances of the shares, each scaled by the source's
+        kept documents squared.
+    """
+    estimates = _pooled_residuals(builds)
+    rows: List[Dict[str, Any]] = []
+    for build, (pooled, _) in estimates.items():
+        margin = INTERVAL_Z * math.sqrt(pooled.variance) / pooled.kept
+        rows.append(
+            {
+                "build": build,
+                "source": "pooled",
+                "kept": pooled.kept,
+                "judged": sum(len(verdicts) for verdicts in builds[build][1].values()),
+                "bad_rate": round(pooled.rate, 4),
+                "bad_rate_low": round(pooled.rate - margin, 4),
+                "bad_rate_high": round(pooled.rate + margin, 4),
+                "good_kept": round(pooled.kept - pooled.bad),
+            }
+        )
+    sources = sorted({source for _, per_source in estimates.values() for source in per_source})
+    for source in sources:
+        for build, (_, per_source) in estimates.items():
+            if source not in per_source:
+                continue
+            estimate, verdicts = per_source[source], builds[build][1][source]
+            low, high = wilson(sum(is_bad_text(verdict) for verdict in verdicts), len(verdicts))
+            rows.append(
+                {
+                    "build": build,
+                    "source": source,
+                    "kept": estimate.kept,
+                    "judged": len(verdicts),
+                    "bad_rate": round(estimate.rate, 4),
+                    "bad_rate_low": round(low, 4),
+                    "bad_rate_high": round(high, 4),
+                    "good_kept": round(estimate.kept - estimate.bad),
+                }
+            )
+    return rows
+
+
+def residual_rise_rows(
+    builds: Dict[str, Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]],
+    gate_passed: Dict[str, bool],
+) -> List[Dict[str, Any]]:
+    """Compare each build's volume-weighted residual bad rate and good text kept with the baseline's (D17).
+
+    Args:
+        builds: As for `residual_rows`, holding `BASELINE_BUILD`.
+        gate_passed: Per build other than the baseline, whether its judge run
+            passed the agreement gate (D3).
+
+    Returns:
+        One row per build other than the baseline: how far its rate rises
+        above the baseline's, with a 95% interval from the two builds'
+        variances added, as independent draws; the good documents it keeps
+        beyond the baseline's; and whether it answers D17 yes, keeping more
+        good text unless the rise's whole interval lies above `MAX_BAD_RATE_RISE`.
+
+    Raises:
+        KeyError: If `builds` holds no baseline.
+    """
+    estimates = _pooled_residuals(builds)
+    baseline = estimates[BASELINE_BUILD][0]
+    rows: List[Dict[str, Any]] = []
+    for build, (pooled, _) in estimates.items():
+        if build == BASELINE_BUILD:
+            continue
+        rise = pooled.rate - baseline.rate
+        margin = INTERVAL_Z * math.sqrt(pooled.variance / pooled.kept**2 + baseline.variance / baseline.kept**2)
+        good_gain = round(pooled.kept - pooled.bad) - round(baseline.kept - baseline.bad)
+        rows.append(
+            {
+                "build": build,
+                "bad_rate_rise": round(rise, 4),
+                "bad_rate_rise_low": round(rise - margin, 4),
+                "bad_rate_rise_high": round(rise + margin, 4),
+                "good_kept_gained": good_gain,
+                "meets_bar": good_gain > 0 and rise - margin <= MAX_BAD_RATE_RISE,
+                "gate_passed": gate_passed[build],
+            }
+        )
+    return rows
+
+
 def read_documents(folder: Path) -> List[Dict[str, Any]]:
     """Read every document in one source's stage folder.
 
@@ -1853,6 +2049,7 @@ def draw_figures(
     losses: List[Dict[str, Any]],
     comparison: List[Dict[str, Any]],
     route_comparison: List[Dict[str, Any]],
+    residuals: List[Dict[str, Any]],
     stem: str,
 ) -> List[Path]:
     """Draw the record's figures from the tables `main` has already built.
@@ -1862,6 +2059,7 @@ def draw_figures(
         losses: Rows from `loss_rows`.
         comparison: Rows from `build_comparison_rows`.
         route_comparison: Rows from `route_comparison_rows`.
+        residuals: Rows from `residual_rows`.
         stem: The candidate config's stem, naming its figures.
 
     Returns:
@@ -1937,6 +2135,25 @@ def draw_figures(
         xmax=1.0,
         figsize=FIG_SIZE.FULL_TALL,
         **below(2),
+    )
+
+    pooled = [row for row in residuals if row["source"] == "pooled"]
+    baseline_rate = next(row["bad_rate"] for row in pooled if row["build"] == BASELINE_BUILD)
+    figures["residual-bad-rate-by-build"] = BarChart(
+        [
+            {"label": f"{row['build']} build", "y": row["bad_rate"], "yerr": row["bad_rate_high"] - row["bad_rate"]}
+            for row in pooled
+        ],
+        title="Bad text left in each build",
+        xlabel="build",
+        ylabel="share of kept documents judged bad",
+        ymin=0.0,
+        show_yerr=True,
+        show_values=True,
+        value_format="{x:.3f}",
+        hlines={"y": baseline_rate + MAX_BAD_RATE_RISE, "label": "baseline plus two points"},
+        figsize=FIG_SIZE.FULL_MEDIUM,
+        **below(1),
     )
 
     written = []
@@ -2165,7 +2382,8 @@ def main() -> None:
     loosened_gate = loosened_agreement[0]["passes_gate"]
     for row in loosened_agreement:
         print(f"{loosened_stem}: judge vs person, {row['test']:12s} kappa {row['kappa']:.3f}")
-    loosened_drops = judged_drops(read_jsonl(args.loosened_sample), loosened_verdicts, candidate_sources)
+    loosened_sample = read_jsonl(args.loosened_sample)
+    loosened_drops = judged_drops(loosened_sample, loosened_verdicts, candidate_sources)
     loosened_trade_off = trade_off_rows(loosened, loosened_drops, loosened_gate)
     gains = gain_rows(
         candidate, loosened, fresh_drops, loosened_drops, routes, variants, setting_changes, loosened_gate
@@ -2179,7 +2397,30 @@ def main() -> None:
                 f" (predicted {row['predicted_bad_gained']!s:>8})"
             )
 
+    # The baseline rebuild was never drawn from, so its rates come from the earlier audit's build (D17).
+    kept_builds = {
+        BASELINE_BUILD: (funnel, judged_kept(sample, verdicts, sources)),
+        "frozen": (candidate, judged_kept(fresh_sample, fresh_verdicts, candidate_sources)),
+        "loosened": (loosened, judged_kept(loosened_sample, loosened_verdicts, candidate_sources)),
+    }
+    residuals = residual_rows(kept_builds)
+    residual_rises = residual_rise_rows(kept_builds, {"frozen": gate_passed, "loosened": loosened_gate})
+    for row in residuals:
+        if row["source"] == "pooled":
+            print(
+                f"residual bad rate: {row['build']:9s} {row['bad_rate']:.4f} [{row['bad_rate_low']:.4f},"
+                f" {row['bad_rate_high']:.4f}]  good kept {row['good_kept']:>12,d}"
+            )
+    for row in residual_rises:
+        print(
+            f"residual bad rate: {row['build']:9s} rise {row['bad_rate_rise']:+.4f} [{row['bad_rate_rise_low']:+.4f},"
+            f" {row['bad_rate_rise_high']:+.4f}]  good kept gained {row['good_kept_gained']:>12,d}"
+            f"  meets bar {row['meets_bar']}"
+        )
+
     written = [
+        write_csv(args.tables / "residual-bad-rate-by-build-and-source.csv", residuals),
+        write_csv(args.tables / "residual-bad-rate-rise-by-build.csv", residual_rises),
         write_csv(args.tables / f"{loosened_stem}-judge-agreement-with-person-by-test.csv", loosened_agreement),
         write_csv(
             args.tables / f"{loosened_stem}-bad-removed-and-good-lost-by-filter-and-source.csv", loosened_trade_off
@@ -2207,7 +2448,7 @@ def main() -> None:
         write_csv(args.tables / "dataset-corpus-statistics.csv", corpus_dataset_rows(funnel)),
         write_csv(args.tables / "audit-precision-by-filter-and-source.csv", precision),
     ]
-    written += draw_figures(args.figures, losses, comparison, route_comparison, stem)
+    written += draw_figures(args.figures, losses, comparison, route_comparison, residuals, stem)
     for path in written:
         print(f"wrote {path}")
 

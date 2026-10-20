@@ -820,3 +820,85 @@ def test_gain_rows_rejects_drops_with_no_judged_document() -> None:
     """A changed filter that drops documents nobody judged leaves its bad share unknown, so the run stops."""
     with pytest.raises(ValueError, match="none of them was judged"):
         _gains([_funnel("a", 100)], [_funnel("a", 0)], {}, {})
+
+
+def _kept(bad: int, good: int) -> List[Dict[str, Any]]:
+    """Build one source's judged kept documents.
+
+    Args:
+        bad: How many are garbage at coherence 1.
+        good: How many are coherent prose.
+
+    Returns:
+        Verdicts as `judged_kept` lists them for one source.
+    """
+    return [_verdict(1, "garbage")] * bad + [_verdict(5)] * good
+
+
+def test_judged_kept_reads_only_documents_kept_at_the_last_filter() -> None:
+    """A document drawn as kept by quality or dropped by repetition is no part of the kept corpus."""
+    sample = [
+        {"id": "k", "dataset": "a", "cells": [{"stage": "repetition", "decision": "kept"}]},
+        {"id": "q", "dataset": "a", "cells": [{"stage": "quality", "decision": "kept"}]},
+        {"id": "d", "dataset": "a", "cells": [{"stage": "repetition", "decision": "dropped"}]},
+    ]
+    verdicts = {doc_id: _verdict() for doc_id in ("k", "q", "d")}
+
+    assert analysis.judged_kept(sample, verdicts, {"a"}) == {"a": [_verdict()]}
+
+
+def test_judged_kept_rejects_a_kept_document_without_a_verdict() -> None:
+    """An unjudged kept document would bias the source's share, so the run stops."""
+    sample = [{"id": "k", "dataset": "a", "cells": [{"stage": "repetition", "decision": "kept"}]}]
+
+    with pytest.raises(KeyError, match="no verdict"):
+        analysis.judged_kept(sample, {}, {"a"})
+
+
+def test_residual_rows_weighs_each_source_by_what_it_keeps() -> None:
+    """A clean source keeping 900 beside one keeping 100 at half bad gives a pooled rate of 0.05."""
+    builds = {"baseline": ([_funnel("a", 100), _funnel("b", 900)], {"a": _kept(0, 40), "b": _kept(20, 20)})}
+    pooled = analysis.residual_rows(builds)[0]
+
+    assert (pooled["source"], pooled["kept"], pooled["bad_rate"], pooled["good_kept"]) == ("pooled", 1000, 0.05, 950)
+
+
+def test_residual_rows_rejects_a_source_keeping_documents_nobody_judged() -> None:
+    """A kept corpus share with no judged document has no rate, so the run stops."""
+    with pytest.raises(ValueError, match="none was judged"):
+        analysis.residual_rows({"baseline": ([_funnel("a", 0)], {})})
+
+
+def test_residual_rise_rows_meets_the_bar_with_more_good_text_and_no_rise() -> None:
+    """Keeping twice the documents at the baseline's rate answers the amended question yes (D17)."""
+    builds = {
+        "baseline": ([_funnel("a", 500)], {"a": _kept(4, 36)}),
+        "loosened": ([_funnel("a", 0)], {"a": _kept(4, 36)}),
+    }
+    row = analysis.residual_rise_rows(builds, {"loosened": False})[0]
+
+    assert (row["bad_rate_rise"], row["good_kept_gained"], row["meets_bar"]) == (0.0, 450, True)
+    assert row["bad_rate_rise_low"] < 0 < row["bad_rate_rise_high"]
+
+
+def test_residual_rise_rows_meets_the_bar_while_the_interval_reaches_below_two_points() -> None:
+    """A rise of four points on a small draw still meets the bar, since its interval reaches under two (D17)."""
+    builds = {
+        "baseline": ([_funnel("a", 500)], {"a": _kept(4, 36)}),
+        "loosened": ([_funnel("a", 0)], {"a": _kept(14, 86)}),
+    }
+    row = analysis.residual_rise_rows(builds, {"loosened": False})[0]
+
+    assert (row["bad_rate_rise"], row["meets_bar"]) == (0.04, True)
+    assert row["bad_rate_rise_low"] <= analysis.MAX_BAD_RATE_RISE
+
+
+def test_residual_rise_rows_misses_the_bar_when_the_whole_interval_lies_above_two_points() -> None:
+    """A rise whose interval sits wholly above two points misses the bar however much good text is kept."""
+    builds = {
+        "baseline": ([_funnel("a", 500)], {"a": _kept(40, 960)}),
+        "loosened": ([_funnel("a", 0)], {"a": _kept(200, 800)}),
+    }
+    row = analysis.residual_rise_rows(builds, {"loosened": False})[0]
+
+    assert row["bad_rate_rise_low"] > analysis.MAX_BAD_RATE_RISE and not row["meets_bar"]
