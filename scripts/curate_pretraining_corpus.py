@@ -3,7 +3,7 @@
 Parses arguments and dispatches into `slm4ie.data.curate.run`, which owns the
 eight stages, their sentinels and the invalidation cascade.
 
-Seven subcommands:
+Eight subcommands:
 
 * `run` builds the corpus. With positional keys (e.g. `kzb solar`) it runs the
   four scoped stages (convert, language, quality, repetition) for the named
@@ -31,6 +31,10 @@ Seven subcommands:
 * `overlap` measures URL and sentence overlap between every pair of extracted
   corpora, the evidence behind the containment audit's measured verdicts.
   Read-only apart from the table and hash arrays it writes to `--out-dir`.
+* `classify` labels every document of the finished corpus with a saved domain
+  classifier, counts documents and words per source and label, notes which
+  judged-sample ids survived, and logs the totals as one MLflow run.
+  Read-only apart from the JSON file it writes to `--out`.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -71,6 +75,7 @@ Examples:
 
 import argparse
 import csv
+import json
 import logging
 import sys
 from pathlib import Path
@@ -92,7 +97,8 @@ from slm4ie.data.curate.inspect.sample import (
     draw_stratified_sample,
     resolve_sample_dir,
 )
-from slm4ie.data.curate.stages import CORPUS_STAGES
+from slm4ie.data.curate.inspect.supervised import label_corpus, track_corpus_labels
+from slm4ie.data.curate.stages import CORPUS_STAGES, STAGE_DIRS
 from slm4ie.utils.cli import add_keys, validate_keys
 
 
@@ -303,7 +309,27 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     overlap_parser.add_argument("--keep-one-in", type=int, default=16, help="Keep 1 in N sentence units by hash.")
     overlap_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Corpora scanned at once.")
 
+    classify_parser = subparsers.add_parser(
+        "classify",
+        help="Label every final-corpus document with a saved domain classifier and log the counts to MLflow.",
+    )
+    _add_common_arguments(classify_parser)
+    classify_parser.add_argument("--classifier", type=Path, required=True, help="A saved DomainClassifier pickle.")
+    classify_parser.add_argument("--gold", type=Path, required=True, help="Judged sample JSONL whose ids to look for.")
+    classify_parser.add_argument("--out", type=Path, required=True, help="JSON file for the per-source label counts.")
+    classify_parser.add_argument("--experiment", required=True, help="MLflow experiment, e.g. slm4ie/data/<slug>.")
+    classify_parser.add_argument("--run-name", required=True, help="MLflow run name.")
+    classify_parser.add_argument(
+        "--tag", action="append", default=[], metavar="KEY=VALUE", help="MLflow run tag; repeatable."
+    )
+    classify_parser.add_argument(
+        "--shards-per-source", type=int, default=None, help="Read only this many shards per source (smoke runs)."
+    )
+    classify_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards read at once.")
+
     args = parser.parse_args(argv)
+    if args.command == "classify" and any("=" not in tag for tag in args.tag):
+        parser.error(f"--tag takes KEY=VALUE, got {[tag for tag in args.tag if '=' not in tag]}")
     if args.command == "sample":
         validate_keys(parser, args, "datasets")
     if args.command == "run":
@@ -391,6 +417,38 @@ def main() -> None:
             workers=args.workers,
         )
         print(f"wrote {args.out_dir / 'overlap.csv'} ({len(rows)} pairs)")
+        return
+
+    if args.command == "classify":
+        setup = load_curate_config(args.input_dir, args.output_dir, args.config, args.extract_config)
+        stage_dir = resolve_sample_dir(args.config, args.output_dir) / STAGE_DIRS["sentence_dedup"]
+        with args.gold.open(encoding="utf-8") as handle:
+            gold_ids = frozenset(json.loads(line)["id"] for line in handle)
+        labels = label_corpus(
+            stage_dir,
+            args.classifier,
+            setup.stopwords,
+            gold_ids,
+            workers=args.workers,
+            shards_per_source=args.shards_per_source,
+        )
+        params = {
+            "stage_dir": stage_dir,
+            "classifier": args.classifier,
+            "gold": args.gold,
+            "shards_per_source": args.shards_per_source,
+            "workers": args.workers,
+        }
+        run_id = track_corpus_labels(
+            labels,
+            args.out,
+            stage_dir,
+            args.experiment,
+            args.run_name,
+            params,
+            dict(tag.split("=", 1) for tag in args.tag),
+        )
+        print(f"wrote {args.out}; MLflow run {run_id}")
         return
 
     if args.command == "status":

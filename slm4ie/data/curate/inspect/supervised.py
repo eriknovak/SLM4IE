@@ -16,13 +16,20 @@ alike, so a classifier measured on cut gold text labels corpus text the same
 way.
 
 The candidates and their settings live in the experiment's YAML config; see
-`load_candidate` for its shape.
+`load_candidate` for its shape. `label_corpus` runs a saved classifier over
+every document of a built corpus, counting documents and words per source and
+label, and `track_corpus_labels` logs that count as an MLflow run.
 """
 
+import gzip
+import json
+import multiprocessing
 import pickle
-from dataclasses import dataclass
+from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin, clone
@@ -33,6 +40,9 @@ from sklearn.model_selection import StratifiedGroupKFold, cross_val_predict
 from sklearn.pipeline import FeatureUnion, Pipeline
 from tqdm import tqdm
 
+from slm4ie.data.curate.lineage import read_sentinel
+from slm4ie.data.curate.stages.statistics import CorpusStats
+from slm4ie.utils import mlflow as ml
 from slm4ie.utils.config import load_yaml
 
 #: Turns a batch of texts into one vector per text.
@@ -317,3 +327,175 @@ def fit_classifier(
         pipeline=pipeline, regularisation=picked["regularisation"], max_chars=candidate.max_chars
     )
     return classifier, [{**row, "picked": row is picked} for row in rows]
+
+
+#: Documents labelled at once within a shard; bounds the feature matrix held in memory.
+LABEL_BATCH = 2_000
+
+#: Per-process state of a corpus pass: the classifier, the word counter and the gold ids.
+_labeller: Dict[str, Any] = {}
+
+
+@dataclass(frozen=True)
+class CorpusLabels:
+    """What a classifier pass over a corpus found.
+
+    Attributes:
+        documents: Documents per source and assigned label.
+        words: Words per source and assigned label, counted as the statistics stage counts them.
+        gold_ids: The gold document ids the corpus still holds.
+    """
+
+    documents: Dict[str, Dict[str, int]]
+    words: Dict[str, Dict[str, int]]
+    gold_ids: List[str]
+
+
+def _start_labeller(classifier_path: Path, stopwords: Set[str], gold_ids: FrozenSet[str]) -> None:
+    """Load the classifier and word counter once per worker process."""
+    _labeller["classifier"] = DomainClassifier.load(classifier_path)
+    _labeller["counter"] = CorpusStats(stopwords=stopwords)
+    _labeller["gold_ids"] = gold_ids
+
+
+def _label_batch(batch: List[Dict[str, Any]], documents: Counter, words: Counter) -> None:
+    """Label one batch of documents and add it to the per-label counts."""
+    labels = _labeller["classifier"].predict([document["text"] for document in batch])
+    for document, label in zip(batch, labels):
+        documents[label] += 1
+        # The statistics stage's own word rule, so tokens match the source-label counts.
+        words[label] += len(_labeller["counter"]._tokenize_words(document["text"]))
+
+
+def _label_shard(shard: Path) -> Tuple[Counter, Counter, List[str]]:
+    """Label every document of one shard.
+
+    Args:
+        shard: A gzipped JSONL shard of `Document` records.
+
+    Returns:
+        Documents and words per assigned label, and the gold ids the shard holds.
+    """
+    documents: Counter = Counter()
+    words: Counter = Counter()
+    found: List[str] = []
+    batch: List[Dict[str, Any]] = []
+    with gzip.open(shard, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            document = json.loads(line)
+            if document["id"] in _labeller["gold_ids"]:
+                found.append(document["id"])
+            batch.append(document)
+            if len(batch) == LABEL_BATCH:
+                _label_batch(batch, documents, words)
+                batch = []
+    if batch:
+        _label_batch(batch, documents, words)
+    return documents, words, found
+
+
+def label_corpus(
+    stage_dir: Path,
+    classifier_path: Path,
+    stopwords: Set[str],
+    gold_ids: FrozenSet[str],
+    workers: int,
+    shards_per_source: Optional[int] = None,
+) -> CorpusLabels:
+    """Label every document of a corpus stage with a saved classifier.
+
+    Args:
+        stage_dir: A stage folder holding one directory of gzipped JSONL shards per source.
+        classifier_path: A classifier `DomainClassifier.save` wrote.
+        stopwords: Words left out of the word counts, as the statistics stage leaves them out.
+        gold_ids: Gold document ids to look for, so a reader learns which survived.
+        workers: Shards labelled at once, one process each.
+        shards_per_source: Read only the first this many shards of each source, for a smoke run.
+
+    Returns:
+        Documents and words per source and label, and the gold ids found.
+
+    Raises:
+        FileNotFoundError: If `stage_dir` holds no shard.
+    """
+    sources = [folder for folder in sorted(stage_dir.iterdir()) if folder.is_dir()]
+    shards = [
+        (folder.name, shard) for folder in sources for shard in sorted(folder.glob("*.jsonl.gz"))[:shards_per_source]
+    ]
+    if not shards:
+        raise FileNotFoundError(f"no *.jsonl.gz shard under {stage_dir}")
+    documents: Dict[str, Counter] = {folder.name: Counter() for folder in sources}
+    words: Dict[str, Counter] = {folder.name: Counter() for folder in sources}
+    found: List[str] = []
+    # spawn: forking a process that already runs BLAS and tokenizer threads can deadlock the children.
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_start_labeller,
+        initargs=(classifier_path, stopwords, gold_ids),
+    ) as pool:
+        futures = {pool.submit(_label_shard, shard): source for source, shard in shards}
+        for future in tqdm(as_completed(futures), total=len(futures), desc="label shards", unit="shard"):
+            shard_documents, shard_words, shard_found = future.result()
+            documents[futures[future]].update(shard_documents)
+            words[futures[future]].update(shard_words)
+            found.extend(shard_found)
+    return CorpusLabels(
+        documents={source: dict(sorted(counts.items())) for source, counts in documents.items()},
+        words={source: dict(sorted(counts.items())) for source, counts in words.items()},
+        gold_ids=sorted(found),
+    )
+
+
+def track_corpus_labels(
+    labels: CorpusLabels,
+    destination: Path,
+    stage_dir: Path,
+    experiment: str,
+    run_name: str,
+    params: Mapping[str, Any],
+    tags: Mapping[str, str],
+) -> Optional[str]:
+    """Write a corpus pass's counts to JSON and log them as one MLflow run.
+
+    The run carries the documents and words per label summed over sources,
+    the JSON as an artifact, and the corpus stage as a dataset input keyed by
+    its sentinel's document digest.
+
+    Args:
+        labels: What `label_corpus` found.
+        destination: JSON file for the counts, its folder created.
+        stage_dir: The corpus stage the pass read.
+        experiment: MLflow experiment name, created when absent.
+        run_name: Display name of the run.
+        params: Settings the pass ran with.
+        tags: Run tags; the current commit is added as `base_commit`.
+
+    Returns:
+        The MLflow run id, or None when tracking is unavailable.
+
+    Raises:
+        FileNotFoundError: If `stage_dir` has no completed sentinel with a document digest.
+    """
+    sentinel = read_sentinel(stage_dir)
+    if sentinel is None or sentinel.document_digest is None:
+        raise FileNotFoundError(f"no completed sentinel with a document digest at {stage_dir}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(asdict(labels), indent=1), encoding="utf-8")
+    documents: Counter = sum((Counter(counts) for counts in labels.documents.values()), Counter())
+    words: Counter = sum((Counter(counts) for counts in labels.words.values()), Counter())
+    metrics = {
+        "documents": sum(documents.values()),
+        "words": sum(words.values()),
+        "gold_documents_kept": len(labels.gold_ids),
+        **{f"documents__{label}": count for label, count in documents.items()},
+        **{f"words__{label}": count for label, count in words.items()},
+    }
+    if not ml.ensure_experiment(experiment):
+        return None
+    with ml.mlflow_run(run_name, tags={**tags, "base_commit": ml.git_commit()}) as run:
+        ml.log_params(dict(params))
+        ml.log_metrics(metrics)
+        ml.log_artifact(destination)
+        ml.log_dataset_input(stage_dir.name, sentinel.document_digest, str(stage_dir), context="labelled")
+        return run.info.run_id

@@ -126,6 +126,17 @@ concluded:
 - **Code**: `slm4ie/data/curate/inspect/supervised.py::fit_classifier` (steps 1 and 2), `analysis.py::fit_or_load_candidate` (step 4), `analysis.py::write_gate_tables` with `analysis.py::label_predicted` (step 3), over the texts of `analysis.py::gold_texts`
 - **Settings**: `max_chars` (characters read per text), `regularisation` (the $C$ values tried), `folds` ($k$), `workers` (folds fitted at once), `seed` (the fold assignment), `max_iterations` (solver iterations before a fit is declared not converged); per candidate `features` (tfidf or embeddings), for tfidf `word_ngrams` (shortest and longest word n-gram), `char_ngrams` (shortest and longest character n-gram), `min_df` (documents an n-gram must occur in), `max_features` (n-grams kept per kind); for embeddings `model` (the encoder), `revision` (the hub commit loaded), `prefix` (text the encoder expects before each document), `batch_size` (documents encoded at once), `max_length` (tokens read per document); in `analysis.py`, `SUPERVISED_CANDIDATES` (the candidates read, in order)
 
+### M5 — Label every final-corpus document of both builds with the passing classifier
+
+- **Input**: the final stage of one build, after both dedup stages ([D1]); one item is one document, its text and its source. The tfidf fit of [M4] that passed the gate, saved under `final/classifier-supervised/tfidf.pkl`. The ids of the judged gold.
+- **Output**: per build, one JSON file under `final/` with the documents and words per source and assigned label, and the gold ids the build still holds, read by [M6] and [M7]. The same totals summed over sources, documents and words per label, are logged as one MLflow run per build.
+- **How**:
+  1. Read every shard of the stage, one process per shard, and label each document with the saved fit, which reads its first 2,000 characters ([M4], step 1).
+  2. Count each document under its source and its assigned label. Count its words as the statistics stage counts them, word tokens with at least one letter and two characters, stopwords left out, so tokens estimated as $t = 2w$ match [M1].
+  3. Note every gold id the stage still holds, so a gold document's true kept flag is known for this build.
+- **Code**: `slm4ie/data/curate/inspect/supervised.py::label_corpus` (steps 1 to 3), `slm4ie/data/curate/inspect/supervised.py::track_corpus_labels` (the JSON and the MLflow run), run by `scripts/curate_pretraining_corpus.py classify`
+- **Settings**: on the command line, `--classifier` (the saved fit), `--gold` (the judged sample whose ids are looked for), `--max-workers` (shards read at once), `--shards-per-source` (the first shards read per source, for a smoke run only); the stopword list from the build's curation config (`stopwords`)
+
 ## Decisions
 
 ### D1 — Read the targets on the loosened build, with the baseline beside it
