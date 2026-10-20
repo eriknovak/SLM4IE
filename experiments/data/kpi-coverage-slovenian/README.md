@@ -74,6 +74,19 @@ concluded:
 
 ## Methods
 
+### M1 — Count each source's documents after every curation stage of both builds
+
+- **Input**: each build's curation output folder. One item is one source at one stage, such as `kas` after the quality filter, with the documents that stage read and wrote. The counts come from the small completion file each per-source stage writes beside its output, from the exact-dedup stage's own files, and from the statistics stage's file per source.
+- **Output**: one row per build and source in `tables/funnel-documents-by-source.csv`. It carries the source's domain label and access from the dataset registry, its documents after each of the seven stages, its final words, estimated tokens and the share of its documents kept. The same counts summed over the sources sharing a domain label, with how many sources each sum spans, are in `tables/funnel-documents-by-domain.csv`, which Q1 and [M6] read.
+- **How**: documents are counted at every stage; words only at the last, since counting them at every stage means splitting every stage's text into words again.
+  1. For the five stages that run per source (convert, language, spam, quality, repetition), read each source's documents read and written from its completion file. Stop if a stage read other than what the stage before it wrote, the sign of a stage reused from another build.
+  2. Exact dedup runs over the whole corpus and records no per-source count, so count the documents in each source's files once. Cache the counts under this experiment's `interim/` with the stage's document digest, a hash of its output, and reuse them while the digest holds.
+  3. Take each source's documents and words after sentence dedup from the statistics stage; a source it has no file for lost its last document earlier and counts zero there. Its words leave out stopwords and punctuation. Estimate tokens as $t = 2w$, where $w$ is that word count, the conversion every KPI reading in the project uses.
+  4. Stop unless the per-source sums equal the counts both dedup stages recorded for the whole corpus.
+  5. Compute the share kept, $r = n_{\text{final}} / n_{\text{convert}}$, where $n_{\text{convert}}$ is the source's documents after conversion and $n_{\text{final}}$ after sentence dedup. Sum every count per build and domain label, and recompute $r$ on the sums.
+- **Code**: `analysis.py::funnel_source_rows`, summed by `analysis.py::funnel_domain_rows`
+- **Settings**: none; the stages counted are the pipeline's own
+
 ## Decisions
 
 ### D1 — Read the targets on the loosened build, with the baseline beside it

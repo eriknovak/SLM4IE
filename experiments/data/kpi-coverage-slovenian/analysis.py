@@ -14,6 +14,7 @@ Run it with:
 import csv
 import hashlib
 import json
+import logging
 import random
 import re
 import statistics
@@ -28,6 +29,9 @@ from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
+
+from slm4ie.data.curate.inspect.profile import cached_source_counts, iter_stage_sentinels
+from slm4ie.data.curate.lineage import read_sentinel
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -48,6 +52,33 @@ BUILDS: Dict[str, Path] = {
 }
 BUILD_COMMITS = {"loosened": "8e21f67", "baseline": "2ece205"}
 
+# The stages that stamp per-source counts in their sentinels, in pipeline order (M1).
+SCOPED_STAGES = ("00_convert", "01_language", "02_spam", "03_quality", "04_repetition")
+# Exact dedup runs over the whole corpus, so its per-source counts are read off its shards.
+COUNTED_STAGE = "05_exact_dedup"
+COUNT_WORKERS = 20
+
+
+def stage_column(stage: str) -> str:
+    """Name a funnel column after a stage folder, without the folder's order prefix.
+
+    Args:
+        stage: A stage folder name such as `03_quality`.
+
+    Returns:
+        The column name, such as `quality`.
+    """
+    return stage[3:]
+
+
+FUNNEL_COLUMNS = (
+    *(stage_column(stage) for stage in SCOPED_STAGES),
+    "exact_dedup",
+    "sentence_dedup",
+    "words_final",
+    "tokens_estimated",
+)
+
 GOLD_DATA = ROOT / "data" / "experiments" / "data" / "curation-quality-slovenian"
 GOLD_SAMPLE = GOLD_DATA / "interim" / "sample.jsonl"
 GOLD_VERDICTS = GOLD_DATA / "final" / "judge-verdicts-sample.jsonl"
@@ -59,8 +90,9 @@ CATALOGUE = HERE.parent / "data-landscape-slovenian" / "tables" / "catalogue.csv
 # The survey used the issue's domain names; the judge's label set (D2) renames three.
 CATALOGUE_DOMAINS = {"encyclopedic": "wiki", "forum/social": "forum", "general-web": "web"}
 
+EXPERIMENT_DATA = ROOT / "data" / "experiments" / "data" / "kpi-coverage-slovenian"
 # The gold's two halves (D3): the classifier is tuned on one and its gate is read on the other.
-SPLIT_DIR = ROOT / "data" / "experiments" / "data" / "kpi-coverage-slovenian" / "final" / "gold-tune-test-split"
+SPLIT_DIR = EXPERIMENT_DATA / "final" / "gold-tune-test-split"
 SPLIT_SEED = 20261020
 # Copies of one text are grouped on this many opening characters, so no copy lands on both sides.
 GROUP_CHARS = 500
@@ -82,7 +114,7 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     return path
@@ -101,18 +133,22 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def read_access(extract_config: Path) -> Dict[str, str]:
-    """Read whether each source may be redistributed.
+def read_sources(extract_config: Path) -> Dict[str, Dict[str, str]]:
+    """Read each source's domain label and whether it may be redistributed.
 
     Args:
         extract_config: `configs/data/extract.yaml`.
 
     Returns:
-        `open` or `gated` per source.
+        `domain` and `access` (`open` or `gated`) per source.
     """
     catalog = yaml.safe_load(extract_config.read_text(encoding="utf-8")) or {}
     entries = catalog.get("datasets", catalog)
-    return {key: (entry or {}).get("access", "open") for key, entry in entries.items() if isinstance(entry, dict)}
+    return {
+        key: {"domain": entry["domain"], "access": entry.get("access", "open")}
+        for key, entry in entries.items()
+        if isinstance(entry, dict)
+    }
 
 
 def check_build_commit(build: str, pretrain_dir: Path) -> None:
@@ -125,44 +161,170 @@ def check_build_commit(build: str, pretrain_dir: Path) -> None:
     Raises:
         ValueError: If the statistics sentinel names another commit.
     """
-    sentinel = json.loads((pretrain_dir / "07_statistics" / ".complete").read_text(encoding="utf-8"))
-    commit = (sentinel.get("info") or {}).get("git_commit", "unknown")
+    sentinel = read_sentinel(pretrain_dir / "07_statistics")
+    commit = sentinel.info.get("git_commit", "unknown") if sentinel else "unknown"
     if not commit.startswith(BUILD_COMMITS[build]):
         raise ValueError(f"{build} build statistics written at {commit}, record names {BUILD_COMMITS[build]}")
 
 
-def build_rows(builds: Dict[str, Path], access: Dict[str, str]) -> List[Dict[str, Any]]:
+def build_rows(builds: Dict[str, Path], sources: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
     """Read the final-stage size of every source in each build.
 
     Args:
         builds: Curation output folder per build name.
-        access: `open` or `gated` per source.
+        sources: `domain` and `access` per source, from `read_sources`.
 
     Returns:
-        One row per build and source with its domain, access, documents,
+        One row per build and source with its domain label, access, documents,
         words, mean words per document and estimated tokens.
     """
     rows: List[Dict[str, Any]] = []
     for build, pretrain_dir in builds.items():
         check_build_commit(build, pretrain_dir)
         aggregate = json.loads((pretrain_dir / "07_statistics" / "aggregate.json").read_text(encoding="utf-8"))
-        for path in sorted((pretrain_dir / "07_statistics" / "per_dataset").glob("*.json")):
-            source = json.loads(path.read_text(encoding="utf-8"))
+        for source, final in read_final_statistics(pretrain_dir).items():
             rows.append(
                 {
                     "build": build,
-                    "source": source["dataset"],
-                    "domain": source["domain"],
-                    "access": access[source["dataset"]],
-                    "documents": source["doc_count"],
-                    "words": source["word_count"],
-                    "mean_words_per_document": round(source["avg_doc_words"], 1),
-                    "tokens_estimated": source["word_count"] * TOKENS_PER_WORD,
+                    "source": source,
+                    "source_domain": sources[source]["domain"],
+                    "access": sources[source]["access"],
+                    "documents": final["doc_count"],
+                    "words": final["word_count"],
+                    "mean_words_per_document": round(final["avg_doc_words"], 1),
+                    "tokens_estimated": final["word_count"] * TOKENS_PER_WORD,
                 }
             )
         totals = [row for row in rows if row["build"] == build]
         if sum(row["documents"] for row in totals) != aggregate["total_docs"]:
             raise ValueError(f"{build} per-source documents do not sum to the aggregate {aggregate['total_docs']}")
+    return rows
+
+
+def read_final_statistics(pretrain_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """Read the statistics stage's file per source.
+
+    Args:
+        pretrain_dir: The build's curation output folder.
+
+    Returns:
+        The statistics per source, in source order. A source that reached the
+        final corpus with no document has no file and is absent.
+    """
+    files = sorted((pretrain_dir / "07_statistics" / "per_dataset").glob("*.json"))
+    return {path.stem: json.loads(path.read_text(encoding="utf-8")) for path in files}
+
+
+def funnel_source_rows(
+    build: str, pretrain_dir: Path, exact_counts: Dict[str, int], sources: Dict[str, Dict[str, str]]
+) -> List[Dict[str, Any]]:
+    """Follow each source's documents through every curation stage of one build.
+
+    The per-source stages stamp the documents they read and wrote in their
+    sentinels; exact dedup is counted off its shards; the final stage's
+    documents and words come from the statistics stage, which writes no file
+    for a source that lost its last document earlier, so such a source ends at
+    zero rather than vanishing.
+
+    Args:
+        build: Build name.
+        pretrain_dir: The build's curation output folder.
+        exact_counts: Documents per source after exact dedup, from `cached_source_counts`.
+        sources: `domain` and `access` per source, from `read_sources`.
+
+    Returns:
+        One row per converted source with its documents after every stage, its
+        final words and estimated tokens, and the share of its converted
+        documents that reached the final corpus.
+
+    Raises:
+        ValueError: If a stage read other than what the stage before it wrote,
+            or the statistics stage names a source no stage converted.
+    """
+    scoped: Dict[str, Dict[str, Tuple[int, int]]] = defaultdict(dict)
+    for stage, source, read, written in iter_stage_sentinels(pretrain_dir, SCOPED_STAGES):
+        scoped[source][stage] = (read, written)
+    finals = read_final_statistics(pretrain_dir)
+    if unconverted := sorted(set(finals) - set(scoped)):
+        raise ValueError(f"{build}: statistics name sources no stage converted: {unconverted}")
+    rows: List[Dict[str, Any]] = []
+    for source in sorted(scoped):
+        row: Dict[str, Any] = {
+            "build": build,
+            "source": source,
+            "source_domain": sources[source]["domain"],
+            "access": sources[source]["access"],
+        }
+        previous = None
+        for stage in SCOPED_STAGES:
+            read, written = scoped[source][stage]
+            if previous is not None and read != previous:
+                raise ValueError(f"{build} {source}: {stage} read {read} documents, the stage before wrote {previous}")
+            row[stage_column(stage)] = previous = written
+        final = finals.get(source, {"doc_count": 0, "word_count": 0})
+        row["exact_dedup"] = exact_counts.get(source, 0)
+        row["sentence_dedup"] = final["doc_count"]
+        row["words_final"] = final["word_count"]
+        row["tokens_estimated"] = final["word_count"] * TOKENS_PER_WORD
+        row["retained"] = round(row["sentence_dedup"] / row["convert"], 4)
+        rows.append(row)
+    check_corpus_stages(build, pretrain_dir, rows)
+    return rows
+
+
+def check_corpus_stages(build: str, pretrain_dir: Path, rows: List[Dict[str, Any]]) -> None:
+    """Fail unless the per-source counts add up to what the two dedup stages recorded.
+
+    Args:
+        build: Build name.
+        pretrain_dir: The build's curation output folder.
+        rows: Rows from `funnel_source_rows`.
+
+    Raises:
+        ValueError: If a column's sum differs from the corpus-wide sentinel.
+    """
+    exact = read_sentinel(pretrain_dir / COUNTED_STAGE)
+    sentence = read_sentinel(pretrain_dir / "06_sentence_dedup")
+    if exact is None or sentence is None:
+        raise ValueError(f"{build}: a dedup stage under {pretrain_dir} has no completed sentinel")
+    expected = [
+        ("repetition", exact.records_in),
+        ("exact_dedup", exact.records_out),
+        ("exact_dedup", sentence.records_in),
+        ("sentence_dedup", sentence.records_out),
+    ]
+    for column, total in expected:
+        counted = sum(row[column] for row in rows)
+        if counted != total:
+            raise ValueError(
+                f"{build}: per-source {column} documents sum to {counted}, the dedup sentinels record {total}"
+            )
+
+
+def funnel_domain_rows(source_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sum the per-source funnel over the sources sharing a domain label.
+
+    Args:
+        source_rows: Rows from `funnel_source_rows`, any number of builds.
+
+    Returns:
+        One row per build and source domain, largest final corpus first, with
+        its source count, its documents after every stage, its final words and
+        estimated tokens, and the share of its converted documents kept.
+    """
+    totals: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for row in source_rows:
+        total = totals.setdefault(
+            (row["build"], row["source_domain"]),
+            {"build": row["build"], "source_domain": row["source_domain"], "sources": 0}
+            | dict.fromkeys(FUNNEL_COLUMNS, 0),
+        )
+        total["sources"] += 1
+        for column in FUNNEL_COLUMNS:
+            total[column] += row[column]
+    rows = sorted(totals.values(), key=lambda total: (total["build"], -total["tokens_estimated"]))
+    for row in rows:
+        row["retained"] = round(row["sentence_dedup"] / row["convert"], 4)
     return rows
 
 
@@ -402,12 +564,24 @@ def draw_gold_figure(rows: List[Dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    """Write the dataset statistics tables and figure, and print the totals."""
-    builds = build_rows(BUILDS, read_access(EXTRACT_CONFIG))
+    """Write the dataset statistics, the per-stage funnel tables and the figure, and print the totals."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    sources = read_sources(EXTRACT_CONFIG)
+    builds = build_rows(BUILDS, sources)
     write_csv(TABLES_DIR / "dataset-builds-statistics.csv", builds)
     for build in BUILDS:
         documents = sum(row["documents"] for row in builds if row["build"] == build)
         print(f"{build}: {documents:,} documents in the final corpus")
+
+    funnel: List[Dict[str, Any]] = []
+    for build, pretrain_dir in BUILDS.items():
+        cache = EXPERIMENT_DATA / "interim" / f"{build}-build-exact-dedup-counts.json"
+        exact_counts = cached_source_counts(pretrain_dir / COUNTED_STAGE, cache, COUNT_WORKERS)
+        funnel += funnel_source_rows(build, pretrain_dir, exact_counts, sources)
+    write_csv(TABLES_DIR / "funnel-documents-by-source.csv", funnel)
+    domains = funnel_domain_rows(funnel)
+    write_csv(TABLES_DIR / "funnel-documents-by-domain.csv", domains)
+    print(f"funnel: {len(funnel)} source rows and {len(domains)} domain rows over {len(BUILDS)} builds")
 
     check_frozen(GOLD_VERDICTS, json.loads(GOLD_META.read_text(encoding="utf-8"))["sha256"])
     check_frozen(GOLD_SAMPLE, GOLD_SAMPLE_SHA256)
