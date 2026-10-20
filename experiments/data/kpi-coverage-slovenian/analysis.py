@@ -22,8 +22,9 @@ import statistics
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 
+import sklearn
 import yaml
 from datachart.charts import BarChart
 from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
@@ -31,8 +32,12 @@ from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
 
+from slm4ie.data.curate.inspect.domains import DecisionRule, DomainLexicons, assign_domain, load_lexicons, score_text
+from slm4ie.data.curate.inspect.judge import DOMAINS
 from slm4ie.data.curate.inspect.profile import cached_source_counts, iter_stage_sentinels
+from slm4ie.data.curate.inspect.supervised import DomainClassifier, fit_classifier, load_candidate
 from slm4ie.data.curate.lineage import read_sentinel
+from slm4ie.utils.config import load_yaml
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -108,6 +113,43 @@ SEED_TOP = 150
 SEED_MIN_COUNT = 5
 SEED_MIN_CHARS = 2
 SEED_PRIOR = 0.01
+
+#: The lexicon classifier's config; its rule must carry the tune-side pick (M3).
+LEXICON_CONFIG = HERE / "configs" / "classifier-lexicon.yaml"
+#: The hash of the lexicons the test side was first read with; a changed lexicon reads it again.
+LEXICON_FREEZE = EXPERIMENT_DATA / "final" / "classifier-lexicon.frozen.json"
+#: The supervised candidates tried when the lexicons fail the gate (M4), and where each fit is kept.
+SUPERVISED_CONFIG = HERE / "configs" / "classifier-supervised.yaml"
+SUPERVISED_CANDIDATES: Tuple[str, ...] = ("tfidf", "embeddings")
+SUPERVISED_MODELS = EXPERIMENT_DATA / "final" / "classifier-supervised"
+#: The thresholds and margins searched on the tune side, in weighted hits per thousand words.
+GRID_THRESHOLDS: Tuple[float, ...] = tuple(float(value) for value in range(0, 101, 5))
+GRID_MARGINS: Tuple[float, ...] = tuple(float(value) for value in range(0, 41, 5))
+#: The gate's floors on the test side (D3), and the domain whose precision it reads off that domain's own source.
+GATE_MACRO_F1 = 0.7
+GATE_PRECISION = 0.8
+GATE_DOMAIN = "medical"
+#: Judge labels folded into one for scoring and fitting (D2): both are science writing, and the judge's
+#: line between them is the classifier's largest confusion.
+LABEL_MERGE: Dict[str, str] = {"scientific": "science", "academic": "science"}
+#: The labels scored, the judge's order with the merged ones collapsed into one at the first's place.
+LABELS: Tuple[str, ...] = tuple(dict.fromkeys(LABEL_MERGE.get(label, label) for label in DOMAINS))
+#: Scores and metrics are tabled, and rules compared, at this many decimals.
+DECIMALS = 4
+
+
+class Labelled(NamedTuple):
+    """One labelled gold document.
+
+    Attributes:
+        judge: The judge's domain.
+        assigned: The label the rule assigned.
+        fallback: The label it keeps when no domain clears the rule, its source label mapped.
+    """
+
+    judge: str
+    assigned: str
+    fallback: str
 
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
@@ -529,6 +571,383 @@ def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Di
     return rows
 
 
+def gold_texts(sample_path: Path, gold: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Read the text of every judged document.
+
+    Args:
+        sample_path: The judged sample.
+        gold: Rows from `gold_documents`, naming the documents wanted.
+
+    Returns:
+        Each document's text by its id, in the sample's order.
+    """
+    wanted = {document["id"] for document in gold}
+    return {document["id"]: document["text"] for document in read_jsonl(sample_path) if document["id"] in wanted}
+
+
+def merge_label(label: str) -> str:
+    """Return the label a judge or classifier label is scored as, folding the merged ones ([D2])."""
+    return LABEL_MERGE.get(label, label)
+
+
+def score_gold(texts: Dict[str, str], gold: List[Dict[str, Any]], lexicons: DomainLexicons) -> List[Dict[str, Any]]:
+    """Score every judged document against the lexicons once, so every rule is read on the same scores.
+
+    Args:
+        texts: Each judged document's text by id, from `gold_texts`.
+        gold: Rows from `gold_documents`, for each document's judge domain and source label.
+        lexicons: The compiled lexicons.
+
+    Returns:
+        One row per judged document with its id, judge domain, the label it
+        keeps when no domain clears the rule, its score per domain and its
+        word count.
+    """
+    rows = []
+    for document in gold:
+        scores, words = score_text(texts[document["id"]], lexicons)
+        rows.append(
+            {
+                "id": document["id"],
+                "judge_domain": merge_label(document["judge_domain"]),
+                "fallback": merge_label(lexicons.fallback_label(document["source_domain"])),
+                "scores": scores,
+                "words": words,
+            }
+        )
+    return rows
+
+
+def label_scored(scored: List[Dict[str, Any]], rule: DecisionRule) -> List[Labelled]:
+    """Read one decision rule over scored documents.
+
+    Args:
+        scored: Rows from `score_gold`.
+        rule: The threshold, margin and length floor to read them with.
+
+    Returns:
+        Per document, its judge domain, the label the rule assigns and its fallback label.
+    """
+    return [
+        Labelled(
+            row["judge_domain"],
+            merge_label(assign_domain(row["scores"], row["words"], rule, row["fallback"])),
+            row["fallback"],
+        )
+        for row in scored
+    ]
+
+
+def label_metrics(labelled: List[Labelled], labels: Tuple[str, ...]) -> Dict[str, Dict[str, float]]:
+    """Compute precision, recall and F1 per label.
+
+    Args:
+        labelled: Judge domain, assigned label and fallback label per document.
+        labels: The labels to report, each present whether or not it occurs.
+
+    Returns:
+        Per label, its gold documents, how many documents were assigned it,
+        and its precision, recall and F1, zero where undefined.
+    """
+    gold_count = Counter(row.judge for row in labelled)
+    assigned_count = Counter(row.assigned for row in labelled)
+    correct = Counter(row.judge for row in labelled if row.judge == row.assigned)
+    metrics = {}
+    for label in labels:
+        precision = correct[label] / assigned_count[label] if assigned_count[label] else 0.0
+        recall = correct[label] / gold_count[label] if gold_count[label] else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        metrics[label] = {
+            "documents": gold_count[label],
+            "assigned": assigned_count[label],
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+    return metrics
+
+
+def macro_f1(metrics: Dict[str, Dict[str, float]]) -> float:
+    """Average F1 over every label of `label_metrics`, each label counting once whatever its size."""
+    return statistics.mean(label["f1"] for label in metrics.values())
+
+
+def off_source(labelled: List[Labelled], label: str) -> List[Labelled]:
+    """Keep the documents whose fallback label is not `label`, where only the lexicons can assign it."""
+    return [row for row in labelled if row.fallback != label]
+
+
+def rounded(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Round every float of a table row to `DECIMALS`, leaving counts and labels as they are."""
+    return {key: round(value, DECIMALS) if isinstance(value, float) else value for key, value in row.items()}
+
+
+def rule_grid_rows(
+    scored: List[Dict[str, Any]], min_words: int, thresholds: Tuple[float, ...], margins: Tuple[float, ...]
+) -> List[Dict[str, Any]]:
+    """Read every threshold and margin pair on the tune side and mark the pick.
+
+    The pick is the pair with the highest macro-F1; ties go to the higher
+    medical precision, then to the lower threshold, then the lower margin, so
+    equal fits prefer the rule that assigns more documents.
+
+    Args:
+        scored: Tune-side rows from `score_gold`.
+        min_words: The length floor, fixed by the config.
+        thresholds: The thresholds to try.
+        margins: The margins to try.
+
+    Returns:
+        One row per pair with its macro-F1 and medical precision, and whether it is the pick.
+    """
+    rows = []
+    for threshold in thresholds:
+        for margin in margins:
+            metrics = label_metrics(label_scored(scored, DecisionRule(threshold, margin, min_words)), LABELS)
+            rows.append(
+                rounded(
+                    {
+                        "threshold": threshold,
+                        "margin": margin,
+                        "macro_f1": macro_f1(metrics),
+                        f"{GATE_DOMAIN}_precision": metrics[GATE_DOMAIN]["precision"],
+                    }
+                )
+            )
+    picked = max(
+        rows, key=lambda row: (row["macro_f1"], row[f"{GATE_DOMAIN}_precision"], -row["threshold"], -row["margin"])
+    )
+    return [{**row, "picked": row is picked} for row in rows]
+
+
+def check_rule_tuned(rule: DecisionRule, grid: List[Dict[str, Any]], config_path: Path) -> None:
+    """Stop unless the config's rule is the tune-side pick, so the test side is never read on an untuned rule.
+
+    Args:
+        rule: The rule the config carries.
+        grid: Rows from `rule_grid_rows`, one of them marked as the pick.
+        config_path: The config, named in the error.
+
+    Raises:
+        ValueError: If the config's threshold or margin differs from the pick.
+    """
+    picked = next(row for row in grid if row["picked"])
+    if (rule.threshold, rule.margin) != (picked["threshold"], picked["margin"]):
+        raise ValueError(
+            f"{config_path.name} rule threshold={rule.threshold:g} margin={rule.margin:g} is not the tune-side pick "
+            f"threshold={picked['threshold']:g} margin={picked['margin']:g}; write the pick into the config"
+        )
+
+
+def settings_digest(settings: Any) -> str:
+    """Hash a JSON-serialisable value, the same way wherever a read is frozen."""
+    return hashlib.sha256(json.dumps(settings, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def check_lexicons_frozen(config_path: Path, freeze_path: Path) -> None:
+    """Freeze the lexicons at the first test-side read, and stop when a later run reads it with other lexicons.
+
+    Args:
+        config_path: The classifier config; its `weights` and `lexicons` are hashed.
+        freeze_path: Where the hash is kept, written when missing.
+
+    Raises:
+        ValueError: If the lexicons differ from the frozen ones.
+    """
+    config = load_yaml(config_path)
+    digest = settings_digest({key: config[key] for key in ("weights", "lexicons")})
+    if not freeze_path.exists():
+        freeze_path.parent.mkdir(parents=True, exist_ok=True)
+        note = "The lexicons the test side was first read with (M3); a changed lexicon reads it again."
+        freeze_path.write_text(json.dumps({"sha256": digest, "note": note}, indent=2) + "\n", encoding="utf-8")
+        return
+    expected = json.loads(freeze_path.read_text(encoding="utf-8"))["sha256"]
+    if digest != expected:
+        raise ValueError(
+            f"{config_path.name} lexicons hash to {digest}, frozen as {expected} in {freeze_path} when the test side "
+            "was first read; a changed lexicon reads the test side again, which D3 allows only by decision"
+        )
+
+
+def gate_rows(labelled_by_side: Dict[str, List[Labelled]], settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Read the gate's two numbers per side of the gold, with medical precision also off its own source.
+
+    Args:
+        labelled_by_side: `tune` and `test` to their labelled documents.
+        settings: The classifier settings picked on the tune side, one column each.
+
+    Returns:
+        One row per side with the settings, macro-F1, medical precision over
+        all documents and over those whose source is not the medical one,
+        and whether both floors are met.
+    """
+    rows = []
+    for side, labelled in labelled_by_side.items():
+        metrics = label_metrics(labelled, LABELS)
+        off_source_metrics = label_metrics(off_source(labelled, GATE_DOMAIN), LABELS)[GATE_DOMAIN]
+        row = rounded(
+            {
+                "side": side,
+                "documents": len(labelled),
+                **settings,
+                "macro_f1": macro_f1(metrics),
+                f"{GATE_DOMAIN}_precision": metrics[GATE_DOMAIN]["precision"],
+                f"{GATE_DOMAIN}_precision_off_source": off_source_metrics["precision"],
+                f"{GATE_DOMAIN}_recall_off_source": off_source_metrics["recall"],
+            }
+        )
+        row["passes_gate"] = (
+            row["macro_f1"] >= GATE_MACRO_F1 and row[f"{GATE_DOMAIN}_precision_off_source"] >= GATE_PRECISION
+        )
+        rows.append(row)
+    return rows
+
+
+def fit_or_load_candidate(
+    name: str, config_path: Path, tune: List[Dict[str, Any]], sample_sha256: str, models_dir: Path
+) -> Tuple[DomainClassifier, List[Dict[str, Any]]]:
+    """Fit a supervised candidate on the tune side once, and reuse the saved fit after.
+
+    The saved fit is what the test side is read with, so a change to anything
+    it was fitted from stops the analysis rather than refit in silence;
+    deleting the saved fit is the deliberate way to read the test side again.
+
+    Args:
+        name: The candidate's key in the config.
+        config_path: The supervised classifier config.
+        tune: The tune-side documents, each with its id, text, judge domain and copy group.
+        sample_sha256: The hash of the judged sample the texts come from.
+        models_dir: Where the fit and its regularisation grid are kept.
+
+    Returns:
+        The fitted classifier and its grid, one row per regularisation strength.
+
+    Raises:
+        ValueError: If the saved fit came from other settings, documents or library than now.
+    """
+    config = load_yaml(config_path)
+    digest = settings_digest(
+        {
+            "settings": {key: value for key, value in config.items() if key != "candidates"},
+            "candidate": config["candidates"][name],
+            "sample_sha256": sample_sha256,
+            "tune": [(document["id"], document["judge_domain"]) for document in tune],
+            "scikit-learn": sklearn.__version__,
+        }
+    )
+    model_path = models_dir / f"{name}.pkl"
+    grid_path = models_dir / f"{name}.grid.json"
+    if model_path.exists():
+        saved = json.loads(grid_path.read_text(encoding="utf-8"))
+        if saved["sha256"] != digest:
+            raise ValueError(
+                f"candidate '{name}' was fitted from inputs hashing to {saved['sha256']}, which now hash to {digest}; "
+                f"delete {model_path} to refit, which reads the test side again"
+            )
+        return DomainClassifier.load(model_path), saved["grid"]
+    classifier, grid = fit_classifier(
+        [document["text"] for document in tune],
+        [document["judge_domain"] for document in tune],
+        [document["group"] for document in tune],
+        LABELS,
+        load_candidate(config_path, name),
+    )
+    classifier.save(model_path)
+    grid_path.write_text(json.dumps({"sha256": digest, "grid": grid}, indent=2) + "\n", encoding="utf-8")
+    return classifier, grid
+
+
+def label_predicted(scored: List[Dict[str, Any]], predicted: List[str]) -> List[Labelled]:
+    """Pair each gold document with the label a classifier gave it.
+
+    Args:
+        scored: Rows from `score_gold`, for the judge domain and fallback label.
+        predicted: One label per row, in the same order.
+
+    Returns:
+        The labelled documents.
+    """
+    return [Labelled(row["judge_domain"], label, row["fallback"]) for row, label in zip(scored, predicted)]
+
+
+def write_gate_tables(name: str, labelled: Dict[str, List[Labelled]], settings: Dict[str, Any]) -> bool:
+    """Write one classifier's gate, per-domain and confusion tables and print its test-side verdict.
+
+    Args:
+        name: The classifier's name, the stem of its tables.
+        labelled: `tune` and `test` to their labelled documents.
+        settings: The settings picked on the tune side, tabled beside the gate.
+
+    Returns:
+        Whether the classifier passes the gate on the test side.
+    """
+    gate = gate_rows(labelled, settings)
+    write_csv(TABLES_DIR / f"classifier-{name}-gate.csv", gate)
+    write_csv(TABLES_DIR / f"classifier-{name}-gate-by-domain.csv", gate_domain_rows(labelled))
+    write_csv(TABLES_DIR / f"classifier-{name}-confusion-by-domain.csv", confusion_rows(labelled))
+    test_gate = next(row for row in gate if row["side"] == "test")
+    verdict = "passes" if test_gate["passes_gate"] else "fails"
+    print(
+        f"{name} gate: test macro-F1 {test_gate['macro_f1']:.3f}, {GATE_DOMAIN} precision off its source "
+        f"{test_gate[f'{GATE_DOMAIN}_precision_off_source']:.3f}, {verdict}"
+    )
+    return bool(test_gate["passes_gate"])
+
+
+def gate_domain_rows(labelled_by_side: Dict[str, List[Labelled]]) -> List[Dict[str, Any]]:
+    """Table precision, recall and F1 per judge domain and side, over all documents and off the domain's own source.
+
+    Args:
+        labelled_by_side: `tune` and `test` to their rows from `label_scored`.
+
+    Returns:
+        One row per side and domain in the judge's label order.
+    """
+    rows = []
+    for side, labelled in labelled_by_side.items():
+        metrics = label_metrics(labelled, LABELS)
+        for domain in LABELS:
+            off_source_metrics = label_metrics(off_source(labelled, domain), LABELS)[domain]
+            rows.append(
+                rounded(
+                    {
+                        "side": side,
+                        "judge_domain": domain,
+                        "documents": metrics[domain]["documents"],
+                        "assigned": metrics[domain]["assigned"],
+                        "precision": metrics[domain]["precision"],
+                        "recall": metrics[domain]["recall"],
+                        "f1": metrics[domain]["f1"],
+                        "off_source_documents": off_source_metrics["documents"],
+                        "off_source_assigned": off_source_metrics["assigned"],
+                        "off_source_precision": off_source_metrics["precision"],
+                        "off_source_recall": off_source_metrics["recall"],
+                    }
+                )
+            )
+    return rows
+
+
+def confusion_rows(labelled_by_side: Dict[str, List[Labelled]]) -> List[Dict[str, Any]]:
+    """Count, per side, the documents of each judge domain under each assigned label.
+
+    Args:
+        labelled_by_side: `tune` and `test` to their rows from `label_scored`.
+
+    Returns:
+        One row per side, judge domain and assigned label, zeros included.
+    """
+    rows = []
+    for side, labelled in labelled_by_side.items():
+        counts = Counter((row.judge, row.assigned) for row in labelled)
+        rows += [
+            {"side": side, "judge_domain": judge, "assigned_domain": assigned, "documents": counts[judge, assigned]}
+            for judge in LABELS
+            for assigned in LABELS
+        ]
+    return rows
+
+
 def gold_rows(gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[str, Any]]:
     """Summarise the judged gold per judge domain.
 
@@ -660,6 +1079,36 @@ def main() -> None:
     seed = lexicon_seed_rows(GOLD_SAMPLE, documents, side_of)
     write_csv(TABLES_DIR / "classifier-lexicon-seed-words-by-domain.csv", seed)
     print(f"lexicon seed: {len(seed)} ranked words over {len({row['judge_domain'] for row in seed})} judge domains")
+
+    lexicons = load_lexicons(LEXICON_CONFIG)
+    texts = gold_texts(GOLD_SAMPLE, documents)
+    scored = score_gold(texts, documents, lexicons)
+    by_side = {side: [row for row in scored if side_of[row["id"]] == side] for side in ("tune", "test")}
+    rule_grid = rule_grid_rows(by_side["tune"], lexicons.rule.min_words, GRID_THRESHOLDS, GRID_MARGINS)
+    write_csv(TABLES_DIR / "classifier-lexicon-gate-by-rule.csv", rule_grid)
+    check_rule_tuned(lexicons.rule, rule_grid, LEXICON_CONFIG)
+    check_lexicons_frozen(LEXICON_CONFIG, LEXICON_FREEZE)
+    lexicon_labelled = {side: label_scored(rows, lexicons.rule) for side, rows in by_side.items()}
+    rule = lexicons.rule
+    lexicon_passes = write_gate_tables(
+        "lexicon", lexicon_labelled, {"threshold": rule.threshold, "margin": rule.margin, "min_words": rule.min_words}
+    )
+
+    group_of = {document["id"]: document["group"] for document in documents}
+    tune = [
+        {"id": row["id"], "text": texts[row["id"]], "judge_domain": row["judge_domain"], "group": group_of[row["id"]]}
+        for row in by_side["tune"]
+    ]
+    for name in SUPERVISED_CANDIDATES if not lexicon_passes else ():
+        classifier, regularisation_grid = fit_or_load_candidate(
+            name, SUPERVISED_CONFIG, tune, GOLD_SAMPLE_SHA256, SUPERVISED_MODELS
+        )
+        write_csv(TABLES_DIR / f"classifier-{name}-gate-by-regularisation.csv", regularisation_grid)
+        candidate_labelled = {
+            side: label_predicted(rows, classifier.predict([texts[row["id"]] for row in rows]))
+            for side, rows in by_side.items()
+        }
+        write_gate_tables(name, candidate_labelled, {"regularisation": classifier.regularisation})
 
     catalogue = catalogue_rows(CATALOGUE)
     write_csv(TABLES_DIR / "dataset-catalogue-statistics.csv", catalogue)

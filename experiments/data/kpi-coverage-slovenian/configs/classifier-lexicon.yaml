@@ -23,10 +23,10 @@ weights:
   strong: 3
   weak: 1
 
-# Placeholders until the tune-half search (M3) writes the picked values.
+# Threshold and margin are the tune-side pick of the M3 grid (tables/classifier-lexicon-gate-by-rule.csv).
 rule:
   threshold: 60     # weighted hits per thousand words the leader must reach
-  margin: 10        # lead over the runner-up it must hold
+  margin: 15        # lead over the runner-up it must hold
   min_words: 50     # shorter texts keep their source label: one strong hit would clear the threshold alone
 
 # Source labels outside the thirteen judge labels and the label they count as.
