@@ -22,6 +22,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Quadratic-weighted κ** (weighted kappa): Cohen's κ for an ordered scale such as 1-5, where a disagreement costs the square of its distance, so a one-point miss counts far less than a three-point one.
 - **Wilson interval** (Wilson score interval): a confidence interval for a share that, unlike the textbook one, never runs below 0 or above 1, which matters for shares near either end.
 - **Drop precision**: of the documents a curation stage dropped, the share judged bad text; high means the stage removes what it should.
+- **Target precision**: of the documents a content filter dropped, the share judged to carry what that filter is built to catch — not Slovene for the language filter, spam for the spam filter, ill-formed text for the quality filter, repeated furniture for the repetition filter.
 - **Residual bad rate**: of the documents a curation stage kept, the share judged bad text; what the stage failed to catch.
 - **Kept win rate**: of the pairs of one kept and one dropped document from the same source and stage, the share where the judge prefers the kept one in both presentation orders.
 - **Order disagreement**: the share of pairs whose answer changes when the two documents swap places; it measures the judge's position bias.
@@ -33,6 +34,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Out-of-vocabulary rate** (OOV rate): the share of alphabetic tokens a lexicon does not list; names, foreign words, code and encoding damage all count as out of vocabulary.
 - **CPU hours**: processor time a step consumed, summed over its tasks; comparable between steps and machines.
 - **Wall hours** (wall clock): elapsed time a step took on the machine that ran it, at the worker count it was given.
+- **Agresti–Coull interval** (Agresti–Coull adjustment): a normal-approximation confidence interval for a share that first adds about two successes and two failures, so a share of 0 or 1 still gets a width; summed over independent shares, it gives the interval on a total such as bad text gained.
 
 ## Terms
 
@@ -40,8 +42,10 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Curation pipeline**: the eight stages that turn extracted text into the pretraining corpus, in order convert, language, spam, quality, repetition, exact dedup, sentence dedup and statistics; the six from language to sentence dedup each keep or drop every document.
 - **Content filter**: one of the four curation stages that judge a document's content — the language, spam, quality and repetition filters — as opposed to the two dedup stages, which remove copies.
 - **Gopher heuristics** (Gopher-style): the rule-based quality and repetition filters published with DeepMind's Gopher model — thresholds on document length, word length, symbol ratios and repeated n-grams, tuned on English web text.
-- **Raw web crawl**: a source scraped from the open web with little editing — here c4, cc100, culturax, fineweb2, hplt, macocu_sl, classla_web_sl and finepdf.
-- **Curated source**: a source assembled or edited by people for a purpose — here the parliamentary, medical, legal, scientific, news, wiki and reference corpora.
+- **Letter rule** (letter share): the Gopher quality rule that most words contain a letter, meant to catch tables of numbers and symbol junk; the letter share is the share of a document's words that contain a letter, and the rule drops the document when it falls under 0.8.
+- **Route** (curation route, raw-crawl route, curated-prose route, medical-and-academic route): a named set of content-filter settings that every source of one kind shares in the curation pipeline, so a web crawl and an edited corpus are filtered differently. Not the repository's conversion routes, which are the three output trees that fork after extraction.
+- **Raw web crawl**: a source scraped from the open web with little editing — here c4, cc100, culturax, fineweb2, hplt, macocu_sl, classla_web_sl and finepdf. In the curation-thresholds experiment finepdf, a crawl of PDF documents, takes the curated-prose route.
+- **Curated source**: a source assembled or edited by people for a purpose — here the parliamentary, medical, legal, scientific, news, wiki and reference corpora. In the curation-thresholds experiment the medical and academic ones take a route of their own.
 - **Sloleks**: the reference lexicon of Slovene word forms, used here to check whether a token is an ordinary Slovene word.
 - **LLM judge** (judge): a language model given a fixed rubric and asked to label documents, standing in for a human annotator once its agreement with one is measured.
 - **Bad text** (lenient bar, strict bar): at the lenient bar, a document the judge scores coherence 2 or lower, labels garbage or boilerplate, or flags as adult or spam; the strict bar also counts coherence 3.
@@ -75,3 +79,9 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **MLflow**: the experiment-tracking server the project logs every run to, with its parameters, metrics and output files.
 - **Lineage run** (lineage): an MLflow run that trains or scores nothing and only records which data and code produced a set of outputs, keeping them as attached files.
 - **Download registry** (registry): the project's list of datasets it downloads and builds its corpus from, kept in `configs/data/download.yaml`.
+- **Agreement gate** (gate): the rule that a judge run's verdicts count as findings only when the judge agrees with the person on bad text at a Cohen's κ of at least 0.6 on the calibration set judged in that same run.
+- **Fresh draw** (third draw): a stratified sample drawn after the settings were frozen, held back from tuning; the third draw is a later one from the loosened build, limited to the filters and sources whose settings changed.
+- **Frozen build** (baseline build, loosened build): the baseline build is the shared corpus rebuilt at the pipeline's settings on main, with no per-source routes; the frozen build is the candidate corpus built with the route settings frozen before the fresh draw; the loosened build relaxes its quality and repetition settings per route and is built into its own folder beside it.
+- **Volume-weighted** (weighted by volume): a rate over several sources in which each source counts by the documents it holds in the build, not by how many of its documents were judged, so the rate describes the corpus rather than the average source.
+- **Kept corpus** (kept documents): the documents that leave the repetition filter, the last content filter; the dedup stages that follow remove copies but judge no content, so a build's bad-text share is read there.
+- **1:1 rate** (exchange rate): the rule that a filter is worth keeping on a source only where at least half of what it drops is bad text, so one bad document removed is worth one good document lost.

@@ -130,7 +130,8 @@ PAIRWISE_SCHEMA: Dict[str, Any] = _reply_schema({"better": {"type": "string", "e
 
 #: Fields a rubric verdict must carry, with the check each one has to pass.
 _REQUIRED_FIELDS: Dict[str, Any] = {
-    "language": lambda value: isinstance(value, str) and bool(re.fullmatch(r"[a-z]{2}|mixed", value)),
+    # Three letters too: a language without a two-letter code (Romani, `rom`) would fail its whole group.
+    "language": lambda value: isinstance(value, str) and bool(re.fullmatch(r"[a-z]{2,3}|mixed", value)),
     "text_type": lambda value: value in TEXT_TYPES,
     "adult_or_spam": lambda value: isinstance(value, bool),
     "coherence": lambda value: isinstance(value, int) and 1 <= value <= 5,

@@ -1,0 +1,34 @@
+# tuning-filter-settings.yaml — setting changes tried on the routes of curation-routes.yaml.
+#
+# Read by analysis.py, never by the pipeline. Each change belongs to one
+# route and one filter (quality or repetition); its settings merge over what
+# that route's sources meet in the candidate build. The analysis tries each
+# change alone, then every change of a route together, on the judged drops
+# of both samples (M10), and calls each route at the 1:1 rate (D12, D16).
+# Settings use the knobs of configs/data/curate.yaml: 0 switches a quality
+# rule off, an empty n-gram list switches that repetition family off.
+
+changes:
+  raw_crawl:
+    ellipsis-line rule off:
+      stage: quality
+      settings: {max_ellipsis_lines_ratio: 0}
+    repeated-phrase rule off:
+      stage: repetition
+      settings: {dup_n_grams: []}
+
+  curated_prose:
+    20-word floor lowered to 10:
+      stage: quality
+      settings: {min_doc_words: 10}
+    stopword rule off:
+      stage: quality
+      settings: {min_stop_words: 0}
+    repetition filter off:
+      stage: repetition
+      settings: {enabled: false}
+
+  medical_academic:
+    repetition filter off:
+      stage: repetition
+      settings: {enabled: false}

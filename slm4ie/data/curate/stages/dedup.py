@@ -37,6 +37,9 @@ from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, stage_i
 #: Signatures buffered as Python tuples before packing into a numpy chunk.
 SIGNATURE_FLUSH_EVERY: int = 1_000_000
 
+#: Last sentence index datatrove's 16-bit `sent` field can hold.
+MAX_SENTENCE_INDEX: int = np.iinfo(np.uint16).max
+
 
 def doc_text(doc: Document) -> str:
     """Return the text payload to hash for whole-document exact dedup.
@@ -113,6 +116,10 @@ class CompactSentenceDedupSignature(SentenceDedupSignature):
     same 14-byte structured dtype every `SIGNATURE_FLUSH_EVERY` entries, so a
     task holds about a tenth of the memory. Hashing, sorting and the files
     written are unchanged, so the find and filter steps read them as usual.
+    Windows starting past `MAX_SENTENCE_INDEX` overflow datatrove's 16-bit
+    sentence field, so they are skipped and counted in the step's stats as
+    `windows_past_sentence_limit`; the rest of such a document is never
+    deduplicated.
     """
 
     def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> None:
@@ -129,7 +136,11 @@ class CompactSentenceDedupSignature(SentenceDedupSignature):
         for doc_idx, doc in enumerate(data):
             with self.stats.time_stats:
                 self.stat_update(StatHints.total)
-                buffer.extend(self.get_hashes(doc, doc_idx))
+                hashes = self.get_hashes(doc, doc_idx)
+                kept = [(hash_, doc_i, sent) for hash_, doc_i, sent in hashes if sent <= MAX_SENTENCE_INDEX]
+                if len(kept) < len(hashes):
+                    self.stat_update("windows_past_sentence_limit", value=len(hashes) - len(kept))
+                buffer.extend(kept)
                 if len(buffer) >= SIGNATURE_FLUSH_EVERY:
                     chunks.append(np.array(buffer, dtype=dtype))
                     buffer = []

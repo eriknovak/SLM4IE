@@ -9,6 +9,7 @@ import importlib.util  # noqa: F401  (datatrove workaround)
 from pathlib import Path
 from typing import Dict
 
+import numpy as np
 import pytest
 
 pytest.importorskip("datatrove")
@@ -103,6 +104,19 @@ class TestCompactSentenceDedupSignature:
         upstream = _signature_files(tmp_path / "upstream")
         assert upstream
         assert _signature_files(tmp_path / "compact") == upstream
+
+    def test_skips_windows_past_the_16_bit_sentence_limit(self, tmp_path: Path) -> None:
+        """A document with more sentences than a 16-bit index holds is hashed up to the limit."""
+        lines = dedup_module.MAX_SENTENCE_INDEX + 5
+        doc = Document(text="\n".join(f"vrstica {i}" for i in range(lines)), id="0", metadata={})
+        cfg = SentDedupConfig(n_sentences=1, split_sentences=False)
+        step = CompactSentenceDedupSignature(output_folder=str(tmp_path), config=cfg, finder_workers=1)
+
+        step.run(iter([doc]), rank=0)
+
+        dtype = np.dtype([("hash", "<u8"), ("doc", "<u4"), ("sent", "<u2")])
+        sents = np.concatenate([np.frombuffer(b, dtype=dtype)["sent"] for b in _signature_files(tmp_path).values()])
+        assert len(sents) == dedup_module.MAX_SENTENCE_INDEX + 1
 
 
 def _paths(tmp_path: Path) -> CuratePaths:

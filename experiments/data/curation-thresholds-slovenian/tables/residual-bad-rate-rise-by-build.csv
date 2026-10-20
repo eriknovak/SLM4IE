@@ -1,0 +1,3 @@
+build,bad_rate_rise,bad_rate_rise_low,bad_rate_rise_high,good_kept_gained,meets_bar,gate_passed
+frozen,0.0218,-0.0255,0.0691,9348690,True,False
+loosened,0.0299,-0.0189,0.0788,11593377,True,False

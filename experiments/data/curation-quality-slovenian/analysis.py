@@ -41,6 +41,7 @@ import yaml
 from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.inspect.judge import interleave
 from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
+from slm4ie.utils.stats import cohen_kappa, wilson
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -131,31 +132,6 @@ def is_bad(verdict: Dict[str, Any], strict: bool = False, stage: Optional[str] =
     if stage == "language" and verdict.get("language", "sl") != "sl":
         return True
     return verdict["coherence"] <= floor or verdict["text_type"] in BAD_TEXT_TYPES or bool(verdict["adult_or_spam"])
-
-
-def wilson(successes: int, total: int, z: float = 1.96) -> Tuple[float, float]:
-    """Return a Wilson score interval for a share.
-
-    The Wilson interval is used rather than the textbook normal one because
-    several cells sit near 0 or 1, where the normal interval runs past the
-    ends of the scale.
-
-    Args:
-        successes: Count of documents with the property.
-        total: Count of documents in the cell.
-        z: Standard-normal quantile; the default is the 95% interval.
-
-    Returns:
-        The interval's lower and upper bounds, or `(0.0, 0.0)` when the cell
-        is empty.
-    """
-    if total == 0:
-        return 0.0, 0.0
-    share = successes / total
-    denominator = 1 + z**2 / total
-    centre = (share + z**2 / (2 * total)) / denominator
-    spread = z * math.sqrt(share * (1 - share) / total + z**2 / (4 * total**2)) / denominator
-    return max(0.0, centre - spread), min(1.0, centre + spread)
 
 
 def _cells(
@@ -951,23 +927,6 @@ def draw_figures(
     return written
 
 
-def _kappa(pairs: List[Tuple[bool, bool]]) -> Tuple[float, float]:
-    """Return Cohen's kappa and raw agreement for two raters' yes-or-no calls.
-
-    Args:
-        pairs: One (first rater, second rater) pair per document.
-
-    Returns:
-        Kappa and the share of documents both raters called alike.
-    """
-    total = len(pairs)
-    observed = sum(first == second for first, second in pairs) / total
-    first_yes = sum(first for first, _ in pairs) / total
-    second_yes = sum(second for _, second in pairs) / total
-    expected = first_yes * second_yes + (1 - first_yes) * (1 - second_yes)
-    return ((observed - expected) / (1 - expected) if expected < 1 else 1.0), observed
-
-
 def agreement_rows(
     labels: List[Dict[str, Any]], runs: Dict[str, Dict[str, Dict[str, Any]]], reference: str
 ) -> List[Dict[str, Any]]:
@@ -999,8 +958,8 @@ def agreement_rows(
 
     rows: List[Dict[str, Any]] = []
     for name, against, pairs in comparisons:
-        lenient, raw = _kappa([(is_bad(first), is_bad(second)) for first, second in pairs])
-        strict, _ = _kappa([(is_bad(first, strict=True), is_bad(second, strict=True)) for first, second in pairs])
+        lenient, raw = cohen_kappa([(is_bad(first), is_bad(second)) for first, second in pairs])
+        strict, _ = cohen_kappa([(is_bad(first, strict=True), is_bad(second, strict=True)) for first, second in pairs])
         gaps = [abs(first["coherence"] - second["coherence"]) for first, second in pairs]
         rows.append(
             {

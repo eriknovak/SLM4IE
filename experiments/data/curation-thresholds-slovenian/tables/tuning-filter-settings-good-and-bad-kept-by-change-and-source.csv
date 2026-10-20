@@ -1,0 +1,62 @@
+route,change,source,drops_judged,rescued_judged,rescued_bad_share,rescued,bad_gained,good_gained,call,gate_passed
+raw_crawl,ellipsis-line rule off,pooled,893,161,0.1779,1145170,203777,941393,adopt,False
+raw_crawl,ellipsis-line rule off,hplt,123,35,0.2,290777,58155,232622,,False
+raw_crawl,ellipsis-line rule off,culturax,126,46,0.1739,218717,38038,180679,,False
+raw_crawl,ellipsis-line rule off,classla_web_sl,132,41,0.0244,145067,3538,141529,,False
+raw_crawl,ellipsis-line rule off,c4,133,11,0.2727,187707,51193,136514,,False
+raw_crawl,ellipsis-line rule off,macocu_sl,140,11,0.1818,153084,27833,125251,,False
+raw_crawl,ellipsis-line rule off,cc100,143,6,0.1667,149741,24957,124784,,False
+raw_crawl,ellipsis-line rule off,fineweb2,96,11,0.8182,77,63,14,,False
+raw_crawl,repeated-phrase rule off,pooled,893,298,0.2434,1290582,314106,976476,adopt,False
+raw_crawl,repeated-phrase rule off,c4,133,51,0.3529,527158,186056,341102,,False
+raw_crawl,repeated-phrase rule off,hplt,123,42,0.2143,337222,72262,264960,,False
+raw_crawl,repeated-phrase rule off,cc100,143,29,0.2069,147238,30463,116775,,False
+raw_crawl,repeated-phrase rule off,macocu_sl,140,21,0.0476,97142,4626,92516,,False
+raw_crawl,repeated-phrase rule off,classla_web_sl,132,55,0.0909,86246,7840,78406,,False
+raw_crawl,repeated-phrase rule off,fineweb2,96,49,0.1837,50952,9359,41593,,False
+raw_crawl,repeated-phrase rule off,culturax,126,51,0.0784,44624,3500,41124,,False
+raw_crawl,all changes together,pooled,893,468,0.2186,2477136,541576,1935560,adopt,False
+raw_crawl,all changes together,hplt,123,79,0.2281,644615,147033,497582,,False
+raw_crawl,all changes together,c4,133,62,0.3319,714865,237249,477616,,False
+raw_crawl,all changes together,cc100,143,35,0.1866,296979,55420,241559,,False
+raw_crawl,all changes together,classla_web_sl,132,103,0.0721,256081,18455,237626,,False
+raw_crawl,all changes together,culturax,126,97,0.1577,263341,41538,221803,,False
+raw_crawl,all changes together,macocu_sl,140,32,0.1297,250226,32459,217767,,False
+raw_crawl,all changes together,fineweb2,96,60,0.1846,51029,9422,41607,,False
+curated_prose,20-word floor lowered to 10,pooled,618,42,0.057,127766,7288,120478,adopt,False
+curated_prose,20-word floor lowered to 10,siparl,118,20,0.05,121225,6061,115164,,False
+curated_prose,20-word floor lowered to 10,classlawiki_sl,103,11,0.2726,4501,1227,3274,,False
+curated_prose,20-word floor lowered to 10,finepdf,97,1,0.0,1075,0,1075,,False
+curated_prose,20-word floor lowered to 10,gigafida,91,3,0.0,788,0,788,,False
+curated_prose,20-word floor lowered to 10,coleslaw,80,1,0.0,171,0,171,,False
+curated_prose,20-word floor lowered to 10,solar,44,6,0.0,6,0,6,,False
+curated_prose,20-word floor lowered to 10,slovenian_news,85,0,0.0,0,0,0,,False
+curated_prose,stopword rule off,pooled,618,101,0.2305,28034,6462,21572,adopt,False
+curated_prose,stopword rule off,slovenian_news,85,27,0.037,8046,298,7748,,False
+curated_prose,stopword rule off,finepdf,97,9,0.5555,9676,5375,4301,,False
+curated_prose,stopword rule off,gigafida,91,18,0.1667,4727,788,3939,,False
+curated_prose,stopword rule off,coleslaw,80,23,0.0,3928,0,3928,,False
+curated_prose,stopword rule off,classlawiki_sl,103,4,0.0,1637,0,1637,,False
+curated_prose,stopword rule off,solar,44,20,0.05,20,1,19,,False
+curated_prose,stopword rule off,siparl,118,0,0.0,0,0,0,,False
+curated_prose,repetition filter off,pooled,618,291,0.1041,155347,16179,139168,adopt,False
+curated_prose,repetition filter off,finepdf,97,53,0.1698,91638,15561,76077,,False
+curated_prose,repetition filter off,coleslaw,80,40,0.0,33952,0,33952,,False
+curated_prose,repetition filter off,slovenian_news,85,45,0.0222,11912,265,11647,,False
+curated_prose,repetition filter off,siparl,118,46,0.0,11275,0,11275,,False
+curated_prose,repetition filter off,classlawiki_sl,103,53,0.0567,6018,341,5677,,False
+curated_prose,repetition filter off,gigafida,91,46,0.0221,544,12,532,,False
+curated_prose,repetition filter off,solar,44,8,0.0,8,0,8,,False
+curated_prose,all changes together,pooled,618,508,0.1071,386271,41372,344899,adopt,False
+curated_prose,all changes together,siparl,118,74,0.067,180990,12122,168868,,False
+curated_prose,all changes together,finepdf,97,71,0.2274,110990,25237,85753,,False
+curated_prose,all changes together,coleslaw,80,80,0.0,40783,0,40783,,False
+curated_prose,all changes together,classlawiki_sl,103,100,0.0945,25248,2387,22861,,False
+curated_prose,all changes together,slovenian_news,85,75,0.027,20852,563,20289,,False
+curated_prose,all changes together,gigafida,91,72,0.1441,7372,1062,6310,,False
+curated_prose,all changes together,solar,44,36,0.0278,36,1,35,,False
+medical_academic,repetition filter off,pooled,271,143,0.0541,5845,316,5529,adopt,False
+medical_academic,repetition filter off,oss,87,45,0.0666,4747,316,4431,,False
+medical_academic,repetition filter off,kas,85,44,0.0,775,0,775,,False
+medical_academic,repetition filter off,povejmo_vemo_med,80,40,0.0,309,0,309,,False
+medical_academic,repetition filter off,kzb,19,14,0.0,14,0,14,,False

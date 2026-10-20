@@ -1,0 +1,6 @@
+test,documents,person_yes,judge_yes,kappa,raw_agreement,passes_gate
+bad text,116,13,13,0.394,0.879,False
+language,116,3,4,0.558,0.974,
+spam,116,2,5,0.561,0.974,
+quality,116,11,9,0.453,0.914,
+repetition,116,4,7,-0.046,0.905,

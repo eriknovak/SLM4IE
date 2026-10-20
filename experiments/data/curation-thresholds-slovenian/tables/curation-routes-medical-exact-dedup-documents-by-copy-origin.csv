@@ -1,0 +1,6 @@
+origin,documents,share,finished_corpus
+dropped: same text under the same text id,3709,0.1622,0
+dropped: same text under another text id,11340,0.4958,0
+dropped: no copy kept in the source,0,0.0,0
+kept: one text per record,5766,0.2521,5709
+kept: a second text of a kept record,2057,0.0899,182
