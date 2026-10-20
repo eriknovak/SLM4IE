@@ -22,9 +22,9 @@ concluded:
 
 ## TL;DR
 
-- **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, on a draw held back from tuning.
-- **Where we stand**: the judge's agreement with the person stays below the agreement gate on both judged draws, so no clause can be called yet ([F9]). Loosening the quality and repetition settings per route, on the evidence of both draws, gained about the good text it was estimated to gain ([F10]). What the loosened quality filter still drops is mostly bad text, while most repetition drops are still good text ([F11]).
-- **Next**: the open amendment of the hypothesis, read on one judge whose agreement with the person stays below the gate; no second judge is run ([D3]).
+- **Hypothesis**: open — whether settings chosen per source let each content filter drop mostly what it targets, and mostly bad text, cannot be called, since every judge run sits below the agreement gate ([F9]). The amended question, whether the loosened build keeps more good text with a kept corpus at most two points dirtier than the baseline's ([D17]), is answered yes.
+- **F12 — The loosened build keeps more good text, and the draws cannot place its rise in bad text above the bar.** The loosened build keeps about a quarter more good documents than the baseline, and the interval on its rise in bad text spans the bar.
+- **Next**: conclude, with the clauses inconclusive on the failed gate and the loosened settings as the recommendation for the shared corpus; no second judge is run ([D3]).
 
 ## Hypothesis
 
@@ -210,6 +210,19 @@ concluded:
 - **Code**: `analysis.py::gain_rows`
 - **Settings**: `configs/tuning-filter-settings.yaml` names the filters each route changes; the bad-text bar is [D1]'s lenient bar
 
+### M12 — Measure the share of bad text each build keeps, weighted by volume, against the baseline's
+
+- **Input**: three builds, the baseline rebuild ([D5]), the frozen build ([D10]) and the loosened build ([D16]). Each comes with its document count per source after the repetition filter and judge verdicts on a draw of the documents it kept there. The baseline's draw is the earlier audit's, taken from that audit's build, which ran at the same settings except the spam repair and the five doubled sources; its per-source shares stand in for the rebuild's. The frozen build's draw is the fresh draw and the loosened build's the third draw ([D13]). One item is a judged document a build kept at the repetition filter.
+- **Output**: per build, a volume-weighted row and then one row per source, each with the documents kept, how many were judged, the residual bad rate with its 95% interval, and the good documents kept. Beside it, one row per build other than the baseline: the rise of its weighted rate above the baseline's with a 95% interval, and the good documents it keeps beyond the baseline's. That row also carries the answer to the amended question ([D17]) and whether the build's judge run passed the agreement gate ([D3]). Written to `tables/residual-bad-rate-by-build-and-source.csv` and `tables/residual-bad-rate-rise-by-build.csv`.
+- **How**: the repetition filter is the last stage all three draws sample, so "kept" means its output and the dedup stages are not counted.
+  1. For a build and a source, let $k$ be the documents kept at the repetition filter, $n$ the judged documents drawn as kept there, and $b$ how many of them are bad text at the lenient bar. The build keeps $k \cdot b / n$ bad documents on that source; the rest are good. A source that keeps documents but has no judged kept one stops the reading.
+  2. A source's rate is $b / n$ with its 95% Wilson interval.
+  3. The volume-weighted rate is the bad documents summed over sources divided by the kept documents summed over sources, so each source weighs by what it keeps, not by how many of its documents were judged. Its 95% interval is $\pm 1.96 \sqrt{V} / \sum k$, with $V = \sum k^2 \tilde p (1 - \tilde p) / n$ over sources and $\tilde p$ the Agresti–Coull share, as for the gains ([M11]).
+  4. A build's rise is its weighted rate minus the baseline's. The interval on the rise adds the two builds' variances, since their draws are independent.
+  5. Good documents kept beyond the baseline's are the build's good documents minus the baseline's. The answer to the amended question is yes when that is positive and the low end of the rise's interval is at most two points ([D17]).
+- **Code**: `analysis.py::judged_kept`, `analysis.py::residual_rows`, `analysis.py::residual_rise_rows`
+- **Settings**: none; the bar is the record's ([D17]), and the kept stage is fixed in the script as the repetition filter
+
 ## Decisions
 
 ### D1 — Judge each filter on what it is built to catch, and the content filters also on bad text
@@ -364,6 +377,19 @@ concluded:
   - 2026-10-16 first version, at the project lead's call, from a scratch run trying each change alone
   - 2026-10-16 the project lead kept the three quality-rule changes (ellipsis-line rule, 20-word floor, stopword rule) beside the repetition changes
 
+### D17 — Also ask whether the loosened build keeps more good text without a dirtier kept corpus
+
+- **Decision**: Beside the clauses, the record answers an amended question. Does the loosened build keep more good text than the baseline, with a volume-weighted residual bad rate at most 2 points above the baseline's? Each build's rate comes from its own judged kept documents. The answer is yes unless the whole 95% interval on the rise lies above 2 points.
+- **Why**: Every clause reads a judge run below the agreement gate ([F9]), so none can be called. The clauses also score how precisely each filter drops, while curation aims at a larger corpus no dirtier than before. About 40 judged kept documents per source leave the rise's interval several points wide, so the bar is read against its low end.
+- **Alternatives**:
+  - Also cap each source's rise at 5 points: within the noise of about 40 judged kept documents per source.
+  - No bar, only the rates reported: leaves the amended question without an answer.
+  - Answer from the point estimate alone: claims more than the draws can separate.
+  - Call it inconclusive while the interval spans the bar: leaves the amended question open at this sample size.
+- **History**:
+  - 2026-10-19 first version, at the project lead's call; the open amendment was agreed on 2026-10-15
+  - 2026-10-20 the bar is read against the interval's low end, at the project lead's call; the frozen build's rise corrected from about one point to about two, measured from the saved draws
+
 ## Findings
 
 ### F1 — Removing the double counting leaves each source's retention almost unchanged · minor
@@ -452,14 +478,15 @@ concluded:
 - **History**:
   - 2026-10-19 first result, from the third draw's judge run ([D11], [D13])
 
-### F10 — The loosened build keeps about the good text the per-route estimate predicted · minor
+### F10 — The loosened build keeps about the good text the per-route estimate predicted · supporting F12
 
 - **Summary**: Before dedup, the loosened build gains within two percent of the good text the per-route estimate predicted, on every route.
 - **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build, and f7810f13462d4f089b7814b359be3feb, the frozen build, both under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 3a4e748 over both builds' counts and the fresh and third draws' verdicts ([M11]).
 - **Result**: [Documents, bad text and good text the loosened build gains over the frozen build before dedup, per route and source, with a 95% interval on bad text and the per-route estimate beside it. A source's bad text can fall below zero by chance, since its two shares come from separate draws.](tables/curation-routes-loosened-good-and-bad-gained-by-route-and-source.csv)
-- **Reading**: On the raw web crawls the bad text gained lands inside its interval around the estimate, though both rest on a judge below the agreement gate ([F9]).
+- **Reading**: On the raw web crawls the bad text gained lands inside its interval around the estimate, though both rest on a judge below the agreement gate ([F9]). The gain before dedup is the text the kept-corpus comparison ([F12]) then weighs against the bad text that came with it.
 - **History**:
   - 2026-10-19 first result, from the loosened build and the third draw ([D13], [D16])
+  - 2026-10-20 weight raised from minor to supporting, qualifying the kept-corpus finding ([F12]) once the amended question ([D17]) was recorded
 
 ### F11 — Most of the loosened build's remaining quality drops are bad text, most repetition drops are not · minor
 
@@ -469,6 +496,19 @@ concluded:
 - **Reading**: Under the rule of keeping a filter only where most of its drops are bad ([D12]), the judge would switch off 16 source-and-filter pairs, though that judge is below the agreement gate ([F9]).
 - **History**:
   - 2026-10-19 first result, from the third draw ([D13], [D16])
+
+### F12 — The loosened build keeps more good text, and the draws cannot place its rise in bad text above the bar · key
+
+- **Summary**: The loosened build keeps about a quarter more good documents than the baseline, and the interval on its rise in bad text spans the bar.
+- **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build, and f7810f13462d4f089b7814b359be3feb, the frozen build, both under `slm4ie/data/curation-thresholds-slovenian`; 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over the three builds' counts and the verdicts of the earlier audit's draw, the fresh draw and the third draw ([M12]).
+- **Result**: ![Share of the documents each build keeps after the repetition filter that the judge calls bad text, weighted by each source's volume, with the upper end of its 95% interval. The horizontal line is the bar of the amended question: the baseline's rate plus two points. The loosened build's rate is 0.089 against the baseline's 0.059, a rise of 3.0 points whose interval runs from −1.9 to +7.9 points, and it keeps 11.6M more good documents, 52.6M against 41.0M. The frozen build sits between the two, at a rise of 2.2 points. The per-source rates behind the weighted ones are in the table linked from the Reading.](figures/residual-bad-rate-by-build.svg)
+- **Reading**:
+  - **The kept corpus grows by a quarter while its bad share rises by about three points, within the noise of the draws.** Kept here means what leaves the repetition filter, the last stage all three draws sample, so the dedup stages are not counted. Weighted by volume, the loosened build's rate sits 3.0 points above the baseline's, and the 95% interval on that rise reaches below zero at one end and past the bar at the other. The [per-source rates](tables/residual-bad-rate-by-build-and-source.csv) rest on about forty judged kept documents each, so no source's rise is separable from chance either.
+  - **The amended question is answered yes, while [H5] is inconclusive.** Under the rule of reading the bar against the interval's low end ([D17]), the loosened build keeps more good text without a rise the draws can place above two points. The clauses themselves, which score how precisely each filter drops, stay uncalled: every judge run they read sits below the agreement gate ([F9]), so no rate can confirm or refute a filter.
+  - **A tighter comparison could still fail the bar.** The point estimate already lies above it, so judging more kept documents per source could narrow the interval until it lies wholly above two points. The three builds were also judged in separate runs, all below the gate. A judge drifting between runs would move the rise as much as the settings do.
+- **Implication**: The loosened settings are the ones to carry into the shared corpus at conclusion, with the rise in bad text recorded as a cost the draws could not bound. Judging a draw of the baseline rebuild in one run with the loosened build's would tighten that bound.
+- **History**:
+  - 2026-10-20 first result, from the three builds' kept counts and the earlier audit's, fresh and third draws ([D17], the amended question read against the interval's low end)
 
 ## Verdict
 
