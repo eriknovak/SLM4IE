@@ -7,7 +7,7 @@ branch: exp/curation-thresholds-slovenian
 base_commit: 2ece205
 status: concluded
 ticket: "#5"
-pr:
+pr: "#30"
 mlflow:
 builds_on: [../../data/curation-quality-slovenian/]
 varies: []
