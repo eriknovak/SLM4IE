@@ -15,6 +15,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Precision**: of the items the system returned, the share that are correct. 1 means nothing wrong was returned.
 - **Recall**: of the correct items, the share the system returned. 1 means nothing was missed.
 - **F1** (F1 score): harmonic mean of precision and recall; 1 is perfect, 0 means nothing right. Macro F1 averages F1 over classes or units with equal weight; micro F1 pools all decisions first.
+- **Macro-F1**: the F1 score computed per class and averaged with equal weight per class, so a rare class such as medical counts as much as a frequent one.
 - **Precision@k** (P@k): precision over the top k ranked items only.
 - **Recall@k** (R@k): the share of correct items found within the top k.
 - **Accuracy**: the share of all decisions that are correct; misleading when classes are imbalanced.
@@ -85,3 +86,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Volume-weighted** (weighted by volume): a rate over several sources in which each source counts by the documents it holds in the build, not by how many of its documents were judged, so the rate describes the corpus rather than the average source.
 - **Kept corpus** (kept documents): the documents that leave the repetition filter, the last content filter; the dedup stages that follow remove copies but judge no content, so a build's bad-text share is read there.
 - **1:1 rate** (exchange rate): the rule that a filter is worth keeping on a source only where at least half of what it drops is bad text, so one bad document removed is worth one good document lost.
+- **Document-level domain**: the domain a classifier or judge assigns to one document from its own text, as opposed to the source label every document of a dataset inherits.
+- **Lexicon scoring**: labelling a document by counting, per 1,000 words, its weighted hits on a word list per domain and taking the highest-scoring domain when it clears a threshold and leads the runner-up by a margin.
+- **Source gap**: a shortfall against a target in a domain that never had the material before curation, so only new sources can close it.
+- **Curation loss**: a shortfall against a target in a domain that had the material before curation and lost it at a named filter stage.
