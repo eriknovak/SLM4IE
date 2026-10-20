@@ -30,9 +30,9 @@ The first check of the pretraining-corpus pipeline against labels: an LLM judge,
 
 The repairs these findings call for, per-source filter settings and a spam filter that counts distinct words, are the subject of the threshold experiment below.
 
-### [Curation filter thresholds — Slovenian](data/curation-thresholds-slovenian/) · running · 2026-10-20
+### [Curation filter thresholds — Slovenian](data/curation-thresholds-slovenian/) · inconclusive · 2026-10-20
 
-The repair the quality audit called for: each source takes one of three routes through the content filters, and the filters' thresholds are loosened per route on the judged evidence. Whether each filter now drops what it targets cannot be called, because every judge run agrees with the person less closely than the gate asks. The question the record answers instead is whether the loosened settings keep more good text without a dirtier kept corpus.
+The repair the quality audit called for: each source takes one of three routes through the content filters, and the filters' thresholds are loosened per route on the judged evidence. Whether each filter now drops what it targets cannot be called, because every judge run agrees with the person less closely than the gate asks. The question the record answers instead is whether the loosened settings keep more good text without a dirtier kept corpus, and the answer is yes. This repairs the quality audit's main loss, good text discarded by filters built for English web crawls. Simple rules still leave web junk that no tested measure separates from good text.
 
 - **[F12](data/curation-thresholds-slovenian/#f12--the-loosened-build-keeps-more-good-text-and-the-draws-cannot-place-its-rise-in-bad-text-above-the-bar) — The loosened build keeps more good text, and the draws cannot place its rise in bad text above the bar.** The loosened build keeps about a quarter more good documents than the baseline, and the interval on its rise in bad text spans the bar.
 

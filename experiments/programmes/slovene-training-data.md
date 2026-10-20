@@ -16,6 +16,10 @@ planned:
     short: KPI coverage check
     title: whether the curated corpus and the task sets together meet every KPI, scientific extraction examples included
     builds_on: [curation-quality-slovenian, medical-ie-slovenian]
+  - slug: quality-classifier-slovenian
+    short: Learned quality filter
+    title: whether a classifier trained on the judge's verdicts removes the web junk that the rule-based filters cannot separate from good text
+    builds_on: [curation-thresholds-slovenian]
 ---
 
 # Slovene training data — a dataset for tokenizers, models and information extraction
@@ -28,6 +32,7 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 
 - **Open Slovene text is enough to pretrain on in medicine and science, before curation**: the survey of open datasets found medicine's new native sources far past the token target ([data-landscape-slovenian:F2]) and science past both targets on text written in Slovene ([data-landscape-slovenian:F3]).
 - **The curation pipeline cannot yet be trusted with that domain text**: what it keeps is clean ([curation-quality-slovenian:F3]), but every content filter drops mostly good text ([curation-quality-slovenian:F1]), how well a filter decides swings with the source ([curation-quality-slovenian:F2]), and the quality filter removes most of the medical source ([curation-quality-slovenian:F7]).
+- **Per-source filter settings win back good text without a measurable rise in bad text**: the loosened routes keep about a quarter more good documents than the baseline, with a rise in bad text the draws cannot place above two points ([curation-thresholds-slovenian:F12]), and the gain matched its estimate on every route ([curation-thresholds-slovenian:F10]). Whether each filter now drops what it targets stays uncalled, since the judge never reached the agreement gate ([curation-thresholds-slovenian:F9]).
 - **Medical examples have to be built**: almost all of medicine's open documents are translation or machine output ([data-landscape-slovenian:F1]), and the machine-written sets gather in medicine rather than across the catalogue ([data-landscape-slovenian:F6]).
 
 ## Threads
@@ -40,6 +45,6 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 
 ## Open
 
-- how to set the curation filters per source so curated domain text survives while web spam is still removed — answered by curation-thresholds-slovenian
+- how to remove the web boilerplate and link lists that simple rules cannot separate from good text, and bound the bad text the corpus keeps — answered by quality-classifier-slovenian
 - how native medical extraction examples are built at the scale KPI 2 asks for — answered by medical-ie-slovenian
 - whether the curated corpus and the task sets together meet every KPI, including extraction examples for science — answered by kpi-coverage-slovenian
