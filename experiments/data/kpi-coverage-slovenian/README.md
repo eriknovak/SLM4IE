@@ -87,6 +87,19 @@ concluded:
 - **Code**: `analysis.py::funnel_source_rows`, summed by `analysis.py::funnel_domain_rows`
 - **Settings**: none; the stages counted are the pipeline's own
 
+### M2 — Label each document with the domain its own words point to
+
+- **Input**: one document of a corpus build, its text and its source's domain label. The thirteen marker-word lists, one per judge label ([D2]), hand-curated in [`configs/classifier-lexicon.yaml`](configs/classifier-lexicon.yaml). An entry is a whole word (`dne`) or a prefix ending in `*` (`zdravil*`), which matches every word starting with it, since Slovene inflects heavily. Each entry sits in a tier, `strong` for words that almost only occur in that domain and `weak` for words common there but seen elsewhere too. The lists were seeded from the words most distinctive of each judge domain on the tune half of the gold, ranked by log-odds against the other domains, in [the seed table](tables/classifier-lexicon-seed-words-by-domain.csv). They were then pruned by hand to words that name the domain's subject or genre, dropping words that mark one source or one text, so the gate measures the domain and not the source.
+- **Output**: one label of the thirteen per document.
+- **How**:
+  1. Split the text into words, runs of letters and digits, lowercased. Let $n$ be their count.
+  2. For every word and every domain, take the weight of the strongest entry of that domain the word matches, $w_s = 3$ for a strong entry, $w_w = 1$ for a weak one, zero when none matches. Sum over the words into $h_d$, the weighted hits of domain $d$.
+  3. Score each domain as hits per thousand words, $s_d = 1000 \, h_d / n$; an empty text scores zero everywhere.
+  4. Rank the domains by score, ties towards the earlier list. Assign the leader when the text has at least $m$ words, $s_{(1)} \ge \tau$ and $s_{(1)} - s_{(2)} \ge \mu$, where $s_{(1)}$ and $s_{(2)}$ are the leading and runner-up scores, $\tau$ the threshold and $\mu$ the margin. The length floor $m$ stops one strong word deciding a short text on its own.
+  5. Otherwise keep the source's label, mapped through the fallback table when it is not one of the thirteen; the mixed-genre reference corpus falls back to `other`.
+- **Code**: `slm4ie/data/curate/inspect/domains.py::label_document`
+- **Settings**: `rule.threshold` ($\tau$, the lowest leading score that assigns a domain), `rule.margin` ($\mu$, the smallest lead over the runner-up), `rule.min_words` ($m$, the shortest text the rule is read on), `weights` (the hit weight of each tier), `fallback` (source labels outside the thirteen and the label they count as), `lexicons` (the entries per domain and tier). Threshold and margin are picked on the tune half of the gold ([D3], [M3]).
+
 ## Decisions
 
 ### D1 — Read the targets on the loosened build, with the baseline beside it

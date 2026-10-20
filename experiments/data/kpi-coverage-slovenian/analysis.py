@@ -15,6 +15,7 @@ import csv
 import hashlib
 import json
 import logging
+import math
 import random
 import re
 import statistics
@@ -100,6 +101,13 @@ WHITESPACE = re.compile(r"\s+")
 
 # A token is estimated as two words, the conversion every KPI reading in the project uses.
 TOKENS_PER_WORD = 2
+
+# The lexicon seed (M2): words of the tune half ranked by log-odds per judge domain.
+SEED_WORD = re.compile(r"[^\W_]+", re.UNICODE)
+SEED_TOP = 150
+SEED_MIN_COUNT = 5
+SEED_MIN_CHARS = 2
+SEED_PRIOR = 0.01
 
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
@@ -464,6 +472,63 @@ def write_split(gold: List[Dict[str, Any]], side_of: Dict[str, str], split_dir: 
     (split_dir / "split.meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
+def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Rank, per judge domain, the words most distinctive of its tune-side documents (the M2 seed).
+
+    A word's score is its log-odds of appearing in the domain's documents
+    against the other domains', smoothed with a prior proportional to the
+    word's overall count and divided by its standard error, after Monroe,
+    Colaresi and Quinn (2008). Only the tune half is read, so the test half
+    stays unseen by the lexicons.
+
+    Args:
+        sample_path: The judged sample, for the texts.
+        gold: Rows from `gold_documents`, for each document's judge domain.
+        side_of: `tune` or `test` per document id.
+
+    Returns:
+        The top words per judge domain with their score and counts, best first.
+    """
+    domain_of = {document["id"]: document["judge_domain"] for document in gold if side_of[document["id"]] == "tune"}
+    per_domain: Dict[str, Counter] = defaultdict(Counter)
+    overall: Counter = Counter()
+    for document in read_jsonl(sample_path):
+        if document["id"] not in domain_of:
+            continue
+        words = [word.lower() for word in SEED_WORD.findall(document["text"])]
+        counts = Counter(word for word in words if len(word) > SEED_MIN_CHARS and not word.isdigit())
+        per_domain[domain_of[document["id"]]].update(counts)
+        overall.update(counts)
+    total = sum(overall.values())
+    rows: List[Dict[str, Any]] = []
+    for domain in sorted(per_domain):
+        counts = per_domain[domain]
+        in_domain = sum(counts.values())
+        scored = []
+        for word, count in counts.items():
+            if count < SEED_MIN_COUNT:
+                continue
+            rest = overall[word] - count
+            prior = SEED_PRIOR * overall[word]
+            odds_in = math.log((count + prior) / (in_domain + SEED_PRIOR * total - count - prior))
+            odds_out = math.log((rest + prior) / (total - in_domain + SEED_PRIOR * total - rest - prior))
+            error = math.sqrt(1 / (count + prior) + 1 / (rest + prior))
+            scored.append(((odds_in - odds_out) / error, word, count, overall[word]))
+        scored.sort(reverse=True)
+        rows += [
+            {
+                "judge_domain": domain,
+                "rank": rank,
+                "word": word,
+                "z": round(z, 2),
+                "tune_domain": count,
+                "tune_all": all_,
+            }
+            for rank, (z, word, count, all_) in enumerate(scored[:SEED_TOP], start=1)
+        ]
+    return rows
+
+
 def gold_rows(gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[str, Any]]:
     """Summarise the judged gold per judge domain.
 
@@ -592,6 +657,9 @@ def main() -> None:
     write_csv(TABLES_DIR / "dataset-gold-statistics.csv", gold)
     draw_gold_figure(gold)
     print(f"gold: {sum(row['documents'] for row in gold):,} judged documents over {len(gold)} judge domains")
+    seed = lexicon_seed_rows(GOLD_SAMPLE, documents, side_of)
+    write_csv(TABLES_DIR / "classifier-lexicon-seed-words-by-domain.csv", seed)
+    print(f"lexicon seed: {len(seed)} ranked words over {len({row['judge_domain'] for row in seed})} judge domains")
 
     catalogue = catalogue_rows(CATALOGUE)
     write_csv(TABLES_DIR / "dataset-catalogue-statistics.csv", catalogue)
