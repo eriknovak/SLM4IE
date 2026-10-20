@@ -34,7 +34,8 @@ Eight subcommands:
 * `classify` labels every document of the finished corpus with a saved domain
   classifier, counts documents and words per source and label, notes which
   judged-sample ids survived, and logs the totals as one MLflow run.
-  Read-only apart from the JSON file it writes to `--out`.
+  Read-only apart from the JSON file it writes to `--out` and the per-shard
+  `--checkpoint` it resumes from.
 
 `--config` is required: an experiment may curate its own corpus variant, so the
 shared registry is never assumed.
@@ -100,6 +101,7 @@ from slm4ie.data.curate.inspect.sample import (
 from slm4ie.data.curate.inspect.supervised import label_corpus, track_corpus_labels
 from slm4ie.data.curate.stages import CORPUS_STAGES, STAGE_DIRS
 from slm4ie.utils.cli import add_keys, validate_keys
+from slm4ie.utils.versioning import file_sha256
 
 
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -317,6 +319,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     classify_parser.add_argument("--classifier", type=Path, required=True, help="A saved DomainClassifier pickle.")
     classify_parser.add_argument("--gold", type=Path, required=True, help="Judged sample JSONL whose ids to look for.")
     classify_parser.add_argument("--out", type=Path, required=True, help="JSON file for the per-source label counts.")
+    classify_parser.add_argument(
+        "--checkpoint", type=Path, required=True, help="JSONL of finished shards; a stopped pass resumes from it."
+    )
     classify_parser.add_argument("--experiment", required=True, help="MLflow experiment, e.g. slm4ie/data/<slug>.")
     classify_parser.add_argument("--run-name", required=True, help="MLflow run name.")
     classify_parser.add_argument(
@@ -421,7 +426,8 @@ def main() -> None:
 
     if args.command == "classify":
         setup = load_curate_config(args.input_dir, args.output_dir, args.config, args.extract_config)
-        stage_dir = resolve_sample_dir(args.config, args.output_dir) / STAGE_DIRS["sentence_dedup"]
+        # Resolved, so the logged path survives the snapshot worktree a tracked run starts in.
+        stage_dir = (resolve_sample_dir(args.config, args.output_dir) / STAGE_DIRS["sentence_dedup"]).resolve()
         with args.gold.open(encoding="utf-8") as handle:
             gold_ids = frozenset(json.loads(line)["id"] for line in handle)
         labels = label_corpus(
@@ -429,13 +435,17 @@ def main() -> None:
             args.classifier,
             setup.stopwords,
             gold_ids,
+            checkpoint=args.checkpoint,
             workers=args.workers,
             shards_per_source=args.shards_per_source,
         )
         params = {
+            "config": args.config,
             "stage_dir": stage_dir,
-            "classifier": args.classifier,
-            "gold": args.gold,
+            "classifier": args.classifier.resolve(),
+            "classifier_sha256": file_sha256(args.classifier),
+            "gold": args.gold.resolve(),
+            "gold_sha256": file_sha256(args.gold),
             "shards_per_source": args.shards_per_source,
             "workers": args.workers,
         }

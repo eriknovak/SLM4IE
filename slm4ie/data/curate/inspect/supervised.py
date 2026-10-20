@@ -22,6 +22,7 @@ label, and `track_corpus_labels` logs that count as an MLflow run.
 """
 
 import gzip
+import hashlib
 import json
 import multiprocessing
 import pickle
@@ -44,6 +45,7 @@ from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.data.curate.stages.statistics import CorpusStats
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.config import load_yaml
+from slm4ie.utils.versioning import corpus_digest, file_sha256
 
 #: Turns a batch of texts into one vector per text.
 Encoder = Callable[[Sequence[str]], np.ndarray]
@@ -335,6 +337,9 @@ LABEL_BATCH = 2_000
 #: Per-process state of a corpus pass: the classifier, the word counter and the gold ids.
 _labeller: Dict[str, Any] = {}
 
+#: The name the curation build logs its final corpus under, so MLflow links the pass to the build.
+FINAL_CORPUS_DATASET = "pretrain/06_sentence_dedup"
+
 
 @dataclass(frozen=True)
 class CorpusLabels:
@@ -367,7 +372,7 @@ def _label_batch(batch: List[Dict[str, Any]], documents: Counter, words: Counter
         words[label] += len(_labeller["counter"]._tokenize_words(document["text"]))
 
 
-def _label_shard(shard: Path) -> Tuple[Counter, Counter, List[str]]:
+def _label_shard(shard: Path) -> Dict[str, Any]:
     """Label every document of one shard.
 
     Args:
@@ -391,7 +396,50 @@ def _label_shard(shard: Path) -> Tuple[Counter, Counter, List[str]]:
                 batch = []
     if batch:
         _label_batch(batch, documents, words)
-    return documents, words, found
+    return {"documents": dict(documents), "words": dict(words), "gold_ids": found}
+
+
+def _pass_key(document_digest: str, classifier_path: Path, stopwords: Set[str], gold_ids: FrozenSet[str]) -> str:
+    """Hash everything a shard's counts depend on, so a checkpoint is reused only for the same pass."""
+    payload = json.dumps([document_digest, file_sha256(classifier_path), sorted(stopwords), sorted(gold_ids)])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _resume_checkpoint(checkpoint: Path, key: str) -> Dict[str, Dict[str, Any]]:
+    """Read the shards a checkpoint already holds and leave it ready to append to.
+
+    A line cut short by a crash is dropped, and the file rewritten without it,
+    so its shard is labelled again.
+
+    Args:
+        checkpoint: JSONL file: a header line with the pass key, then one line per finished shard.
+        key: The key of the pass about to run.
+
+    Returns:
+        The finished shards' counts, keyed by shard path relative to the stage.
+
+    Raises:
+        ValueError: If the checkpoint was written by a pass with another key.
+    """
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    if not checkpoint.is_file():
+        checkpoint.write_text(json.dumps({"key": key}) + "\n", encoding="utf-8")
+        return {}
+    lines = checkpoint.read_text(encoding="utf-8").splitlines()
+    written = json.loads(lines[0])["key"]
+    if written != key:
+        raise ValueError(f"checkpoint {checkpoint} belongs to pass {written}, not {key}; delete it to start over")
+    done: Dict[str, Dict[str, Any]] = {}
+    for number, line in enumerate(lines[1:], start=2):
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            if number != len(lines):
+                raise
+            break
+        done[row["shard"]] = row
+    checkpoint.write_text("".join(json.dumps(row) + "\n" for row in [{"key": key}, *done.values()]), encoding="utf-8")
+    return done
 
 
 def label_corpus(
@@ -399,16 +447,21 @@ def label_corpus(
     classifier_path: Path,
     stopwords: Set[str],
     gold_ids: FrozenSet[str],
+    checkpoint: Path,
     workers: int,
     shards_per_source: Optional[int] = None,
 ) -> CorpusLabels:
     """Label every document of a corpus stage with a saved classifier.
 
+    Each finished shard's counts are appended to `checkpoint`, so a pass that
+    stops part way resumes from the shards it has not finished.
+
     Args:
-        stage_dir: A stage folder holding one directory of gzipped JSONL shards per source.
+        stage_dir: A completed stage folder holding one directory of gzipped JSONL shards per source.
         classifier_path: A classifier `DomainClassifier.save` wrote.
         stopwords: Words left out of the word counts, as the statistics stage leaves them out.
         gold_ids: Gold document ids to look for, so a reader learns which survived.
+        checkpoint: JSONL file of finished shards, reused while the stage, classifier, stopwords and gold ids match.
         workers: Shards labelled at once, one process each.
         shards_per_source: Read only the first this many shards of each source, for a smoke run.
 
@@ -416,34 +469,58 @@ def label_corpus(
         Documents and words per source and label, and the gold ids found.
 
     Raises:
-        FileNotFoundError: If `stage_dir` holds no shard.
+        FileNotFoundError: If `stage_dir` has no completed sentinel with a document digest, or holds no shard.
+        ValueError: If a full pass counts other than the sentinel's documents, or the checkpoint
+            belongs to another pass.
     """
+    sentinel = read_sentinel(stage_dir)
+    if sentinel is None or sentinel.document_digest is None:
+        raise FileNotFoundError(f"no completed sentinel with a document digest at {stage_dir}")
     sources = [folder for folder in sorted(stage_dir.iterdir()) if folder.is_dir()]
-    shards = [
-        (folder.name, shard) for folder in sources for shard in sorted(folder.glob("*.jsonl.gz"))[:shards_per_source]
-    ]
+    shards = [shard for folder in sources for shard in sorted(folder.glob("*.jsonl.gz"))[:shards_per_source]]
     if not shards:
         raise FileNotFoundError(f"no *.jsonl.gz shard under {stage_dir}")
-    documents: Dict[str, Counter] = {folder.name: Counter() for folder in sources}
-    words: Dict[str, Counter] = {folder.name: Counter() for folder in sources}
-    found: List[str] = []
+    done = _resume_checkpoint(checkpoint, _pass_key(sentinel.document_digest, classifier_path, stopwords, gold_ids))
+    pending = [shard for shard in shards if str(shard.relative_to(stage_dir)) not in done]
     # spawn: forking a process that already runs BLAS and tokenizer threads can deadlock the children.
-    with ProcessPoolExecutor(
+    pool = ProcessPoolExecutor(
         max_workers=workers,
         mp_context=multiprocessing.get_context("spawn"),
         initializer=_start_labeller,
         initargs=(classifier_path, stopwords, gold_ids),
-    ) as pool:
-        futures = {pool.submit(_label_shard, shard): source for source, shard in shards}
-        for future in tqdm(as_completed(futures), total=len(futures), desc="label shards", unit="shard"):
-            shard_documents, shard_words, shard_found = future.result()
-            documents[futures[future]].update(shard_documents)
-            words[futures[future]].update(shard_words)
-            found.extend(shard_found)
+    )
+    try:
+        futures = {pool.submit(_label_shard, shard): shard for shard in pending}
+        with checkpoint.open("a", encoding="utf-8") as handle:
+            for future in tqdm(
+                as_completed(futures), total=len(shards), initial=len(shards) - len(pending), desc="label shards"
+            ):
+                shard = futures[future]
+                row = {"shard": str(shard.relative_to(stage_dir)), "source": shard.parent.name, **future.result()}
+                handle.write(json.dumps(row) + "\n")
+                handle.flush()
+                done[row["shard"]] = row
+    finally:
+        # Without cancelling, a failed shard would wait for every queued shard before raising.
+        pool.shutdown(cancel_futures=True)
+    labels = _sum_shards([done[str(shard.relative_to(stage_dir))] for shard in shards], [f.name for f in sources])
+    counted = sum(sum(counts.values()) for counts in labels.documents.values())
+    if shards_per_source is None and counted != sentinel.records_out:
+        raise ValueError(f"labelled {counted} documents in {stage_dir}, its sentinel records {sentinel.records_out}")
+    return labels
+
+
+def _sum_shards(rows: Sequence[Mapping[str, Any]], sources: Sequence[str]) -> CorpusLabels:
+    """Sum per-shard counts into per-source counts, every source present even when empty."""
+    documents: Dict[str, Counter] = {source: Counter() for source in sources}
+    words: Dict[str, Counter] = {source: Counter() for source in sources}
+    for row in rows:
+        documents[row["source"]].update(row["documents"])
+        words[row["source"]].update(row["words"])
     return CorpusLabels(
         documents={source: dict(sorted(counts.items())) for source, counts in documents.items()},
         words={source: dict(sorted(counts.items())) for source, counts in words.items()},
-        gold_ids=sorted(found),
+        gold_ids=sorted(gold_id for row in rows for gold_id in row["gold_ids"]),
     )
 
 
@@ -459,8 +536,8 @@ def track_corpus_labels(
     """Write a corpus pass's counts to JSON and log them as one MLflow run.
 
     The run carries the documents and words per label summed over sources,
-    the JSON as an artifact, and the corpus stage as a dataset input keyed by
-    its sentinel's document digest.
+    the JSON as an artifact, and the corpus stage as a dataset input under
+    the name and digest the curation build logged it with.
 
     Args:
         labels: What `label_corpus` found.
@@ -473,13 +550,7 @@ def track_corpus_labels(
 
     Returns:
         The MLflow run id, or None when tracking is unavailable.
-
-    Raises:
-        FileNotFoundError: If `stage_dir` has no completed sentinel with a document digest.
     """
-    sentinel = read_sentinel(stage_dir)
-    if sentinel is None or sentinel.document_digest is None:
-        raise FileNotFoundError(f"no completed sentinel with a document digest at {stage_dir}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(asdict(labels), indent=1), encoding="utf-8")
     documents: Counter = sum((Counter(counts) for counts in labels.documents.values()), Counter())
@@ -497,5 +568,5 @@ def track_corpus_labels(
         ml.log_params(dict(params))
         ml.log_metrics(metrics)
         ml.log_artifact(destination)
-        ml.log_dataset_input(stage_dir.name, sentinel.document_digest, str(stage_dir), context="labelled")
+        ml.log_dataset_input(FINAL_CORPUS_DATASET, corpus_digest(stage_dir), str(stage_dir), context="labelled")
         return run.info.run_id

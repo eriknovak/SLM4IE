@@ -11,6 +11,7 @@ from sklearn.pipeline import FeatureUnion
 
 from slm4ie.data.curate.inspect.supervised import (
     Candidate,
+    CorpusLabels,
     DomainClassifier,
     EmbeddingFeatures,
     fit_classifier,
@@ -215,34 +216,87 @@ def saved_classifier(tmp_path: Path) -> Path:
     return path
 
 
+def _label(stage: Path, classifier: Path, checkpoint: Path, **options: Any) -> CorpusLabels:
+    """Run a one-worker pass, no stopwords or gold ids unless given."""
+    return label_corpus(
+        stage,
+        classifier,
+        options.pop("stopwords", set()),
+        options.pop("gold_ids", frozenset()),
+        checkpoint=checkpoint,
+        workers=1,
+        **options,
+    )
+
+
 class TestLabelCorpus:
     """A corpus pass counts documents and words per source and label, and finds the gold ids."""
 
-    def test_documents_counted_per_source_and_label(self, corpus: Path, saved_classifier: Path) -> None:
+    def test_documents_counted_per_source_and_label(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
         """Each source's documents land under the label the classifier gives them."""
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset(), workers=1)
+        labels = _label(corpus, saved_classifier, tmp_path / "pass.jsonl")
         assert labels.documents == {"lek": {"medical": 2}, "web": {"legal": 2}}
 
-    def test_words_follow_the_statistics_rule(self, corpus: Path, saved_classifier: Path) -> None:
+    def test_words_follow_the_statistics_rule(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
         """Words leave out stopwords, as the statistics stage counts them."""
-        labels = label_corpus(corpus, saved_classifier, {"bolnik"}, frozenset(), workers=1)
+        labels = _label(corpus, saved_classifier, tmp_path / "pass.jsonl", stopwords={"bolnik"})
         assert labels.words["lek"] == {"medical": 3}
 
-    def test_gold_ids_found_in_the_corpus(self, corpus: Path, saved_classifier: Path) -> None:
+    def test_gold_ids_found_in_the_corpus(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
         """Only the gold ids the corpus still holds come back."""
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset({"web:2", "gone:9"}), workers=1)
+        labels = _label(corpus, saved_classifier, tmp_path / "pass.jsonl", gold_ids=frozenset({"web:2", "gone:9"}))
         assert labels.gold_ids == ["web:2"]
 
-    def test_shards_per_source_cuts_the_read(self, corpus: Path, saved_classifier: Path) -> None:
+    def test_shards_per_source_cuts_the_read(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
         """A smoke run reads only the first shards of each source."""
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset(), workers=1, shards_per_source=1)
+        labels = _label(corpus, saved_classifier, tmp_path / "pass.jsonl", shards_per_source=1)
         assert labels.documents["web"] == {"legal": 1}
 
+    def test_count_short_of_the_sentinel_is_rejected(
+        self, corpus: Path, saved_classifier: Path, tmp_path: Path
+    ) -> None:
+        """A full pass that counts other than the stage's recorded documents stops, naming both."""
+        write_sentinel(corpus, config_slice={}, config_hash_value="h", records_in=5, records_out=5, document_digest="d")
+        with pytest.raises(ValueError, match="labelled 4 documents .* its sentinel records 5"):
+            _label(corpus, saved_classifier, tmp_path / "pass.jsonl")
+
+    def test_stage_without_sentinel_is_rejected(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
+        """A stage with no completed sentinel stops before any shard is read."""
+        (corpus / ".complete").unlink()
+        with pytest.raises(FileNotFoundError, match="no completed sentinel"):
+            _label(corpus, saved_classifier, tmp_path / "pass.jsonl")
+
     def test_empty_stage_is_rejected(self, tmp_path: Path, saved_classifier: Path) -> None:
-        """A stage with no shard names itself."""
-        (tmp_path / "empty" / "lek").mkdir(parents=True)
+        """A completed stage with no shard names itself."""
+        stage = tmp_path / "empty"
+        (stage / "lek").mkdir(parents=True)
+        write_sentinel(stage, config_slice={}, config_hash_value="h", records_in=0, records_out=0, document_digest="d")
         with pytest.raises(FileNotFoundError, match="no \\*.jsonl.gz shard under"):
-            label_corpus(tmp_path / "empty", saved_classifier, set(), frozenset(), workers=1)
+            _label(stage, saved_classifier, tmp_path / "pass.jsonl")
+
+
+class TestCheckpoint:
+    """A stopped pass resumes from the shards it finished, and only for the same pass."""
+
+    def test_finished_shards_are_not_read_again(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
+        """A rerun takes a finished shard's counts from the checkpoint, not from the shard."""
+        _label(corpus, saved_classifier, tmp_path / "pass.jsonl")
+        _write_shard(corpus / "lek" / "00000.jsonl.gz", [{"id": "lek:1", "text": "sodišče zakon"}] * 2)
+        assert _label(corpus, saved_classifier, tmp_path / "pass.jsonl").documents["lek"] == {"medical": 2}
+
+    def test_line_cut_short_is_labelled_again(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
+        """A shard whose checkpoint line a crash cut short is read again."""
+        checkpoint = tmp_path / "pass.jsonl"
+        first = _label(corpus, saved_classifier, checkpoint)
+        lines = checkpoint.read_text(encoding="utf-8").splitlines()
+        checkpoint.write_text("\n".join(lines[:-1]) + "\n" + lines[-1][:10], encoding="utf-8")
+        assert _label(corpus, saved_classifier, checkpoint) == first
+
+    def test_checkpoint_of_another_pass_is_rejected(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
+        """Changed gold ids change the pass, so the old checkpoint stops the run."""
+        _label(corpus, saved_classifier, tmp_path / "pass.jsonl")
+        with pytest.raises(ValueError, match="delete it to start over"):
+            _label(corpus, saved_classifier, tmp_path / "pass.jsonl", gold_ids=frozenset({"web:2"}))
 
 
 class TestTrackCorpusLabels:
@@ -255,37 +309,39 @@ class TestTrackCorpusLabels:
         # The artifact root `./mlruns` resolves against the working directory.
         monkeypatch.chdir(tmp_path)
 
-    def test_totals_per_label_are_logged(
-        self, store: None, corpus: Path, saved_classifier: Path, tmp_path: Path
-    ) -> None:
+    @pytest.fixture
+    def labels(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> CorpusLabels:
+        """The fixture corpus, labelled."""
+        return _label(corpus, saved_classifier, tmp_path / "pass.jsonl")
+
+    def test_totals_per_label_are_logged(self, store: None, labels: CorpusLabels, corpus: Path, tmp_path: Path) -> None:
         """The run carries the documents per label summed over sources."""
         import mlflow
 
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset(), workers=1)
         run_id = track_corpus_labels(labels, tmp_path / "labels.json", corpus, "slm4ie/data/test", "pass", {}, {})
         assert mlflow.MlflowClient().get_run(run_id).data.metrics["documents__medical"] == 2.0
 
-    def test_tags_reach_the_run(self, store: None, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
+    def test_tags_reach_the_run(self, store: None, labels: CorpusLabels, corpus: Path, tmp_path: Path) -> None:
         """The tags passed in are set on the run."""
         import mlflow
 
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset(), workers=1)
         run_id = track_corpus_labels(
             labels, tmp_path / "labels.json", corpus, "slm4ie/data/test", "pass", {}, {"tier": "scratch"}
         )
         assert mlflow.MlflowClient().get_run(run_id).data.tags["tier"] == "scratch"
 
-    def test_counts_are_written_to_json(
-        self, store: None, corpus: Path, saved_classifier: Path, tmp_path: Path
+    def test_corpus_logged_under_the_build_name(
+        self, store: None, labels: CorpusLabels, corpus: Path, tmp_path: Path
     ) -> None:
+        """The stage is a dataset input under the name the curation build logs it with."""
+        import mlflow
+
+        run_id = track_corpus_labels(labels, tmp_path / "labels.json", corpus, "slm4ie/data/test", "pass", {}, {})
+        inputs = mlflow.MlflowClient().get_run(run_id).inputs.dataset_inputs
+        assert [entry.dataset.name for entry in inputs] == ["pretrain/06_sentence_dedup"]
+
+    def test_counts_are_written_to_json(self, store: None, labels: CorpusLabels, corpus: Path, tmp_path: Path) -> None:
         """The JSON holds the per-source counts the pass found."""
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset(), workers=1)
         destination = tmp_path / "out" / "labels.json"
         track_corpus_labels(labels, destination, corpus, "slm4ie/data/test", "pass", {}, {})
         assert json.loads(destination.read_text(encoding="utf-8"))["documents"] == labels.documents
-
-    def test_stage_without_digest_is_rejected(self, corpus: Path, saved_classifier: Path, tmp_path: Path) -> None:
-        """A stage with no completed sentinel stops before anything is written or logged."""
-        labels = label_corpus(corpus, saved_classifier, set(), frozenset(), workers=1)
-        with pytest.raises(FileNotFoundError, match="no completed sentinel"):
-            track_corpus_labels(labels, tmp_path / "labels.json", tmp_path / "bare", "e", "pass", {}, {})

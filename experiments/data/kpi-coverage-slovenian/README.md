@@ -134,8 +134,9 @@ concluded:
   1. Read every shard of the stage, one process per shard, and label each document with the saved fit, which reads its first 2,000 characters ([M4], step 1).
   2. Count each document under its source and its assigned label. Count its words as the statistics stage counts them, word tokens with at least one letter and two characters, stopwords left out, so tokens estimated as $t = 2w$ match [M1].
   3. Note every gold id the stage still holds, so a gold document's true kept flag is known for this build.
-- **Code**: `slm4ie/data/curate/inspect/supervised.py::label_corpus` (steps 1 to 3), `slm4ie/data/curate/inspect/supervised.py::track_corpus_labels` (the JSON and the MLflow run), run by `scripts/curate_pretraining_corpus.py classify`
-- **Settings**: on the command line, `--classifier` (the saved fit), `--gold` (the judged sample whose ids are looked for), `--max-workers` (shards read at once), `--shards-per-source` (the first shards read per source, for a smoke run only); the stopword list from the build's curation config (`stopwords`)
+  4. Sum the shards and stop unless the documents counted equal those the stage's completion record holds, so no shard is missed. Each finished shard is saved as it ends, so a pass that stops part way resumes from where it was, and only while the stage, fit, stopwords and gold ids are the ones it started with.
+- **Code**: `slm4ie/data/curate/inspect/supervised.py::label_corpus` (steps 1 to 4), `slm4ie/data/curate/inspect/supervised.py::track_corpus_labels` (the JSON and the MLflow run, with the hashes of the fit and the gold file), run by `scripts/curate_pretraining_corpus.py classify`
+- **Settings**: on the command line, `--classifier` (the saved fit), `--gold` (the judged sample whose ids are looked for), `--checkpoint` (the file of finished shards), `--max-workers` (shards read at once), `--shards-per-source` (the first shards read per source, for a smoke run only); the stopword list from the build's curation config (`stopwords`)
 
 ## Decisions
 
