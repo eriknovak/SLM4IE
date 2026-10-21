@@ -3,8 +3,10 @@
 Every input is a frozen file of an earlier experiment, read in place and never
 copied: the loosened build of the curation-thresholds experiment, the baseline
 build on the shared pretraining path, the judged sample of the curation-quality
-experiment and the catalogue of the data-landscape survey. This pass writes the
-statistics behind the record's `## Datasets` rows.
+experiment and the catalogue of the data-landscape survey. Beside them it reads
+the two corpus passes of the `classify` subcommand. It writes the statistics
+behind the record's `## Datasets` rows, the classifier gates, the per-target
+verdicts, the gap attribution and the figures.
 
 Run it with:
 
@@ -26,8 +28,8 @@ from typing import Any, Dict, List, NamedTuple, Tuple
 
 import sklearn
 import yaml
-from datachart.charts import BarChart
-from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
+from datachart.charts import BarChart, DumbbellChart, LineChart
+from datachart.constants import AXIS_SCALE, BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
@@ -77,13 +79,9 @@ def stage_column(stage: str) -> str:
     return stage[3:]
 
 
-FUNNEL_COLUMNS = (
-    *(stage_column(stage) for stage in SCOPED_STAGES),
-    "exact_dedup",
-    "sentence_dedup",
-    "words_final",
-    "tokens_estimated",
-)
+#: The documents after each stage, in pipeline order (M1).
+STAGE_COLUMNS = (*(stage_column(stage) for stage in SCOPED_STAGES), "exact_dedup", "sentence_dedup")
+FUNNEL_COLUMNS = (*STAGE_COLUMNS, "words_final", "tokens_estimated")
 
 GOLD_DATA = ROOT / "data" / "experiments" / "data" / "curation-quality-slovenian"
 GOLD_SAMPLE = GOLD_DATA / "interim" / "sample.jsonl"
@@ -136,6 +134,27 @@ LABEL_MERGE: Dict[str, str] = {"scientific": "science", "academic": "science"}
 LABELS: Tuple[str, ...] = tuple(dict.fromkeys(LABEL_MERGE.get(label, label) for label in DOMAINS))
 #: Scores and metrics are tabled, and rules compared, at this many decimals.
 DECIMALS = 4
+
+#: Each build's corpus pass (M5): documents and words per source and assigned label, and the gold ids it holds.
+CORPUS_LABELS: Dict[str, Path] = {build: EXPERIMENT_DATA / "final" / f"corpus-labels-{build}.json" for build in BUILDS}
+#: The candidate whose saved fit labelled both corpora (M5), and the hash both tracked passes logged for it;
+#: a refit stops the analysis, since the corpus counts would no longer match the gate.
+CORPUS_CLASSIFIER = "tfidf"
+CORPUS_CLASSIFIER_SHA256 = "1ca0684142cd5113e1cdeb83971965138e7684613bd307fa75a126c3a7d26256"
+#: The data targets the clauses read (M6): estimated tokens in the corpus, and tokens and documents per domain.
+CORPUS_TOKEN_TARGET = 5_000_000_000
+DOMAIN_TOKEN_TARGET = 500_000
+DOMAIN_DOCUMENT_TARGET = 10_000
+#: The domains the per-domain targets are read for, science folded (D2).
+TARGET_DOMAINS: Tuple[str, ...] = ("science", "medical")
+#: What a count counts: words read as two tokens each, words read as one token each, and documents.
+MEASURES: Tuple[str, ...] = ("estimated tokens", "words", "documents")
+#: A document counts under its source's label, or under the label the classifier assigned it.
+LABELLING_RULES: Tuple[str, ...] = ("source", "document")
+#: Every source, or only those a public release may carry, mapped to whether the gated ones are left out.
+SOURCE_SETS: Dict[str, bool] = {"all": False, "open": True}
+#: The catalogue's annotation value for datasets annotated with extraction spans, KPI 2's second reading.
+IE_ANNOTATION = "IE spans"
 
 
 class Labelled(NamedTuple):
@@ -980,21 +999,19 @@ def gold_rows(gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[
     return sorted(rows, key=lambda row: -row["documents"])
 
 
-def catalogue_rows(catalogue_path: Path) -> List[Dict[str, Any]]:
+def catalogue_rows(datasets: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """Summarise the landscape catalogue per domain and access.
 
     A dataset listing several domains counts once under each.
 
     Args:
-        catalogue_path: The data-landscape survey's `catalogue.csv`.
+        datasets: Rows from `read_catalogue`.
 
     Returns:
         One row per domain and access with the datasets, how many fit the
         examples target, how many report a size, and their summed documents
         and estimated tokens.
     """
-    with catalogue_path.open(encoding="utf-8", newline="") as handle:
-        datasets = list(csv.DictReader(handle))
     groups: Dict[Tuple[str, str], List[Dict[str, str]]] = defaultdict(list)
     for dataset in datasets:
         for domain in dataset["domains"].split(","):
@@ -1016,6 +1033,519 @@ def catalogue_rows(catalogue_path: Path) -> List[Dict[str, Any]]:
             }
         )
     return rows
+
+
+def read_corpus_labels(path: Path, build: str, funnel: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Read one build's corpus pass and check it against the statistics stage, source by source.
+
+    Args:
+        path: The pass's JSON, written by the `classify` subcommand ([M5]).
+        build: Build name.
+        funnel: Rows from `funnel_source_rows`, any number of builds.
+
+    Returns:
+        The pass: `documents` and `words` per source and assigned label, and
+        the `gold_ids` the build still holds.
+
+    Raises:
+        ValueError: If the pass names a source the build's funnel lacks, or
+            counts a source's documents or words other than the statistics stage did.
+    """
+    labels = json.loads(path.read_text(encoding="utf-8"))
+    finals = {row["source"]: row for row in funnel if row["build"] == build}
+    if unknown := sorted(set(labels["documents"]) - set(finals)):
+        raise ValueError(f"{build}: the corpus pass names sources the funnel lacks: {unknown}")
+    for source, final in finals.items():
+        documents = sum(labels["documents"].get(source, {}).values())
+        words = sum(labels["words"].get(source, {}).values())
+        if (documents, words) != (final["sentence_dedup"], final["words_final"]):
+            raise ValueError(
+                f"{build} {source}: the corpus pass counts {documents} documents and {words} words, "
+                f"the statistics stage {final['sentence_dedup']} and {final['words_final']}"
+            )
+    return labels
+
+
+def domain_totals(
+    labels: Dict[str, Any], sources: Dict[str, Dict[str, str]], rule: str, open_only: bool
+) -> Dict[str, Tuple[int, int]]:
+    """Sum one corpus pass's documents and words per domain under one labelling rule.
+
+    Under `source` every document counts under its source's registry label,
+    unfolded, so scientific and academic stay apart; under `document` it
+    counts under the label the classifier assigned it.
+
+    Args:
+        labels: A pass from `read_corpus_labels`.
+        sources: `domain` and `access` per source, from `read_sources`.
+        rule: `source` or `document`, a member of `LABELLING_RULES`.
+        open_only: Leave out the gated sources, which a public release cannot carry.
+
+    Returns:
+        Documents and words per domain.
+    """
+    totals: Dict[str, List[int]] = defaultdict(lambda: [0, 0])
+    for source, by_label in labels["documents"].items():
+        if open_only and sources[source]["access"] == "gated":
+            continue
+        for label, documents in by_label.items():
+            total = totals[sources[source]["domain"] if rule == "source" else label]
+            total[0] += documents
+            total[1] += labels["words"][source][label]
+    return {domain: (documents, words) for domain, (documents, words) in totals.items()}
+
+
+def measure_count(documents: int, words: int, measure: str) -> int:
+    """Return the count one measure of `MEASURES` reads from a domain's documents and words."""
+    return {"estimated tokens": words * TOKENS_PER_WORD, "words": words, "documents": documents}[measure]
+
+
+def kpi_row(
+    build: str, domain: str, measure: str, labels: str, sources: str, count: int, is_readable: bool = True
+) -> Dict[str, Any]:
+    """Read one count against its target.
+
+    Args:
+        build: Build name.
+        domain: `corpus`, or a member of `TARGET_DOMAINS`.
+        measure: A member of `MEASURES`.
+        labels: The labelling rule, or `either` for the corpus, whose total no rule changes.
+        sources: A key of `SOURCE_SETS`.
+        count: The count read.
+        is_readable: Whether the count may be read against its target; a count
+            under document labels may not when the classifier failed its gate ([D3]).
+
+    Returns:
+        The row, with the target, whether the count is above it (none when it
+        may not be read), and the share of the count that must truly belong to
+        the domain for it to stay above.
+    """
+    if domain == "corpus":
+        target = CORPUS_TOKEN_TARGET
+    else:
+        target = DOMAIN_DOCUMENT_TARGET if measure == "documents" else DOMAIN_TOKEN_TARGET
+    return {
+        "build": build,
+        "domain": domain,
+        "measure": measure,
+        "labels": labels,
+        "sources": sources,
+        "count": count,
+        "target": target,
+        "passes": count > target if is_readable else None,
+        "share_needed": round(target / count, DECIMALS) if count else None,
+    }
+
+
+def kpi_rows(
+    build: str, labels: Dict[str, Any], sources: Dict[str, Dict[str, str]], classifier_passes: bool
+) -> List[Dict[str, Any]]:
+    """Read every target under every counting rule on one build ([M6]).
+
+    The corpus is read in estimated tokens and in words; each target domain
+    in estimated tokens, words and documents, under source and document
+    labels; everything with every source and with the gated ones removed.
+
+    Args:
+        build: Build name.
+        labels: The build's pass from `read_corpus_labels`.
+        sources: `domain` and `access` per source, from `read_sources`.
+        classifier_passes: Whether the classifier that labelled the corpus passed
+            its gate; when it did not, no count under document labels is read ([D3]).
+
+    Returns:
+        One row per count read, from `kpi_row`: the corpus first, then each
+        domain measure by measure.
+    """
+    totals = {
+        (rule, source_set): domain_totals(labels, sources, rule, open_only)
+        for rule in LABELLING_RULES
+        for source_set, open_only in SOURCE_SETS.items()
+    }
+    rows = []
+    for measure in MEASURES[:2]:
+        for source_set in SOURCE_SETS:
+            words = sum(words for _, words in totals["source", source_set].values())
+            rows.append(kpi_row(build, "corpus", measure, "either", source_set, measure_count(0, words, measure)))
+    for domain in TARGET_DOMAINS:
+        for measure in MEASURES:
+            for rule in LABELLING_RULES:
+                for source_set in SOURCE_SETS:
+                    members = [
+                        counts for label, counts in totals[rule, source_set].items() if merge_label(label) == domain
+                    ]
+                    documents, words = (sum(column) for column in zip(*members)) if members else (0, 0)
+                    count = measure_count(documents, words, measure)
+                    is_readable = rule == "source" or classifier_passes
+                    rows.append(kpi_row(build, domain, measure, rule, source_set, count, is_readable))
+    return rows
+
+
+def corpus_domain_rows(build: str, labels: Dict[str, Any], sources: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Total one build's documents and estimated tokens per domain under each labelling rule.
+
+    Args:
+        build: Build name.
+        labels: The build's pass from `read_corpus_labels`.
+        sources: `domain` and `access` per source, from `read_sources`.
+
+    Returns:
+        One row per labelling rule and domain, the target domains first, then
+        by documents, with the same totals over the open sources beside.
+    """
+    rows = []
+    for rule in LABELLING_RULES:
+        every = domain_totals(labels, sources, rule, open_only=False)
+        public = domain_totals(labels, sources, rule, open_only=True)
+        for domain, (documents, words) in every.items():
+            open_documents, open_words = public.get(domain, (0, 0))
+            rows.append(
+                {
+                    "build": build,
+                    "labels": rule,
+                    "domain": domain,
+                    "documents": documents,
+                    "tokens_estimated": words * TOKENS_PER_WORD,
+                    "open_documents": open_documents,
+                    "open_tokens_estimated": open_words * TOKENS_PER_WORD,
+                }
+            )
+    return sorted(
+        rows, key=lambda row: (row["labels"], merge_label(row["domain"]) not in TARGET_DOMAINS, -row["documents"])
+    )
+
+
+def corpus_source_rows(build: str, labels: Dict[str, Any], sources: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Table one build's documents and estimated tokens per source and assigned label.
+
+    Args:
+        build: Build name.
+        labels: The build's pass from `read_corpus_labels`.
+        sources: `domain` and `access` per source, from `read_sources`.
+
+    Returns:
+        One row per source and assigned label, the target domains first, then
+        by documents.
+    """
+    rows = [
+        {
+            "build": build,
+            "assigned_domain": label,
+            "source": source,
+            "source_domain": sources[source]["domain"],
+            "access": sources[source]["access"],
+            "documents": documents,
+            "tokens_estimated": labels["words"][source][label] * TOKENS_PER_WORD,
+        }
+        for source, by_label in labels["documents"].items()
+        for label, documents in by_label.items()
+    ]
+    order = {domain: index for index, domain in enumerate(TARGET_DOMAINS)}
+    return sorted(rows, key=lambda row: (order.get(row["assigned_domain"], len(order)), -row["documents"]))
+
+
+def domain_stage_counts(funnel: List[Dict[str, Any]], build: str, domain: str, open_only: bool) -> Dict[str, int]:
+    """Sum the documents after each stage over the sources whose label folds into one domain.
+
+    Args:
+        funnel: Rows from `funnel_source_rows`, any number of builds.
+        build: Build name.
+        domain: The folded domain, such as `science`.
+        open_only: Leave out the gated sources.
+
+    Returns:
+        Documents per stage column of `STAGE_COLUMNS`.
+    """
+    members = [
+        row
+        for row in funnel
+        if row["build"] == build
+        and merge_label(row["source_domain"]) == domain
+        and not (open_only and row["access"] == "gated")
+    ]
+    return {column: sum(row[column] for row in members) for column in STAGE_COLUMNS}
+
+
+def gap_rows(kpi: List[Dict[str, Any]], funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attribute every missed target to a missing source or to the curation stage that lost it ([M7]).
+
+    A domain whose sources held no more than the target once converted has a
+    source gap. One that held more and fell to the target or below is a
+    curation loss, named by the first stage after which it holds no more.
+    Only documents under source labels have a count per stage: words are
+    counted at the final stage alone and document labels exist only there,
+    so any other missed target is tabled as not attributable.
+
+    Args:
+        kpi: Rows from `kpi_rows`.
+        funnel: Rows from `funnel_source_rows`, any number of builds.
+
+    Returns:
+        One row per missed target, in the order of `kpi`, with its converted
+        and final documents, the cause, and the stage a curation loss names.
+    """
+    rows = []
+    for shortfall in kpi:
+        # A count that may not be read against its target ([D3]) is no shortfall to attribute.
+        if shortfall["passes"] is not False:
+            continue
+        row = {key: shortfall[key] for key in ("build", "domain", "measure", "labels", "sources")}
+        if shortfall["labels"] != "source" or shortfall["measure"] != "documents":
+            rows.append(
+                row | {"converted": None, "final": shortfall["count"], "cause": "not attributable", "stage": ""}
+            )
+            continue
+        counts = domain_stage_counts(funnel, shortfall["build"], shortfall["domain"], shortfall["sources"] == "open")
+        target = shortfall["target"]
+        if counts["convert"] > target:
+            cause = "curation loss"
+            stage = next(column for column in STAGE_COLUMNS if counts[column] <= target)
+        else:
+            cause, stage = "source gap", ""
+        rows.append(
+            row | {"converted": counts["convert"], "final": counts["sentence_dedup"], "cause": cause, "stage": stage}
+        )
+    return rows
+
+
+def read_catalogue(catalogue_path: Path) -> List[Dict[str, str]]:
+    """Read the landscape catalogue, one row per dataset.
+
+    Args:
+        catalogue_path: The data-landscape survey's `catalogue.csv`.
+
+    Returns:
+        The catalogue's rows in file order.
+    """
+    with catalogue_path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def catalogue_domains(dataset: Dict[str, str]) -> List[str]:
+    """Return a catalogue dataset's domains under the judge's labels, science folded ([D2])."""
+    return list(
+        dict.fromkeys(merge_label(CATALOGUE_DOMAINS.get(domain, domain)) for domain in dataset["domains"].split(","))
+    )
+
+
+def catalogue_dataset_row(domain: str, dataset: Dict[str, str]) -> Dict[str, Any]:
+    """Table one catalogue dataset under one of its domains.
+
+    Args:
+        domain: The domain it is listed under.
+        dataset: Its catalogue row.
+
+    Returns:
+        Its name, access, provenance, annotation, documents (none when the
+        survey found no count), whether the survey judged it to fit the
+        examples target, and its address.
+    """
+    return {
+        "domain": domain,
+        "dataset": dataset["name"],
+        "access": dataset["access"],
+        "provenance": dataset["provenance_class"],
+        "annotation": dataset["annotation"],
+        "documents": int(dataset["documents"]) if dataset["documents"] else None,
+        "fits_examples_target": dataset["kpi2_fit"],
+        "url": dataset["url"],
+    }
+
+
+def by_domain_then_documents(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort catalogue rows with the target domains first, then by documents, uncounted last."""
+    order = {domain: index for index, domain in enumerate(TARGET_DOMAINS)}
+    return sorted(
+        rows, key=lambda row: (order.get(row["domain"], len(order)), row["domain"], -(row["documents"] or -1))
+    )
+
+
+def gap_catalogue_rows(gaps: List[Dict[str, Any]], catalogue: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """List the open catalogue datasets of each domain that misses a target and the corpus does not yet hold.
+
+    Args:
+        gaps: Rows from `gap_rows`.
+        catalogue: Rows from `read_catalogue`.
+
+    Returns:
+        One row per domain and dataset, from `catalogue_dataset_row`, largest first.
+    """
+    domains = dict.fromkeys(gap["domain"] for gap in gaps)
+    rows = [
+        catalogue_dataset_row(domain, dataset)
+        for domain in domains
+        for dataset in catalogue
+        if domain in catalogue_domains(dataset) and dataset["access"] == "open" and dataset["in_registry"] != "yes"
+    ]
+    return by_domain_then_documents(rows)
+
+
+def ie_example_rows(catalogue: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """List the catalogue datasets annotated for extraction, the second reading of the examples target.
+
+    Args:
+        catalogue: Rows from `read_catalogue`.
+
+    Returns:
+        One row per domain and dataset annotated with extraction spans, from
+        `catalogue_dataset_row`, the target domains first.
+    """
+    rows = [
+        catalogue_dataset_row(domain, dataset)
+        for dataset in catalogue
+        if dataset["annotation"] == IE_ANNOTATION
+        for domain in catalogue_domains(dataset)
+    ]
+    return by_domain_then_documents(rows)
+
+
+def final_corpus_gate_rows(
+    test: List[Dict[str, Any]], labelled: List[Labelled], gold_ids: Dict[str, List[str]]
+) -> List[Dict[str, Any]]:
+    """Read the gate's numbers again on the test-side documents each final corpus still holds.
+
+    Args:
+        test: The test side's rows from `score_gold`, for their ids.
+        labelled: The same rows labelled by the classifier that labelled the corpora.
+        gold_ids: The gold ids each build's final corpus holds, per build.
+
+    Returns:
+        One row per build, as `gate_rows` reads it, without its pass column:
+        the gate is read on the whole test side alone ([D3]).
+    """
+    held = {build: set(ids) for build, ids in gold_ids.items()}
+    rows = gate_rows(
+        {
+            f"test in the {build} final corpus": [
+                document for row, document in zip(test, labelled) if row["id"] in held[build]
+            ]
+            for build in held
+        },
+        {},
+    )
+    return [{key: value for key, value in row.items() if key != "passes_gate"} for row in rows]
+
+
+def kpi_figure_rows(kpi: List[Dict[str, Any]], build: str) -> List[Dict[str, Any]]:
+    """Pair each target's count under source and under document labels, as a multiple of the target.
+
+    Args:
+        kpi: Rows from `kpi_rows`.
+        build: Build name.
+
+    Returns:
+        One dumbbell record per target read with every source, plus the corpus
+        with the gated sources removed: the source-label multiple at the
+        start, the document-label one at the end.
+    """
+    multiple = {
+        (row["domain"], row["measure"], row["labels"], row["sources"]): row["count"] / row["target"]
+        for row in kpi
+        if row["build"] == build
+    }
+    records = [
+        {
+            "label": f"corpus tokens, {source_set} sources",
+            "start": multiple["corpus", "estimated tokens", "either", source_set],
+            "end": multiple["corpus", "estimated tokens", "either", source_set],
+        }
+        for source_set in SOURCE_SETS
+    ]
+    for measure, name in (("estimated tokens", "tokens"), ("documents", "documents")):
+        records += [
+            {
+                "label": f"{domain} {name}",
+                "start": multiple[domain, measure, "source", "all"],
+                "end": multiple[domain, measure, "document", "all"],
+            }
+            for domain in TARGET_DOMAINS
+        ]
+    return records
+
+
+def draw_kpi_figure(kpi: List[Dict[str, Any]]) -> None:
+    """Draw every target's count as a multiple of it, under source and document labels, per build.
+
+    Args:
+        kpi: Rows from `kpi_rows`.
+    """
+    save_figure(
+        lambda: DumbbellChart(
+            [kpi_figure_rows(kpi, build) for build in BUILDS],
+            title="Data targets per labelling rule",
+            xlabel="count as a multiple of its target",
+            ylabel="target",
+            subtitle=[f"{build} build" for build in BUILDS],
+            start_name="source labels",
+            end_name="document labels",
+            scaley=AXIS_SCALE.LOG,
+            vlines=[{"x": 1, "label": "target"}],
+            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
+            figsize=FIG_SIZE.FULL_TALL,
+        ),
+        FIGURES_DIR / "kpi-target-multiple-by-rule.svg",
+    )
+
+
+def draw_medical_funnel_figure(funnel: List[Dict[str, Any]]) -> None:
+    """Draw the medical source's documents after every curation stage, per build.
+
+    Args:
+        funnel: Rows from `funnel_source_rows`, both builds.
+    """
+    series = [
+        [
+            {"x": index, "y": count}
+            for index, count in enumerate(domain_stage_counts(funnel, build, "medical", open_only=False).values())
+        ]
+        for build in BUILDS
+    ]
+    save_figure(
+        lambda: LineChart(
+            series,
+            title="Medical source documents per stage",
+            xlabel="curation stage",
+            ylabel="documents",
+            subtitle=[f"{build} build" for build in BUILDS],
+            scaley=AXIS_SCALE.LOG,
+            xticks=list(range(len(STAGE_COLUMNS))),
+            xticklabels=[column.replace("_", " ") for column in STAGE_COLUMNS],
+            xtickrotate=30,
+            hlines=[{"y": DOMAIN_DOCUMENT_TARGET, "label": "examples target"}],
+            show_legend=True,
+            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
+            figsize=FIG_SIZE.FULL_MEDIUM,
+        ),
+        FIGURES_DIR / "funnel-medical-documents-by-stage.svg",
+    )
+
+
+def draw_medical_sources_figure(by_source: List[Dict[str, Any]]) -> None:
+    """Draw the documents the classifier labels medical in each source, per build.
+
+    Args:
+        by_source: Rows from `corpus_source_rows`, both builds.
+    """
+    medical = {
+        (row["build"], row["source"]): row["documents"] for row in by_source if row["assigned_domain"] == "medical"
+    }
+    # Horizontal bars draw the first label at the bottom, so the largest source goes last to sit on top.
+    names = sorted({source for _, source in medical}, key=lambda source: medical.get(("loosened", source), 0))
+    save_figure(
+        lambda: BarChart(
+            [[{"label": source, "y": medical.get((build, source), 0)} for source in names] for build in BUILDS],
+            title="Medical documents per source",
+            xlabel="documents labelled medical",
+            ylabel="source",
+            subtitle=[f"{build} build" for build in BUILDS],
+            orientation=ORIENTATION.HORIZONTAL,
+            show_legend=True,
+            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
+            xmin=0,
+            figsize=FIG_SIZE.FULL_TALL,
+        ),
+        FIGURES_DIR / "corpus-medical-documents-by-source.svg",
+    )
 
 
 def draw_gold_figure(rows: List[Dict[str, Any]]) -> None:
@@ -1048,7 +1578,7 @@ def draw_gold_figure(rows: List[Dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    """Write the dataset statistics, the per-stage funnel tables and the figure, and print the totals."""
+    """Write the dataset statistics, the funnel, the gates, the per-target verdicts and the figures."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     sources = read_sources(EXTRACT_CONFIG)
     builds = build_rows(BUILDS, sources)
@@ -1090,7 +1620,8 @@ def main() -> None:
     check_lexicons_frozen(LEXICON_CONFIG, LEXICON_FREEZE)
     lexicon_labelled = {side: label_scored(rows, lexicons.rule) for side, rows in by_side.items()}
     rule = lexicons.rule
-    lexicon_passes = write_gate_tables(
+    passes_by_name = {}
+    lexicon_passes = passes_by_name["lexicon"] = write_gate_tables(
         "lexicon", lexicon_labelled, {"threshold": rule.threshold, "margin": rule.margin, "min_words": rule.min_words}
     )
 
@@ -1099,6 +1630,7 @@ def main() -> None:
         {"id": row["id"], "text": texts[row["id"]], "judge_domain": row["judge_domain"], "group": group_of[row["id"]]}
         for row in by_side["tune"]
     ]
+    candidate_labelled_by_name: Dict[str, Dict[str, List[Labelled]]] = {}
     for name in SUPERVISED_CANDIDATES if not lexicon_passes else ():
         classifier, regularisation_grid = fit_or_load_candidate(
             name, SUPERVISED_CONFIG, tune, GOLD_SAMPLE_SHA256, SUPERVISED_MODELS
@@ -1108,11 +1640,43 @@ def main() -> None:
             side: label_predicted(rows, classifier.predict([texts[row["id"]] for row in rows]))
             for side, rows in by_side.items()
         }
-        write_gate_tables(name, candidate_labelled, {"regularisation": classifier.regularisation})
+        passes_by_name[name] = write_gate_tables(
+            name, candidate_labelled, {"regularisation": classifier.regularisation}
+        )
+        candidate_labelled_by_name[name] = candidate_labelled
 
-    catalogue = catalogue_rows(CATALOGUE)
-    write_csv(TABLES_DIR / "dataset-catalogue-statistics.csv", catalogue)
-    print(f"catalogue: {len(catalogue)} domain and access groups")
+    catalogue = read_catalogue(CATALOGUE)
+    catalogue_statistics = catalogue_rows(catalogue)
+    write_csv(TABLES_DIR / "dataset-catalogue-statistics.csv", catalogue_statistics)
+    print(f"catalogue: {len(catalogue_statistics)} domain and access groups")
+
+    check_frozen(SUPERVISED_MODELS / f"{CORPUS_CLASSIFIER}.pkl", CORPUS_CLASSIFIER_SHA256)
+    labels = {build: read_corpus_labels(path, build, funnel) for build, path in CORPUS_LABELS.items()}
+    classifier_passes = passes_by_name.get(CORPUS_CLASSIFIER, False)
+    if CORPUS_CLASSIFIER in candidate_labelled_by_name:
+        gold_held = {build: labels[build]["gold_ids"] for build in BUILDS}
+        final_gate = final_corpus_gate_rows(
+            by_side["test"], candidate_labelled_by_name[CORPUS_CLASSIFIER]["test"], gold_held
+        )
+        write_csv(TABLES_DIR / f"classifier-{CORPUS_CLASSIFIER}-gate-by-final-corpus.csv", final_gate)
+    kpi = [row for build in BUILDS for row in kpi_rows(build, labels[build], sources, classifier_passes)]
+    write_csv(TABLES_DIR / "kpi-pass-by-rule.csv", kpi)
+    print(
+        f"targets: {sum(row['passes'] is True for row in kpi)} of {len(kpi)} counts above their target, "
+        f"{sum(row['passes'] is None for row in kpi)} not read"
+    )
+    by_source = [row for build in BUILDS for row in corpus_source_rows(build, labels[build], sources)]
+    write_csv(TABLES_DIR / "corpus-documents-by-source.csv", by_source)
+    by_domain = [row for build in BUILDS for row in corpus_domain_rows(build, labels[build], sources)]
+    write_csv(TABLES_DIR / "corpus-documents-by-domain.csv", by_domain)
+    gaps = gap_rows(kpi, funnel)
+    write_csv(TABLES_DIR / "gap-attribution-by-stage.csv", gaps)
+    write_csv(TABLES_DIR / "gap-catalogue-datasets.csv", gap_catalogue_rows(gaps, catalogue))
+    print(f"gaps: {len(gaps)} missed targets, {sum(gap['cause'] == 'curation loss' for gap in gaps)} curation losses")
+    write_csv(TABLES_DIR / "catalogue-ie-examples-by-domain.csv", ie_example_rows(catalogue))
+    draw_kpi_figure(kpi)
+    draw_medical_funnel_figure(funnel)
+    draw_medical_sources_figure(by_source)
 
 
 if __name__ == "__main__":

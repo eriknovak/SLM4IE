@@ -134,9 +134,36 @@ concluded:
   1. Read every shard of the stage, one process per shard, and label each document with the saved fit, which reads its first 2,000 characters ([M4], step 1).
   2. Count each document under its source and its assigned label. Count its words as the statistics stage counts them, word tokens with at least one letter and two characters, stopwords left out, so tokens estimated as $t = 2w$ match [M1].
   3. Note every gold id the stage still holds, so a gold document's true kept flag is known for this build.
-  4. Sum the shards and stop unless the documents counted equal those the stage's completion record holds, so no shard is missed. Each finished shard is saved as it ends, so a pass that stops part way resumes from where it was, and only while the stage, fit, stopwords and gold ids are the ones it started with.
+  4. Sum the shards and stop unless the documents counted equal those the stage's completion record holds, so no shard is missed. Each finished shard is saved as it ends, so a pass that stops part way resumes from where it was. It resumes only while the stage, fit, stopwords and gold ids are the ones it started with.
 - **Code**: `slm4ie/data/curate/inspect/supervised.py::label_corpus` (steps 1 to 4), `slm4ie/data/curate/inspect/supervised.py::track_corpus_labels` (the JSON and the MLflow run, with the hashes of the fit and the gold file), run by `scripts/curate_pretraining_corpus.py classify`
-- **Settings**: on the command line, `--classifier` (the saved fit), `--gold` (the judged sample whose ids are looked for), `--checkpoint` (the file of finished shards), `--max-workers` (shards read at once), `--shards-per-source` (the first shards read per source, for a smoke run only); the stopword list from the build's curation config (`stopwords`)
+- **Settings**: on the command line, `--classifier` (the saved fit), `--gold` (the judged sample whose ids are looked for), `--checkpoint` (the file of finished shards), `--max-workers` (shards read at once), `--shards-per-source` (the first shards read per source, for a smoke run only); in the build's curation config, `stopwords` (the words left out of every word count)
+
+### M6 — Read every target under every counting rule on both builds
+
+- **Input**: the two files of [M5], one per build, with documents and words per source and assigned label. The per-source funnel of [M1], to check them against. Each source's domain label and access from the dataset registry. The gate verdict of [M3] and [M4].
+- **Output**: [the target table](tables/kpi-pass-by-rule.csv), one row per build, domain, measure, labelling rule and source set. Each row holds the count, the target and whether the count is above it. It also holds the share of the count that must truly belong to the domain for it to stay above. The totals behind it: [documents and estimated tokens per domain](tables/corpus-documents-by-domain.csv) under each labelling rule, with the open sources beside, and [the same per source and assigned label](tables/corpus-documents-by-source.csv). [The gate read again](tables/classifier-tfidf-gate-by-final-corpus.csv) on the test-side gold documents each final corpus still holds.
+- **How**:
+  1. Stop unless the saved fit hashes to what both corpus passes logged, and unless every source's documents and words in a pass equal what the statistics stage counted for it.
+  2. Sum documents and words per domain under each labelling rule. Under source labels a document counts under its source's registry label; under document labels, under the label the classifier assigned it. Scientific and academic both count as science ([D2]). Sum once with every source and once without the four gated ones.
+  3. Read the corpus in estimated tokens $t = 2w$, where $w$ is its word count, and in words, each word read as one token, against $5 \times 10^9$. Read science and medicine in estimated tokens and in words against $5 \times 10^5$, and in documents against $10^4$.
+  4. A count passes when it is above its target. A count under document labels is not read when the classifier that labelled the corpus failed its gate ([D3]).
+  5. For each count $n$ with target $T$, the share needed is $T / n$: the lowest precision at which the domain's true documents or tokens would still clear the target.
+  6. Read the gate's macro-F1 and medical precision of [M3] again on the test-side documents whose ids [M5] found in each final corpus, beside the gate and never as it.
+- **Code**: `analysis.py::read_corpus_labels` (step 1), `analysis.py::domain_totals` (step 2), `analysis.py::kpi_rows` with `analysis.py::kpi_row` (steps 3 to 5), `analysis.py::final_corpus_gate_rows` (step 6)
+- **Settings**: in `analysis.py`, `CORPUS_TOKEN_TARGET` (estimated tokens the corpus must hold), `DOMAIN_TOKEN_TARGET` (estimated tokens per domain), `DOMAIN_DOCUMENT_TARGET` (documents per domain), `TARGET_DOMAINS` (the domains read, science and medical), `TOKENS_PER_WORD` (the word-to-token estimate), `CORPUS_CLASSIFIER` (the candidate whose fit labelled the corpora), `CORPUS_CLASSIFIER_SHA256` (the hash of that fit both passes logged)
+
+### M7 — Attribute each missed target to a missing source or to the stage that lost it
+
+- **Input**: the rows of [M6] whose count is not above its target. The per-source funnel of [M1], documents after every stage of both builds. The landscape catalogue.
+- **Output**: [the attribution](tables/gap-attribution-by-stage.csv), one row per missed target with the documents its sources held after conversion and at the end, the cause and the stage named. [The open catalogue datasets](tables/gap-catalogue-datasets.csv) of each domain with a missed target that the corpus does not yet hold. [The catalogue datasets annotated with extraction spans](tables/catalogue-ie-examples-by-domain.csv) per domain, the second reading of the examples target.
+- **How**:
+  1. Sum, per stage, the documents of the sources whose label folds into the missed domain, leaving out the gated sources where the row does.
+  2. If the sources held no more than the target after conversion, the cause is a source gap. Otherwise it is a curation loss, and the stage named is the first after which they hold no more than the target.
+  3. A missed target under document labels or in words names no cause, since those counts exist only at the final stage.
+  4. List the catalogue datasets of each missed domain that are openly downloadable and not in the dataset registry, largest first. Catalogue domains are renamed to the judge's labels, science folded ([D2]).
+  5. List, per domain, the catalogue datasets annotated with extraction spans, whatever their access.
+- **Code**: `analysis.py::gap_rows` with `analysis.py::domain_stage_counts` (steps 1 to 3), `analysis.py::gap_catalogue_rows` (step 4), `analysis.py::ie_example_rows` (step 5)
+- **Settings**: in `analysis.py`, `IE_ANNOTATION` (the catalogue's annotation value for extraction spans), `CATALOGUE_DOMAINS` (the catalogue's domain names renamed to the judge's labels)
 
 ## Decisions
 

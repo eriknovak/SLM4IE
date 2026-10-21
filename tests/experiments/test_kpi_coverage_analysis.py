@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
@@ -296,3 +296,158 @@ def test_changed_tune_side_stops_a_saved_fit_from_being_reused(tmp_path: Path) -
     analysis.fit_or_load_candidate("tfidf", config, _TUNE, "abc", tmp_path / "models")
     with pytest.raises(ValueError, match="was fitted from inputs hashing to .* delete .*tfidf.pkl to refit"):
         analysis.fit_or_load_candidate("tfidf", config, _TUNE[1:], "abc", tmp_path / "models")
+
+
+#: A corpus pass over the fixture build: web_a holds ten documents the classifier reads as medical.
+_PASS = {
+    "documents": {"web_a": {"web": 30, "medical": 10}, "web_b": {"web": 5}, "med": {"medical": 3}},
+    "words": {"web_a": {"web": 300, "medical": 100}, "web_b": {"web": 50}, "med": {"medical": 30}},
+    "gold_ids": [],
+}
+
+
+def _kpi(
+    build: str, rows: List[Dict[str, Any]], domain: str, measure: str, labels: str, sources: str = "all"
+) -> Dict[str, Any]:
+    """Pick one row of `kpi_rows` by what it counts."""
+    return next(
+        row
+        for row in rows
+        if (row["build"], row["domain"], row["measure"], row["labels"], row["sources"])
+        == (build, domain, measure, labels, sources)
+    )
+
+
+@pytest.fixture
+def funnel(tmp_path: Path) -> List[Dict[str, Any]]:
+    """The fixture build's funnel rows."""
+    return analysis.funnel_source_rows("loosened", _build(tmp_path), _EXACT, _SOURCES)
+
+
+def test_corpus_pass_matching_the_statistics_stage_is_read(tmp_path: Path, funnel: List[Dict[str, Any]]) -> None:
+    """A pass that counts each source as the statistics stage did comes back whole."""
+    path = tmp_path / "labels.json"
+    path.write_text(json.dumps(_PASS), encoding="utf-8")
+    assert analysis.read_corpus_labels(path, "loosened", funnel) == _PASS
+
+
+def test_corpus_pass_counting_a_source_otherwise_is_rejected(tmp_path: Path, funnel: List[Dict[str, Any]]) -> None:
+    """A source whose words differ from the statistics stage names both counts."""
+    path = tmp_path / "labels.json"
+    path.write_text(json.dumps({**_PASS, "words": {**_PASS["words"], "med": {"medical": 31}}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="loosened med: the corpus pass counts 3 documents and 31 words"):
+        analysis.read_corpus_labels(path, "loosened", funnel)
+
+
+def test_medical_documents_counted_under_each_labelling_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Source labels see the medical source alone; document labels add the web documents read as medical."""
+    monkeypatch.setattr(analysis, "DOMAIN_DOCUMENT_TARGET", 5)
+    rows = analysis.kpi_rows("loosened", _PASS, _SOURCES, True)
+    source, document = (_kpi("loosened", rows, "medical", "documents", labels) for labels in ("source", "document"))
+    assert (source["count"], source["passes"], document["count"], document["passes"]) == (3, False, 13, True)
+
+
+def test_document_labels_are_not_read_when_the_classifier_fails_its_gate() -> None:
+    """A failed gate leaves every count under document labels unread, and the source-label ones read."""
+    rows = analysis.kpi_rows("loosened", _PASS, _SOURCES, False)
+    source, document = (_kpi("loosened", rows, "medical", "documents", labels) for labels in ("source", "document"))
+    assert (source["passes"], document["passes"]) == (False, None)
+
+
+def test_count_equal_to_its_target_misses_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pass is a total above the target, so a total at it fails."""
+    monkeypatch.setattr(analysis, "DOMAIN_DOCUMENT_TARGET", 3)
+    assert not _kpi("loosened", analysis.kpi_rows("loosened", _PASS, _SOURCES, True), "medical", "documents", "source")[
+        "passes"
+    ]
+
+
+def test_open_sources_leave_out_the_gated_ones() -> None:
+    """The corpus read on open sources drops the gated web_b's words."""
+    rows = analysis.kpi_rows("loosened", _PASS, _SOURCES, True)
+    every, public = (_kpi("loosened", rows, "corpus", "words", "either", sources) for sources in ("all", "open"))
+    assert (every["count"], public["count"]) == (480, 430)
+
+
+def test_scientific_and_academic_sources_count_as_science() -> None:
+    """Under source labels, science sums the scientific and the academic sources."""
+    sources = {"oss": {"domain": "scientific", "access": "open"}, "kas": {"domain": "academic", "access": "gated"}}
+    labels = {
+        "documents": {"oss": {"science": 4}, "kas": {"student": 6}},
+        "words": {"oss": {"science": 40}, "kas": {"student": 60}},
+    }
+    rows = analysis.kpi_rows("loosened", labels, sources, True)
+    assert _kpi("loosened", rows, "science", "documents", "source")["count"] == 10
+
+
+def _medical_gap(funnel: List[Dict[str, Any]], labels: str) -> Dict[str, Any]:
+    """Attribute the fixture pass's missed targets and pick the medical documents one under a labelling rule."""
+    gaps = analysis.gap_rows(analysis.kpi_rows("loosened", _PASS, _SOURCES, True), funnel)
+    return next(
+        gap
+        for gap in gaps
+        if (gap["domain"], gap["measure"], gap["labels"], gap["sources"]) == ("medical", "documents", labels, "all")
+    )
+
+
+def test_curation_loss_names_the_first_stage_at_or_below_the_target(
+    monkeypatch: pytest.MonkeyPatch, funnel: List[Dict[str, Any]]
+) -> None:
+    """The medical source converts 20 documents and first holds 10 or fewer after exact dedup."""
+    monkeypatch.setattr(analysis, "DOMAIN_DOCUMENT_TARGET", 10)
+    gap = _medical_gap(funnel, "source")
+    assert (gap["converted"], gap["final"], gap["cause"], gap["stage"]) == (20, 3, "curation loss", "exact_dedup")
+
+
+def test_domain_that_never_held_the_target_is_a_source_gap(
+    monkeypatch: pytest.MonkeyPatch, funnel: List[Dict[str, Any]]
+) -> None:
+    """A target above what the medical source converted is a source gap, naming no stage."""
+    monkeypatch.setattr(analysis, "DOMAIN_DOCUMENT_TARGET", 25)
+    gap = _medical_gap(funnel, "source")
+    assert (gap["cause"], gap["stage"]) == ("source gap", "")
+
+
+def test_shortfall_under_document_labels_is_not_attributable(
+    monkeypatch: pytest.MonkeyPatch, funnel: List[Dict[str, Any]]
+) -> None:
+    """Document labels exist only at the final stage, so their shortfall names no cause."""
+    monkeypatch.setattr(analysis, "DOMAIN_DOCUMENT_TARGET", 20)
+    assert _medical_gap(funnel, "document")["cause"] == "not attributable"
+
+
+def _dataset(name: str, domains: str, **fields: str) -> Dict[str, Any]:
+    """Write one catalogue row, open, outside the registry and unannotated unless told otherwise."""
+    row = {
+        "name": name,
+        "domains": domains,
+        "access": "open",
+        "in_registry": "no",
+        "provenance_class": "native",
+        "annotation": "none",
+        "documents": "",
+        "kpi2_fit": "unknown",
+        "url": "",
+    }
+    return row | fields
+
+
+def test_gap_catalogue_lists_open_datasets_the_corpus_lacks() -> None:
+    """Datasets already in the registry or not openly downloadable are left out, the largest first."""
+    catalogue = [
+        _dataset("leaflets", "medical", in_registry="yes", documents="900"),
+        _dataset("guidelines", "medical", access="not_downloadable", documents="800"),
+        _dataset("notes", "medical", documents="20"),
+        _dataset("ner", "medical", documents="300"),
+    ]
+    rows = analysis.gap_catalogue_rows([{"domain": "medical"}], catalogue)
+    assert [row["dataset"] for row in rows] == ["ner", "notes"]
+
+
+def test_ie_examples_keep_span_annotated_datasets_under_folded_domains() -> None:
+    """Only extraction-span datasets count, and an academic one lists under science."""
+    catalogue = [
+        _dataset("terms", "academic", annotation="IE spans", documents="5"),
+        _dataset("treebank", "academic", annotation="linguistic", documents="9"),
+    ]
+    assert [(row["domain"], row["dataset"]) for row in analysis.ie_example_rows(catalogue)] == [("science", "terms")]

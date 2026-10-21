@@ -1,0 +1,3 @@
+side,documents,macro_f1,medical_precision,medical_precision_off_source,medical_recall_off_source
+test in the loosened final corpus,2515,0.6743,0.9375,0.8205,0.5614
+test in the baseline final corpus,1621,0.6856,0.9315,0.8485,0.6667
