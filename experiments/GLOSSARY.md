@@ -36,16 +36,18 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **CPU hours**: processor time a step consumed, summed over its tasks; comparable between steps and machines.
 - **Wall hours** (wall clock): elapsed time a step took on the machine that ran it, at the worker count it was given.
 - **Agresti–Coull interval** (Agresti–Coull adjustment): a normal-approximation confidence interval for a share that first adds about two successes and two failures, so a share of 0 or 1 still gets a width; summed over independent shares, it gives the interval on a total such as bad text gained.
+- **Share needed**: the target divided by the count, the lowest share of a count that must truly belong to its domain for the count to stay above the target; a share above 1 means the count falls short even if every item is right.
+- **Off-source precision** (precision off the source, off-source read): a domain's precision read only on documents whose source carries a different label, so the classifier has to find the domain from the text rather than inherit it from the source.
 
 ## Terms
 
 - **q05, q50, q95** (q05, q50, q95): the 5th, 50th (median) and 95th percentiles of a distribution.
 - **Curation pipeline**: the eight stages that turn extracted text into the pretraining corpus, in order convert, language, spam, quality, repetition, exact dedup, sentence dedup and statistics; the six from language to sentence dedup each keep or drop every document.
 - **Content filter**: one of the four curation stages that judge a document's content — the language, spam, quality and repetition filters — as opposed to the two dedup stages, which remove copies.
-- **Gopher heuristics** (Gopher-style): the rule-based quality and repetition filters published with DeepMind's Gopher model — thresholds on document length, word length, symbol ratios and repeated n-grams, tuned on English web text.
+- **Gopher heuristics** (Gopher-style, quality filter, repetition filter): the rule-based quality and repetition filters published with DeepMind's Gopher model — thresholds on document length, word length, symbol ratios and repeated n-grams, tuned on English web text.
 - **Letter rule** (letter share): the Gopher quality rule that most words contain a letter, meant to catch tables of numbers and symbol junk; the letter share is the share of a document's words that contain a letter, and the rule drops the document when it falls under 0.8.
 - **Route** (curation route, raw-crawl route, curated-prose route, medical-and-academic route): a named set of content-filter settings that every source of one kind shares in the curation pipeline, so a web crawl and an edited corpus are filtered differently. Not the repository's conversion routes, which are the three output trees that fork after extraction.
-- **Raw web crawl**: a source scraped from the open web with little editing — here c4, cc100, culturax, fineweb2, hplt, macocu_sl, classla_web_sl and finepdf. In the curation-thresholds experiment finepdf, a crawl of PDF documents, takes the curated-prose route.
+- **Raw web crawl** (web crawl, web crawls): a source scraped from the open web with little editing — here c4, cc100, culturax, fineweb2, hplt, macocu_sl, classla_web_sl and finepdf. In the curation-thresholds experiment finepdf, a crawl of PDF documents, takes the curated-prose route.
 - **Curated source**: a source assembled or edited by people for a purpose — here the parliamentary, medical, legal, scientific, news, wiki and reference corpora. In the curation-thresholds experiment the medical and academic ones take a route of their own.
 - **Sloleks**: the reference lexicon of Slovene word forms, used here to check whether a token is an ordinary Slovene word.
 - **LLM judge** (judge): a language model given a fixed rubric and asked to label documents, standing in for a human annotator once its agreement with one is measured.
@@ -71,7 +73,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **LINDAT** (LINDAT/CLARIAH-CZ): the Czech CLARIN node, which re-publishes some Slovene holdings under `11234/<n>` handles.
 - **ELG** (European Language Grid): an EU platform cataloguing language resources and services; for Slovene it largely mirrors CLARIN.SI rather than publishing its own.
 - **NER** (named-entity recognition): labelling spans of text with the kind of entity they name — a person, a place, a drug, a diagnosis. One of the information-extraction tasks the project targets.
-- **Entity span** (span): one named entity recorded as the character range of its surface text in a document, `[start, end, label]` with `end` exclusive, plus an upper-case label such as `PER`, `LOC`, `ORG`, `MISC` or `DERIV-PER` (a word derived from a person's name, like "Freudovo"). Decoded from the IOB tags of the source, where `B-` opens an entity, `I-` continues it and `O` is outside any entity.
+- **Entity span** (span, IE spans, extraction spans): one named entity recorded as the character range of its surface text in a document, `[start, end, label]` with `end` exclusive, plus an upper-case label such as `PER`, `LOC`, `ORG`, `MISC` or `DERIV-PER` (a word derived from a person's name, like "Freudovo"). Decoded from the IOB tags of the source, where `B-` opens an entity, `I-` continues it and `O` is outside any entity.
 - **IE** (information extraction): pulling structured facts — entities, relations, attributes — out of running text. The project's target task family.
 - **PDF** (Portable Document Format): the page-layout file most Slovene journals and institutions publish articles and guidelines in. Its text has to be extracted before it can be counted, and a scanned PDF yields none.
 - **Tokenizer**: the component that splits text into the subword units a language model reads; its vocabulary decides how many tokens a word becomes.
@@ -86,7 +88,22 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Volume-weighted** (weighted by volume): a rate over several sources in which each source counts by the documents it holds in the build, not by how many of its documents were judged, so the rate describes the corpus rather than the average source.
 - **Kept corpus** (kept documents): the documents that leave the repetition filter, the last content filter; the dedup stages that follow remove copies but judge no content, so a build's bad-text share is read there.
 - **1:1 rate** (exchange rate): the rule that a filter is worth keeping on a source only where at least half of what it drops is bad text, so one bad document removed is worth one good document lost.
-- **Document-level domain**: the domain a classifier or judge assigns to one document from its own text, as opposed to the source label every document of a dataset inherits.
-- **Lexicon scoring**: labelling a document by counting, per 1,000 words, its weighted hits on a word list per domain and taking the highest-scoring domain when it clears a threshold and leads the runner-up by a margin.
+- **Document-level domain** (document labels, document-level labels): the domain a classifier or judge assigns to one document from its own text, as opposed to the source label every document of a dataset inherits.
+- **Lexicon scoring** (lexicon classifier): labelling a document by counting, per 1,000 words, its weighted hits on a word list per domain and taking the highest-scoring domain when it clears a threshold and leads the runner-up by a margin.
 - **Source gap**: a shortfall against a target in a domain that never had the material before curation, so only new sources can close it.
 - **Curation loss**: a shortfall against a target in a domain that had the material before curation and lost it at a named filter stage.
+- **Source label** (source labels): the domain every document of a dataset inherits from the dataset's entry in the download registry, as opposed to a document-level domain read from the text.
+- **Data target** (examples target, token target, corpus target): the three KPI thresholds read as pass-or-fail bars — ten thousand documents per domain (the examples target), half a million estimated tokens per domain (the token target) and five billion estimated tokens per language (the corpus target); read for science and medicine, they give the four bars H1 to H4 of the KPI-coverage experiment.
+- **Judged gold** (gold, tune side, test side): the curation-quality judge's sample of documents with the domain the judge assigned each, halved into a tune side for picking a classifier's settings and a test side read once to pass or fail it.
+- **Classifier gate** (quality gate): the rule that a domain classifier's labels count only when its test-side macro-F1 is at least 0.7 and its off-source medical precision at least 0.8.
+- **Log-odds** (log-odds ratio): the logarithm of how many times more often a word occurs in one domain's documents than in the others', used to rank the words most distinctive of a domain.
+- **TF-IDF** (tfidf): term frequency times inverse document frequency; a word or character n-gram's count in a document, discounted by how many documents carry it, so n-grams that occur everywhere weigh little.
+- **Regularisation** (C, regularisation strength): a penalty on large weights in a fitted model that keeps it from memorising the training documents; C is the inverse strength, so a smaller C regularises more.
+- **Logistic regression**: a linear classifier that turns a weighted sum of features into a probability per class; with class weights, every class counts the same whatever its size.
+- **Sentence encoder** (embeddings, multilingual-e5-small): a neural model that turns a text into one fixed-length vector so that texts about the same thing lie close; multilingual-e5-small is the small multilingual encoder tried here.
+- **Exact dedup** (exact deduplication): the curation stage that drops every document whose text is byte-identical to one already kept, wherever in the corpus the copy sits.
+- **Converted documents** (convert stage): a source's documents after the convert stage, before any filter runs; the starting count every retention and loss share is taken over.
+- **Funnel** (source funnel, domain funnel): a source's or domain's document count after every curation stage in order, read to see at which stage text is lost.
+- **Medical leaflet source** (medical source, povejmo_vemo_med): the one dataset in the download registry labelled medical, PoVeJMo-VeMo-Med 1.0, drug package leaflets from the Slovene central drug database; its release ships the same texts twice, so its converted count is about three times its distinct texts.
+- **KAS-term**: a terminology-identification dataset built from KAS, the corpus of Slovene academic theses, with the spans of technical terms marked in each text.
+- **HUMADEX**: a medical named-entity dataset machine-translated into Slovene, with entity spans; large, but not native Slovene text.
