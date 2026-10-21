@@ -98,7 +98,6 @@ from slm4ie.data.curate.inspect.sample import (
     draw_stratified_sample,
     resolve_sample_dir,
 )
-from slm4ie.data.curate.inspect.supervised import label_corpus, track_corpus_labels
 from slm4ie.data.curate.stages import CORPUS_STAGES, STAGE_DIRS
 from slm4ie.utils.cli import add_keys, validate_keys
 from slm4ie.utils.versioning import file_sha256
@@ -425,6 +424,9 @@ def main() -> None:
         return
 
     if args.command == "classify":
+        # Imported here: scikit-learn sits in the analysis group, not in corpus.
+        from slm4ie.data.curate.inspect.supervised import label_corpus, track_corpus_labels
+
         setup = load_curate_config(args.input_dir, args.output_dir, args.config, args.extract_config)
         # Resolved, so the logged path survives the snapshot worktree a tracked run starts in.
         stage_dir = (resolve_sample_dir(args.config, args.output_dir) / STAGE_DIRS["sentence_dedup"]).resolve()
@@ -458,6 +460,8 @@ def main() -> None:
             params,
             dict(tag.split("=", 1) for tag in args.tag),
         )
+        if run_id is None:
+            sys.exit(f"wrote {args.out}, but MLflow experiment {args.experiment!r} is unreachable; no run logged")
         print(f"wrote {args.out}; MLflow run {run_id}")
         return
 

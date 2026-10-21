@@ -30,6 +30,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Counter as TypingCounter
 from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
@@ -381,8 +382,8 @@ def _label_shard(shard: Path) -> Dict[str, Any]:
     Returns:
         Documents and words per assigned label, and the gold ids the shard holds.
     """
-    documents: Counter = Counter()
-    words: Counter = Counter()
+    documents: TypingCounter[str] = Counter()
+    words: TypingCounter[str] = Counter()
     found: List[str] = []
     batch: List[Dict[str, Any]] = []
     with gzip.open(shard, "rt", encoding="utf-8") as handle:
@@ -512,8 +513,8 @@ def label_corpus(
 
 def _sum_shards(rows: Sequence[Mapping[str, Any]], sources: Sequence[str]) -> CorpusLabels:
     """Sum per-shard counts into per-source counts, every source present even when empty."""
-    documents: Dict[str, Counter] = {source: Counter() for source in sources}
-    words: Dict[str, Counter] = {source: Counter() for source in sources}
+    documents: Dict[str, TypingCounter[str]] = {source: Counter() for source in sources}
+    words: Dict[str, TypingCounter[str]] = {source: Counter() for source in sources}
     for row in rows:
         documents[row["source"]].update(row["documents"])
         words[row["source"]].update(row["words"])
@@ -553,8 +554,8 @@ def track_corpus_labels(
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(asdict(labels), indent=1), encoding="utf-8")
-    documents: Counter = sum((Counter(counts) for counts in labels.documents.values()), Counter())
-    words: Counter = sum((Counter(counts) for counts in labels.words.values()), Counter())
+    documents: TypingCounter[str] = sum((Counter(counts) for counts in labels.documents.values()), Counter())
+    words: TypingCounter[str] = sum((Counter(counts) for counts in labels.words.values()), Counter())
     metrics = {
         "documents": sum(documents.values()),
         "words": sum(words.values()),
