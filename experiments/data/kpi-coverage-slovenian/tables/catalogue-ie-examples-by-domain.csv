@@ -1,0 +1,17 @@
+domain,dataset,access,provenance,annotation,documents,fits_examples_target,url
+science,English-Slovene term candidates KAS-biterm 1.0,open,bilingual_resource,IE spans,133710,yes,https://hdl.handle.net/11356/1263
+science,Terminology identification dataset KAS-term 1.0,open,native,IE spans,22950,yes,https://hdl.handle.net/11356/1198
+science,Bilingual terminology extraction dataset KAS-biterm 1.0,open,bilingual_resource,IE spans,,unknown,https://hdl.handle.net/11356/1199
+medical,"Slovenian NER dataset (HUMADEX, medical)",open,machine_translated,IE spans,437577,yes,https://huggingface.co/datasets/HUMADEX/slovenian_ner_dataset
+medical,Synthetic multilingual medical notes for NER (incl. Slovenian),open,synthetic,IE spans,3238,no,https://huggingface.co/datasets/E3-JSI/synthetic-multi-med-notes-ner-v1
+medical,Slovenian Relation Extraction (clinical case reports),open,native,IE spans,84,no,https://huggingface.co/datasets/NLP-FBK/Slovenian_Relation_Extraction
+forum,Corpus for identifying sex education concepts SemSex 1.0,open,native,IE spans,,n/a,https://hdl.handle.net/11356/1895
+other,Slovene translation of the SQuAD2.0 dataset,open,machine_translated,IE spans,150000,n/a,https://hdl.handle.net/11356/1756
+other,Synthetic multilingual PII NER dataset (incl. Slovenian),open,synthetic,IE spans,2971,n/a,https://huggingface.co/datasets/E3-JSI/synthetic-multi-pii-ner-v1
+other,CorefUD conversion of Slovene corpus for aspect-based sentiment analysis SentiCoref,open,native,IE spans,837,n/a,https://hdl.handle.net/11356/1990
+other,CorefUD conversion of Slovene coreference resolution corpus coref149,open,native,IE spans,149,n/a,https://hdl.handle.net/11356/1989
+other,Slovene coreference resolution corpus coref149,open,native,IE spans,,n/a,https://hdl.handle.net/11356/1182
+other,PARSEME corpora annotated for verbal multiword expressions (version 1.3),open,native,IE spans,,n/a,http://hdl.handle.net/11372/LRT-5124
+other,Corpus of metaphorical expressions in spoken Slovene language G-KOMET 1.0,open,native,IE spans,,n/a,https://live.european-language-grid.eu/catalogue/corpus/20173
+wiki,WikiANN (Slovenian NER),open,native,IE spans,35000,n/a,https://huggingface.co/datasets/unimelb-nlp/wikiann
+wiki,DaMuEL 1.0: A Large Multilingual Dataset for Entity Linking,open,native,IE spans,,n/a,http://hdl.handle.net/11234/1-5047

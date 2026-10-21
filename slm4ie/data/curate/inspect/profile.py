@@ -35,6 +35,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
+from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.data.curate.paths import count_jsonl_rows
 
 logger = logging.getLogger(__name__)
@@ -355,6 +356,37 @@ def count_source_documents(stage_dir: Path, workers: int = 10) -> Dict[str, int]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for (source, _), rows in zip(shards, pool.map(count_jsonl_rows, [shard for _, shard in shards])):
             counts[source] += rows
+    return counts
+
+
+def cached_source_counts(stage_dir: Path, cache: Path, workers: int = 10) -> Dict[str, int]:
+    """Count the documents each source holds in a stage's output, once per state of the stage.
+
+    The count reads every shard, so it is written to `cache` with the stage's
+    document digest and reused while the digest is unchanged.
+
+    Args:
+        stage_dir: A corpus-wide stage folder with a completed sentinel.
+        cache: JSON file holding the counts and the digest they were taken at.
+        workers: Shards counted at once.
+
+    Returns:
+        Documents per source.
+
+    Raises:
+        FileNotFoundError: If the stage has no completed sentinel with a document digest.
+    """
+    sentinel = read_sentinel(stage_dir)
+    if sentinel is None or sentinel.document_digest is None:
+        raise FileNotFoundError(f"no completed sentinel with a document digest at {stage_dir}")
+    if cache.is_file():
+        cached = json.loads(cache.read_text(encoding="utf-8"))
+        if cached.get("document_digest") == sentinel.document_digest:
+            return cached["counts"]
+    logger.info("counting %s per source; this reads every shard", stage_dir)
+    counts = count_source_documents(stage_dir, workers=workers)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"document_digest": sentinel.document_digest, "counts": counts}, indent=1))
     return counts
 
 

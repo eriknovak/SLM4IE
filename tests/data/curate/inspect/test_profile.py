@@ -6,7 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Sequence, Tuple
 
+import pytest
+
 from slm4ie.data.curate.inspect.profile import (
+    cached_source_counts,
     count_source_documents,
     iter_stage_sentinels,
     language_confidence,
@@ -143,3 +146,43 @@ class TestCountSourceDocuments:
         _write_shard(tmp_path / "a" / "00001.jsonl.gz", 2, start=3)
         _write_shard(tmp_path / "b" / "00000.jsonl.gz", 4)
         assert count_source_documents(tmp_path, workers=1) == {"a": 5, "b": 4}
+
+
+class TestCachedSourceCounts:
+    """A corpus-wide stage's per-source counts are counted once per state of the stage."""
+
+    @staticmethod
+    def _stage(root: Path, digest: str) -> Path:
+        """Write a stage with one two-document source and a completed sentinel.
+
+        Args:
+            root: The stage folder.
+            digest: The document digest the sentinel records.
+
+        Returns:
+            The stage folder.
+        """
+        _write_shard(root / "a" / "00000.jsonl.gz", 2)
+        payload = {"completed_at": "", "config_hash": "", "config_slice": {}, "records_in": 2, "records_out": 2}
+        (root / ".complete").write_text(json.dumps({**payload, "document_digest": digest}), encoding="utf-8")
+        return root
+
+    def test_reuses_the_cache_while_the_digest_holds(self, tmp_path: Path) -> None:
+        """A cache taken at the stage's current digest is returned without reading shards."""
+        stage = self._stage(tmp_path / "stage", "sum256:abc")
+        cache = tmp_path / "counts.json"
+        cache.write_text(json.dumps({"document_digest": "sum256:abc", "counts": {"a": 99}}), encoding="utf-8")
+        assert cached_source_counts(stage, cache, workers=1) == {"a": 99}
+
+    def test_recounts_when_the_digest_changed(self, tmp_path: Path) -> None:
+        """A cache from an earlier state of the stage is replaced by a fresh count."""
+        stage = self._stage(tmp_path / "stage", "sum256:new")
+        cache = tmp_path / "counts.json"
+        cache.write_text(json.dumps({"document_digest": "sum256:old", "counts": {"a": 99}}), encoding="utf-8")
+        assert cached_source_counts(stage, cache, workers=1) == {"a": 2}
+        assert json.loads(cache.read_text(encoding="utf-8"))["document_digest"] == "sum256:new"
+
+    def test_rejects_a_stage_without_a_sentinel(self, tmp_path: Path) -> None:
+        """An unfinished stage is not counted."""
+        with pytest.raises(FileNotFoundError, match="no completed sentinel"):
+            cached_source_counts(tmp_path, tmp_path / "counts.json", workers=1)

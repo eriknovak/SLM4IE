@@ -55,7 +55,7 @@ from slm4ie.data.curate.config import (  # noqa: E402
     lock_path_for,
     resolve_profiles,
 )
-from slm4ie.data.curate.inspect.profile import count_source_documents  # noqa: E402
+from slm4ie.data.curate.inspect.profile import cached_source_counts  # noqa: E402
 from slm4ie.data.curate.resources.stopwords import load_stopwords  # noqa: E402
 from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _build_quality_config  # noqa: E402
 from slm4ie.data.curate.stages.repetition import _build_repetition_config  # noqa: E402
@@ -299,33 +299,6 @@ def scoped_counts(pretrain_dir: Path) -> Tuple[Dict[str, Dict[str, int]], Set[st
             counts[source][stage] = sentinel["records_out"]
             commits.add((sentinel.get("info") or {}).get("git_commit", "unknown"))
     return counts, commits
-
-
-def counted_stage(pretrain_dir: Path, cache: Path, workers: int) -> Dict[str, int]:
-    """Count each source's documents after exact dedup, once.
-
-    Exact dedup runs over the whole corpus and keeps no per-source sentinel,
-    so its output is counted. The count reads every shard, so it is cached and
-    reused while the stage's sentinel is unchanged.
-
-    Args:
-        pretrain_dir: The curation `output_dir`.
-        cache: JSON file holding the counts and the sentinel they were taken at.
-        workers: Shards counted at once.
-
-    Returns:
-        Documents per source after exact dedup.
-    """
-    sentinel = json.loads((pretrain_dir / COUNTED_STAGE / ".complete").read_text(encoding="utf-8"))
-    if cache.is_file():
-        cached = json.loads(cache.read_text(encoding="utf-8"))
-        if cached.get("document_digest") == sentinel["document_digest"]:
-            return cached["counts"]
-    print(f"counting {COUNTED_STAGE} per source; this reads every shard")
-    counts = count_source_documents(pretrain_dir / COUNTED_STAGE, workers=workers)
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps({"document_digest": sentinel["document_digest"], "counts": counts}, indent=1))
-    return counts
 
 
 def funnel_rows(pretrain_dir: Path, exact_counts: Dict[str, int], access: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -2238,7 +2211,9 @@ def main() -> None:
     print(f"baseline corpus built at {', '.join(sorted(commits))}")
 
     access = read_access(args.extract_config)
-    exact_counts = counted_stage(args.pretrain_dir, args.data_root / "interim" / "stage-counts.json", args.workers)
+    exact_counts = cached_source_counts(
+        args.pretrain_dir / COUNTED_STAGE, args.data_root / "interim" / "stage-counts.json", args.workers
+    )
     funnel = funnel_rows(args.pretrain_dir, exact_counts, access)
     audit_funnel = read_csv(AUDIT_TABLES / "source-funnel.csv")
     losses = loss_rows(funnel)
@@ -2269,7 +2244,9 @@ def main() -> None:
         f"{stem} build matches {lock_path_for(args.routes_config).name}; built at {', '.join(sorted(candidate_commits))}"
     )
     candidate_cache = args.data_root / "interim" / f"{stem}-stage-counts.json"
-    candidate = funnel_rows(candidate_dir, counted_stage(candidate_dir, candidate_cache, args.workers), access)
+    candidate = funnel_rows(
+        candidate_dir, cached_source_counts(candidate_dir / COUNTED_STAGE, candidate_cache, args.workers), access
+    )
     route_comparison = route_comparison_rows(funnel, candidate, routes)
     loss_changes = loss_change_rows(funnel, candidate, routes)
     candidate_domains = domain_token_rows(candidate, funnel, earlier="baseline")
@@ -2376,7 +2353,9 @@ def main() -> None:
     loosened_dir = Path(yaml.safe_load(args.loosened_config.read_text(encoding="utf-8"))["output_dir"])
     check_lock(loosened_dir, args.loosened_config)
     loosened_cache = args.data_root / "interim" / f"{loosened_stem}-stage-counts.json"
-    loosened = funnel_rows(loosened_dir, counted_stage(loosened_dir, loosened_cache, args.workers), access)
+    loosened = funnel_rows(
+        loosened_dir, cached_source_counts(loosened_dir / COUNTED_STAGE, loosened_cache, args.workers), access
+    )
     loosened_verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.loosened_verdicts)}
     loosened_agreement = agreement_rows(read_jsonl(CALIBRATION_LABELS), loosened_verdicts)
     loosened_gate = loosened_agreement[0]["passes_gate"]
