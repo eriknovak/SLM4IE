@@ -7,7 +7,7 @@ branch: exp/kpi-coverage-slovenian
 base_commit: bb8c5ad
 status: concluded
 ticket: "#3"
-pr:
+pr: "#31"
 mlflow: slm4ie/data/kpi-coverage-slovenian
 builds_on:
   - ../../data/curation-thresholds-slovenian/
