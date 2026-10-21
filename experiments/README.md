@@ -28,7 +28,20 @@ The first check of the pretraining-corpus pipeline against labels: an LLM judge,
 - **[F3](data/curation-quality-slovenian/#f3--what-the-stages-keep-is-clean) — What the stages keep is clean.** Fewer than one in ten documents that any stage keeps is bad text at the lenient bar.
 - **[F7](data/curation-quality-slovenian/#f7--curated-domain-sources-lose-most-of-their-text-to-a-filter-the-judge-does-not-confirm) — Curated domain sources lose most of their text to a filter the judge does not confirm.** The quality filter removes most of the medical source, and the judge calls none of the sampled drops bad text.
 
-The repairs these findings call for, per-source filter settings and a spam filter that counts distinct words, are the subject of the planned threshold experiment, curation-thresholds-slovenian.
+The repairs these findings call for, per-source filter settings and a spam filter that counts distinct words, are the subject of the threshold experiment below.
+
+### [Curation filter thresholds — Slovenian](data/curation-thresholds-slovenian/) · inconclusive · 2026-10-20
+
+The repair the quality audit called for: each source takes one of three routes through the content filters, and the filters' thresholds are loosened per route on the judged evidence. Whether each filter now drops what it targets cannot be called, because every judge run agrees with the person less closely than the gate asks. The question the record answers instead is whether the loosened settings keep more good text without a dirtier kept corpus, and the answer is yes. This repairs the quality audit's main loss, good text discarded by filters built for English web crawls. Simple rules still leave web junk that no tested measure separates from good text.
+
+- **[F12](data/curation-thresholds-slovenian/#f12--the-loosened-build-keeps-more-good-text-and-the-draws-cannot-place-its-rise-in-bad-text-above-the-bar) — The loosened build keeps more good text, and the draws cannot place its rise in bad text above the bar.** The loosened build keeps about a quarter more good documents than the baseline, and the interval on its rise in bad text spans the bar.
+
+### [KPI coverage of the curated Slovene corpus](data/kpi-coverage-slovenian/) · confirmed · 2026-10-21
+
+The check of the corpus the project built against its four data targets, read once with every document carrying its source's domain and once with each document labelled by a classifier that passed a quality gate on judged gold. It reads the loosened build the [threshold experiment](data/curation-thresholds-slovenian/) produced, and answers what the [data landscape](data/data-landscape-slovenian/) left open: whether medical text hidden in the web crawls changes the medical verdict. All four targets clear. Medicine misses the examples target under source labels only because its one source never held ten thousand distinct texts, and clears it a hundredfold once the medical documents inside the web crawls are counted. That contradicts the landscape survey's reading that medical examples are missing, for documents, though not for annotated extraction examples, which still have to be built.
+
+- **[F1](data/kpi-coverage-slovenian/#f1--every-data-target-clears-under-document-level-labels-and-under-source-labels-only-the-medical-examples-target-misses) — Every data target clears under document-level labels, and under source labels only the medical examples target misses.** Medical documents miss the examples target under source labels and clear it a hundredfold under document labels, while every other count clears under both.
+- **[F2](data/kpi-coverage-slovenian/#f2--the-medical-shortfall-under-source-labels-is-a-source-gap-since-the-medical-source-never-held-enough-distinct-texts) — The medical shortfall under source labels is a source gap, since the medical source never held enough distinct texts.** The medical source falls below the examples target at exact dedup, which removes only copies, so only a new dataset can close the gap.
 
 ## methods
 

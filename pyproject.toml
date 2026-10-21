@@ -154,4 +154,13 @@ analysis = [
     "anthropic>=1.6.0",
     "marimo>=0.24.2",
     "pypdf>=5",                       # PDF text for the medical sizing pass
+    "scikit-learn>=1.6",              # TF-IDF + logistic regression domain classifier
+]
+
+# Sentence-embedding features for the supervised domain classifier
+# (slm4ie/data/curate/inspect/supervised.py). Imported lazily: the TF-IDF
+# backend and the gate tables need none of it.
+embeddings = [
+    "sentence-transformers>=3.3",     # multilingual-e5 encoder
+    "torch>=2.5",
 ]

@@ -3,6 +3,7 @@
 import gzip
 import json
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -207,6 +208,20 @@ class TestSurvivorIndex:
 
         assert len(index) == 0
         assert f"{_DATASET}:0000" not in index
+
+    def test_lookups_stay_fast_on_a_large_index(self) -> None:
+        """A thousand lookups on a two-million-id index finish well within a second."""
+        index = SurvivorIndex()
+        for number in range(2_000_000):
+            index.add(f"{_DATASET}:{number}")
+        index.freeze()
+
+        start = time.perf_counter()
+        for number in range(1_000):
+            _ = f"{_DATASET}:{number}" in index
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 1.0
 
 
 class TestDrawStratifiedSample:

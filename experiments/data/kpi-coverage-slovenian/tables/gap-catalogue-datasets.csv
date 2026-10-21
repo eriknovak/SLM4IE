@@ -1,0 +1,30 @@
+domain,dataset,access,provenance,annotation,documents,fits_examples_target,url
+medical,Slovene instruction-following dataset for large language models GaMS-Instruct-MED-Termset 1.0,open,synthetic,labels,975060,yes,https://hdl.handle.net/11356/2089
+medical,Slovene instruction-following dataset for large language models GaMS-Instruct-MED-Anatomy 1.0,open,mixed,labels,711805,yes,https://hdl.handle.net/11356/2085
+medical,Slovene instruction-following dataset for large language models GaMS-Instruct-PHARMA 1.0,open,synthetic,none,482276,yes,https://hdl.handle.net/11356/2081
+medical,"Slovenian NER dataset (HUMADEX, medical)",open,machine_translated,IE spans,437577,yes,https://huggingface.co/datasets/HUMADEX/slovenian_ner_dataset
+medical,EMEA-V3 (European Medicines Agency parallel corpus),open,human_translated,parallel,338195,yes,https://huggingface.co/datasets/qanastek/EMEA-V3
+medical,Slovene instruction-following dataset for large language models GaMS-Instruct-MED 2.0,open,mixed,labels,25046,yes,https://hdl.handle.net/11356/2045
+medical,Slovene instruction-following dataset for large language models GaMS-Instruct-MED 1.0,open,synthetic,none,18897,yes,https://hdl.handle.net/11356/1982
+medical,"ELRC-Medical-V2 (English-Slovenian, healthcare MT)",open,human_translated,parallel,13208,yes,https://huggingface.co/datasets/qanastek/ELRC-Medical-V2
+medical,EU medical domain publications corpus (EN-SL),open,human_translated,parallel,7419,no,https://huggingface.co/datasets/FrancophonIA/EU_medical_domain_publications
+medical,Synthetic multilingual medical notes for NER (incl. Slovenian),open,synthetic,IE spans,3238,no,https://huggingface.co/datasets/E3-JSI/synthetic-multi-med-notes-ner-v1
+medical,Zdravniški vestnik — dLib.si digital library,open,native,none,2652,no,https://www.dlib.si/results/?pageSize=25&query=%27rele%3DZdravni%C5%A1ki+vestnik%27
+medical,ECDC Translation Memory (English-Slovene),open,human_translated,parallel,2545,no,https://huggingface.co/datasets/community-datasets/europa_ecdc_tm
+medical,Slovenska Wikipedija — Kategorija:Medicina,open,native,none,2132,no,https://sl.wikipedia.org/wiki/Kategorija:Medicina
+medical,ICD-10 multilingual clinical notes,open,synthetic,labels,1802,no,https://huggingface.co/datasets/birgermoell/icd10-clinical-notes
+medical,Zdravniški vestnik — official archive,open,native,none,1616,no,https://vestnik.szd.si/index.php/ZdravVest/issue/archive
+medical,NIJZ open data (OPSI portal),open,native,none,479,no,https://podatki.gov.si/publisher/nacionalni_institut_za_javno_zdravje
+medical,Zdravniški vestnik — Odprto založništvo listing,open,native,none,93,no,https://odprtozaloznistvo.si/revije/zdravniski-vestnik/
+medical,Slovenian Relation Extraction (clinical case reports),open,native,IE spans,84,no,https://huggingface.co/datasets/NLP-FBK/Slovenian_Relation_Extraction
+medical,"EMEA parallel corpus (Slovenian, medical)",open,human_translated,parallel,,unknown,https://huggingface.co/datasets/Helsinki-NLP/emea
+medical,Antibiotic domain parallel corpus (incl. Slovenian),open,human_translated,parallel,,unknown,https://huggingface.co/datasets/FrancophonIA/Antibiotic
+medical,COVID-19 health domain parallel corpus (incl. Slovenian),open,human_translated,parallel,,unknown,https://huggingface.co/datasets/FrancophonIA/COVID-19_HEALTH
+medical,"Publications of the Medical Domain (EU, multilingual)",open,human_translated,parallel,,unknown,https://huggingface.co/datasets/FrancophonIA/Publications_Medical_Domain_UE
+medical,COVID-19 health corpus from Wikipedia (multilingual),open,bilingual_resource,parallel,,unknown,https://huggingface.co/datasets/FrancophonIA/COVID-19_HEALTH_Wikipedia
+medical,COVID-19 OSHA-EUROPA corpus (multilingual),open,human_translated,parallel,,unknown,https://huggingface.co/datasets/FrancophonIA/COVID-19_OSHA-EUROPA
+medical,ECDC Translation Memory (CLARIN:GR re-publication),open,human_translated,parallel,,unknown,https://huggingface.co/datasets/FrancophonIA/ECDC_Translation_Memory
+medical,CURLICAT Slovenian corpus,open,native,linguistic,,unknown,https://live.european-language-grid.eu/catalogue/corpus/20800
+medical,Bilingual corpus from the Publications Office of the EU on the medical domain (EN-SL),open,human_translated,parallel,,unknown,https://live.european-language-grid.eu/catalogue/corpus/3435
+medical,Bilingual corpus made out of PDF documents from the European Medicines Agency (EMEA) EN-SL,open,human_translated,parallel,,unknown,https://live.european-language-grid.eu/catalogue/corpus/3459
+medical,European Medicines Agency corpus,open,human_translated,parallel,,unknown,https://live.european-language-grid.eu/catalogue/corpus/12729

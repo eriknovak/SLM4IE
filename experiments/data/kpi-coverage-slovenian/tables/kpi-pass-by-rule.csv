@@ -1,0 +1,57 @@
+build,domain,measure,labels,sources,count,target,passes,share_needed
+loosened,corpus,estimated tokens,either,all,22539297662,5000000000,True,0.2218
+loosened,corpus,estimated tokens,either,open,17418488860,5000000000,True,0.2871
+loosened,corpus,words,either,all,11269648831,5000000000,True,0.4437
+loosened,corpus,words,either,open,8709244430,5000000000,True,0.5741
+loosened,science,estimated tokens,source,all,2836041136,500000,True,0.0002
+loosened,science,estimated tokens,source,open,1539331988,500000,True,0.0003
+loosened,science,estimated tokens,document,all,1438279988,500000,True,0.0003
+loosened,science,estimated tokens,document,open,1194714562,500000,True,0.0004
+loosened,science,words,source,all,1418020568,500000,True,0.0004
+loosened,science,words,source,open,769665994,500000,True,0.0006
+loosened,science,words,document,all,719139994,500000,True,0.0007
+loosened,science,words,document,open,597357281,500000,True,0.0008
+loosened,science,documents,source,all,165466,10000,True,0.0604
+loosened,science,documents,source,open,83754,10000,True,0.1194
+loosened,science,documents,document,all,960023,10000,True,0.0104
+loosened,science,documents,document,open,832031,10000,True,0.012
+loosened,medical,estimated tokens,source,all,22077564,500000,True,0.0226
+loosened,medical,estimated tokens,source,open,22077564,500000,True,0.0226
+loosened,medical,estimated tokens,document,all,1491281406,500000,True,0.0003
+loosened,medical,estimated tokens,document,open,898232422,500000,True,0.0006
+loosened,medical,words,source,all,11038782,500000,True,0.0453
+loosened,medical,words,source,open,11038782,500000,True,0.0453
+loosened,medical,words,document,all,745640703,500000,True,0.0007
+loosened,medical,words,document,open,449116211,500000,True,0.0011
+loosened,medical,documents,source,all,5941,10000,False,1.6832
+loosened,medical,documents,source,open,5941,10000,False,1.6832
+loosened,medical,documents,document,all,1057731,10000,True,0.0095
+loosened,medical,documents,document,open,776592,10000,True,0.0129
+baseline,corpus,estimated tokens,either,all,14793093312,5000000000,True,0.338
+baseline,corpus,estimated tokens,either,open,11576553328,5000000000,True,0.4319
+baseline,corpus,words,either,all,7396546656,5000000000,True,0.676
+baseline,corpus,words,either,open,5788276664,5000000000,True,0.8638
+baseline,science,estimated tokens,source,all,1259598548,500000,True,0.0004
+baseline,science,estimated tokens,source,open,377895726,500000,True,0.0013
+baseline,science,estimated tokens,document,all,686538224,500000,True,0.0007
+baseline,science,estimated tokens,document,open,559649208,500000,True,0.0009
+baseline,science,words,source,all,629799274,500000,True,0.0008
+baseline,science,words,source,open,188947863,500000,True,0.0026
+baseline,science,words,document,all,343269112,500000,True,0.0015
+baseline,science,words,document,open,279824604,500000,True,0.0018
+baseline,science,documents,source,all,73338,10000,True,0.1364
+baseline,science,documents,source,open,19881,10000,True,0.503
+baseline,science,documents,document,all,694837,10000,True,0.0144
+baseline,science,documents,document,open,610101,10000,True,0.0164
+baseline,medical,estimated tokens,source,all,1711210,500000,True,0.2922
+baseline,medical,estimated tokens,source,open,1711210,500000,True,0.2922
+baseline,medical,estimated tokens,document,all,1253065918,500000,True,0.0004
+baseline,medical,estimated tokens,document,open,788817426,500000,True,0.0006
+baseline,medical,words,source,all,855605,500000,True,0.5844
+baseline,medical,words,source,open,855605,500000,True,0.5844
+baseline,medical,words,document,all,626532959,500000,True,0.0008
+baseline,medical,words,document,open,394408713,500000,True,0.0013
+baseline,medical,documents,source,all,367,10000,False,27.248
+baseline,medical,documents,source,open,367,10000,False,27.248
+baseline,medical,documents,document,all,886916,10000,True,0.0113
+baseline,medical,documents,document,open,667642,10000,True,0.015

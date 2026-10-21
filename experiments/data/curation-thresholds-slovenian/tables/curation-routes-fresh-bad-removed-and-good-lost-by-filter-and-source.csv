@@ -1,0 +1,58 @@
+stage,source,dropped,drops_judged,bad_share,bad_removed,good_lost,call,gate_passed
+language,pooled,1014758,372,0.5117,519279,495479,,False
+language,cc100,322054,40,0.15,48308,273746,switch off,False
+language,c4,534061,40,0.8,427249,106812,keep,False
+language,macocu_sl,84079,40,0.025,2102,81977,switch off,False
+language,fineweb2,40312,40,0.675,27211,13101,keep,False
+language,hplt,17697,40,0.5,8848,8849,keep,False
+language,finepdf,5750,40,0.3,1725,4025,switch off,False
+language,classla_web_sl,4033,40,0.2,807,3226,switch off,False
+language,culturax,3199,40,0.0,0,3199,switch off,False
+language,oss,3561,40,0.85,3027,534,keep,False
+language,povejmo_vemo_med,12,12,0.25,3,9,,False
+spam,pooled,938028,280,0.7184,673907,264121,,False
+spam,fineweb2,448856,40,0.85,381528,67328,keep,False
+spam,hplt,130722,40,0.55,71897,58825,keep,False
+spam,c4,132600,40,0.625,82875,49725,keep,False
+spam,classla_web_sl,40860,40,0.1,4086,36774,switch off,False
+spam,cc100,79871,40,0.75,59903,19968,keep,False
+spam,culturax,73723,40,0.775,57135,16588,keep,False
+spam,macocu_sl,31396,40,0.525,16483,14913,keep,False
+quality,pooled,4610235,657,0.489,2254286,2355949,,False
+quality,cc100,1572285,40,0.525,825450,746835,keep,False
+quality,siparl,436409,40,0.1,43641,392768,switch off,False
+quality,macocu_sl,835002,40,0.625,521876,313126,keep,False
+quality,hplt,357240,40,0.25,89310,267930,switch off,False
+quality,c4,904407,40,0.775,700915,203492,keep,False
+quality,culturax,218717,40,0.175,38275,180442,switch off,False
+quality,classla_web_sl,183988,40,0.05,9199,174789,switch off,False
+quality,finepdf,47304,40,0.375,17739,29565,switch off,False
+quality,classlawiki_sl,20457,40,0.125,2557,17900,switch off,False
+quality,slovenian_news,11920,40,0.075,894,11026,switch off,False
+quality,gigafida,11818,40,0.275,3250,8568,switch off,False
+quality,coleslaw,6831,40,0.0,0,6831,switch off,False
+quality,oss,3106,40,0.275,854,2252,switch off,False
+quality,kas,249,40,0.1,25,224,switch off,False
+quality,povejmo_vemo_med,349,40,0.65,227,122,keep,False
+quality,fineweb2,112,16,0.625,70,42,,False
+quality,solar,36,36,0.0833,3,33,switch off,False
+quality,kzb,5,5,0.0,0,5,,False
+repetition,pooled,2685306,662,0.2963,795612,1889694,,False
+repetition,hplt,642328,40,0.225,144524,497804,switch off,False
+repetition,c4,826915,40,0.475,392785,434130,switch off,False
+repetition,macocu_sl,370063,40,0.15,55509,314554,switch off,False
+repetition,cc100,406175,40,0.35,142161,264014,switch off,False
+repetition,classla_web_sl,125448,40,0.125,15681,109767,switch off,False
+repetition,finepdf,91638,40,0.175,16037,75601,switch off,False
+repetition,culturax,69998,40,0.1,7000,62998,switch off,False
+repetition,fineweb2,83187,40,0.25,20797,62390,switch off,False
+repetition,coleslaw,33952,40,0.0,0,33952,switch off,False
+repetition,slovenian_news,11912,40,0.025,298,11614,switch off,False
+repetition,siparl,11275,40,0.0,0,11275,switch off,False
+repetition,classlawiki_sl,6018,40,0.075,451,5567,switch off,False
+repetition,oss,4747,40,0.075,356,4391,switch off,False
+repetition,kas,775,40,0.0,0,775,switch off,False
+repetition,gigafida,544,40,0.025,14,530,switch off,False
+repetition,povejmo_vemo_med,309,40,0.0,0,309,switch off,False
+repetition,kzb,14,14,0.0,0,14,,False
+repetition,solar,8,8,0.0,0,8,,False

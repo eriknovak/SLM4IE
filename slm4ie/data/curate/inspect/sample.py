@@ -229,7 +229,8 @@ class SurvivorIndex:
             probability around 1e-5 over a corpus this size, so a rare drop
             may read as a survivor; none is ever invented the other way.
         """
-        needle = hash(document_id) & 0xFFFFFFFFFFFFFFFF
+        # An int needle < 2**63 makes searchsorted recast the whole index.
+        needle = np.uint64(hash(document_id) & 0xFFFFFFFFFFFFFFFF)
         position = int(np.searchsorted(self._sorted, needle))
         return position < len(self._sorted) and bool(self._sorted[position] == needle)
 

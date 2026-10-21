@@ -1,0 +1,5 @@
+build,domain,measure,labels,sources,converted,final,cause,stage
+loosened,medical,documents,source,all,23542,5941,curation loss,exact_dedup
+loosened,medical,documents,source,open,23542,5941,curation loss,exact_dedup
+baseline,medical,documents,source,all,23542,367,curation loss,quality
+baseline,medical,documents,source,open,23542,367,curation loss,quality

@@ -344,6 +344,12 @@ class TestValidation:
         with pytest.raises(ValueError, match=field):
             validate_batch([_verdict("demo:000", **{field: value})], [{"id": "demo:000", "text": "x"}])
 
+    def test_a_three_letter_language_code_is_accepted(self) -> None:
+        """A language with no two-letter code, such as Romani, keeps its group."""
+        checked = validate_batch([_verdict("demo:000", language="rom")], [{"id": "demo:000", "text": "x"}])
+
+        assert checked[0]["language"] == "rom"
+
     def test_a_missing_field_is_refused(self) -> None:
         """A verdict must carry every dimension."""
         verdict = _verdict("demo:000")

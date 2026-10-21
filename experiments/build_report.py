@@ -35,7 +35,7 @@ not exist, or prose
 over the record template's word caps (CAPS below), prose outside the rows of
 Design or Verdict, a finding titled as a fix (FIX_WORDS — a fix revises the
 entry it corrects, it is not an entry), a supporting finding naming no key
-finding, a key finding whose Reading cites no `[H<n>]` clause, a Summary citing a
+finding, a key finding whose Reading cites no `[H<n>]`, `[C<n>]` or `[Q<n>]` clause, a Summary citing a
 ticket or carrying more than a pair of numbers, a concluded record whose
 Verdict has no Discussion, or prose the voice rules reject (VOICE below): a
 sentence over SENTENCE_WORDS words or with more than SENTENCE_SEMICOLONS
@@ -119,10 +119,64 @@ def needs_glance(text: str) -> bool:
     return bool(HOT_NEED.search(t))
 
 
-# a clause's conditions: `confirmed if …; refuted if … — note`
-CONDITIONS = re.compile(r"confirmed if (.*?)[;.]\s*refuted if (.*?)(?:\s+—\s+(.*))?\s*$", re.I | re.S)
-HCITE = re.compile(r"\[(H\d+)\]")
-TLDR_STATUS = re.compile(r"^\s*(?:confirmed|refuted|inconclusive|open|leaning \w+)\s*(?:\([^)]*\))?\s*[—–-]\s*", re.I)
+# the three clause types of a Predictions row, by id letter: the two condition keywords
+# the line carries (`<yes> …; <no> … — note`), the outcome words a reading finding may
+# use (checked in order, so `unanswered` is read before `answered`), and the kind of
+# experiment a record made of such clauses is
+CLAUSE_TYPES = {
+    "H": {
+        "yes": "confirmed if",
+        "no": "refuted if",
+        "outcomes": ("inconclusive", "refuted", "confirmed"),
+        "kind": "confirmatory",
+    },
+    "C": {
+        "yes": "better if",
+        "no": "worse if",
+        "outcomes": ("undecided", "equivalent", "worse", "better"),
+        "kind": "comparative",
+    },
+    "Q": {
+        "yes": "read on",
+        "no": "robust if",
+        "outcomes": ("unanswered", "partial", "answered"),
+        "kind": "exploratory",
+    },
+}
+CLAUSE_ID = r"[HCQ]\d+"
+HCITE = re.compile(rf"\[({CLAUSE_ID})\]")
+# a record's outcome word: H-driven, C-driven (an arm adopted or none) or Q-driven
+OUTCOMES = ("confirmed", "refuted", "inconclusive", "adopted", "rejected", "answered", "partial", "unanswered")
+TLDR_STATUS = re.compile(rf"^\s*(?:{'|'.join(OUTCOMES)}|open|abandoned|leaning \w+)\s*(?:\([^)]*\))?\s*[—–-]\s*", re.I)
+
+
+OUTCOME_STEMS = {"confirmed": "confirm", "refuted": "refut"}  # an outcome word's verb forms count as the word
+
+
+def clause_type(cid: str) -> dict:
+    return CLAUSE_TYPES[cid[0]]
+
+
+def outcome_words(cid: str) -> str:
+    """The outcome words a finding may use for this clause, for an error message."""
+    o = clause_type(cid)["outcomes"]
+    return ", ".join(o[:-1]) + " or " + o[-1]
+
+
+def split_conditions(cid: str, cond: str) -> tuple[str, str, str]:
+    """A clause's conditions `<yes> …; <no> … — note` split by its type's keywords;
+    a line not in that shape is returned whole as the positive condition."""
+    t = clause_type(cid)
+    m = re.match(rf"{t['yes']} (.*?)[;.]\s*{t['no']} (.*?)(?:\s+—\s+(.*))?\s*$", cond.strip(), re.I | re.S)
+    return (m.group(1), m.group(2), m.group(3) or "") if m else (cond, "", "")
+
+
+def record_kind(cids: list[str]) -> str:
+    """What the clauses make the experiment: one type's kind, or `mixed`."""
+    kinds = {clause_type(c)["kind"] for c in cids}
+    return kinds.pop() if len(kinds) == 1 else ("mixed" if kinds else "")
+
+
 # lint that reads as advice on prose, not a broken record: counted per record, listed with --warnings, never fails the build
 WARNING = re.compile(
     r"\(cap \d+\)|sentence|cites \[|numbers beyond|one paragraph|TL;DR line|carries no gloss|is minor but|"
@@ -139,7 +193,7 @@ PROGRAMME_SECTIONS = {
     "open": "Open",
 }
 XREF = re.compile(
-    r"\[([a-z0-9][a-z0-9-]*):([FH]\d+)\]"
+    rf"\[([a-z0-9][a-z0-9-]*):(F\d+|{CLAUSE_ID})\]"
 )  # a finding or clause of a member experiment, cited from a programme
 # word caps from the record template; Alternatives is per bullet, Design per row
 CAPS = {
@@ -169,7 +223,7 @@ def numbers(text: str) -> list[str]:
     return [n.rstrip(",.") for n in NUMBER.findall(MODEL_VERSION.sub(" ", text))]
 
 
-PREDICTION = re.compile(r"\[H\d+\]")  # a key Reading cites the clause it decides
+PREDICTION = HCITE  # a key Reading cites the clause it decides
 MINOR_LABELS = {"Summary", "Runs", "Result", "Reading", "History"}
 # voice rules from dev-tools/references/voice.md, "In records"
 SENTENCE_WORDS = 35
@@ -177,7 +231,7 @@ SENTENCE_SEMICOLONS = 2
 CITATION_WORDS = 3  # words of its own sentence a citation needs before it: "with score rules removed ([D3])"
 READING_NUMBERS = 2  # beyond the Summary's; the rest belong in the Result
 BLOCK_WORDS = 60  # past this a Reading, Rationale or Discussion is bold-lead blocks and a How is numbered steps
-CITATION = re.compile(r"\[([DFMH]\d+)\]")
+CITATION = re.compile(rf"\[([DFM]\d+|{CLAUSE_ID})\]")
 LEAD_BULLET = re.compile(r"(?m)^\s*- \*\*[^*\n]+\*\*")
 NUMBERED_STEP = re.compile(r"(?m)^\s*\d+\. ")
 TLDR_LINE = re.compile(r"^\*\*F\d+ — [^*\n]+?[.!?]\*\* \S")
@@ -409,10 +463,10 @@ def voice_problems(where: str, text: str, length: bool = True) -> list[str]:
         if length and s.count(";") > SENTENCE_SEMICOLONS:
             out.append(f"{where} has a sentence with {s.count(';')} semicolons (cap {SENTENCE_SEMICOLONS}): {s[:50]}…")
         for m in CITATION.finditer(s):
-            if m.group(1).startswith("H"):
+            if m.group(1)[0] in CLAUSE_TYPES:
                 continue  # a clause id reads on its own: "confirms [H2]"
             clause = re.split(r"[;:—]", s[: m.start()])[-1]  # the gloss belongs to the citation's own clause
-            before = re.sub(r"\[[DFMH]\d+\]|[^\w\s]", " ", clause).split()
+            before = re.sub(rf"\[(?:[DFM]\d+|{CLAUSE_ID})\]|[^\w\s]", " ", clause).split()
             if len(before) < CITATION_WORDS:
                 out.append(f"{where} cites [{m.group(1)}] with no words saying what it is: {s[:50]}…")
     return out
@@ -470,6 +524,8 @@ class Record:
         hyp = parse_kv(self.sections.get("hypothesis", ""))
         outcome = re.sub(r"<.*?>", "", hyp.get("Outcome", "")).strip().split()[:1]
         self.outcome = outcome[0].lower() if outcome and outcome[0].lower() != "open" else ""
+        if self.outcome and self.outcome not in OUTCOMES:
+            self.problems.append(f"Hypothesis Outcome `{self.outcome}` is not one of {', '.join(OUTCOMES)}")
         if self.status == "concluded":
             for key, name in REQUIRED_WHEN_CONCLUDED.items():
                 if not strip_placeholders(self.sections.get(key, "")):
@@ -504,7 +560,7 @@ class Record:
             for c in clause_rows(self):
                 if not any(clause_outcome(f, c["id"]) for f in c["findings"]):
                     self.problems.append(
-                        f"{c['id']} is decided by no key finding: no Reading sentence names [{c['id']}] with confirmed, refuted or inconclusive"
+                        f"{c['id']} is decided by no key finding: no Reading sentence names [{c['id']}] with {outcome_words(c['id'])}"
                     )
         for f in self.findings:
             fid, kv = f.id, f.kv
@@ -540,10 +596,11 @@ class Record:
             if f.weight == "key" and kv.get("Reading") and clause_ids:
                 cited = set(HCITE.findall(reading + " " + kv.get("Summary", "")))
                 if not cited:
-                    self.problems.append(f"{fid} is key but its Reading cites no clause as [H<n>]")
+                    self.problems.append(f"{fid} is key but its Reading cites no clause as [H<n>], [C<n>] or [Q<n>]")
                 elif not any(clause_outcome(f, cid) for cid in cited):
                     self.problems.append(
-                        f"{fid} names {', '.join(sorted(cited))} but no sentence with the citation says confirmed, refuted or inconclusive"
+                        f"{fid} names {', '.join(sorted(cited))} but no sentence with the citation says "
+                        + " / ".join(outcome_words(c) for c in sorted(cited))
                     )
             if re.search(r"!\[[^\]]*\[", kv.get("Result", "")):
                 self.problems.append(f"{fid} Result image alt text carries a bracket, so the image does not render")
@@ -613,7 +670,7 @@ class Record:
             clauses = CLAUSE.findall(predictions)
             if not clauses:
                 self.problems.append(
-                    "Predictions has no `- **H<n> — <claim>**:` line: one per clause, so findings can cite H<n>"
+                    "Predictions has no `- **H<n> — <claim>**:` (or C<n>, Q<n>) line: one per clause, so findings can cite it"
                 )
             elif len(clauses) > 1 and not VERDICT_RULE.search(predictions):
                 self.problems.append("Predictions has several clauses but no `- **Verdict rule**:` line")
@@ -680,8 +737,8 @@ def bullets(block: str) -> list[str]:
     return out
 
 
-CLAUSE = re.compile(r"^\s*- \*\*H\d+ — [^*]+\*\*:", re.M)
-CLAUSE_LINE = re.compile(r"^\s*- \*\*(H\d+) — ([^*]+)\*\*:\s*(.*)$")
+CLAUSE = re.compile(rf"^\s*- \*\*{CLAUSE_ID} — [^*]+\*\*:", re.M)
+CLAUSE_LINE = re.compile(rf"^\s*- \*\*({CLAUSE_ID}) — ([^*]+)\*\*:\s*(.*)$")
 
 
 def clauses(predictions: str) -> tuple[str, list[tuple[str, str, str]], str]:
@@ -747,7 +804,8 @@ def families(records: list[Record]) -> list[list[Record]]:
         return out
 
     roots.sort(key=lambda r: (str(r.meta.get("concluded") or "9999"), r.slug))
-    return [walk(r, 0, set()) for r in roots]
+    seen: set = set()  # a record with parents in two families renders once, under the first
+    return [walk(r, 0, seen) for r in roots]
 
 
 FIG_PATCH = re.compile(r'(<g id="(?:figure|axes)_\d+">\s*<g id="patch_\d+">\s*<path[^>]*?fill: )#ffffff')
@@ -989,8 +1047,7 @@ def clause_rows(record: Record) -> list[dict]:
     predictions = parse_kv(record.sections.get("hypothesis", "")).get("Predictions", "")
     out = []
     for cid, claim, cond in clauses(predictions)[1]:
-        m = CONDITIONS.match(cond.strip())
-        yes, no, note = (m.group(1), m.group(2), m.group(3) or "") if m else (cond, "", "")
+        yes, no, note = split_conditions(cid, cond)
         names = re.compile(rf"(?<![\w\[]){cid}\b|\[{cid}\]")
         carriers = [
             f
@@ -1004,6 +1061,7 @@ def clause_rows(record: Record) -> list[dict]:
                 "yes": yes.strip(),
                 "no": no.strip().rstrip("."),
                 "note": note.strip(),
+                "type": clause_type(cid),
                 "findings": carriers,
             }
         )
@@ -1016,12 +1074,9 @@ def clause_outcome(f: Entry, cid: str) -> str:
     for sentence in sentences(f.kv.get("Reading", "") + " " + f.kv.get("Summary", "")):
         if names.search(sentence):
             low = sentence.lower()
-            if "inconclusive" in low:
-                return "inconclusive"
-            if "refut" in low:
-                return "refuted"
-            if "confirm" in low:
-                return "confirmed"
+            for word in clause_type(cid)["outcomes"]:
+                if re.search(rf"\b{OUTCOME_STEMS.get(word, word)}\w*", low):  # `confirms`, `refutes` count too
+                    return word
     return ""
 
 
@@ -1050,7 +1105,11 @@ def render_clauses(record: Record) -> str:
             return ""
         return f'<div class="pred"><span class="lbl">Predictions</span>{md(cap(predictions))}</div>'
     trs = []
+    mixed = len({r["id"][0] for r in rows}) > 1
     for r in rows:
+        yes_l, no_l = (r["type"]["yes"].capitalize(), r["type"]["no"].capitalize())
+        # a table mixing clause types says each row's keyword in the cell, since the header cannot
+        yes_p, no_p = (f'<span class="kw">{yes_l}</span> ', f'<span class="kw">{no_l}</span> ') if mixed else ("", "")
         # one block per reading finding, so a clause read twice shows two rows
         result = (
             "".join(
@@ -1065,12 +1124,15 @@ def render_clauses(record: Record) -> str:
         note = f' — <span class="muted">{md_inline(r["note"])}</span>' if r["note"] else ""
         trs.append(
             f'<tr id="{record.slug}/{r["id"].lower()}"><td><span class="tag">{r["id"]}</span></td><td>{md_inline(r["claim"])}</td>'
-            f'<td class="muted" data-l="Confirmed if">{md_inline(r["yes"])}</td><td class="muted" data-l="Refuted if">{md_inline(r["no"])}{note}</td>'
+            f'<td class="muted" data-l="{yes_l}">{yes_p}{md_inline(r["yes"])}</td><td class="muted" data-l="{no_l}">{no_p}{md_inline(r["no"])}{note}</td>'
             f'<td class="result" data-l="Result">{result}</td></tr>'
         )
+    t = rows[0]["type"]
+    yes_h, no_h = ("Holds if", "Fails if") if mixed else (t["yes"].capitalize(), t["no"].capitalize())
+    kind = record_kind([r["id"] for r in rows])
     return (
-        '<div class="scroll"><table class="data wide clauses"><thead><tr><th>Clause</th><th>Claim</th><th>Confirmed if</th>'
-        f'<th>Refuted if</th><th>Result</th></tr></thead><tbody>{"".join(trs)}</tbody></table></div>'
+        f'<div class="scroll"><table class="data wide clauses" data-kind="{kind}"><thead><tr><th>Clause <span class="kind">{kind}</span></th><th>Claim</th><th>{yes_h}</th>'
+        f'<th>{no_h}</th><th>Result</th></tr></thead><tbody>{"".join(trs)}</tbody></table></div>'
     )
 
 
@@ -1403,7 +1465,7 @@ def link_refs(record: Record, html_: str) -> str:
     tips |= {cid: tip(f"{cid} — {claim}", cond) for cid, claim, cond in clauses(predictions)[1]}
     if not tips:
         return html_
-    ref = re.compile(r"\[([DFMH]\d+)\]")
+    ref = re.compile(rf"\[([DFM]\d+|{CLAUSE_ID})\]")
 
     def link(m: re.Match) -> str:
         rid = m.group(1)
@@ -1517,10 +1579,17 @@ def undefined_terms(records: list[Record], terms: list[Term]) -> list[str]:
     for r in records:
         for key in ("hypothesis", "design", "datasets", "methods", "findings", "verdict"):
             text = re.sub(
-                r"```.*?```|`[^`]*`|\[[DFMH]\d+\]|!?\[[^\]]*\]\([^)]*\)", " ", r.sections.get(key, ""), flags=re.S
+                rf"```.*?```|`[^`]*`|\[(?:[DFM]\d+|{CLAUSE_ID})\]|!?\[[^\]]*\]\([^)]*\)",
+                " ",
+                r.sections.get(key, ""),
+                flags=re.S,
             )
             text = "\n".join(l for l in MATH.sub(" ", text).splitlines() if not l.lstrip().startswith(("|", "###")))
-            hits |= {w for w in ABBREV.findall(text) if w.lower() not in known and not re.fullmatch(r"[DFMH]\d+", w)}
+            hits |= {
+                w
+                for w in ABBREV.findall(text)
+                if w.lower() not in known and not re.fullmatch(rf"[DFM]\d+|{CLAUSE_ID}", w)
+            }
             hits |= {w for w in methods.findall(text) if w.lower() not in known}
     return sorted({h.lower(): h for h in sorted(hits, reverse=True)}.values(), key=str.lower)
 
@@ -1681,6 +1750,8 @@ def render_page(
     body = link_terms(link_refs(record, "".join(parts)), terms)
     if ref:
         body = link_entries(body, ref)
+    # A bare `tables/x.csv` link reaches this record's asset, not a same-named one elsewhere.
+    body = re.sub(r'<a href="((?:tables|figures)/)', f'<a href="{record.slug}/\\1', body)
     return f'<section class="page" id="{record.slug}" data-title="{esc(record.meta.get("short") or record.title)}">{body}</section>'
 
 
@@ -1719,7 +1790,7 @@ class Programme:
                 r = by_slug.get(slug)
                 if r is None:
                     self.problems.append(f"[{slug}:{fid}] cites an experiment that is not a member")
-                elif fid.startswith("H") and fid not in {c["id"] for c in clause_rows(r)}:
+                elif fid[0] in CLAUSE_TYPES and fid not in {c["id"] for c in clause_rows(r)}:
                     self.problems.append(f"[{slug}:{fid}] cites a clause {slug} does not have")
                 elif fid.startswith("F") and fid not in {f.id for f in r.findings}:
                     self.problems.append(f"[{slug}:{fid}] cites a finding {slug} does not have")
@@ -1756,7 +1827,7 @@ def link_xrefs(prog: Programme, html_: str) -> str:
     shown as `[F<n>]` with the finding's Summary as a hover card under the experiment's name."""
 
     def link(m: re.Match) -> str:
-        if m.group(2).startswith("H"):
+        if m.group(2)[0] in CLAUSE_TYPES:
             hit = prog.clause(m.group(1), m.group(2))
             if hit is None:
                 return m.group(0)
@@ -1937,7 +2008,7 @@ def render_threads(prog: Programme) -> str:
         sentence = re.sub(r"[\s—–,;-]+$", "", XREF.sub("", body))
         items = []
         for slug, cid in XREF.findall(body):
-            hit = prog.clause(slug, cid) if cid.startswith("H") else prog.finding(slug, cid)
+            hit = prog.clause(slug, cid) if cid[0] in CLAUSE_TYPES else prog.finding(slug, cid)
             if hit is None:
                 items.append(
                     f'<div class="line"><span class="who">{esc(slug)}</span><span class="c"><span class="tag">{esc(cid)}</span> not found</span><span></span></div>'
@@ -1945,7 +2016,7 @@ def render_threads(prog: Programme) -> str:
                 continue
             r, x = hit
             who = f'<span class="who" title="{esc(r.title)}">{esc(r.meta.get("short") or r.slug)}</span>'
-            if cid.startswith("H"):
+            if cid[0] in CLAUSE_TYPES:
                 href = f"#{r.slug}/{cid.lower()}"
                 evidence = "".join(
                     f'<div class="ev"><a href="#{r.slug}/{f.id.lower()}" data-tip="{tip(f"{f.id} — {f.title}", f.kv.get("Summary", ""), r.slug)}"><span class="tag">{f.id}</span>{md_inline(f.title)}</a></div>'
@@ -2268,7 +2339,9 @@ class RefEntry:
         if m.group(2):
             n = len(found.read_text(encoding="utf-8", errors="replace").splitlines())
             if int(m.group(3) or m.group(2)) > n or int(m.group(2)) < 1:
-                self.problems.append(f"cites {path}:{m.group(2)}{'-' + m.group(3) if m.group(3) else ''}, the file has {n} lines")
+                self.problems.append(
+                    f"cites {path}:{m.group(2)}{'-' + m.group(3) if m.group(3) else ''}, the file has {n} lines"
+                )
 
     @property
     def idents(self) -> list[str]:
@@ -2431,9 +2504,7 @@ class Reference:
         return [self.by_key[k] for k in as_list(record.meta.get(field)) if k in self.by_key]
 
     def related(self, e: RefEntry) -> list[tuple[str, RefEntry]]:
-        out = [
-            (RELATION_LABELS[f][0], self.by_key[k]) for f in RELATIONS for k in e.relations[f] if k in self.by_key
-        ]
+        out = [(RELATION_LABELS[f][0], self.by_key[k]) for f in RELATIONS for k in e.relations[f] if k in self.by_key]
         out += [(RELATION_LABELS[f][1], o) for f in RELATIONS for o in self.entries if e.key in o.relations[f]]
         return out
 
@@ -2445,7 +2516,9 @@ class Reference:
 
 
 def entry_link(e: RefEntry, text: str = "") -> str:
-    return f'<a class="term" href="#{e.page_id}" data-tip="{tip(e.title, e.summary or e.kind)}">{esc(text or e.title)}</a>'
+    return (
+        f'<a class="term" href="#{e.page_id}" data-tip="{tip(e.title, e.summary or e.kind)}">{esc(text or e.title)}</a>'
+    )
 
 
 def entry_badge(e: RefEntry) -> str:
@@ -2627,12 +2700,15 @@ def render_entry(e: RefEntry, ref: Reference, terms: list[Term]) -> str:
             left += f"<h3>{title}</h3>{ref_md(e, ref, block)}"
     facts = [(k, ref_inline(e, ref, v)) for k, v in e.facts]
     if varied := ref.varying(e):
-        facts.append(("Varied in", ", ".join(f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a>' for r in varied)))
+        facts.append(
+            ("Varied in", ", ".join(f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a>' for r in varied))
+        )
     labels: dict[str, list[str]] = {}
     for k, v in e.sources:
         labels.setdefault(k, []).extend(row_values(v))
     sources = [(k, "".join(f'<div class="sl">{ref_inline(e, ref, x)}</div>' for x in vs)) for k, vs in labels.items()]
     right = f"<h2>Facts</h2>{facts_table(facts)}" if facts else ""
+    right += f'<h2 class="s">Sources</h2>{facts_table(sources)}' if sources else ""
     sections: list[tuple[str, str, str]] = []
     if e.diff:
         sections.append(("difference", "Difference from predecessor", render_difference(e, ref)))
@@ -2649,15 +2725,15 @@ def render_entry(e: RefEntry, ref: Reference, terms: list[Term]) -> str:
             f'<div class="card"><h3>{md_inline(head)}</h3>{ref_md(e, ref, body)}</div>'
             for head, _, body in (c.partition("\n") for c in re.split(r"^### ", block, flags=re.M)[1:])
         )
-        sections.append(("limits", "Limits", linked(f'<div class="lim">{cards}</div>' if cards else ref_md(e, ref, block))))
+        sections.append(
+            ("limits", "Limits", linked(f'<div class="lim">{cards}</div>' if cards else ref_md(e, ref, block)))
+        )
     if related := ref.related(e):
         cards = "".join(
             f'<a href="#{o.page_id}"><span class="r">{label}</span><span class="t">{esc(o.title)}</span><span class="m">{md_inline(o.summary)}</span></a>'
             for label, o in related
         )
         sections.append(("related", "Related", f'<div class="rel three">{cards}</div>'))
-    if sources:
-        sections.append(("sources", "Sources", facts_table(sources)))
     bar = f'<a href="#{pid}/description">Description</a>' + "".join(
         f'<a href="#{pid}/{key}">{title.split(" from ")[0]}</a>' for key, title, _ in sections
     )
@@ -2728,9 +2804,12 @@ def render_compared(t: Topic, ref: Reference) -> str:
             f'<td class="muted">{esc(parent.title) if parent else "—"}</td>{"".join(cells)}</tr>'
         )
     head = "".join(f"<th>{esc(c)}</th>" for c in t.compare)
-    return '<p class="intro">Filled from each entry\'s Facts. A tinted cell differs from the entry\'s own predecessor.</p>' + card_table(
-        f'<div class="scroll"><table class="data wide compared cards"><thead><tr><th>Entry</th><th>Predecessor</th>{head}</tr></thead>'
-        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    return (
+        "<p class=\"intro\">Filled from each entry's Facts. A tinted cell differs from the entry's own predecessor.</p>"
+        + card_table(
+            f'<div class="scroll"><table class="data wide compared cards"><thead><tr><th>Entry</th><th>Predecessor</th>{head}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>'
+        )
     )
 
 
@@ -2743,7 +2822,10 @@ def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
     """Every idea touching an entry of the topic: an overview of which entry each
     would change, then a card per idea saying what changes where."""
     if ref.ideas is None or not ref.ideas.source:
-        return '<div class="card"><p class="muted">No ideas loaded: the tracker is unreachable and there is no cache.</p></div>', 0
+        return (
+            '<div class="card"><p class="muted">No ideas loaded: the tracker is unreachable and there is no cache.</p></div>',
+            0,
+        )
     keys = {e.key for e in t.entries}
     ideas = [i for i in ref.ideas.items if any(r[0] in keys for r in i.rows)]
     if not ideas:
@@ -2753,7 +2835,9 @@ def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
         return f'<a href="{esc(i.url)}">#{i.number}</a>' if i.url else f"#{i.number}"
 
     def tested(i: Idea) -> str:
-        return ", ".join(f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a> {badge(r)}' for r in ref.testing(i))
+        return ", ".join(
+            f'<a href="#{r.slug}">{esc(r.meta.get("short") or r.title)}</a> {badge(r)}' for r in ref.testing(i)
+        )
 
     def grouped(i: Idea) -> str:
         """The entries an idea touches, one row per relation, for the narrow layout."""
@@ -2762,8 +2846,7 @@ def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
             if (r := i.row(e.key)) and IDEA_RELATIONS.get(r[1].lower()):
                 groups.setdefault(r[1], []).append(e.title)
         return "".join(
-            f'<div class="rl">{idea_mark(k)}<span>{esc(", ".join(v))}</span></div>'
-            for k, v in groups.items()
+            f'<div class="rl">{idea_mark(k)}<span>{esc(", ".join(v))}</span></div>' for k, v in groups.items()
         )
 
     head = "".join(f"<th>{esc(e.title)}</th>" for e in t.entries)
@@ -2782,7 +2865,7 @@ def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
     cards = []
     for i in ideas:
         rows = "".join(
-            f'<tr><td>{entry_link(ref.by_key[r[0]]) if r[0] in ref.by_key else esc(r[0])}'
+            f"<tr><td>{entry_link(ref.by_key[r[0]]) if r[0] in ref.by_key else esc(r[0])}"
             f'{f"<span class={chr(34)}rl{chr(34)}>{idea_mark(r[1])}</span>" if IDEA_RELATIONS.get(r[1].lower()) else ""}</td>'
             f"<td>{idea_mark(r[1])}</td>"
             f'<td class="mono" data-l="Touches">{esc(r[2]) or "—"}</td><td data-l="Change">{md_inline(r[3]) if r[3] else "—"}</td>'
@@ -2796,7 +2879,7 @@ def render_ideas(t: Topic, ref: Reference) -> tuple[str, int]:
             f'<div class="meta">{"".join(f"<span>{m}</span>" for m in meta)}</div>'
             f'{f"<p class=why>{md_inline(i.why)}</p>" if i.why else ""}'
             '<div class="scroll"><table class="data wide inner"><thead><tr><th>Entry</th><th>Relation</th><th>Touches</th>'
-            f'<th>What changes there</th><th>Expected effect</th></tr></thead><tbody>{rows}</tbody></table></div></article>'
+            f"<th>What changes there</th><th>Expected effect</th></tr></thead><tbody>{rows}</tbody></table></div></article>"
         )
     note = ' <span class="muted">Read from the cache, not the tracker.</span>' if ref.ideas.source == "cache" else ""
     return (
@@ -2839,7 +2922,7 @@ def render_topic(t: Topic, ref: Reference, terms: list[Term]) -> str:
         + f'<a href="#{pid}/ideas">Ideas{f" <i>{n}</i>" if n else ""}</a><a href="#{pid}/entries">Entries <i>{len(t.entries)}</i></a>'
     )
     parts = [
-        f'{kicker(t.path)}<h1>{esc(t.title)}</h1>{meta_row(meta)}',
+        f"{kicker(t.path)}<h1>{esc(t.title)}</h1>{meta_row(meta)}",
         f'<div class="book">{link_terms(md(strip_placeholders(t.sections.get("question", ""))), terms)}</div>',
         f'<div class="prose intro">{link_entries(link_terms(md(intro), terms), ref)}</div>' if intro else "",
         f'<div class="bar">{bar}<span class="hint"><kbd>j</kbd><kbd>k</kbd> sections</span></div>',
@@ -2882,7 +2965,7 @@ REF_CSS = """
 /* ---- reference: topics and entries ---- */
 .item.topic{font-weight:600}.item.nest{padding-left:28px}.item.topic.on{font-weight:600}
 .call{background:var(--soft);border-radius:8px;padding:12px 16px;margin:18px 0 0;font-size:var(--t-prose);line-height:1.6}
-.lead2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:28px;align-items:start;margin-top:26px}.lead2 h2{margin-top:0}.lead2 h3{margin:20px 0 8px;font-size:var(--t-body)}
+.lead2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:28px;align-items:start;margin-top:26px}.lead2 h2{margin-top:0}.lead2 h2.s{margin-top:24px}.lead2 h3{margin:20px 0 8px;font-size:var(--t-body)}
 .lead2 .prose{font-size:var(--t-prose);line-height:1.6}.intro{max-width:760px}.small{font-size:var(--t-sm)}
 .facts{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}.facts table.data td:first-child{position:static;font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap;width:1%;padding-top:9px}
 .facts tr:last-child td{border-bottom:0}.facts code{font-size:11.5px;overflow-wrap:anywhere}.sl+.sl{margin-top:6px}
@@ -2893,7 +2976,7 @@ REF_CSS = """
 .alg li.hl{background:var(--accent-soft);margin:0 -14px;padding:0 14px}.alg .cm{color:var(--muted);font-style:italic;margin-left:18px}.alg .cm code{font-style:normal;font-size:11px}.alg code{font-size:.8em}
 :root[data-theme=dark] .alg,:root[data-theme=dark] .diff{background:var(--plate)}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .alg,:root:not([data-theme=light]) .diff{background:var(--plate)}}
-.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);grid-template-rows:max-content 1fr;gap:0 24px;align-items:start;margin:0 0 22px}.algrow+.algrow{margin-top:72px}
+.algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);grid-template-rows:max-content 1fr;gap:0 24px;align-items:start;margin:0 0 22px}
 .algrow>.sh,.algrow>.alg{grid-column:1}.algrow>.sh{margin:0 0 8px}.algrow>.reading{grid-column:2;grid-row:1/span 2}
 .reading .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
 .walk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;font-size:var(--t-sm);line-height:1.55}.walk .tag{align-self:start;margin-top:1px;white-space:nowrap}
@@ -2907,10 +2990,7 @@ h3.ev{margin:18px 0 2px;font-size:var(--t-body)}p.muted{margin:0 0 4px}
 .idea{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:12px 0;scroll-margin-top:60px}.idea h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--t-body)}
 .idea .why{margin:0 0 6px;font-size:var(--t-sm);color:var(--muted)}.idea .meta{margin:0 0 8px}table.inner tr{background:transparent}
 table.ideas td.rel,table.inner td:first-child .rl{display:none}table.inner tr:last-child td{border-bottom:0}
-@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.algrow>.reading{grid-column:1;grid-row:auto;margin-top:28px}}
-/* narrow facts tables: label above its value, long values wrap instead of overflowing */
-.facts table.data td{overflow-wrap:anywhere}.facts table.data td:last-child{min-width:0}
-@container (max-width:560px){.facts table.data tr,.facts table.data td{display:block}.facts table.data td:first-child{width:auto;padding:9px 10px 2px;border-bottom:0}.facts table.data td:last-child{padding:0 10px 9px}}
+@container (max-width:860px){.algrow,.lead2,.lim,.rel.three{grid-template-columns:minmax(0,1fr)}.algrow>.reading{grid-column:1;grid-row:auto}}
 @media(max-width:800px){.alg,.diff{font-size:15px}.diff>div{grid-template-columns:110px max-content minmax(max-content,1fr)}}
 """
 REF_FONT = "&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400"
@@ -3025,14 +3105,14 @@ a{color:var(--accent);text-decoration:none}a:hover{color:color-mix(in srgb,var(-
 .side .h{font-size:var(--t-xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 10px 6px;margin:0}
 .item{display:flex;align-items:flex-start;gap:10px;padding:6px 10px;border-radius:8px;font-size:var(--t-sm);line-height:1.4;color:var(--fg)}.item:hover{background:var(--panel);color:var(--fg)}.item.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .item.d1{margin-left:18px}.item.d2{margin-left:36px}.item.d3{margin-left:54px}
-.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:5px}.d-done{background:var(--fg)}.d-open{border:1.5px solid var(--fg)}.d-confirmed{background:var(--ok)}.d-refuted{background:var(--bad)}.d-inconclusive{background:var(--muted)}.item.on .dot{background:var(--accent);border-color:var(--accent)}.item.on .d-open{background:transparent}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:5px}.d-done{background:var(--fg)}.d-open{border:1.5px solid var(--fg)}.d-confirmed,.d-adopted,.d-answered{background:var(--ok)}.d-refuted,.d-rejected,.d-unanswered{background:var(--bad)}.d-inconclusive,.d-partial{background:var(--muted)}.item.on .dot{background:var(--accent);border-color:var(--accent)}.item.on .d-open{background:transparent}
 .item .sub{margin-left:auto;padding-left:8px;margin-top:3px;font-family:var(--mono);font-size:var(--t-xs);color:var(--muted);flex:none}
 .main{overflow:auto;padding:36px 56px 64px;background:var(--bg)}.page{max-width:1080px;margin:0 auto}.page{display:none}.page.on{display:block}
 .kicker{font-family:var(--mono);font-size:var(--t-mono);color:var(--muted);margin:0}
 h1{font-size:var(--t-h1);font-weight:700;letter-spacing:-.02em;margin:8px 0 10px}
 p.lede{font-size:var(--t-lead);color:var(--muted);margin:0 0 8px}ul.lede{font-size:var(--t-lead);margin:0 0 24px;padding-left:20px}ul.lede li{margin:0 0 8px}ul.lede a{color:inherit;font-weight:600;text-decoration:none}ul.lede a:hover{color:var(--accent)}ul.lede .s{display:block;font-size:var(--t-sm);color:var(--muted)}
 .badge{display:inline-block;font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:5px;vertical-align:middle}
-.b-confirmed{background:var(--ok-soft);color:var(--ok)}.b-refuted{background:var(--bad-soft);color:var(--bad)}.b-inconclusive,.b-draft{background:var(--soft);color:var(--muted)}.b-running{background:var(--run-soft);color:var(--run)}
+.b-confirmed,.b-better,.b-adopted,.b-answered{background:var(--ok-soft);color:var(--ok)}.b-refuted,.b-worse,.b-rejected,.b-unanswered{background:var(--bad-soft);color:var(--bad)}.b-inconclusive,.b-equivalent,.b-undecided,.b-partial,.b-draft,.b-abandoned{background:var(--soft);color:var(--muted)}.b-running{background:var(--run-soft);color:var(--run)}
 h2{font-size:var(--t-h2);font-weight:600;letter-spacing:-.01em;margin:64px 0 20px;scroll-margin-top:20px}
 h3{font-size:var(--t-h3);font-weight:600;margin:0 0 8px}
 .kv{display:flex;flex-direction:column;gap:26px}.kv h3{font-size:var(--t-mono);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:0 0 4px}.v p,.v ul{margin:0 0 6px}.v>:last-child{margin-bottom:0}
@@ -3086,7 +3166,7 @@ h1{font-size:26px;margin:6px 0 6px}h2{margin:52px 0 14px}.prose p,.v p{margin:0 
 .needs{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:var(--t-sm);margin:0 0 18px;overflow:hidden}
 .needs>div{padding:8px 12px;border-right:1px solid var(--line);min-width:0}.needs>div:last-child{border-right:0}.needs .hot{background:var(--run-soft)}.needs .hot .lbl{color:var(--run)}
 .pred{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:0 0 18px;font-size:var(--t-prose);line-height:1.6}.pred p{margin:0 0 6px}
-table.clauses td.result{font-weight:500}table.clauses td.result .badge{margin-right:4px}table.clauses td.result .reading+.reading{margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)}table.clauses td.muted{color:var(--muted)}td.hot{background:var(--run-soft)}
+table.clauses .kw{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-right:4px}table.clauses th .kind{font-weight:400;color:var(--muted);text-transform:none;margin-left:6px}table.clauses td.result{font-weight:500}table.clauses td.result .badge{margin-right:4px}table.clauses td.result .reading+.reading{margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)}table.clauses td.muted{color:var(--muted)}td.hot{background:var(--run-soft)}
 /* sticky clamps at the scroller content box: undo .main padding to sit flush under .top */
 .bar{position:sticky;top:calc(-1 * var(--main-top));z-index:5;display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--line);background:var(--bg);margin:22px 0 0;font-size:var(--t-sm)}
 .bar a{padding:8px 12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}.bar a i{font-style:normal;font-family:var(--mono);font-size:var(--t-xs)}.bar a:hover{color:var(--fg)}.bar a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
@@ -3405,7 +3485,7 @@ def selftest() -> int:
         and '<div class="out"><span class="badge b-inconclusive">' in body
         and '<div class="needs"><div><span class="lbl">Needs</span></div>' in body
         and 'class="hot"' in body
-        and '<table class="data wide clauses">' in body
+        and '<table class="data wide clauses" data-kind="confirmatory">' in body
         and '<tr id="alpha/h1"><td><span class="tag">H1</span></td><td>something holds</td><td class="muted" data-l="Confirmed if">a</td><td class="muted" data-l="Refuted if">b — <span class="muted">c.</span></td>'
         in body
         and '<div class="bar"><a href="#alpha/findings">Findings <i>2</i></a>' in body,
@@ -3578,8 +3658,19 @@ def selftest() -> int:
         and 'id="alpha-a-' in body[body.find('id="alpha/datasets"') : body.find('id="alpha/methods"')],
         "prose outside Design rows flagged": "Design has content outside `- **Label**:` rows: #### Notes" in problems,
         "ticket ref in a Summary flagged": "F1 Summary cites a ticket (#32): findings read cold" in problems,
-        "key finding without a clause citation flagged": "F4 is key but its Reading cites no clause as [H<n>]"
+        "key finding without a clause citation flagged": "F4 is key but its Reading cites no clause as [H<n>], [C<n>] or [Q<n>]"
         in problems,
+        "comparison and question clauses: keywords in the cells, kind in the header, outcome badges": '<table class="data wide clauses" data-kind="mixed">'
+        in body
+        and '<th>Clause <span class="kind">mixed</span></th><th>Claim</th><th>Holds if</th><th>Fails if</th>' in body
+        and '<td class="muted" data-l="Better if"><span class="kw">Better if</span> the interval' in body
+        and '<td class="muted" data-l="Read on"><span class="kw">Read on</span> the expected-best curve' in body
+        and '<span class="badge b-equivalent">equivalent</span>' in body
+        and '<span class="badge b-answered">answered</span>' in body
+        and '<span class="badge b-adopted">adopted</span>' in body,
+        "programme links a comparison clause with its verdict, and the thread holds it": 'href="#beta/c1" data-tip="C1 — refined parameters against production'
+        in body
+        and "clause beta C1 sits in no thread" not in Programme(fixture / "programmes" / "gamma.md", records).problems,
         "clauses rendered as an id-marked list, [H<n>] linked with a hover card": '<a class="ref" href="#alpha/h1" data-tip="H1 — something holds\nconfirmed if a; refuted if b — c.">[H1]</a>'
         in body,
         "missing Discussion flagged": "concluded record has no Verdict Discussion"
@@ -3610,10 +3701,10 @@ def selftest() -> int:
         in body
         and '<tr><td>Code</td><td><div class="sl"><code>experiments/data/alpha/prep.py</code></div><div class="sl"><code>experiments/data/alpha/prep.py:1</code></div></td></tr>'
         in body
-        and body.count('<tr><td>Paper</td>') == 2
+        and body.count("<tr><td>Paper</td>") == 2
         and '</div><div class="sl">A second source, ' in body,
-        "paper notes under the description, facts beside, sources last": re.search(
-            r'<div class="lead2"><div class="prose"><h2 id="ref-cutting-base-cut/description">Description</h2>.*?<h3>What the paper adds</h3>.*?</div><div class="side2"><h2>Facts</h2>.*?<h2 id="ref-cutting-base-cut/sources">Sources</h2>(?:(?!<h2 ).)*</section>',
+        "paper notes under the description, sources under the facts": re.search(
+            r'<div class="lead2"><div class="prose"><h2 id="ref-cutting-base-cut/description">Description</h2>.*?<h3>What the paper adds</h3>.*?</div><div class="side2"><h2>Facts</h2>.*?<h2 class="s">Sources</h2>',
             body,
             re.S,
         )
@@ -3662,9 +3753,7 @@ def selftest() -> int:
         <= broken
         and not entry["base-cut"].problems
         and not entry["morph-cut"].problems,
-        "line range checked against the file": (
-            m := PATH_REF.search("`experiments/data/alpha/prep.py:400`")
-        )
+        "line range checked against the file": (m := PATH_REF.search("`experiments/data/alpha/prep.py:400`"))
         is not None
         and (entry["test-split"].check_path(m) or entry["test-split"].problems.pop())
         == "cites experiments/data/alpha/prep.py:400, the file has 11 lines",
@@ -3677,13 +3766,15 @@ def selftest() -> int:
         and '<table class="data wide entries">' in body,
         "compared tints what differs from the predecessor": '<td data-l="Predecessor" class="muted">Base cut</td><td data-l="Base unit">characters</td><td data-l="Chunk" class=hot>marked piece</td>'
         in body
-        and '<td data-l="Predecessor" class="muted">—</td><td data-l="Base unit">characters</td><td data-l="Chunk">whole word</td>' in body,
+        and '<td data-l="Predecessor" class="muted">—</td><td data-l="Base unit">characters</td><td data-l="Chunk">whole word</td>'
+        in body,
         "ideas from the cache: overview row, card per idea, tested in": '<table class="data wide ideas">' in body
-        and '<th>Base cut</th><th>Broken cut</th><th>Morph cut</th><th>Test split</th><th>Issue</th><th>Tested in</th>'
+        and "<th>Base cut</th><th>Broken cut</th><th>Morph cut</th><th>Test split</th><th>Issue</th><th>Tested in</th>"
         in body
         and '<td class="mark" data-l="Base cut"><span class="badge b-confirmed">already has</span></td>' in body
         and '<span class="badge b-running">changes</span>' in body
-        and '<td class="rel"><div class="rl"><span class="badge b-confirmed">already has</span><span>Base cut</span></div>' in body
+        and '<td class="rel"><div class="rl"><span class="badge b-confirmed">already has</span><span>Base cut</span></div>'
+        in body
         and "<span class=muted>not assessed</span>" in body
         and '<article class="idea" id="topic-cutting/idea-7"' in body
         and '</h3><div class="meta"><span>' in body
