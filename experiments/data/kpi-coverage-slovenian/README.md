@@ -5,7 +5,7 @@ short: KPI coverage check
 category: data
 branch: exp/kpi-coverage-slovenian
 base_commit: bb8c5ad
-status: running
+status: concluded
 ticket: "#3"
 pr:
 mlflow: slm4ie/data/kpi-coverage-slovenian
@@ -18,18 +18,18 @@ uses: []
 tests: []
 evidence: {}
 types: [assessment]
-concluded:
+concluded: 2026-10-21
 ---
 
 # KPI coverage of the curated Slovene corpus under source and document-level domain labels
 
 ## TL;DR
 
-- **Hypothesis**: leaning confirmed — the curated Slovene corpus clears all four bars on the loosened build, corpus tokens, domain tokens, and science and medical documents, and medicine clears the examples target only once each document is labelled with its own domain rather than its source's.
+- **Hypothesis**: confirmed — the curated Slovene corpus clears all four bars, H1 to H4, on the loosened build, and medicine clears the examples target only once each document is labelled with its own domain rather than its source's.
 - **F1 — Every data target clears under document-level labels, and under source labels only the medical examples target misses.** Medical documents miss the examples target under source labels and clear it a hundredfold under document labels, while every other count clears under both.
 - **F2 — The medical shortfall under source labels is a source gap, since the medical source never held enough distinct texts.** The medical source falls below the examples target at exact dedup, which removes only copies, so only a new dataset can close the gap.
-- **Caveat**: the classifier clears its medical precision floor by a single document, but the medical count would stay above target at a precision a hundred times lower.
-- **Next**: conclude, noting that the medical source's converted count holds about three copies per distinct leaflet, so its source-label counts overstate distinct texts.
+- **Caveat**: the classifier's medical precision off the medical source sits exactly on its floor of 0.8, but the medical count stays above target at any precision of 0.01 or more.
+- **Next**: measure the classifier's medical precision on corpus web documents rather than on the judged gold, and count medicine in distinct texts rather than documents.
 
 ## Hypothesis
 
@@ -48,7 +48,7 @@ concluded:
   - **Q1 — Where does each shortfall arise, before curation or at a filter stage?**: read on the table of documents per domain at every curation stage of both builds ([M1], [M7]), where a domain that had the material at the converted stage and lost it is a curation loss naming the stage, and one that never had it is a source gap; robust if the stage or gap named is the same on the loosened and the baseline build — the answer feeds the follow-up, a filter to tune or the catalogue datasets that would close the gap. Added 2026-10-20 at the data phase.
   - **Verdict rule**: confirmed when all four bars hold; refuted when any bar is refuted; inconclusive when the classifier fails its quality gate ([D3]) so that H3 and H4 cannot be read under document labels. Q1 is read beside that outcome and does not change it.
   - **Read beside the clauses, not as clauses**: the classifier's macro-F1 and per-domain precision on the judged gold; the second reading of the examples target, annotated extraction examples per domain from the landscape catalogue; the same per-domain totals on the baseline build.
-- **Outcome**: open
+- **Outcome**: confirmed
 
 ## Design
 
@@ -200,6 +200,7 @@ concluded:
   - 2026-10-20 tune/test split added at the data phase, after the code review of the experiment flagged tuning and scoring on one set.
   - 2026-10-20 the precision floor moved from every test document to the documents outside the medical source, after the review gate of [M3] showed the medical source's leaflets inflating it (0.715 over all documents, 0.381 off the source); H3 counts the medical documents inside the web crawls, which is the off-source read.
   - 2026-10-20 the test side was read a second time for all three classifiers after [D2] merged scientific and academic, the one re-read this gate allows. Before the merge, test macro-F1 and off-source medical precision were 0.540 and 0.381 for the lexicons, 0.670 and 0.820 for tfidf, 0.682 and 0.650 for embeddings. After it, tfidf passes at 0.702 and exactly 0.800, 48 of 60 assigned documents, so one more misassigned document would fail it.
+  - 2026-10-21 at conclusion, two departures from the issue's requirement 4 recorded: the medical floor reads precision rather than F1, since H3 counts what the classifier assigns medical; the topic-model baseline it named for escalation was not found on this machine, so the supervised candidates were read without it.
 
 ## Findings
 
@@ -207,7 +208,7 @@ concluded:
 
 - **Summary**: Medical documents miss the examples target under source labels and clear it a hundredfold under document labels, while every other count clears under both.
 - **Runs**: c90d350793274d64b766a2cf089bc49b, the classifier pass over the loosened build, and 355409bfde9e42029c96f3d2be95b6a1, the same pass over the baseline build, both under `slm4ie/data/kpi-coverage-slovenian` ([M5]); `analysis.py` at 024330f over their totals and the statistics stage of both builds ([M6]).
-- **Result**: ![Each data target's count as a multiple of its target, on a log scale, under source labels and under document-level labels, per build. The vertical line is the target itself, a multiple of one. On the loosened build the medical document count sits at 0.59 of its target under source labels and at 106 times it under document labels, and science documents move from 17 to 96 times. Every token count sits past a thousand times its target except medical tokens under source labels, at 44 times, and the whole corpus, at 4.5 times its five billion with every source and 3.5 times with the gated sources removed. The baseline build shows the same shape with the medical source count at 0.04 of the target. The target table linked from the Reading holds twenty-eight counts per build: the corpus in tokens and in words, with and without the gated sources, and science and medicine in tokens, words and documents under both labelling rules and both source sets.](figures/kpi-target-multiple-by-rule.svg)
+- **Result**: ![Each data target's count as a multiple of its target, on a log scale, under source labels and under document-level labels, per build. The vertical line is the target itself, a multiple of one. On the loosened build the medical document count sits at 0.59 of its target under source labels and at 106 times it under document labels, and science documents move from 17 to 96 times. On the loosened build every token count sits past a thousand times its target except medical tokens under source labels, at 44 times, and the whole corpus, at 4.5 times its five billion with every source and 3.5 times with the gated sources removed. The baseline build passes and misses the same counts, with medical documents under source labels at 0.04 of the target and medical tokens under source labels at 3.4 times. The target table linked from the Reading holds twenty-eight counts per build: the corpus in tokens and in words, with and without the gated sources, and science and medicine in tokens, words and documents under both labelling rules and both source sets.](figures/kpi-target-multiple-by-rule.svg)
 - **Reading**:
   - **All but four of the fifty-six counts sit above their target, and the four misses are the medical document count under source labels.** The misses fall on both builds, with and without the gated sources. Under source labels the medical count is the one medical leaflet source after both dedup stages. Under document labels it is what the TF-IDF classifier that passed the gate ([D3]) assigned medical, mostly from the web crawls ([F3]). [The table of every count against its target](tables/kpi-pass-by-rule.csv) also reads each target counting one token per word instead of two; no pass changes.
   - **[H1], [H2], [H3] and [H4] are each confirmed on the loosened build.** The corpus holds over four times the tokens H1 asks for, over three times without the gated sources, and science and medicine each far exceed H2's tokens. Medicine misses the examples target under source labels and clears it under document labels, as H3 predicts; science clears it under both, as H4 predicts. The medical count under document labels stays above its target as long as at least one in a hundred documents labelled medical truly is medical. The gate measured 0.80 off the medical source. The baseline build gives the same four verdicts.
@@ -220,10 +221,10 @@ concluded:
 
 - **Summary**: The medical source falls below the examples target at exact dedup, which removes only copies, so only a new dataset can close the gap.
 - **Runs**: no run; `analysis.py` at 024330f over the per-stage document counts of both builds ([M1], [M7]) and the landscape catalogue's row for the medical source.
-- **Result**: ![The medical source's documents after every curation stage of both builds, on a log scale, with the horizontal line at the examples target of ten thousand. Both builds start from 23,542 converted documents. The loosened build keeps 23,181 through the four content filters, then exact dedup removes two thirds and sentence dedup a quarter of what is left, down to 5,941. The baseline build's quality filter cuts the source to 3,599 and the stages after it to 367. The converted count is about three times the source's 7,924 distinct texts, since the release ships each leaflet in two files and repeats it per medicine. The loosened final count sits a hundred above the publisher's 5,841 deduplicated texts, because that file rewrote quote marks and its near-copies escape exact dedup. The attribution rows are in the table linked from the Reading.](figures/funnel-medical-documents-by-stage.svg)
+- **Result**: ![The medical source's documents after every curation stage of both builds, on a log scale, with the horizontal line at the examples target of ten thousand. Both builds start from 23,542 converted documents. The loosened build keeps 23,181 through the four content filters, then exact dedup removes two thirds and sentence dedup a quarter of what is left, down to 5,941. The baseline build's quality filter cuts the source to 3,599 and the stages after it to 367. The converted count is about three times the source's 7,924 byte-distinct texts, since the release ships each leaflet in two files and repeats it per medicine. The publisher's own deduplicated file holds 5,841 texts, since many texts differ only in quote marks. Either way the source holds under ten thousand distinct texts. The loosened final count sits a hundred above 5,841 because the quote-mark variants survive exact dedup. The attribution rows are in the table linked from the Reading.](figures/funnel-medical-documents-by-stage.svg)
 - **Reading**:
-  - **Both builds start with more than twice the target and end below it, at different stages.** The attribution rule ([M7]) names the first stage after which the medical source holds no more than the target. That is exact dedup on the loosened build and the quality filter on the baseline, a rule-based filter built for English web text. [The attribution table](tables/gap-attribution-by-stage.csv) reads the same without the gated sources, since the medical source is open.
-  - **[Q1] is partial: each build's shortfall is attributed, but the builds name different stages, and the loosened build's stage removes copies, not text.** The source's release ships every leaflet twice, as an original and a publisher-deduplicated file. The original also repeats a leaflet for every medicine it covers. The curation-thresholds experiment, which tuned the filters per source, traced every medical drop at exact dedup to such a copy. The publisher's deduplicated file holds 5,841 texts, so the source never had ten thousand distinct documents. The rule calls this a curation loss at exact dedup, but that stage removes only copies, so the cause is a source gap.
+  - **Both builds start with more than twice the target and end below it, at different stages.** The attribution rule ([M7]) names the first stage after which the medical source holds no more than the target. That is exact dedup on the loosened build and the quality filter on the baseline. [The attribution table](tables/gap-attribution-by-stage.csv) reads the same without the gated sources, since the medical source is open.
+  - **[Q1] is partial: each build's shortfall is attributed, but the builds name different stages, so the clause's robustness test, the same cause on both builds, fails.** The source's release ships every leaflet twice, as an original and a deduplicated file, and the original repeats a leaflet per medicine. The curation-thresholds experiment traced every medical drop at exact dedup to such a copy. The publisher's deduplicated file holds 5,841 texts, so the source never had ten thousand distinct documents. The rule calls this a curation loss at exact dedup, but that stage removes only copies. The baseline's quality filter does remove medical text, yet the loosened build keeps the source through that filter and still ends below the target. Repairing a filter therefore cannot close the gap, so the cause is a source gap.
   - **A medical source with more than ten thousand distinct texts before curation, lost at a filter, would overturn this reading.** The loosened build keeps the source through the quality filter, and its distinct texts still fall short.
 - **Implication**: Closing the medical examples gap under source labels means adding a dataset, not tuning a filter. The [open catalogue datasets in the medical domain](tables/gap-catalogue-datasets.csv) show the native ones are small, each medical journal archive under three thousand documents, and the large ones translated or machine-written.
 - **History**:
@@ -247,8 +248,8 @@ concluded:
 - **Runs**: c90d350793274d64b766a2cf089bc49b and 355409bfde9e42029c96f3d2be95b6a1, which recorded the gold ids each final corpus holds ([M5]); `analysis.py` at 024330f over the frozen TF-IDF fit ([M4], [M6]).
 - **Result**: [The gate's metrics read again on the test-side gold documents found in each final corpus: documents, macro-F1, medical precision over all of them and off the medical source, and medical recall off the source.](tables/classifier-tfidf-gate-by-final-corpus.csv)
 - **Reading**:
-  - **The documents the corpus keeps are easier for the classifier on medicine and harder on average.** The gold was drawn with up to forty kept and forty dropped documents per source and stage, so the test side holds many documents the pipeline removed. Just over half of it survives in the loosened final corpus and about a third in the baseline's. On the survivors, off-source medical precision is 0.82 on the loosened build and 0.85 on the baseline, and macro-F1 falls about two hundredths below its floor on each.
-  - **This supports the medical count under document labels ([F1]) and leaves the gate's verdict as it stands.** The gate is read once on the whole test side ([D3]), where the classifier passed. This second read describes the corpus the count was taken on, where the medical precision is at least as high. The lower macro-F1 falls on the other eleven labels, whose counts bear on no target except science, which clears its document target with ninety times the margin.
+  - **The documents the corpus keeps are easier for the classifier on medicine and harder on average.** The gold was drawn with up to forty kept and forty dropped documents per source and stage, so the test side holds many documents the pipeline removed. Just over half of it survives in the loosened final corpus and about a third in the baseline's. On the survivors, off-source medical precision is 0.82 on the loosened build and 0.85 on the baseline. Macro-F1 falls below its floor on each, by about two hundredths.
+  - **This supports the medical count under document labels ([F1]) and leaves the gate's verdict as it stands.** The gate is read once on the whole test side ([D3]), where the classifier passed. This second read describes the corpus the count was taken on, where the medical precision is at least as high. The lower macro-F1 falls on the other eleven labels, whose counts bear on no target except science. Science's document count is about a hundred times its target, so it holds at any precision above one in a hundred.
   - **An off-source medical precision below the floor on the kept documents would overturn the support.** The read rests on a few dozen medical assignments off the source, so a handful of mislabels would move it.
 - **History**:
   - 2026-10-21 first result, from the gold ids the two classifier passes found
@@ -264,4 +265,48 @@ concluded:
 
 ## Verdict
 
+- **Outcome**: confirmed
+- **Evidence**: Every count clears its target on the loosened build except medical documents under source labels, which clear under document labels as H3 predicts ([F1]). That shortfall is a source gap: the medical source never held ten thousand distinct texts ([F2]). The medical documents under document labels come from eight web crawls ([F3]), and the classifier's medical precision holds on the gold each final corpus keeps ([F4]).
+- **Discussion**:
+  - **Yes, the curated corpus meets all four data targets once each document carries its own domain label.** Tokens clear by wide margins under either labelling rule. Only the medical examples target depends on the rule, and it clears only when the web crawls' medical pages are counted.
+  - **The medical examples sit inside general web text, not in a medical dataset.** About a million web documents read as medical, spread over eight crawls, while the one medical source holds under six thousand. The gap rule named exact dedup on the loosened build, a stage that removes only copies, so the rule misreads a source of repeated leaflets.
+  - **Precision was measured on judged gold, not on the corpus, and sits exactly on its floor.** One more mislabelled document would fail it. The gold over-represents dropped text, and the counts are documents, not distinct texts. The margin is wide enough that neither changes a verdict, but a follow-up that needs the medical documents themselves inherits both unknowns.
+- **Adoption candidate**: a document-level domain label for the shared corpus, run after the statistics stage. It would carry the `classify` subcommand of `scripts/curate_pretraining_corpus.py`, `label_corpus` and `track_corpus_labels` with the TF-IDF candidate in `slm4ie/data/curate/inspect/supervised.py` ([M4], [M5]), and the target and gap readings from `analysis.py` ([M6], [M7]). The lexicon classifier in `domains.py` and the embeddings candidate failed the gate on the judged gold, whose scores per classifier sit in the gate decision ([D3]), and stay out.
+- **Next**:
+  - Judge a sample of the corpus web documents labelled medical, to measure the classifier's precision on the corpus rather than on the gold ([F1], [F4]).
+  - Count medicine in distinct texts rather than documents, inside the medical source (issue #29) and among the web documents ([F3]).
+  - Decide whether theses and papers the judge reads as student writing count as science. The classifier puts most theses and open science papers under student, so science under document labels rests on web documents.
+  - Build native Slovene medical extraction examples, since the catalogue holds none at scale ([F5]), in the planned medical-ie-slovenian experiment.
+  - Make the gap rule tell a stage that removes copies from one that removes text ([F2]).
+- **Limitations**:
+  - Under source labels the medical source counts about three copies per distinct leaflet after conversion ([F2]).
+  - The gate is read on the judged gold, which over-represents dropped text, and its medical precision sits exactly on the floor ([D3]).
+  - Every count is in documents, not distinct texts, and the classifier reads only each document's first 2,000 characters ([M4]).
+  - Tokens are estimated as two per word, never counted with a tokenizer ([M1]).
+  - The baseline build is read beside the loosened build, never as the verdict ([D1]).
+
 ## Reproduce
+
+Every run logs to the project's MLflow server under `slm4ie/data/kpi-coverage-slovenian`. Data lives under `data/`, a symlink to `/vault/data/SLM4IE/`. Both corpus builds must be in place: the baseline under `data/pretrain/` and the loosened build under the curation-thresholds experiment's `interim/pretrain-loosened/`. The curation-quality experiment's judged sample and verdicts, and the data-landscape survey's catalogue, are read in place. The gold split, the lexicon freeze and the supervised fits under `final/` are frozen; deleting one is a deliberate second read of the test side.
+
+```bash
+export MLFLOW_TRACKING_URI=http://localhost:5555
+export EXP=experiments/data/kpi-coverage-slovenian
+export FINAL=data/experiments/data/kpi-coverage-slovenian/final
+export INTERIM=data/experiments/data/kpi-coverage-slovenian/interim
+export GOLD=data/experiments/data/curation-quality-slovenian/interim/sample.jsonl
+export LOOSENED=experiments/data/curation-thresholds-slovenian/configs/curation-routes-loosened.yaml
+
+# Gold split, classifier gates and the saved TF-IDF fit the classifier passes read (commit d2dedc1)
+uv sync --group corpus --group analysis --group embeddings
+uv run python $EXP/analysis.py
+
+# Classifier pass over the loosened build for F1, F3 and F4 (commit 0ef4c33)
+uv run python scripts/curate_pretraining_corpus.py classify --config $LOOSENED --classifier $FINAL/classifier-supervised/tfidf.pkl --gold $GOLD --out $FINAL/corpus-labels-loosened.json --checkpoint $INTERIM/corpus-labels-loosened.shards.jsonl --experiment slm4ie/data/kpi-coverage-slovenian --run-name classify-loosened --tag tier=tracked --tag type=coverage --max-workers 36
+
+# Classifier pass over the baseline build for F1, F3 and F4 (commit 0ef4c33)
+uv run python scripts/curate_pretraining_corpus.py classify --config configs/data/curate.yaml --classifier $FINAL/classifier-supervised/tfidf.pkl --gold $GOLD --out $FINAL/corpus-labels-baseline.json --checkpoint $INTERIM/corpus-labels-baseline.shards.jsonl --experiment slm4ie/data/kpi-coverage-slovenian --run-name classify-baseline --tag tier=tracked --tag type=coverage --max-workers 36
+
+# Every table and figure for F1 to F5 (commit 024330f)
+uv run python $EXP/analysis.py
+```
