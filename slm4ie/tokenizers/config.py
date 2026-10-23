@@ -9,7 +9,7 @@ shared import cycle.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -41,6 +41,8 @@ class SweepConfig:
         mlflow_experiment (str): MLflow experiment name.
         mlflow_enabled (bool): Whether to log to MLflow.
         mlflow_tracking_uri (Optional[str]): MLflow tracking URI override.
+        mlflow_tags (Dict[str, str]): Tags set on every train and eval run,
+            such as the experiment's `branch`, `type` and `language`.
         stats_n_resamples (int): Bootstrap resamples (B) for CIs and tests.
         stats_ci_level (float): Confidence level for the bootstrap CIs.
         stats_seed (int): Seed for the shared bootstrap resample indices.
@@ -77,6 +79,7 @@ class SweepConfig:
     corpus_train_share: Optional[float] = None
     inflection_path: Optional[Path] = None
     heldout_lexeme_share: Optional[float] = None
+    mlflow_tags: Dict[str, str] = field(default_factory=dict)
 
     @property
     def corpus_split_path(self) -> Path:
@@ -246,6 +249,7 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         corpus_train_share=_optional_float((corpus.get("split") or {}).get("train_share")),
         inflection_path=Path(morphology["inflection_path"]) if morphology.get("inflection_path") else None,
         heldout_lexeme_share=_optional_float(morphology.get("heldout_lexeme_share")),
+        mlflow_tags={str(k): str(v) for k, v in (mlflow_cfg.get("tags") or {}).items()},
     )
 
 

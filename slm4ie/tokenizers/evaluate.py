@@ -50,7 +50,14 @@ from slm4ie.tokenizers.morphology import (
     without_forms,
 )
 from slm4ie.tokenizers.registry import get_tokenizer
-from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, corpus_split_for, parse_sweep_run_key
+from slm4ie.tokenizers.train import (
+    MLFLOW_LINK_FILENAME,
+    corpus_split_for,
+    log_sweep_lineage,
+    parse_sweep_run_key,
+    run_tags,
+    sweep_inputs,
+)
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.tokenizers.config import SweepConfig
@@ -746,12 +753,16 @@ def log_evaluate_runs(
         "morph_coverage_deriv",
         "vocab_used",
     ]
-    with ml.mlflow_run("sweep-eval", tags={"run_type": "sweep", "phase": "eval"}):
+    tags = run_tags(cfg)
+    gold_paths = {"sloleks-inflection": cfg.inflection_path} if cfg.inflection_path else {}
+    inputs = sweep_inputs({"corpus-split": cfg.corpus_split_path, "eval-sample": cfg.eval_sample_path, **gold_paths})
+    with ml.mlflow_run("sweep-eval", tags={**tags, "run_type": "sweep", "phase": "eval"}):
         for record in results:
             with ml.mlflow_run(
                 record["run_key"],
                 nested=True,
                 tags={
+                    **tags,
                     "model_type": record["tokenizer"],
                     "model_version": str(record["vocab_size"]),
                     "run_type": "sweep",
@@ -767,6 +778,7 @@ def log_evaluate_runs(
                         "renyi_alpha": cfg.renyi_alpha,
                     }
                 )
+                log_sweep_lineage(cfg, inputs, context="eval")
                 ml.log_metrics({k: record[k] for k in metric_keys if k in record})
                 ci_metrics: Dict[str, float] = {}
                 for metric in (*_DECOMPOSABLE_METRICS, *_DERIV_DECOMPOSABLE_METRICS):

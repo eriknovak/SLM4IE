@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
-from slm4ie.utils.versioning import corpus_digest
+from slm4ie.utils.versioning import corpus_digest, file_sha256
 from slm4ie.utils.parallel import (
     configure_script_logging,
     cpu_default,
@@ -409,6 +409,47 @@ def _write_mlflow_link(
     (out_dir / MLFLOW_LINK_FILENAME).write_text(json.dumps(link, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def run_tags(cfg: SweepConfig) -> Dict[str, str]:
+    """Return the tags every sweep run carries beside its structural ones.
+
+    Args:
+        cfg (SweepConfig): The resolved sweep configuration.
+
+    Returns:
+        Dict[str, str]: The configured `mlflow_tags` plus `base_commit`, the
+            commit the run executes from.
+    """
+    return {**cfg.mlflow_tags, "base_commit": ml.git_commit() or "unknown"}
+
+
+def sweep_inputs(paths: Dict[str, Path]) -> List[Tuple[str, str, str]]:
+    """Digest the shared sweep inputs that exist, for logging as dataset inputs.
+
+    Args:
+        paths (Dict[str, Path]): Input name (e.g. `train-sample`) to its file.
+
+    Returns:
+        List[Tuple[str, str, str]]: `(name, digest, path)` per existing file, the
+            name prefixed `sweep/` and the digest a `sha256:` content hash.
+    """
+    return [
+        (f"sweep/{name}", f"sha256:{file_sha256(path)}", str(path)) for name, path in paths.items() if path.exists()
+    ]
+
+
+def log_sweep_lineage(cfg: SweepConfig, inputs: List[Tuple[str, str, str]], context: str) -> None:
+    """Log the split shares and the digested sweep inputs on the active run.
+
+    Args:
+        cfg (SweepConfig): The resolved sweep configuration.
+        inputs (List[Tuple[str, str, str]]): What `sweep_inputs` returned.
+        context (str): Lineage context of the inputs (`training` or `eval`).
+    """
+    ml.log_params({"corpus_train_share": cfg.corpus_train_share, "heldout_lexeme_share": cfg.heldout_lexeme_share})
+    for name, digest, source in inputs:
+        ml.log_dataset_input(name, digest, source, context=context)
+
+
 def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
     """Log the training sweep to MLflow as a parent run with nested children.
 
@@ -429,7 +470,15 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
         return
 
     commit = ml.git_commit()
-    with ml.mlflow_run("sweep-train", tags={"run_type": "sweep", "phase": "train"}) as parent:
+    tags = run_tags(cfg)
+    inputs = sweep_inputs(
+        {
+            "corpus-split": cfg.corpus_split_path,
+            "train-sample": cfg.corpus_sample_path,
+            "morph-table": cfg.lexicon_path,
+        }
+    )
+    with ml.mlflow_run("sweep-train", tags={**tags, "run_type": "sweep", "phase": "train"}) as parent:
         parent_run_id = parent.info.run_id if parent is not None else None
         for key in keys:
             stats_path = cfg.output_root / key / TRAIN_STATS_FILENAME
@@ -441,6 +490,7 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
                 key,
                 nested=True,
                 tags={
+                    **tags,
                     "model_type": stats["tokenizer"],
                     "model_version": str(stats["vocab_size"]),
                     "run_type": "sweep",
@@ -458,6 +508,7 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
                         "n_special_tokens": stats.get("n_special_tokens"),
                     }
                 )
+                log_sweep_lineage(cfg, inputs, context="training")
                 ml.log_metrics(
                     {
                         "train_seconds": stats["train_seconds"],

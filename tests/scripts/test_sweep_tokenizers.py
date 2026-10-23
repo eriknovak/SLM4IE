@@ -45,6 +45,12 @@ class TestSelectionFlags:
             with pytest.raises(SystemExit):
                 sweep.parse_args([command, "--all"])
 
+    def test_tier_defaults_to_scratch_on_tracked_subcommands(self):
+        """train and evaluate tag runs scratch unless --tier tracked is given."""
+        for command in ("train", "evaluate"):
+            assert sweep.parse_args([command, "--config", "sweep.yaml", "--all"]).tier == "scratch"
+            assert sweep.parse_args([command, "--config", "sweep.yaml", "--all", "--tier", "tracked"]).tier == "tracked"
+
     def test_a_subcommand_is_required(self):
         """A bare invocation names no step and is rejected."""
         with pytest.raises(SystemExit):

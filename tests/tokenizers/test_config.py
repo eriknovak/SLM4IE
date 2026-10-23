@@ -126,3 +126,15 @@ def test_heldout_share_without_inflection_path_rejected(tmp_path: Path):
     text = _BASE_CONFIG.replace("  min_stem_len: 3\n", "  min_stem_len: 3\n  heldout_lexeme_share: 0.2\n")
     with pytest.raises(ValueError, match="inflection_path"):
         load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+def test_mlflow_tags_load_as_strings(tmp_path: Path):
+    """The dial's run tags reach the config, every value as a string."""
+    text = _BASE_CONFIG.replace("  enabled: true\n", "  enabled: true\n  tags: { type: metric-validity, version: 2 }\n")
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", text))
+    assert cfg.mlflow_tags == {"type": "metric-validity", "version": "2"}
+
+
+def test_mlflow_tags_default_to_empty(tmp_path: Path):
+    """A config without run tags tags nothing beyond the structural tags."""
+    assert load_sweep_config(_write(tmp_path / "s.yaml", _BASE_CONFIG)).mlflow_tags == {}

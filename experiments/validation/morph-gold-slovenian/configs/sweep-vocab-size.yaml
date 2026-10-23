@@ -12,6 +12,8 @@
 #   vocab_sizes    128k joins the June sizes (Q1).
 #   morphology     heldout_lexeme_share holds 20% of the Sloleks 3.2 lexemes,
 #     stratified by word class and status, out of the morpheme table (D4).
+#   mlflow.tags    labflow's run tags; `base_commit` is the commit the run
+#     executes from, and `sweep_tokenizers.py train|evaluate --tier` sets `tier`.
 #   output.root    the experiment's data folder; holds the split, both samples,
 #     the morpheme table and one subdir per tokenizer.
 #
@@ -67,3 +69,7 @@ mlflow:
   enabled: true
   experiment: slm4ie/validation/morph-gold-slovenian
   tracking_uri: null              # null -> $MLFLOW_TRACKING_URI
+  tags:                           # on every train and eval run; --tier adds tier
+    branch: exp/morph-gold-slovenian
+    type: metric-validity
+    language: sl

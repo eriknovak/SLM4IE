@@ -189,12 +189,40 @@ class TestLogTrainingToMlflow:
             for run in client.search_runs([experiment.experiment_id])
             if run.data.tags.get("mlflow.parentRunId")
         }
-        input_90 = children["bpe-90"].inputs.dataset_inputs
-        assert [d.dataset.name for d in input_90] == ["tokenizer/bpe-90"]
+        produced = {
+            key: [d.dataset for d in run.inputs.dataset_inputs if d.dataset.name.startswith("tokenizer/")]
+            for key, run in children.items()
+        }
+        assert [d.name for d in produced["bpe-90"]] == ["tokenizer/bpe-90"]
         # Distinct tokenizers hash to distinct digests (identity for lineage).
-        digest_90 = input_90[0].dataset.digest
-        digest_120 = children["bpe-120"].inputs.dataset_inputs[0].dataset.digest
+        digest_90 = produced["bpe-90"][0].digest
+        digest_120 = produced["bpe-120"][0].digest
         assert digest_90 and digest_120 and digest_90 != digest_120
+
+    def test_child_carries_labflow_tags_and_sample_digest(self, tmp_path: Path, monkeypatch):
+        """A train child run carries the configured tags, base_commit and the training sample's content digest."""
+        pytest.importorskip("mlflow")
+        import mlflow
+
+        from slm4ie.utils.mlflow import MAX_DATASET_DIGEST_LEN
+        from slm4ie.utils.versioning import file_sha256
+
+        monkeypatch.chdir(tmp_path)
+        cfg = _enable_mlflow(_make_config(tmp_path, ["bpe"], [90]), tmp_path)
+        cfg = dataclasses.replace(cfg, mlflow_tags={"tier": "scratch", "type": "metric-validity"})
+        sample_path, _ = prepare_inputs(cfg)
+        train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+        log_train_runs(["bpe-90"], cfg)
+
+        mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
+        client = mlflow.MlflowClient()
+        experiment = client.get_experiment_by_name(cfg.mlflow_experiment)
+        child = next(r for r in client.search_runs([experiment.experiment_id]) if r.data.tags.get("mlflow.parentRunId"))
+        assert child.data.tags["tier"] == "scratch"
+        assert child.data.tags["type"] == "metric-validity"
+        assert "base_commit" in child.data.tags
+        digests = {d.dataset.name: d.dataset.digest for d in child.inputs.dataset_inputs}
+        assert digests["sweep/train-sample"] == f"sha256:{file_sha256(sample_path)}"[:MAX_DATASET_DIGEST_LEN]
 
 
 class TestResolveRunSelection:

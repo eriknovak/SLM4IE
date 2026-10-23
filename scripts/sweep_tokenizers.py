@@ -31,6 +31,7 @@ Examples:
 """
 
 import argparse
+import dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -77,6 +78,20 @@ def _add_run_selection(parser: argparse.ArgumentParser, verb: str) -> None:
     parser.add_argument("--all", action="store_true", help=f"{verb.capitalize()} every run in the sweep.")
 
 
+def _add_tier_argument(parser: argparse.ArgumentParser) -> None:
+    """Add `--tier`, the labflow run tier tagged on every MLflow run.
+
+    Args:
+        parser: Subcommand parser to extend.
+    """
+    parser.add_argument(
+        "--tier",
+        choices=("scratch", "tracked"),
+        default="scratch",
+        help="labflow run tier tagged on every MLflow run: scratch for the inner loop, tracked for cited runs.",
+    )
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
@@ -104,12 +119,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     train_parser = subparsers.add_parser("train", help="Train the selected tokenizers.")
     _add_config_argument(train_parser)
     _add_run_selection(train_parser, "train")
+    _add_tier_argument(train_parser)
     train_parser.add_argument("--force", action="store_true", help="Retrain existing artifacts.")
     add_workers(train_parser, "Parallel runs. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
 
     evaluate_parser = subparsers.add_parser("evaluate", help="Score trained tokenizers and write the report.")
     _add_config_argument(evaluate_parser)
     _add_run_selection(evaluate_parser, "evaluate")
+    _add_tier_argument(evaluate_parser)
     evaluate_parser.add_argument(
         "--morph-form-sample",
         type=int,
@@ -284,6 +301,8 @@ def main() -> None:
     """Dispatch the selected subcommand."""
     args = parse_args()
     cfg = load_sweep_config(args.config)
+    if getattr(args, "tier", None):
+        cfg = dataclasses.replace(cfg, mlflow_tags={**cfg.mlflow_tags, "tier": args.tier})
     handlers = {
         "sample": _run_sample,
         "train": _run_train,

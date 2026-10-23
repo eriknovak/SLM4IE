@@ -52,11 +52,11 @@ concluded:
 
 - **Inputs**: the shared curated corpus, the Sloleks 3.1 lexicon as the heuristic's source, the Sloleks 3.2 stem-ending split, the Sloleks word relations and the MorphScore v2 Slovene set, described in `## Datasets`.
 - **Method / factors**: one pass from a corpus split and two golds to two rank agreements.
-  - Split the corpus 80/20 by document within each source, and draw a training sample and an evaluation sample from the two sides ([D3]).
-  - Build the Sloleks 3.2 gold, one form per row, and mark each form manual or automatic ([D1]).
-  - Build the heuristic gold from Sloleks 3.1 with the Slovene word-class tags.
-  - Split the lexemes 80/20, build the morpheme table from the training side, and keep the held-out forms for scoring ([D4]).
-  - Train the six algorithms at four vocabulary sizes on the training sample ([D2]).
+  - Split the corpus 80/20 by document within each source, and draw a training sample and an evaluation sample from the two sides ([D3], [M1], [M2]).
+  - Build the Sloleks 3.2 gold, one form per row, and mark each form manual or automatic ([D1], [M3]).
+  - Build the heuristic gold from Sloleks 3.1 with the Slovene word-class tags ([M4]).
+  - Split the lexemes 80/20, build the morpheme table from the training side, and keep the held-out forms for scoring ([D4], [M5]).
+  - Train the six algorithms at four vocabulary sizes on the training sample ([D2], [M6]).
   - Score all 24 tokenizers on the held-out forms under each gold and slice, and on the evaluation sample for the corpus metrics.
   - Rank the tokenizers per gold and slice, and compute τ with its interval for H1 and H2.
   - Factors: the gold (corrected heuristic, Sloleks 3.2) and the slice (manual, all) are scientific. The algorithm and the vocabulary size span the population being ranked. The training sample and the morpheme table are fixed ([D2]).
@@ -81,6 +81,77 @@ concluded:
 
 ## Methods
 
+### M1 — Split every source's documents 80/20 into a training side and an evaluation side
+
+- **Input**: the shared curated corpus `pretrain/06_sentence_dedup/`, one JSONL record per document with its `id` and `text`, in one folder per source (18 sources).
+- **Output**: `corpus_split.json` in the experiment's `final/sweep-vocab-size/`: one rank threshold per source, the documents, words and bytes on each side, and a fingerprint of the corpus shard set. It is the input of [M2].
+- **How**:
+  1. Each document gets a rank: the first eight bytes of the BLAKE2b hash of `<source>/<id>`, read as an integer.
+  2. Within each source the documents are sorted by rank, and the first $n_{\text{train}} = \operatorname{round}(N \cdot s)$ form the training side, where $N$ is the source's document count and $s$ is `corpus.split.train_share`. The rank of the next document is the source's threshold, so a document's side follows from its rank alone.
+  3. The fingerprint is a SHA-256 hash over every shard's path, size and modification time. A later step that finds a different fingerprint refuses the split, since the corpus changed under it.
+  4. The split is by id, so two documents with the same text but different ids can sit on different sides ([D3]).
+- **Code**: `slm4ie/tokenizers/corpus.py::fit_corpus_split`
+- **Settings**: `corpus.root` (the corpus folder), `corpus.split.train_share` (share of each source on the training side), in `configs/sweep-vocab-size.yaml`
+
+### M2 — Draw a training sample and an evaluation sample in proportion to each side's sources
+
+- **Input**: the corpus and the split of [M1].
+- **Output**: `corpus_sample.txt.gz` (training) and `eval_sample.txt.gz` (evaluation), one document text per line, each with a `.sources.json` sidecar giving the side and the documents, words and bytes drawn per source. The training sample feeds the tokenizer training of [M6]; the evaluation sample feeds the corpus metrics.
+- **How**:
+  1. Each source's quota is the byte budget times the source's share of that side's bytes.
+  2. Each source's shards are read in an order shuffled by the side's seed, and only documents on the side are taken, until the quota is met.
+  3. A sample reused later is refused if its sidecar names the other side.
+- **Code**: `slm4ie/tokenizers/corpus.py::materialize_sample`
+- **Settings**: `corpus.budget.max_bytes` (training budget, 2 GB), `corpus.budget.seed` (training shuffle seed), `eval.corpus_budget.max_bytes` (evaluation budget, 200 MB), `eval.corpus_budget.seed` (evaluation shuffle seed), `corpus.budget.source_weights` (empty: proportional to the side's bytes), in `configs/sweep-vocab-size.yaml`
+
+### M3 — Build the Sloleks 3.2 gold, one stem-ending cut per form
+
+- **Input**: `tokenization/sloleks_inflection.jsonl.gz`, one record per lexeme (a dictionary entry with its whole paradigm) carrying its entry id, word class, manual or automatic status, and each form already cut as stem and ending, such as *mačk·ah*.
+- **Output**: a gold mapping each distinct form to its cut, its tag and a `verified` flag. It is the input of [M5].
+- **How**:
+  1. Every form of every lexeme is read with its cut.
+  2. A form that two lexemes cut differently has no single gold cut, so it is dropped and counted ([D1]).
+  3. A form with no ending is kept as one stem ([D8]).
+  4. A form is `verified` (manual) only when every lexeme carrying it was checked by hand.
+- **Code**: `slm4ie/tokenizers/morphology.py::build_inflection_lexicon`
+- **Settings**: `morphology.inflection_path` (the converted stem-ending split), in `configs/sweep-vocab-size.yaml`
+
+### M4 — Build the heuristic gold by aligning each form to its lemma
+
+- **Input**: `tokenization/sloleks.jsonl.gz`, one Sloleks 3.1 record per lemma (dictionary form) with its forms and their morphosyntactic tags.
+- **Output**: a gold mapping each form to a stem and a suffix, or to one whole stem. It is the reference arm of H1 and the inflectional half of the morpheme table in [M5].
+- **How**:
+  1. A form whose tag starts with an invariant word class (`D`, `V`, `L`, `M`, `O` in the Slovene tag set: preposition, conjunction, particle, interjection, abbreviation) or that holds a space is kept whole.
+  2. Otherwise the cut is where the lowercased form first departs from the lowercased lemma, with rules for the usual stem changes.
+  3. A form that is the lemma, or a prefix of it, is one stem. A cut shorter than `min_stem_len` letters is untrusted, and the form is kept whole and marked so.
+  4. A form that two lemmas cut differently keeps its first cut and is counted as a collision.
+- **Code**: `slm4ie/tokenizers/morphology.py::build_morph_lexicon`
+- **Settings**: `morphology.sloleks_path` (the converted Sloleks 3.1 lexicon), `morphology.min_stem_len` (shortest stem trusted, 2 letters), in `configs/sweep-vocab-size.yaml`
+
+### M5 — Hold out a fifth of the lexemes, build the morpheme table from the rest, and cut the golds to held-out forms
+
+- **Input**: the stem-ending split of [M3]'s input, the golds of [M3] and [M4], and the Sloleks word relations, whose derivational splits join the table.
+- **Output**: the morpheme table `morph_lexicon.jsonl.gz`, read by MorphBPE and MorphPiece in [M6], and the scored golds in `final/morph-golds-heldout-forms/`, each form with its lexeme id.
+- **How**:
+  1. Lexemes are grouped by word class and status. Within each group they are ordered by the hash rank of their entry id, and the lowest `heldout_lexeme_share` of each group is held out, so a whole paradigm sits on one side.
+  2. A held-out form that a training-side lexeme also carries is dropped from scoring ([D4]).
+  3. Each scored form is assigned one held-out lexeme, the unit the bootstrap resamples ([D6]). Among several carriers the lowest hash rank of form and entry id wins.
+  4. The table is the derivational splits merged with the heuristic gold, minus every scored form. Training on a table that holds a scored form is refused.
+  5. The golds are cut to the scored forms every gold covers.
+- **Code**: `slm4ie/tokenizers/morphology.py::split_lexemes`
+- **Settings**: `morphology.heldout_lexeme_share` (share of each group held out, 0.2), `morphology.sloleks_relations_path` (the word relations), in `configs/sweep-vocab-size.yaml`
+
+### M6 — Train the six algorithms at four vocabulary sizes on the training sample, with their lineage
+
+- **Input**: the training sample of [M2] and, for MorphBPE and MorphPiece, the morpheme table of [M5].
+- **Output**: one tokenizer folder per algorithm and size under `final/sweep-vocab-size/<algorithm>-<size>/`, with its training time, and one MLflow child run per tokenizer.
+- **How**:
+  1. Each of the 24 runs trains its backend on the same training sample with the same special tokens. Byte-level BPE, character-level BPE, WordPiece and Unigram ignore the table. MorphBPE forbids merges across the table's morpheme boundaries, and MorphPiece splits table words by the table before byte-level BPE.
+  2. Each run logs its algorithm, vocabulary size, seed, training seconds, and the corpus and held-out shares. It also logs the content hashes of the split, the training sample and the table, so a run names the exact inputs it saw.
+  3. Each run carries the labflow tags `tier`, `branch`, `base_commit`, `type` and `language`.
+- **Code**: `slm4ie/tokenizers/train.py::train_sweep`
+- **Settings**: `tokenizers` (the six algorithms), `vocab_sizes` (16k, 32k, 64k, 128k), `special_tokens` (tokens reserved in every vocabulary), `mlflow.tags` (the fixed run tags), in `configs/sweep-vocab-size.yaml`
+
 ## Decisions
 
 ### D1 — Score one row per distinct form and drop forms the lexicon splits two ways
@@ -104,7 +175,7 @@ concluded:
 ### D3 — Split the corpus 80/20 by document within each source, and sample each side in proportion to its sources
 
 - **Decision**: each document is ranked by a hash of its source and id; within each source, the lowest 80% go to training and the rest to evaluation. A 2 GB training sample and a 200 MB evaluation sample are drawn from the two sides, each source taking its share of that side's words.
-- **Why**: exact per-source proportions keep small sources on both sides. A held-out side means no evaluated document was seen in training, by id; the same text under two ids can still sit on both sides, which the data review measured at 34 of the training sample's lines. A hash rank is reproducible without storing 30 million ids.
+- **Why**: exact per-source proportions keep small sources on both sides. A held-out side means no evaluated document was seen in training, by id. The same text under two ids can still sit on both sides; the data review found 34 such lines in the training sample. A hash rank is reproducible without storing 30 million ids.
 - **Alternatives**:
   - Split one 2.5 GB sample: the evaluation side would be one small draw, not reusable.
   - Weight sources equally, as the June sampler did: a 367-document source would weigh as much as the largest web crawl.
@@ -187,8 +258,8 @@ concluded:
 
 ### D12 — Count how often each vocabulary token occurs in both samples, and read the rare share beside Q1
 
-- **Decision**: each of the 24 tokenizers encodes the training and the evaluation sample ([D3]), and every vocabulary token's count is kept per sample. A table per tokenizer and sample gives the share of the vocabulary in the count bins 0, 1–9, 10–99, 100–999 and 1,000 or more, and the share of the sample's tokens that each bin covers. Counts are also given per million sample tokens, so they scale to a pretraining corpus of any size. The rare share is read beside Q1.
-- **Why**: a token seen only a few times gives a language model too few examples to learn its embedding. A vocabulary that gains on the morph metrics at 128k but holds many such tokens may still be the worse choice for a small model. The training-sample counts show what the tokenizer learned from; the evaluation-sample counts show how the tokens hold on unseen text.
+- **Decision**: each of the 24 tokenizers encodes both samples ([D3]) and counts every vocabulary token per sample. A table per tokenizer and sample puts the vocabulary in the count bins 0, 1–9, 10–99, 100–999 and 1,000 or more. Each bin shows its share of the vocabulary and of the sample's tokens. The rare share is read beside Q1.
+- **Why**: a token seen only a few times gives a language model too few examples to learn its embedding. A 128k vocabulary that gains on the morph metrics but holds many such tokens may still be the worse choice for a small model. Counts per million tokens carry the reading to a pretraining corpus of any size.
 - **Alternatives**:
   - A bar on the rare share: no level can be set before the counts exist, so it stays a reading.
   - Count on the whole training side of the corpus: ten times the encoding cost for counts the per-million scale already gives.
