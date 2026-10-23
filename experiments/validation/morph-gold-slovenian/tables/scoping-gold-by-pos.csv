@@ -1,0 +1,13 @@
+pos,status,forms,forms_ambiguous,forms_not_in_old,forms_compared,boundary_agree,boundary_old_unsplit,boundary_cut_differs,boundary_new_unsplit
+adjective,automatic,205648,2406,0,203242,101249,12563,89429,1
+adjective,manual,319031,9563,8699,300769,193811,11370,95577,11
+adjective,mixed,8290,4171,0,4119,4109,4,4,2
+adverb,automatic,3270,1016,0,2254,2247,0,0,7
+adverb,manual,785,72,22,691,679,3,8,1
+adverb,mixed,25,21,0,4,4,0,0,0
+noun,automatic,1705687,43926,0,1661761,150709,1510950,89,13
+noun,manual,383596,1046,5,382545,39136,343281,104,24
+noun,mixed,14491,5637,0,8854,1378,7475,1,0
+verb,automatic,84178,210,38,83930,59192,9703,14973,62
+verb,manual,160860,5483,94,155283,105397,17927,31831,128
+verb,mixed,1039,870,0,169,130,10,29,0

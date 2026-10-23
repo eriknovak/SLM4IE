@@ -4,7 +4,8 @@ One CLI over `slm4ie.tokenizers`, with one subcommand per step of the sweep.
 Every subcommand reads the same sweep config (`--config`) and selects runs the
 same way: `--all`, or `--tokenizer` optionally narrowed by `--vocab-size`.
 
-    sample    materialize the shared training sample + morpheme lexicon
+    sample    materialize the shared training sample + morpheme lexicon, and with a
+              corpus split the split itself and the evaluation sample
     train     train the selected tokenizers, logging runs to MLflow
     evaluate  score trained artifacts and write the comparison report
     export    write HuggingFace tokenizer files into each artifact directory
@@ -39,7 +40,8 @@ from slm4ie.utils.parallel import configure_script_logging
 from slm4ie.tokenizers.evaluate import evaluate_sweep
 from slm4ie.tokenizers.config import SweepConfig, load_sweep_config
 from slm4ie.tokenizers.hf_export import export_sweep_runs
-from slm4ie.tokenizers.train import prepare_inputs, resolve_sweep_runs, train_sweep
+from slm4ie.tokenizers.corpus import check_sample_side, materialize_sample
+from slm4ie.tokenizers.train import corpus_split_for, prepare_inputs, resolve_sweep_runs, train_sweep
 from slm4ie.utils.cli import add_workers
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Rebuild the sample and lexicon even when they already exist.",
     )
+    add_workers(sample_parser, "Sources ranked at once when the corpus split is fitted. 0=1.")
 
     train_parser = subparsers.add_parser("train", help="Train the selected tokenizers.")
     _add_config_argument(train_parser)
@@ -202,7 +205,14 @@ def _run_sample(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """
     configure_script_logging(parallel=False, console_level=logging.INFO)
     cfg.output_root.mkdir(parents=True, exist_ok=True)
-    sample_path, lexicon_path = prepare_inputs(cfg, force=args.force)
+    max_workers = max(1, args.max_workers)
+    sample_path, lexicon_path = prepare_inputs(cfg, force=args.force, max_workers=max_workers)
+    split = corpus_split_for(cfg, max_workers)
+    if split is not None and (args.force or not cfg.eval_sample_path.exists()):
+        materialize_sample(cfg.corpus_root, cfg.eval_budget, cfg.eval_sample_path, split, "eval")
+        logger.info("Evaluation sample ready: %s", _describe(cfg.eval_sample_path))
+    elif split is not None:
+        check_sample_side(cfg.eval_sample_path, "eval")
 
     logger.info("Training sample ready: %s", _describe(sample_path))
     if lexicon_path is not None:

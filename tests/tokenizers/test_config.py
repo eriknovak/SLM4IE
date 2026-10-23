@@ -99,3 +99,30 @@ class TestLoadTokenizerConfig:
         """A non-existent config path raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
             load_sweep_config(tmp_path / "nope.yaml")
+
+
+def test_split_keys_default_to_none(tmp_path: Path):
+    """Without split keys the sweep samples the whole corpus and holds no lexemes out."""
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", _BASE_CONFIG))
+    assert (cfg.corpus_train_share, cfg.heldout_lexeme_share, cfg.inflection_path) == (None, None, None)
+
+
+def test_split_keys_load(tmp_path: Path):
+    """The corpus split share and the held-out lexeme settings reach the config."""
+    text = _BASE_CONFIG.replace("  datasets: [macocu_sl]\n", "  datasets: [macocu_sl]\n  split: { train_share: 0.8 }\n")
+    text = text.replace(
+        "  min_stem_len: 3\n",
+        "  min_stem_len: 3\n  inflection_path: /data/tokenization/sloleks_inflection.jsonl.gz\n"
+        "  heldout_lexeme_share: 0.2\n",
+    )
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", text))
+    assert cfg.corpus_train_share == 0.8
+    assert cfg.heldout_lexeme_share == 0.2
+    assert cfg.corpus_split_path == Path("/data/tokenizers/corpus_split.json")
+
+
+def test_heldout_share_without_inflection_path_rejected(tmp_path: Path):
+    """Holding lexemes out needs the stem-ending split they come from."""
+    text = _BASE_CONFIG.replace("  min_stem_len: 3\n", "  min_stem_len: 3\n  heldout_lexeme_share: 0.2\n")
+    with pytest.raises(ValueError, match="inflection_path"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))

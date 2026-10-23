@@ -64,12 +64,13 @@ class TestSample:
         """
         monkeypatch.setattr(sweep, "configure_script_logging", lambda **_kwargs: None)
 
-        def fake_prepare(passed_cfg, force=False):
+        def fake_prepare(passed_cfg, force=False, max_workers=1):
             recorder["force"] = force
             recorder["cfg"] = passed_cfg
             return cfg.corpus_sample_path, cfg.lexicon_path
 
         monkeypatch.setattr(sweep, "prepare_inputs", fake_prepare)
+        monkeypatch.setattr(sweep, "corpus_split_for", lambda _cfg, _workers=1: None)
 
     def test_materializes_and_passes_force(self, monkeypatch, tmp_path: Path):
         """`--force` is threaded through to prepare_inputs."""

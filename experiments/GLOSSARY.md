@@ -37,10 +37,19 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Wall hours** (wall clock): elapsed time a step took on the machine that ran it, at the worker count it was given.
 - **Agresti–Coull interval** (Agresti–Coull adjustment): a normal-approximation confidence interval for a share that first adds about two successes and two failures, so a share of 0 or 1 still gets a width; summed over independent shares, it gives the interval on a total such as bad text gained.
 - **Share needed**: the target divided by the count, the lowest share of a count that must truly belong to its domain for the count to stay above the target; a share above 1 means the count falls short even if every item is right.
+- **Kendall's τ** (Kendall, Kendall tau, rank agreement): agreement between two rankings of the same items, the share of item pairs ordered alike minus the share ordered oppositely; 1 is the same order, 0 unrelated, −1 reversed.
+- **Bootstrap** (bootstrap interval): a confidence interval found by redrawing the scored items with replacement many times and recomputing the statistic on each draw; the interval spans the middle 95% of those values.
+- **Morpheme-boundary F1** (morph boundary F1, MorphScore): F1 of the cuts a tokenizer makes inside a word against the cuts a morphological gold makes there, pooled over all scored forms.
+- **Morph-Edit-Distance**: the number of token insertions, deletions and substitutions that turn a word's tokens into its gold morphemes, averaged over forms; lower is closer to the gold.
+- **Morph-Consistency**: F1 of whether two words that share a gold morpheme also share a token, over sampled word pairs; high means a morpheme is spelled by the same token wherever it appears. Pairs are drawn per shared morpheme, at most 200 each, so on a stem-ending gold the many stems outweigh the few endings.
+- **Fertility**: tokens per word over a held-out text sample; 1 means every word is one token, and higher means words are cut into more pieces.
+- **Compression** (characters per token, bytes per token): how much text one token covers on a held-out sample; higher means shorter token sequences.
+- **Rényi efficiency**: Rényi entropy of the token frequencies (order 2.5) divided by its maximum for the vocabulary size; it is high when tokens are used evenly, low when a few tokens dominate.
 - **Off-source precision** (precision off the source, off-source read): a domain's precision read only on documents whose source carries a different label, so the classifier has to find the domain from the text rather than inherit it from the source.
 
 ## Terms
 
+- **CJVT**: the Centre for Language Resources and Technologies of the University of Ljubljana, which maintains Sloleks.
 - **q05, q50, q95** (q05, q50, q95): the 5th, 50th (median) and 95th percentiles of a distribution.
 - **Curation pipeline**: the eight stages that turn extracted text into the pretraining corpus, in order convert, language, spam, quality, repetition, exact dedup, sentence dedup and statistics; the six from language to sentence dedup each keep or drop every document.
 - **Content filter**: one of the four curation stages that judge a document's content — the language, spam, quality and repetition filters — as opposed to the two dedup stages, which remove copies.

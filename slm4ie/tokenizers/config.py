@@ -45,6 +45,13 @@ class SweepConfig:
         stats_ci_level (float): Confidence level for the bootstrap CIs.
         stats_seed (int): Seed for the shared bootstrap resample indices.
         stats_morph_form_sample (int): Forms drawn for the morph CIs and tests.
+        corpus_train_share (Optional[float]): Share of each source's documents on
+            the training side of the corpus split, or None to sample the whole
+            corpus for both training and evaluation.
+        inflection_path (Optional[Path]): Path to the converted Sloleks
+            stem-ending split, whose lexemes are split for held-out scoring.
+        heldout_lexeme_share (Optional[float]): Share of those lexemes held out
+            of the morpheme table, or None to hold none out.
     """
 
     corpus_root: Path
@@ -67,6 +74,18 @@ class SweepConfig:
     stats_ci_level: float = 0.95
     stats_seed: int = 12345
     stats_morph_form_sample: int = 200000
+    corpus_train_share: Optional[float] = None
+    inflection_path: Optional[Path] = None
+    heldout_lexeme_share: Optional[float] = None
+
+    @property
+    def corpus_split_path(self) -> Path:
+        """Path to the persisted corpus split.
+
+        Returns:
+            Path: `<output_root>/corpus_split.json`.
+        """
+        return self.output_root / "corpus_split.json"
 
     @property
     def corpus_sample_path(self) -> Path:
@@ -193,6 +212,8 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         missing.append("morphology.sloleks_path")
     if not output.get("root"):
         missing.append("output.root")
+    if morphology.get("heldout_lexeme_share") is not None and not morphology.get("inflection_path"):
+        missing.append("morphology.inflection_path (needed by morphology.heldout_lexeme_share)")
     if missing:
         raise ValueError(f"Tokenizer config {config_path} missing fields: {', '.join(missing)}")
 
@@ -222,4 +243,19 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         stats_ci_level=float(stats_cfg.get("ci_level", 0.95)),
         stats_seed=int(stats_cfg.get("seed", 12345)),
         stats_morph_form_sample=int(stats_cfg.get("morph_form_sample", 200000)),
+        corpus_train_share=_optional_float((corpus.get("split") or {}).get("train_share")),
+        inflection_path=Path(morphology["inflection_path"]) if morphology.get("inflection_path") else None,
+        heldout_lexeme_share=_optional_float(morphology.get("heldout_lexeme_share")),
     )
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    """Return `value` as a float, or None when it is unset.
+
+    Args:
+        value (Any): A config value, possibly None.
+
+    Returns:
+        Optional[float]: The float value, or None.
+    """
+    return None if value is None else float(value)

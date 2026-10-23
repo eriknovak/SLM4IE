@@ -27,13 +27,24 @@ from slm4ie.utils.parallel import (
     run_parallel,
 )
 from slm4ie.tokenizers.base import TrainContext
-from slm4ie.tokenizers.corpus import iter_sample, sample_corpus, write_sample
+from slm4ie.tokenizers.corpus import (
+    CorpusSplit,
+    check_sample_side,
+    corpus_fingerprint,
+    fit_corpus_split,
+    iter_sample,
+    load_corpus_split,
+    materialize_sample,
+    save_corpus_split,
+)
 from slm4ie.tokenizers.morphology import (
     build_derivational_lexicon,
     build_morph_lexicon,
     load_lexicon,
     merge_lexicons,
     save_lexicon,
+    split_lexemes,
+    without_forms,
 )
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.utils import mlflow as ml
@@ -100,15 +111,51 @@ def plan_sweep_runs(cfg: SweepConfig) -> List[str]:
     return [sweep_run_key(name, vocab) for name, vocab in product(cfg.tokenizers, cfg.vocab_sizes)]
 
 
-def prepare_inputs(cfg: SweepConfig, force: bool = False) -> Tuple[Path, Optional[Path]]:
+def corpus_split_for(cfg: SweepConfig, max_workers: int = 1) -> Optional[CorpusSplit]:
+    """Return the sweep's corpus split, fitting and saving it on first use.
+
+    Args:
+        cfg (SweepConfig): The resolved sweep configuration.
+        max_workers (int): Sources ranked at once when the split is fitted.
+
+    Returns:
+        Optional[CorpusSplit]: The split, or None when the config sets no
+            `corpus.split.train_share`.
+
+    Raises:
+        ValueError: If a saved split was fitted with another training share or
+            on a corpus whose shards have changed since.
+    """
+    if cfg.corpus_train_share is None:
+        return None
+    if cfg.corpus_split_path.exists():
+        split = load_corpus_split(cfg.corpus_split_path)
+        if split.train_share != cfg.corpus_train_share:
+            raise ValueError(
+                f"{cfg.corpus_split_path} holds train_share {split.train_share}, "
+                f"config asks for {cfg.corpus_train_share}; remove the file to refit"
+            )
+        if split.corpus_fingerprint != corpus_fingerprint(cfg.corpus_root):
+            raise ValueError(f"{cfg.corpus_root} changed since {cfg.corpus_split_path} was fitted; remove it to refit")
+        return split
+    logger.info("Fitting the %.0f/%.0f corpus split", 100 * cfg.corpus_train_share, 100 * (1 - cfg.corpus_train_share))
+    split = fit_corpus_split(cfg.corpus_root, cfg.corpus_train_share, max_workers)
+    save_corpus_split(split, cfg.corpus_split_path)
+    return split
+
+
+def prepare_inputs(cfg: SweepConfig, force: bool = False, max_workers: int = 1) -> Tuple[Path, Optional[Path]]:
     """Materialize the shared training sample and morpheme lexicon.
 
     Both artifacts are reused across every run. Existing artifacts are kept
-    unless `force` is set.
+    unless `force` is set. With a corpus split configured, the sample is drawn
+    from its training side; with held-out lexemes configured, their forms are
+    left out of the morpheme table.
 
     Args:
         cfg (SweepConfig): The resolved sweep configuration.
         force (bool): Rebuild even when the artifacts already exist.
+        max_workers (int): Sources ranked at once if the corpus split is fitted.
 
     Returns:
         Tuple[Path, Optional[Path]]: The training-sample path and the morpheme
@@ -117,8 +164,11 @@ def prepare_inputs(cfg: SweepConfig, force: bool = False) -> Tuple[Path, Optiona
     sample_path = cfg.corpus_sample_path
     if force or not sample_path.exists():
         logger.info("Sampling training corpus -> %s", sample_path)
-        write_sample(sample_corpus(cfg.corpus_root, cfg.train_budget), sample_path)
+        split = corpus_split_for(cfg, max_workers)
+        materialize_sample(cfg.corpus_root, cfg.train_budget, sample_path, split, "train" if split else None)
     else:
+        if cfg.corpus_train_share is not None:
+            check_sample_side(sample_path, "train")
         logger.info("Reusing cached training sample: %s", sample_path)
 
     lexicon_path: Optional[Path] = None
@@ -128,18 +178,40 @@ def prepare_inputs(cfg: SweepConfig, force: bool = False) -> Tuple[Path, Optiona
             logger.info("Deriving morpheme lexicon from %s", cfg.sloleks_path)
             infl = build_morph_lexicon(cfg.sloleks_path, min_stem_len=cfg.min_stem_len)
             save_lexicon(infl, cfg.infl_lexicon_path)
+            table = infl
             if cfg.needs_derivational():
                 logger.info("Deriving derivational lexicon from %s", cfg.sloleks_relations_path)
                 deriv = build_derivational_lexicon(cfg.sloleks_relations_path)
                 save_lexicon(deriv, cfg.deriv_lexicon_path)
                 # Derivational splits win ties so a lemma's morpheme split beats
                 # its trivial single-stem inflectional entry in the table.
-                save_lexicon(merge_lexicons(deriv, infl), lexicon_path)
-            else:
-                save_lexicon(infl, lexicon_path)
+                table = merge_lexicons(deriv, infl)
+            if cfg.heldout_lexeme_share is not None:
+                heldout = split_lexemes(cfg.inflection_path, cfg.heldout_lexeme_share).heldout_forms
+                logger.info("Leaving %d held-out forms out of the morpheme table", len(heldout))
+                table = without_forms(table, heldout)
+            save_lexicon(table, lexicon_path)
         else:
+            if cfg.heldout_lexeme_share is not None:
+                _check_table_excludes_heldout(cfg, lexicon_path)
             logger.info("Reusing cached morpheme lexicon: %s", lexicon_path)
     return sample_path, lexicon_path
+
+
+def _check_table_excludes_heldout(cfg: SweepConfig, lexicon_path: Path) -> None:
+    """Refuse a cached morpheme table that holds a held-out form.
+
+    Args:
+        cfg (SweepConfig): The resolved sweep configuration, with held-out lexemes set.
+        lexicon_path (Path): The cached morpheme table.
+
+    Raises:
+        ValueError: If the table and the held-out forms share any form.
+    """
+    heldout = split_lexemes(cfg.inflection_path, cfg.heldout_lexeme_share).heldout_forms
+    leaked = heldout & load_lexicon(lexicon_path).by_form.keys()
+    if leaked:
+        raise ValueError(f"{lexicon_path} holds {len(leaked)} held-out forms; rerun `sample --force`")
 
 
 def train_one(

@@ -483,6 +483,50 @@ datasets:
       pipeline never sees it. Convert via `prepare_datasets.py tokenization`.
       License: CC BY-SA 4.0.
 
+  sloleks_inflection:
+    enabled: true
+    role: lexicon
+    source: http
+    publisher: cjvt.si
+    name: "Sloleks inflectional stem-ending split (DSBS inflect_morph_seg, 2026-07)"
+    urls: []                      # shared privately by the authors; placed by hand
+    output_dir: "sloleks/Sloleks 3.2"
+    overlaps: [sloleks]
+    tasks:
+      - TOKENIZER
+    note: >
+      Every inflected form of the Digital Dictionary Database of Slovene (the
+      morphological part of Sloleks) cut into the stem shared by its paradigm
+      and the inflectional ending (`split_encoding`, `prostozidar__jema`), with
+      a manual/automatic status per lexeme. Not a public release: the authors
+      shared the TSV via the CJVT Nextcloud in 2026-07, so it is placed in the
+      output_dir by hand. Cite as Sloleks 3.1 (http://hdl.handle.net/11356/2080),
+      as the authors ask. Inflection only, no derivation or compounding. Used
+      for tokenizer / morphology evaluation only -- NOT running text and must
+      not enter the pretraining corpus. Convert via `prepare_datasets.py
+      tokenization`. License: CC BY-SA 4.0, as Sloleks 3.1.
+
+  morphscore_slovenian:
+    enabled: true
+    role: lexicon
+    source: http
+    publisher: huggingface.co
+    name: "MorphScore v2 (Slovene items)"
+    urls:
+      # Pinned to the dataset revision of 2025-07-10 so the items cannot drift.
+      - "https://huggingface.co/datasets/catherinearnett/morphscore/resolve/bd39be59e4d17f3d324c405aeb9adc51216a52e3/slovenian_data.csv"
+    output_dir: morphscore
+    tasks:
+      - TOKENIZER
+    note: >
+      Word forms of UD_Slovenian-SSJ cut into the part before the stem, the
+      stem and the part after it, the stem being the substring the form shares
+      with its lemma (Arnett, Hudspeth & O'Connor 2025, arXiv:2507.06378). One
+      row per token occurrence, with a `unique` flag and the treebank count.
+      Used as an outside gold for tokenizer / morphology evaluation only --
+      NOT pretraining text. Convert via `prepare_datasets.py tokenization`.
+      License: CC BY-SA 4.0.
+
   sloleks_relations:
     enabled: true
     role: lexicon
