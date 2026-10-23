@@ -44,6 +44,7 @@ from slm4ie.tokenizers.hf_export import export_sweep_runs
 from slm4ie.tokenizers.corpus import check_sample_side, materialize_sample
 from slm4ie.tokenizers.train import corpus_split_for, prepare_inputs, resolve_sweep_runs, train_sweep
 from slm4ie.utils.cli import add_workers
+from slm4ie.utils.mlflow import DEFAULT_TRACKING_URI, resolve_tracking_uri
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +308,11 @@ def main() -> None:
     cfg = load_sweep_config(args.config)
     if getattr(args, "tier", None):
         cfg = dataclasses.replace(cfg, mlflow_tags={**cfg.mlflow_tags, "tier": args.tier})
+    if getattr(args, "tier", None) == "tracked" and cfg.mlflow_enabled:
+        if resolve_tracking_uri(cfg.mlflow_tracking_uri) == DEFAULT_TRACKING_URI:
+            sys.exit(
+                f"--tier tracked needs MLFLOW_TRACKING_URI set; refusing the local {DEFAULT_TRACKING_URI} fallback"
+            )
     handlers = {
         "sample": _run_sample,
         "train": _run_train,

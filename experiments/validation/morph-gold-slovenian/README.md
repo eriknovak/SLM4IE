@@ -146,10 +146,11 @@ concluded:
 - **Input**: the training sample of [M2] and, for MorphBPE and MorphPiece, the morpheme table of [M5].
 - **Output**: one tokenizer folder per algorithm and size under `final/sweep-vocab-size/<algorithm>-<size>/`, with its training time and peak memory, and one MLflow child run per tokenizer.
 - **How**:
-  1. Each of the 24 runs trains its backend on the same training sample with the same special tokens. Byte-level BPE, character-level BPE, WordPiece and Unigram ignore the table. MorphBPE forbids merges across the table's morpheme boundaries, and MorphPiece splits table words by the table before byte-level BPE.
-  2. Each run logs its algorithm, vocabulary size, seed, training seconds, and the corpus and held-out shares. It also logs the content hashes of the split, the training sample and the table, so a run names the exact inputs it saw.
+  1. Each of the 24 runs trains its backend on the same training sample with the same special tokens. Unigram first cuts each document at whitespace into pieces of at most 4,192 bytes ([D13]). Byte-level BPE, character-level BPE, WordPiece and Unigram ignore the table. MorphBPE forbids merges across the table's morpheme boundaries, and MorphPiece splits table words by the table before byte-level BPE.
+  2. Each run logs its algorithm, vocabulary size, the sample's seed, training seconds, and the corpus and held-out shares. The trainers themselves take no seed and are deterministic. It also logs the content hashes of the split, the training sample and the table, so a run names the exact inputs it saw.
   3. Peak memory is the highest resident memory of the training process, read once a second while the backend trains.
-  4. Each run carries the labflow tags `tier`, `branch`, `base_commit`, `type` and `language`. A tokenizer trained by a run that stopped before logging is logged by the next run that skips it.
+  4. The runs are queued MorphBPE and MorphPiece first, largest vocabulary first, so the slowest start at once.
+  5. Each run carries the labflow tags `tier`, `branch`, `base_commit`, `type` and `language`. A tokenizer trained by a run that stopped before logging is logged by the next run that skips it.
 - **Code**: `slm4ie/tokenizers/train.py::train_sweep`
 - **Settings**: `tokenizers` (the six algorithms), `vocab_sizes` (16k, 32k, 64k, 128k), `special_tokens` (tokens reserved in every vocabulary), `mlflow.tags` (the fixed run tags), in `configs/sweep-vocab-size.yaml`
 
@@ -268,6 +269,15 @@ concluded:
   - Count on the whole training side of the corpus: ten times the encoding cost for counts the per-million scale already gives.
 - **History**:
   - 2026-10-23 set with the user before any run.
+
+### D13 — Cut each document into pieces SentencePiece accepts before Unigram trains on it
+
+- **Decision**: Unigram trains on every document, cut at whitespace into pieces of at most 4,192 bytes. The other five algorithms read whole documents.
+- **Why**: SentencePiece drops any line longer than 4,192 bytes, and the sample holds one document per line. Uncut, Unigram would train on 41% of the sample's bytes, mostly short documents with a different source mix. The June Unigram tokenizers had this loss, so their scores are not comparable.
+- **Alternatives**:
+  - Raise SentencePiece's line limit: long lines strain its memory, and a cut at a space loses only cross-piece pairs.
+- **History**:
+  - 2026-10-23 set before any run, after the pre-launch review measured the loss.
 
 ## Findings
 

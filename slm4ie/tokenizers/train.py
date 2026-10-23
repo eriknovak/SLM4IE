@@ -605,6 +605,27 @@ class TrainSummary:
     failed: List[str] = field(default_factory=list)
 
 
+def longest_first(keys: List[str]) -> List[str]:
+    """Order run keys so the slowest runs start first in the pool.
+
+    The morphological backends train far slower than the rest, and every
+    backend slows with vocabulary size, so the sweep ends soonest when they
+    lead.
+
+    Args:
+        keys (List[str]): Run keys (`<name>-<vocab>`).
+
+    Returns:
+        List[str]: The same keys, morphological backends first, largest vocabulary first.
+    """
+
+    def cost(key: str) -> Tuple[bool, int]:
+        name, vocab = parse_sweep_run_key(key)
+        return (not name.startswith("morph"), -vocab)
+
+    return sorted(keys, key=cost)
+
+
 def train_sweep(
     cfg: SweepConfig,
     keys: List[str],
@@ -628,11 +649,14 @@ def train_sweep(
     Returns:
         TrainSummary: The trained, skipped, and failed run keys.
     """
+    if cfg.mlflow_enabled and not ml.ensure_experiment(cfg.mlflow_experiment, tracking_uri=cfg.mlflow_tracking_uri):
+        raise RuntimeError(f"MLflow unreachable for {cfg.mlflow_experiment}; refusing to train runs it cannot log")
     cfg.output_root.mkdir(parents=True, exist_ok=True)
     workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
     sample_path, lexicon_path = prepare_inputs(cfg)
+    keys = longest_first(keys)
 
     def kwargs_for(_key: str) -> Dict[str, Any]:
         """Return per-run kwargs for `train_one`.

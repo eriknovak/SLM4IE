@@ -13,6 +13,7 @@ from slm4ie.tokenizers.train import (
     MLFLOW_LINK_FILENAME,
     TRAIN_STATS_FILENAME,
     log_train_runs,
+    longest_first,
     parse_sweep_run_key,
     plan_sweep_runs,
     prepare_inputs,
@@ -153,6 +154,23 @@ def test_resumed_sweep_logs_runs_trained_before_it(tmp_path: Path, monkeypatch):
 
     assert summary.skipped == ["bpe-90"]
     assert (cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).exists()
+
+
+def test_morphological_and_large_runs_queue_first():
+    """The slowest runs lead the pool: morphological backends, then larger vocabularies."""
+    keys = ["bpe-16000", "morphbpe-16000", "bpe-128000", "morphpiece-128000"]
+    assert longest_first(keys) == ["morphpiece-128000", "morphbpe-16000", "bpe-128000", "bpe-16000"]
+
+
+def test_unreachable_mlflow_refuses_to_train(tmp_path: Path, monkeypatch):
+    """With tracking on and no server, the sweep stops before training anything."""
+    from slm4ie.tokenizers import train as train_module
+
+    cfg = dataclasses.replace(_make_config(tmp_path, ["bpe"], [90]), mlflow_enabled=True)
+    monkeypatch.setattr(train_module.ml, "ensure_experiment", lambda *a, **k: False)
+    with pytest.raises(RuntimeError, match="MLflow unreachable"):
+        train_sweep(cfg, ["bpe-90"], max_workers=1)
+    assert not (cfg.output_root / "bpe-90").exists()
 
 
 def test_forced_training_keeps_the_sample(tmp_path: Path):
