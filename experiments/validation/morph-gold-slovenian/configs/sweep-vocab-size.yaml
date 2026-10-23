@@ -10,6 +10,9 @@
 #     source_weights empty, each sample takes every source in proportion to its
 #     bytes on that side.
 #   vocab_sizes    128k joins the June sizes (Q1).
+#   character_coverage  the share of the sample's character occurrences the
+#     base alphabet of charbpe, wordpiece, morphbpe and unigram covers (D14);
+#     the rest encode as <unk>. Byte-level bpe and morphpiece are unaffected.
 #   morphology     heldout_lexeme_share holds 20% of the Sloleks 3.2 lexemes,
 #     stratified by word class and status, out of the morpheme table (D4).
 #   mlflow.tags    labflow's run tags; `base_commit` is the commit the run
@@ -36,6 +39,7 @@ corpus:
 tokenizers: [bpe, charbpe, wordpiece, unigram, morphbpe, morphpiece]
 vocab_sizes: [16000, 32000, 64000, 128000]
 special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
+character_coverage: 0.9999        # 236 of 6,074 characters; 1.0 keeps every character
 
 # --- Morphology ---------------------------------------------------------
 morphology:

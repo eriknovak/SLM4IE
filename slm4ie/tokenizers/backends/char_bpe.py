@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from slm4ie.tokenizers.backends._hf_base import HfBackend
+from slm4ie.tokenizers.backends._hf_base import HfBackend, alphabet_options
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.registry import register_tokenizer
 
@@ -31,7 +31,8 @@ class CharBpeTokenizer(HfBackend):
         Args:
             corpus (Iterable[str]): Training sentences.
             vocab_size (int): Target vocabulary size.
-            config (TrainContext): Shared training settings (special tokens).
+            config (TrainContext): Shared training settings (special tokens,
+                base alphabet).
         """
         from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
 
@@ -42,6 +43,7 @@ class CharBpeTokenizer(HfBackend):
             vocab_size=vocab_size,
             special_tokens=list(config.special_tokens),
             show_progress=False,
+            **alphabet_options(config),
         )
         tokenizer.train_from_iterator(corpus, trainer=trainer)
         self._tokenizer = tokenizer

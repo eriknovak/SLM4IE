@@ -11,6 +11,8 @@ import hashlib
 import json
 import logging
 import random
+import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -457,6 +459,26 @@ def iter_sample(cache_path: Path) -> Iterator[str]:
             line = line.rstrip("\n")
             if line:
                 yield line
+
+
+def count_sample_characters(cache_path: Path) -> Counter:
+    """Count the non-space characters of a cached sample, after NFC.
+
+    The character-level backends normalize to NFC and never keep whitespace as
+    a symbol, so these counts are the ones their alphabets are drawn from.
+
+    Args:
+        cache_path (Path): Path to the `.txt`/`.txt.gz` cache file.
+
+    Returns:
+        Counter: Occurrences of each character.
+    """
+    counts: Counter = Counter()
+    for line in iter_sample(cache_path):
+        counts.update(unicodedata.normalize("NFC", line))
+    for char in [c for c in counts if c.isspace()]:
+        del counts[char]
+    return counts
 
 
 def _iter_shards(

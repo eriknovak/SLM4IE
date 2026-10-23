@@ -18,8 +18,10 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    FrozenSet,
     Iterable,
     List,
+    Mapping,
     Optional,
     Protocol,
     Tuple,
@@ -64,13 +66,62 @@ class TrainContext:
         seed (int): Seed for any stochastic step, kept for reproducibility.
         lexicon (Optional[MorphLexicon]): Sloleks-derived morpheme lexicon.
             Required by the morphological backends; None for the others.
+        alphabet (Optional[FrozenSet[str]]): The base alphabet of the
+            character-level backends (charBPE, WordPiece, MorphBPE, Unigram),
+            from `covering_alphabet`; None keeps every character.
         extra (Dict[str, Any]): Backend-specific overrides, rarely needed.
     """
 
     special_tokens: List[str] = field(default_factory=list)
     seed: int = 0
     lexicon: Optional["MorphLexicon"] = None
+    alphabet: Optional[FrozenSet[str]] = None
     extra: Dict[str, Any] = field(default_factory=dict)
+
+
+def keep_alphabet(text: str, alphabet: FrozenSet[str]) -> str:
+    """Drop every character of `text` outside `alphabet`, keeping whitespace.
+
+    This is what the `tokenizers` trainers do with a limited alphabet, so the
+    backends that filter their own input learn from the same characters.
+
+    Args:
+        text (str): Training text.
+        alphabet (FrozenSet[str]): The characters to keep.
+
+    Returns:
+        str: `text` without the characters outside `alphabet`.
+    """
+    return "".join(char for char in text if char in alphabet or char.isspace())
+
+
+def covering_alphabet(char_counts: Mapping[str, int], coverage: float) -> FrozenSet[str]:
+    """Return the most frequent characters that together cover `coverage` of all occurrences.
+
+    Follows SentencePiece's `character_coverage`: characters are taken most
+    frequent first (ties by code point) until the taken ones reach `coverage`.
+
+    Args:
+        char_counts (Mapping[str, int]): Occurrences of each character.
+        coverage (float): Share of all occurrences to cover, in (0, 1].
+
+    Returns:
+        FrozenSet[str]: The covering characters.
+
+    Raises:
+        ValueError: If `coverage` lies outside (0, 1].
+    """
+    if not 0.0 < coverage <= 1.0:
+        raise ValueError(f"character_coverage must lie in (0, 1], got {coverage}")
+    total = sum(char_counts.values())
+    kept: List[str] = []
+    covered = 0
+    for char, count in sorted(char_counts.items(), key=lambda item: (-item[1], item[0])):
+        if covered >= coverage * total:
+            break
+        kept.append(char)
+        covered += count
+    return frozenset(kept)
 
 
 def clean_piece(piece: str) -> str:

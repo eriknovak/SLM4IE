@@ -7,6 +7,8 @@
 #   tokenizers      Backends to train (see Notes: backends).
 #   vocab_sizes     Vocab sweep applied to every backend.
 #   special_tokens  Reserved tokens shared by all trained tokenizers.
+#   character_coverage  Share of the sample's character occurrences the base
+#                   alphabet of charbpe, wordpiece, morphbpe and unigram covers.
 #   morphology      Sloleks-derived silver gold (see Notes: morphology).
 #   output          Artifact + report roots.
 #   eval            Held-out evaluation sample + Rényi alpha.
@@ -47,6 +49,7 @@ corpus:
 tokenizers: [bpe, charbpe, wordpiece, unigram, morphbpe, morphpiece]  # see Notes: backends
 vocab_sizes: [16000, 32000, 64000]
 special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
+character_coverage: 1.0           # 1.0 keeps every character
 
 # --- Morphology (Sloleks-derived silver gold) ---------------------------
 morphology:                       # see Notes: morphology

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.tokenizers.corpus import SampleBudget
+from slm4ie.tokenizers.corpus import SampleBudget, write_sample
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.tokenizers.train import (
     MLFLOW_LINK_FILENAME,
@@ -18,6 +18,7 @@ from slm4ie.tokenizers.train import (
     plan_sweep_runs,
     prepare_inputs,
     resolve_sweep_runs,
+    sample_alphabet,
     sweep_run_key,
     select_sweep_runs,
     train_one,
@@ -328,3 +329,27 @@ class TestResolveRunSelection:
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
             resolve_sweep_runs(cfg, all_runs=False, tokenizer="bpe", vocab_size=99999)
+
+
+def test_sample_alphabet_is_none_at_full_coverage(tmp_path: Path):
+    """At coverage 1.0 the sample is not counted and every backend keeps all characters."""
+    cfg = _make_config(tmp_path, ["charbpe"], [90])
+    assert sample_alphabet(cfg, tmp_path / "never-read.txt") is None
+
+
+def test_sample_alphabet_caps_the_rare_characters(tmp_path: Path):
+    """Below full coverage, the sample's rarest character falls out of the alphabet."""
+    cfg = dataclasses.replace(_make_config(tmp_path, ["charbpe"], [90]), character_coverage=0.99)
+    sample = write_sample(iter(["a" * 200 + "ž"]), tmp_path / "sample.txt")
+    assert sample_alphabet(cfg, sample) == {"a"}
+
+
+def test_train_stats_record_the_alphabet(tmp_path: Path):
+    """A run's stats carry the coverage and the size of the alphabet it trained with."""
+    cfg = dataclasses.replace(_make_config(tmp_path, ["charbpe"], [90]), character_coverage=0.99)
+    sample_path, _ = prepare_inputs(cfg)
+    alphabet = sample_alphabet(cfg, sample_path)
+    out = train_one("charbpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None, alphabet=alphabet)
+    stats = json.loads((out / TRAIN_STATS_FILENAME).read_text())
+    assert stats["character_coverage"] == 0.99
+    assert stats["alphabet_size"] == len(alphabet)

@@ -56,7 +56,7 @@ concluded:
   - Build the Sloleks 3.2 gold, one form per row, and mark each form manual or automatic ([D1], [M3]).
   - Build the heuristic gold from Sloleks 3.1 with the Slovene word-class tags ([M4]).
   - Split the lexemes 80/20, build the morpheme table from the training side, and keep the held-out forms for scoring ([D4], [M5]).
-  - Train the six algorithms at four vocabulary sizes on the training sample ([D2], [M6]).
+  - Train the six algorithms at four vocabulary sizes on the training sample, the character-level ones on a capped alphabet ([D2], [D14], [M6]).
   - Score all 24 tokenizers on the held-out forms under each gold and slice, and on the evaluation sample for the corpus metrics.
   - Rank the tokenizers per gold and slice, and compute τ with its interval for H1 and H2.
   - Factors: the gold (corrected heuristic, Sloleks 3.2) and the slice (manual, all) are scientific. The algorithm and the vocabulary size span the population being ranked. The training sample and the morpheme table are fixed ([D2]).
@@ -146,13 +146,13 @@ concluded:
 - **Input**: the training sample of [M2] and, for MorphBPE and MorphPiece, the morpheme table of [M5].
 - **Output**: one tokenizer folder per algorithm and size under `final/sweep-vocab-size/<algorithm>-<size>/`, with its training time and peak memory, and one MLflow child run per tokenizer.
 - **How**:
-  1. Each of the 24 runs trains its backend on the same training sample with the same special tokens. Unigram first cuts each document at whitespace into pieces of at most 4,192 bytes ([D13]). Byte-level BPE, character-level BPE, WordPiece and Unigram ignore the table. MorphBPE forbids merges across the table's morpheme boundaries, and MorphPiece splits table words by the table before byte-level BPE.
+  1. Each of the 24 runs trains its backend on the same training sample with the same special tokens. Unigram first cuts each document at whitespace into pieces of at most 4,192 bytes ([D13]). Character BPE, WordPiece, MorphBPE and Unigram take as base characters only those covering 99.99% of the sample's character occurrences ([D14]). The alphabet is counted once on the sample after NFC, without whitespace. Each algorithm leaves the other characters out of its training text; at inference they encode as `<unk>`, and WordPiece turns a whole word holding one into `<unk>`. Byte-level BPE, character-level BPE, WordPiece and Unigram ignore the table. MorphBPE forbids merges across the table's morpheme boundaries, and MorphPiece splits table words by the table before byte-level BPE.
   2. Each run logs its algorithm, vocabulary size, the sample's seed, training seconds, and the corpus and held-out shares. The trainers themselves take no seed and are deterministic. It also logs the content hashes of the split, the training sample and the table, so a run names the exact inputs it saw.
   3. Peak memory is the highest resident memory of the training process, read once a second while the backend trains.
   4. The runs are queued MorphBPE and MorphPiece first, largest vocabulary first, so the slowest start at once.
   5. Each run carries the labflow tags `tier`, `branch`, `base_commit`, `type` and `language`. A tokenizer trained by a run that stopped before logging is logged by the next run that skips it.
 - **Code**: `slm4ie/tokenizers/train.py::train_sweep`
-- **Settings**: `tokenizers` (the six algorithms), `vocab_sizes` (16k, 32k, 64k, 128k), `special_tokens` (tokens reserved in every vocabulary), `mlflow.tags` (the fixed run tags), in `configs/sweep-vocab-size.yaml`
+- **Settings**: `tokenizers` (the six algorithms), `vocab_sizes` (16k, 32k, 64k, 128k), `special_tokens` (tokens reserved in every vocabulary), `character_coverage` (the share of character occurrences the base alphabet covers), `mlflow.tags` (the fixed run tags), in `configs/sweep-vocab-size.yaml`
 
 ## Decisions
 
@@ -278,6 +278,17 @@ concluded:
   - Raise SentencePiece's line limit: long lines strain its memory, and a cut at a space loses only cross-piece pairs.
 - **History**:
   - 2026-10-23 set before any run, after the pre-launch review measured the loss.
+
+### D14 — Give the character-level algorithms only the characters that cover 99.99% of the sample
+
+- **Decision**: character BPE, WordPiece, MorphBPE and Unigram take as base characters the most frequent ones that together cover 99.99% of the training sample's character occurrences: the same 236 of 6,074 for all four. The other characters encode as `<unk>`. Unigram gets this alphabet too, not SentencePiece's own coverage, which counts spaces and NFKC forms and would pick a different set. Byte-level BPE and MorphPiece keep their 256 bytes.
+- **Why**: with every character kept, 5,369 of Unigram's 16,000 pieces were single characters, mostly other scripts, private-use and mis-decoded text. The byte-level algorithms pay no such cost, so the 16k ranking would partly measure the alphabet. At 99.95%, SentencePiece's default, ü, ö, á, đ and Ć drop out and 0.98% of the Sloleks forms hold one; at 99.99%, 0.057% do.
+- **Alternatives**:
+  - Keep every character, as the libraries do by default: a third of a 16k vocabulary goes to single characters.
+  - Cover 99.95%: drops letters of names the gold scores.
+  - Clean the corpus first: a curation rebuild of several days, planned on its own.
+- **History**:
+  - 2026-10-23 set with the user before any tracked run, after the smoke run counted the single-character pieces. 99.99% was chosen over the proposed 99.95% after counting the forms each drops.
 
 ## Findings
 

@@ -10,6 +10,7 @@ per run.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -18,7 +19,7 @@ from dataclasses import dataclass, field
 from contextlib import contextmanager
 from itertools import product
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
 from slm4ie.utils.versioning import corpus_digest, file_sha256
@@ -28,11 +29,12 @@ from slm4ie.utils.parallel import (
     resolve_workers,
     run_parallel,
 )
-from slm4ie.tokenizers.base import TrainContext
+from slm4ie.tokenizers.base import TrainContext, covering_alphabet
 from slm4ie.tokenizers.corpus import (
     CorpusSplit,
     check_sample_side,
     corpus_fingerprint,
+    count_sample_characters,
     fit_corpus_split,
     iter_sample,
     load_corpus_split,
@@ -226,6 +228,7 @@ def train_one(
     sample_path: Path,
     lexicon_path: Optional[Path],
     force: bool = False,
+    alphabet: Optional[FrozenSet[str]] = None,
 ) -> Optional[Path]:
     """Train and persist one tokenizer x vocab-size run.
 
@@ -236,6 +239,8 @@ def train_one(
         lexicon_path (Optional[Path]): Morpheme lexicon path for morphological
             backends, or None.
         force (bool): Retrain even when the artifact already exists.
+        alphabet (Optional[FrozenSet[str]]): Base alphabet of the
+            character-level backends (`sample_alphabet`), or None for all.
 
     Returns:
         Optional[Path]: The artifact directory, or None when the run was
@@ -260,6 +265,7 @@ def train_one(
         special_tokens=list(cfg.special_tokens),
         seed=cfg.train_budget.seed,
         lexicon=lexicon,
+        alphabet=alphabet,
     )
     tokenizer = get_tokenizer(name)()
     logger.info("Training %s (vocab=%d)", name, vocab_size)
@@ -268,7 +274,7 @@ def train_one(
         tokenizer.train(iter_sample(sample_path), vocab_size, config=context)
     train_seconds = time.perf_counter() - start
     tokenizer.save(out_dir)
-    _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg, memory)
+    _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg, memory, alphabet)
     logger.info("Saved %s -> %s (%.1fs)", key, out_dir, train_seconds)
     return out_dir
 
@@ -333,6 +339,7 @@ def _write_train_stats(
     train_seconds: float,
     cfg: SweepConfig,
     memory: Dict[str, Optional[int]],
+    alphabet: Optional[FrozenSet[str]] = None,
 ) -> None:
     """Write the per-run training-stats sidecar for later MLflow logging.
 
@@ -348,6 +355,8 @@ def _write_train_stats(
         train_seconds (float): Wall-clock training time in seconds.
         cfg (SweepConfig): The resolved sweep configuration.
         memory (Dict[str, Optional[int]]): What `track_peak_rss` measured.
+        alphabet (Optional[FrozenSet[str]]): The base alphabet the run trained
+            with, or None for every character.
     """
     stats = {
         "run_key": key,
@@ -359,6 +368,11 @@ def _write_train_stats(
         "n_special_tokens": len(cfg.special_tokens),
         "max_bytes": cfg.train_budget.max_bytes,
         "max_docs": cfg.train_budget.max_docs,
+        "character_coverage": cfg.character_coverage,
+        "alphabet_size": None if alphabet is None else len(alphabet),
+        "alphabet_sha256": None
+        if alphabet is None
+        else hashlib.sha256("".join(sorted(alphabet)).encode("utf-8")).hexdigest(),
         **memory,
     }
     (out_dir / TRAIN_STATS_FILENAME).write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -566,6 +580,11 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
                         "max_bytes": stats.get("max_bytes"),
                         "max_docs": stats.get("max_docs"),
                         "n_special_tokens": stats.get("n_special_tokens"),
+                        **{
+                            k: stats.get(k)
+                            for k in ("character_coverage", "alphabet_size", "alphabet_sha256")
+                            if k in stats
+                        },
                     }
                 )
                 log_sweep_lineage(cfg, inputs, context="training")
@@ -603,6 +622,30 @@ class TrainSummary:
     trained: List[str] = field(default_factory=list)
     skipped: List[str] = field(default_factory=list)
     failed: List[str] = field(default_factory=list)
+
+
+def sample_alphabet(cfg: SweepConfig, sample_path: Path) -> Optional[FrozenSet[str]]:
+    """Return the characters covering `cfg.character_coverage` of the training sample.
+
+    Args:
+        cfg (SweepConfig): The resolved sweep configuration.
+        sample_path (Path): Cached training-sample path.
+
+    Returns:
+        Optional[FrozenSet[str]]: The covering characters, or None when the
+            coverage is 1.0 and every character is kept.
+    """
+    if cfg.character_coverage >= 1.0:
+        return None
+    counts = count_sample_characters(sample_path)
+    alphabet = covering_alphabet(counts, cfg.character_coverage)
+    logger.info(
+        "Alphabet: %d of %d characters cover %.4f of the sample",
+        len(alphabet),
+        len(counts),
+        cfg.character_coverage,
+    )
+    return alphabet
 
 
 def longest_first(keys: List[str]) -> List[str]:
@@ -656,6 +699,7 @@ def train_sweep(
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
     sample_path, lexicon_path = prepare_inputs(cfg)
+    alphabet = sample_alphabet(cfg, sample_path)
     keys = longest_first(keys)
 
     def kwargs_for(_key: str) -> Dict[str, Any]:
@@ -667,7 +711,13 @@ def train_sweep(
         Returns:
             Dict[str, Any]: Keyword arguments for `train_one`.
         """
-        return {"cfg": cfg, "sample_path": sample_path, "lexicon_path": lexicon_path, "force": force}
+        return {
+            "cfg": cfg,
+            "sample_path": sample_path,
+            "lexicon_path": lexicon_path,
+            "force": force,
+            "alphabet": alphabet,
+        }
 
     results, failures = run_parallel(
         train_one,

@@ -29,6 +29,9 @@ class SweepConfig:
         tokenizers (List[str]): Registry keys of the tokenizers to train.
         vocab_sizes (List[int]): Vocabulary sizes to sweep.
         special_tokens (List[str]): Reserved tokens for every tokenizer.
+        character_coverage (float): Share of the training sample's character
+            occurrences the character-level backends' base alphabet covers;
+            1.0 keeps every character.
         sloleks_path (Path): Path to the converted Sloleks JSONL(.gz).
         min_stem_len (int): Minimum stem length for morpheme derivation.
         sloleks_relations_path (Optional[Path]): Path to the converted Sloleks
@@ -80,6 +83,7 @@ class SweepConfig:
     inflection_path: Optional[Path] = None
     heldout_lexeme_share: Optional[float] = None
     mlflow_tags: Dict[str, str] = field(default_factory=dict)
+    character_coverage: float = 1.0
 
     @property
     def corpus_split_path(self) -> Path:
@@ -219,6 +223,9 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         missing.append("morphology.inflection_path (needed by morphology.heldout_lexeme_share)")
     if missing:
         raise ValueError(f"Tokenizer config {config_path} missing fields: {', '.join(missing)}")
+    character_coverage = raw.get("character_coverage", 1.0)
+    if not isinstance(character_coverage, (int, float)) or not 0.0 < character_coverage <= 1.0:
+        raise ValueError(f"Tokenizer config {config_path}: character_coverage {character_coverage!r} outside (0, 1]")
 
     output_root = Path(output["root"])
     report_dir = Path(output.get("report_dir") or output_root / "_reports")
@@ -250,6 +257,7 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         inflection_path=Path(morphology["inflection_path"]) if morphology.get("inflection_path") else None,
         heldout_lexeme_share=_optional_float(morphology.get("heldout_lexeme_share")),
         mlflow_tags={str(k): str(v) for k, v in (mlflow_cfg.get("tags") or {}).items()},
+        character_coverage=float(character_coverage),
     )
 
 

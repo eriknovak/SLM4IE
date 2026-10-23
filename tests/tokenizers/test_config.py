@@ -138,3 +138,22 @@ def test_mlflow_tags_load_as_strings(tmp_path: Path):
 def test_mlflow_tags_default_to_empty(tmp_path: Path):
     """A config without run tags tags nothing beyond the structural tags."""
     assert load_sweep_config(_write(tmp_path / "s.yaml", _BASE_CONFIG)).mlflow_tags == {}
+
+
+def test_character_coverage_defaults_to_every_character(tmp_path: Path):
+    """A config without the key keeps every character."""
+    assert load_sweep_config(_write(tmp_path / "s.yaml", _BASE_CONFIG)).character_coverage == 1.0
+
+
+def test_character_coverage_loads(tmp_path: Path):
+    """The dial's coverage reaches the config as a float."""
+    text = _BASE_CONFIG + "character_coverage: 0.9995\n"
+    assert load_sweep_config(_write(tmp_path / "s.yaml", text)).character_coverage == 0.9995
+
+
+@pytest.mark.parametrize("value", ["0", "1.5", "null"])
+def test_character_coverage_outside_the_unit_interval_rejected(tmp_path: Path, value: str):
+    """A coverage that names no alphabet fails at load, naming the key and the value."""
+    text = _BASE_CONFIG + f"character_coverage: {value}\n"
+    with pytest.raises(ValueError, match="character_coverage"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))

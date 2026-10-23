@@ -118,3 +118,23 @@ class TestUnigramLongLines:
         tokenizer.train(iter([long_document] * 3), 160, config=TrainContext(special_tokens=_SPECIAL_TOKENS))
         assert len(tokenizer.vocab) > 2 * len(_SPECIAL_TOKENS)
         assert "<unk>" not in tokenizer.encode("hiša stoji")
+
+
+@pytest.mark.parametrize("name", ["charbpe", "wordpiece"])
+def test_capped_alphabet_leaves_out_the_rest(name: str):
+    """A character outside the given alphabet gets no token and encodes as `<unk>`."""
+    alphabet = frozenset("".join(_CORPUS)) - {"č", " "}
+    tokenizer = get_tokenizer(name)()
+    context = TrainContext(special_tokens=_SPECIAL_TOKENS, alphabet=alphabet)
+    tokenizer.train(iter(_CORPUS), 160, config=context)
+    assert not any("č" in token for token in tokenizer.vocab)
+    assert "<unk>" in tokenizer.encode("mačka")
+
+
+def test_unigram_capped_alphabet_leaves_out_the_rest():
+    """Unigram gets the same alphabet as the other backends; a character outside it has no piece."""
+    alphabet = frozenset("".join(_CORPUS)) - {"č", " "}
+    tokenizer = get_tokenizer("unigram")()
+    context = TrainContext(special_tokens=_SPECIAL_TOKENS, alphabet=alphabet)
+    tokenizer.train(iter(_CORPUS), 160, config=context)
+    assert not any("č" in token for token in tokenizer.vocab)

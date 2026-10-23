@@ -3,11 +3,14 @@
 from pathlib import Path
 from typing import Dict, Iterable, List
 
+import pytest
+
 from slm4ie.tokenizers.base import (
     BaseTokenizer,
     TokenizerSpec,
     TrainContext,
     clean_piece,
+    covering_alphabet,
 )
 
 
@@ -98,3 +101,20 @@ class TestBaseTokenizer:
         assert loaded.vocab == tok.vocab
         assert loaded.vocab_size == 20
         assert loaded.encode("hiša") == tok.encode("hiša")
+
+
+class TestCoveringAlphabet:
+    """The characters a capped base alphabet keeps."""
+
+    def test_keeps_the_most_frequent_until_the_coverage_is_reached(self):
+        """With 90% coverage, the two characters that reach 90% stay and the rare one goes."""
+        assert covering_alphabet({"a": 60, "b": 30, "ž": 10}, 0.9) == {"a", "b"}
+
+    def test_full_coverage_keeps_every_character(self):
+        """Coverage 1.0 keeps even a character seen once."""
+        assert covering_alphabet({"a": 999, "ž": 1}, 1.0) == {"a", "ž"}
+
+    def test_rejects_a_coverage_outside_the_unit_interval(self):
+        """A coverage of 0 names no alphabet and is refused."""
+        with pytest.raises(ValueError, match="character_coverage"):
+            covering_alphabet({"a": 1}, 0.0)

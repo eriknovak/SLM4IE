@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from slm4ie.tokenizers.base import BaseTokenizer
+from slm4ie.tokenizers.base import BaseTokenizer, TrainContext
 
 
 class HfBackend(BaseTokenizer):
@@ -84,6 +84,25 @@ class HfBackend(BaseTokenizer):
         from tokenizers import Tokenizer
 
         return cls(Tokenizer.from_file(str(out_dir / "tokenizer.json")))
+
+
+def alphabet_options(config: TrainContext) -> Dict[str, Any]:
+    """Return the `tokenizers` trainer options that fix the base alphabet.
+
+    The trainer gives `initial_alphabet` characters top priority and then keeps
+    `limit_alphabet` characters, so the base alphabet is exactly
+    `config.alphabet`; any other character encodes as the unknown token.
+
+    Args:
+        config (TrainContext): Shared training settings.
+
+    Returns:
+        Dict[str, Any]: Keyword arguments for a `BpeTrainer` or
+            `WordPieceTrainer`; empty when `config.alphabet` is None.
+    """
+    if config.alphabet is None:
+        return {}
+    return {"initial_alphabet": sorted(config.alphabet), "limit_alphabet": len(config.alphabet)}
 
 
 def build_char_bpe_from_merges(

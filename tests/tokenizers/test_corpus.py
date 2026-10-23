@@ -11,6 +11,7 @@ from slm4ie.tokenizers.corpus import (
     SampleBudget,
     check_sample_side,
     corpus_fingerprint,
+    count_sample_characters,
     fit_corpus_split,
     iter_dedup_documents,
     iter_sample,
@@ -208,3 +209,11 @@ class TestSplitGuards:
         cache = write_sample(iter(["old"]), tmp_path / "old.txt")
         with pytest.raises(ValueError, match="None"):
             check_sample_side(cache, "train")
+
+
+def test_character_counts_skip_spaces_and_compose_accents(tmp_path: Path):
+    """Spaces are not counted, and a decomposed "č" counts as the one character "č"."""
+    cache = write_sample(iter(["mac\u030cka  spi"]), tmp_path / "sample.txt")
+    counts = count_sample_characters(cache)
+    assert counts["č"] == 1
+    assert " " not in counts and "\u030c" not in counts
