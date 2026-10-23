@@ -130,6 +130,31 @@ class TestTrainOne:
         assert stats["seed"] == cfg.train_budget.seed
 
 
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="reads memory from /proc")
+def test_train_stats_carry_peak_memory(tmp_path: Path):
+    """The stats sidecar records the run's peak resident memory, at least its starting memory."""
+    cfg = _make_config(tmp_path, ["bpe"], [90])
+    sample_path, _ = prepare_inputs(cfg)
+    out = train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+    stats = json.loads((out / TRAIN_STATS_FILENAME).read_text(encoding="utf-8"))
+    assert stats["peak_rss_bytes"] >= stats["start_rss_bytes"] > 0
+
+
+def test_resumed_sweep_logs_runs_trained_before_it(tmp_path: Path, monkeypatch):
+    """A run trained earlier but never logged to MLflow is logged when a later sweep skips it."""
+    pytest.importorskip("mlflow")
+    monkeypatch.chdir(tmp_path)
+    cfg = _enable_mlflow(_make_config(tmp_path, ["bpe"], [90]), tmp_path)
+    sample_path, _ = prepare_inputs(cfg)
+    train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+    summary = train_sweep(cfg, ["bpe-90"], max_workers=1)
+
+    assert summary.skipped == ["bpe-90"]
+    assert (cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).exists()
+
+
 def test_forced_training_keeps_the_sample(tmp_path: Path):
     """Retraining with force reuses the drawn sample instead of redrawing it."""
     cfg = _make_config(tmp_path, ["bpe"], [90])

@@ -88,7 +88,7 @@ concluded:
 - **How**:
   1. Each document gets a rank: the first eight bytes of the BLAKE2b hash of `<source>/<id>`, read as an integer.
   2. Within each source the documents are sorted by rank, and the first $n_{\text{train}} = \operatorname{round}(N \cdot s)$ form the training side, where $N$ is the source's document count and $s$ is `corpus.split.train_share`. The rank of the next document is the source's threshold, so a document's side follows from its rank alone.
-  3. The fingerprint is a SHA-256 hash over every shard's path, size and modification time. A later step that finds a different fingerprint refuses the split, since the corpus changed under it.
+  3. The fingerprint is a SHA-256 hash over every shard's path, size and modification time. A later step that reads the corpus refuses the split when the fingerprint differs, since the corpus changed under it. Training reads only the sample, so it does not check.
   4. The split is by id, so two documents with the same text but different ids can sit on different sides ([D3]).
 - **Code**: `slm4ie/tokenizers/corpus.py::fit_corpus_split`
 - **Settings**: `corpus.root` (the corpus folder), `corpus.split.train_share` (share of each source on the training side), in `configs/sweep-vocab-size.yaml`
@@ -144,11 +144,12 @@ concluded:
 ### M6 — Train the six algorithms at four vocabulary sizes on the training sample, with their lineage
 
 - **Input**: the training sample of [M2] and, for MorphBPE and MorphPiece, the morpheme table of [M5].
-- **Output**: one tokenizer folder per algorithm and size under `final/sweep-vocab-size/<algorithm>-<size>/`, with its training time, and one MLflow child run per tokenizer.
+- **Output**: one tokenizer folder per algorithm and size under `final/sweep-vocab-size/<algorithm>-<size>/`, with its training time and peak memory, and one MLflow child run per tokenizer.
 - **How**:
   1. Each of the 24 runs trains its backend on the same training sample with the same special tokens. Byte-level BPE, character-level BPE, WordPiece and Unigram ignore the table. MorphBPE forbids merges across the table's morpheme boundaries, and MorphPiece splits table words by the table before byte-level BPE.
   2. Each run logs its algorithm, vocabulary size, seed, training seconds, and the corpus and held-out shares. It also logs the content hashes of the split, the training sample and the table, so a run names the exact inputs it saw.
-  3. Each run carries the labflow tags `tier`, `branch`, `base_commit`, `type` and `language`.
+  3. Peak memory is the highest resident memory of the training process, read once a second while the backend trains.
+  4. Each run carries the labflow tags `tier`, `branch`, `base_commit`, `type` and `language`. A tokenizer trained by a run that stopped before logging is logged by the next run that skips it.
 - **Code**: `slm4ie/tokenizers/train.py::train_sweep`
 - **Settings**: `tokenizers` (the six algorithms), `vocab_sizes` (16k, 32k, 64k, 128k), `special_tokens` (tokens reserved in every vocabulary), `mlflow.tags` (the fixed run tags), in `configs/sweep-vocab-size.yaml`
 
@@ -163,7 +164,7 @@ concluded:
 
 ### D2 — Retrain all 24 tokenizers on one new sample, with a morpheme table from the corrected heuristic
 
-- **Decision**: all six algorithms train at 16k, 32k, 64k and 128k on the training sample of the corpus split ([D3]). MorphBPE and MorphPiece use one morpheme table: the corrected heuristic's cuts plus the word-relation splits, from the training-side lexemes only ([D4]).
+- **Decision**: all six algorithms train at 16k, 32k, 64k and 128k on the training sample of the corpus split ([D3]). MorphBPE and MorphPiece use one morpheme table: the corrected heuristic's cuts plus the word-relation splits, with every scored form removed ([D4]).
 - **Why**: the June sample came from an earlier corpus build, so the June tokenizers cannot join a sweep on the current one. The corrected heuristic is the morphological algorithms' own method with its bug fixed; a table from the Sloleks split is a method change, planned as its own experiment.
 - **Alternatives**:
   - Reuse the 18 June tokenizers and train only 128k: they were trained on an older corpus.
@@ -171,16 +172,18 @@ concluded:
 - **History**:
   - 2026-10-22 set at the start: train only 128k on the June sample and the June table.
   - 2026-10-22 changed before any run: the corpus was rebuilt since June, so the whole sweep is retrained on a new sample with a held-out evaluation side.
+  - 2026-10-23 worded as built before any run: the table removes the scored forms, not whole lexemes, so it keeps Sloleks 3.1 forms that 3.2 lacks.
 
 ### D3 — Split the corpus 80/20 by document within each source, and sample each side in proportion to its sources
 
-- **Decision**: each document is ranked by a hash of its source and id; within each source, the lowest 80% go to training and the rest to evaluation. A 2 GB training sample and a 200 MB evaluation sample are drawn from the two sides, each source taking its share of that side's words.
+- **Decision**: each document is ranked by a hash of its source and id; within each source, the lowest 80% go to training and the rest to evaluation. A 2 GB training sample and a 200 MB evaluation sample are drawn from the two sides, each source taking its share of that side's bytes.
 - **Why**: exact per-source proportions keep small sources on both sides. A held-out side means no evaluated document was seen in training, by id. The same text under two ids can still sit on both sides; the data review found 34 such lines in the training sample. A hash rank is reproducible without storing 30 million ids.
 - **Alternatives**:
   - Split one 2.5 GB sample: the evaluation side would be one small draw, not reusable.
   - Weight sources equally, as the June sampler did: a 367-document source would weigh as much as the largest web crawl.
 - **History**:
   - 2026-10-22 set with the user before any run.
+  - 2026-10-23 worded as built before any run: the source shares are by bytes, as the sampler draws them.
 
 ### D4 — Split the lexemes 80/20 within each word class and status, and score only held-out forms
 

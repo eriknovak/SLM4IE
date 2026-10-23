@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from itertools import product
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
 from slm4ie.utils.versioning import corpus_digest, file_sha256
@@ -55,6 +57,9 @@ logger = logging.getLogger(__name__)
 
 #: Sidecar carrying per-run training stats, read by the MLflow logger.
 TRAIN_STATS_FILENAME = "train_stats.json"
+
+#: Seconds between two reads of the process's resident memory while a run trains.
+RSS_POLL_SECONDS = 1.0
 
 #: Glob patterns identifying a trained tokenizer's defining artifacts under its
 #: export dir -- the vocab/merges file (`tokenizer.json` for HuggingFace
@@ -259,12 +264,64 @@ def train_one(
     tokenizer = get_tokenizer(name)()
     logger.info("Training %s (vocab=%d)", name, vocab_size)
     start = time.perf_counter()
-    tokenizer.train(iter_sample(sample_path), vocab_size, config=context)
+    with track_peak_rss() as memory:
+        tokenizer.train(iter_sample(sample_path), vocab_size, config=context)
     train_seconds = time.perf_counter() - start
     tokenizer.save(out_dir)
-    _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg)
+    _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg, memory)
     logger.info("Saved %s -> %s (%.1fs)", key, out_dir, train_seconds)
     return out_dir
+
+
+def _resident_bytes() -> Optional[int]:
+    """Return this process's resident memory, read from `/proc/self/status`.
+
+    Returns:
+        Optional[int]: Resident set size in bytes, or None where `/proc` is absent.
+    """
+    try:
+        with open("/proc/self/status", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        return None
+    return None
+
+
+@contextmanager
+def track_peak_rss() -> Iterator[Dict[str, Optional[int]]]:
+    """Track the peak resident memory of this process while the block runs.
+
+    A pool worker trains several runs in one process, so the lifetime peak
+    (`ru_maxrss`) would carry over from earlier runs; polling during the block
+    gives each run its own peak.
+
+    Yields:
+        Dict[str, Optional[int]]: `start_rss_bytes` and, once the block exits,
+            `peak_rss_bytes`; both None where `/proc` is absent.
+    """
+    start = _resident_bytes()
+    reading: Dict[str, Optional[int]] = {"start_rss_bytes": start, "peak_rss_bytes": start}
+    stop = threading.Event()
+
+    def record() -> None:
+        current = _resident_bytes()
+        if current is not None and current > (reading["peak_rss_bytes"] or 0):
+            reading["peak_rss_bytes"] = current
+
+    def poll() -> None:
+        while not stop.wait(RSS_POLL_SECONDS):
+            record()
+
+    poller = threading.Thread(target=poll, daemon=True)
+    poller.start()
+    try:
+        yield reading
+    finally:
+        stop.set()
+        poller.join()
+        record()
 
 
 def _write_train_stats(
@@ -275,6 +332,7 @@ def _write_train_stats(
     vocab_used: int,
     train_seconds: float,
     cfg: SweepConfig,
+    memory: Dict[str, Optional[int]],
 ) -> None:
     """Write the per-run training-stats sidecar for later MLflow logging.
 
@@ -289,6 +347,7 @@ def _write_train_stats(
         vocab_used (int): Actual vocabulary size after training.
         train_seconds (float): Wall-clock training time in seconds.
         cfg (SweepConfig): The resolved sweep configuration.
+        memory (Dict[str, Optional[int]]): What `track_peak_rss` measured.
     """
     stats = {
         "run_key": key,
@@ -300,6 +359,7 @@ def _write_train_stats(
         "n_special_tokens": len(cfg.special_tokens),
         "max_bytes": cfg.train_budget.max_bytes,
         "max_docs": cfg.train_budget.max_docs,
+        **memory,
     }
     (out_dir / TRAIN_STATS_FILENAME).write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -513,6 +573,7 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
                     {
                         "train_seconds": stats["train_seconds"],
                         "vocab_used": stats["vocab_used"],
+                        **{k: stats[k] for k in ("start_rss_bytes", "peak_rss_bytes") if stats.get(k) is not None},
                     }
                 )
                 # Emit the trained tokenizer as a `produced` dataset input so a
@@ -605,6 +666,8 @@ def train_sweep(
         len(summary.skipped),
         summary.failed or "none",
     )
-    if summary.trained:
-        log_train_runs(summary.trained, cfg)
+    # A skipped run with no MLflow link was trained by a run that ended before logging.
+    unlogged = [k for k in summary.skipped if not (cfg.output_root / k / MLFLOW_LINK_FILENAME).exists()]
+    if summary.trained or unlogged:
+        log_train_runs([*summary.trained, *unlogged], cfg)
     return summary
