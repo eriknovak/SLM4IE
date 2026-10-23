@@ -13,6 +13,7 @@ from slm4ie.tokenizers.evaluate import (
     build_report,
     evaluate_artifact,
     log_evaluate_runs,
+    prepare_eval_inputs,
     write_report,
 )
 from slm4ie.tokenizers.corpus import SampleBudget
@@ -84,6 +85,20 @@ def _make_config(tmp_path: Path) -> SweepConfig:
         mlflow_experiment="tokenizer/test",
         mlflow_enabled=False,
     )
+
+
+def test_forced_evaluation_keeps_the_eval_sample(tmp_path: Path):
+    """Rebuilding the eval inputs with force reuses the drawn evaluation sample."""
+    cfg = _make_config(tmp_path)
+    cfg.output_root.mkdir(parents=True)
+    with gzip.open(cfg.eval_sample_path, "wt", encoding="utf-8") as handle:
+        handle.write("hiša ob cesti\npes laja\n")
+    before = cfg.eval_sample_path.read_bytes()
+
+    eval_docs, _, _ = prepare_eval_inputs(cfg, force=True, morph_form_sample=10)
+
+    assert eval_docs == [["hiša", "ob", "cesti"], ["pes", "laja"]]
+    assert cfg.eval_sample_path.read_bytes() == before
 
 
 class TestEvaluateArtifact:

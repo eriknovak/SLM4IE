@@ -100,7 +100,7 @@ concluded:
 - **How**:
   1. Each source's quota is the byte budget times the source's share of that side's bytes.
   2. Each source's shards are read in an order shuffled by the side's seed, and only documents on the side are taken, until the quota is met.
-  3. A sample reused later is refused if its sidecar names the other side.
+  3. A sample reused later is refused if its sidecar names the other side. Training and scoring never redraw a sample, even when forced; only the `sample --force` step does.
 - **Code**: `slm4ie/tokenizers/corpus.py::materialize_sample`
 - **Settings**: `corpus.budget.max_bytes` (training budget, 2 GB), `corpus.budget.seed` (training shuffle seed), `eval.corpus_budget.max_bytes` (evaluation budget, 200 MB), `eval.corpus_budget.seed` (evaluation shuffle seed), `corpus.budget.source_weights` (empty: proportional to the side's bytes), in `configs/sweep-vocab-size.yaml`
 

@@ -120,7 +120,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     _add_config_argument(train_parser)
     _add_run_selection(train_parser, "train")
     _add_tier_argument(train_parser)
-    train_parser.add_argument("--force", action="store_true", help="Retrain existing artifacts.")
+    train_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Retrain existing artifacts; the sample and table are kept (redraw with `sample --force`).",
+    )
     add_workers(train_parser, "Parallel runs. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
 
     evaluate_parser = subparsers.add_parser("evaluate", help="Score trained tokenizers and write the report.")
@@ -142,7 +146,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     evaluate_parser.add_argument(
         "--force",
         action="store_true",
-        help="Rebuild the evaluation sample and morpheme lexicon.",
+        help="Rebuild the gold lexicons; the evaluation sample is kept (redraw with `sample --force`).",
     )
     add_workers(evaluate_parser, "Parallel evaluations. 0=auto, 1=serial, N=N workers.")
 

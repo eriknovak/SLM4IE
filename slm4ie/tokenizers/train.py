@@ -559,7 +559,9 @@ def train_sweep(
     Args:
         cfg (SweepConfig): The resolved sweep configuration.
         keys (List[str]): Run keys (`<name>-<vocab>`) to train.
-        force (bool): Retrain runs whose artifacts already exist.
+        force (bool): Retrain runs whose artifacts already exist. The sample
+            and the morpheme table are reused as they are; only
+            `prepare_inputs(force=True)` (the `sample --force` step) redraws them.
         max_workers (int): Parallel runs. 0=auto (cpu_count // 2), 1=serial.
 
     Returns:
@@ -569,7 +571,7 @@ def train_sweep(
     workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
-    sample_path, lexicon_path = prepare_inputs(cfg, force=force)
+    sample_path, lexicon_path = prepare_inputs(cfg)
 
     def kwargs_for(_key: str) -> Dict[str, Any]:
         """Return per-run kwargs for `train_one`.

@@ -20,6 +20,7 @@ from slm4ie.tokenizers.train import (
     sweep_run_key,
     select_sweep_runs,
     train_one,
+    train_sweep,
 )
 from slm4ie.tokenizers.config import SweepConfig
 
@@ -127,6 +128,20 @@ class TestTrainOne:
         assert stats["vocab_used"] > 0
         assert stats["train_seconds"] >= 0.0
         assert stats["seed"] == cfg.train_budget.seed
+
+
+def test_forced_training_keeps_the_sample(tmp_path: Path):
+    """Retraining with force reuses the drawn sample instead of redrawing it."""
+    cfg = _make_config(tmp_path, ["bpe"], [90])
+    sample_path, _ = prepare_inputs(cfg)
+    with gzip.open(sample_path, "wt", encoding="utf-8") as handle:
+        handle.write("hiša stoji\nmačka spi\n")
+    before = sample_path.read_bytes()
+
+    summary = train_sweep(cfg, ["bpe-90"], force=True, max_workers=1)
+
+    assert summary.trained == ["bpe-90"]
+    assert sample_path.read_bytes() == before
 
 
 def _enable_mlflow(cfg: SweepConfig, tmp_path: Path) -> SweepConfig:

@@ -853,7 +853,8 @@ def prepare_eval_inputs(
 
     Args:
         cfg (SweepConfig): The resolved sweep configuration.
-        force (bool): Rebuild the eval sample and lexicons even if present.
+        force (bool): Rebuild the gold lexicons even if present. The eval
+            sample is drawn only when missing; `sample --force` redraws it.
         morph_form_sample (int): Size of the shared morph form sample.
 
     Returns:
@@ -863,7 +864,7 @@ def prepare_eval_inputs(
             gold is configured).
     """
     eval_path = cfg.eval_sample_path
-    if force or not eval_path.exists():
+    if not eval_path.exists():
         logger.info("Sampling held-out evaluation corpus -> %s", eval_path)
         split = corpus_split_for(cfg)
         materialize_sample(cfg.corpus_root, cfg.eval_budget, eval_path, split, "eval" if split else None)
@@ -919,7 +920,7 @@ def evaluate_sweep(
     Args:
         cfg (SweepConfig): The resolved sweep configuration.
         keys (List[str]): Run keys (`<name>-<vocab>`) with trained artifacts.
-        force (bool): Rebuild the evaluation sample and gold lexicons.
+        force (bool): Rebuild the gold lexicons; the evaluation sample is kept.
         morph_form_sample (Optional[int]): Override for the config's morph
             form-sample size, or None to use the configured value.
         n_resamples (Optional[int]): Override for the config's bootstrap
