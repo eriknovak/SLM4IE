@@ -37,6 +37,9 @@ if config.theme != THEME:
 # text stays text rather than glyph outlines: smaller SVGs, selectable labels,
 # and the report's font face resolves at render
 matplotlib.rcParams["svg.fonttype"] = "none"
+# a fixed salt keeps clip-path and marker ids stable, so a rerun on unchanged
+# tables leaves the committed file untouched
+matplotlib.rcParams["svg.hashsalt"] = THEME
 
 
 def save_figure(figure: Union[object, Callable[[], object]], path: Union[str, Path]) -> None:
