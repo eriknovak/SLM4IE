@@ -7,7 +7,7 @@ branch: exp/morph-gold-slovenian
 base_commit: 3dc0921
 status: concluded
 ticket: "#32"
-pr:
+pr: "#33"
 mlflow: http://localhost:5555/#/experiments/16
 builds_on: []
 varies: []
