@@ -4,7 +4,8 @@ One CLI over `slm4ie.tokenizers`, with one subcommand per step of the sweep.
 Every subcommand reads the same sweep config (`--config`) and selects runs the
 same way: `--all`, or `--tokenizer` optionally narrowed by `--vocab-size`.
 
-    sample    materialize the shared training sample + morpheme lexicon
+    sample    materialize the shared training sample + morpheme lexicon, and with a
+              corpus split the split itself and the evaluation sample
     train     train the selected tokenizers, logging runs to MLflow
     evaluate  score trained artifacts and write the comparison report
     export    write HuggingFace tokenizer files into each artifact directory
@@ -30,6 +31,7 @@ Examples:
 """
 
 import argparse
+import dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -39,8 +41,10 @@ from slm4ie.utils.parallel import configure_script_logging
 from slm4ie.tokenizers.evaluate import evaluate_sweep
 from slm4ie.tokenizers.config import SweepConfig, load_sweep_config
 from slm4ie.tokenizers.hf_export import export_sweep_runs
-from slm4ie.tokenizers.train import prepare_inputs, resolve_sweep_runs, train_sweep
+from slm4ie.tokenizers.corpus import check_sample_side, materialize_sample
+from slm4ie.tokenizers.train import corpus_split_for, prepare_inputs, resolve_sweep_runs, train_sweep
 from slm4ie.utils.cli import add_workers
+from slm4ie.utils.mlflow import DEFAULT_TRACKING_URI, resolve_tracking_uri
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +79,20 @@ def _add_run_selection(parser: argparse.ArgumentParser, verb: str) -> None:
     parser.add_argument("--all", action="store_true", help=f"{verb.capitalize()} every run in the sweep.")
 
 
+def _add_tier_argument(parser: argparse.ArgumentParser) -> None:
+    """Add `--tier`, the labflow run tier tagged on every MLflow run.
+
+    Args:
+        parser: Subcommand parser to extend.
+    """
+    parser.add_argument(
+        "--tier",
+        choices=("scratch", "tracked"),
+        default="scratch",
+        help="labflow run tier tagged on every MLflow run: scratch for the inner loop, tracked for cited runs.",
+    )
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
@@ -97,16 +115,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Rebuild the sample and lexicon even when they already exist.",
     )
+    add_workers(sample_parser, "Sources ranked at once when the corpus split is fitted. 0=1.")
 
     train_parser = subparsers.add_parser("train", help="Train the selected tokenizers.")
     _add_config_argument(train_parser)
     _add_run_selection(train_parser, "train")
-    train_parser.add_argument("--force", action="store_true", help="Retrain existing artifacts.")
+    _add_tier_argument(train_parser)
+    train_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Retrain existing artifacts; the sample and table are kept (redraw with `sample --force`).",
+    )
     add_workers(train_parser, "Parallel runs. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
 
     evaluate_parser = subparsers.add_parser("evaluate", help="Score trained tokenizers and write the report.")
     _add_config_argument(evaluate_parser)
     _add_run_selection(evaluate_parser, "evaluate")
+    _add_tier_argument(evaluate_parser)
     evaluate_parser.add_argument(
         "--morph-form-sample",
         type=int,
@@ -122,7 +147,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     evaluate_parser.add_argument(
         "--force",
         action="store_true",
-        help="Rebuild the evaluation sample and morpheme lexicon.",
+        help="Rebuild the gold lexicons; the evaluation sample is kept (redraw with `sample --force`).",
     )
     add_workers(evaluate_parser, "Parallel evaluations. 0=auto, 1=serial, N=N workers.")
 
@@ -202,7 +227,14 @@ def _run_sample(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """
     configure_script_logging(parallel=False, console_level=logging.INFO)
     cfg.output_root.mkdir(parents=True, exist_ok=True)
-    sample_path, lexicon_path = prepare_inputs(cfg, force=args.force)
+    max_workers = max(1, args.max_workers)
+    sample_path, lexicon_path = prepare_inputs(cfg, force=args.force, max_workers=max_workers)
+    split = corpus_split_for(cfg, max_workers)
+    if split is not None and (args.force or not cfg.eval_sample_path.exists()):
+        materialize_sample(cfg.corpus_root, cfg.eval_budget, cfg.eval_sample_path, split, "eval")
+        logger.info("Evaluation sample ready: %s", _describe(cfg.eval_sample_path))
+    elif split is not None:
+        check_sample_side(cfg.eval_sample_path, "eval")
 
     logger.info("Training sample ready: %s", _describe(sample_path))
     if lexicon_path is not None:
@@ -274,6 +306,13 @@ def main() -> None:
     """Dispatch the selected subcommand."""
     args = parse_args()
     cfg = load_sweep_config(args.config)
+    if getattr(args, "tier", None):
+        cfg = dataclasses.replace(cfg, mlflow_tags={**cfg.mlflow_tags, "tier": args.tier})
+    if getattr(args, "tier", None) == "tracked" and cfg.mlflow_enabled:
+        if resolve_tracking_uri(cfg.mlflow_tracking_uri) == DEFAULT_TRACKING_URI:
+            sys.exit(
+                f"--tier tracked needs MLFLOW_TRACKING_URI set; refusing the local {DEFAULT_TRACKING_URI} fallback"
+            )
     handlers = {
         "sample": _run_sample,
         "train": _run_train,

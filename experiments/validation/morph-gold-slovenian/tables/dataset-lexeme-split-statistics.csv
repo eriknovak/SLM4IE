@@ -1,0 +1,17 @@
+side,word_class,status,lexemes,forms,forms_kept
+heldout,verb,automatic,943,17144,16845
+heldout,verb,manual,1772,32653,31281
+heldout,adjective,automatic,3573,41581,40695
+heldout,adjective,manual,5284,65725,62386
+heldout,adverb,automatic,1426,1426,654
+heldout,adverb,manual,1234,1266,355
+heldout,noun,automatic,44885,380528,313933
+heldout,noun,manual,10719,82423,76413
+table,verb,automatic,3774,68620,68620
+table,verb,manual,7089,129676,129676
+table,adjective,automatic,14292,166022,166022
+table,adjective,manual,21138,263348,263348
+table,adverb,automatic,5705,5705,5705
+table,adverb,manual,4938,5010,5010
+table,noun,automatic,179540,1410584,1410584
+table,noun,manual,42874,326997,326997

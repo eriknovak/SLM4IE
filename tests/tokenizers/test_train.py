@@ -7,19 +7,22 @@ from pathlib import Path
 
 import pytest
 
-from slm4ie.tokenizers.corpus import SampleBudget
+from slm4ie.tokenizers.corpus import SampleBudget, write_sample
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.tokenizers.train import (
     MLFLOW_LINK_FILENAME,
     TRAIN_STATS_FILENAME,
     log_train_runs,
+    longest_first,
     parse_sweep_run_key,
     plan_sweep_runs,
     prepare_inputs,
     resolve_sweep_runs,
+    sample_alphabet,
     sweep_run_key,
     select_sweep_runs,
     train_one,
+    train_sweep,
 )
 from slm4ie.tokenizers.config import SweepConfig
 
@@ -129,6 +132,62 @@ class TestTrainOne:
         assert stats["seed"] == cfg.train_budget.seed
 
 
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="reads memory from /proc")
+def test_train_stats_carry_peak_memory(tmp_path: Path):
+    """The stats sidecar records the run's peak resident memory, at least its starting memory."""
+    cfg = _make_config(tmp_path, ["bpe"], [90])
+    sample_path, _ = prepare_inputs(cfg)
+    out = train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+    stats = json.loads((out / TRAIN_STATS_FILENAME).read_text(encoding="utf-8"))
+    assert stats["peak_rss_bytes"] >= stats["start_rss_bytes"] > 0
+
+
+def test_resumed_sweep_logs_runs_trained_before_it(tmp_path: Path, monkeypatch):
+    """A run trained earlier but never logged to MLflow is logged when a later sweep skips it."""
+    pytest.importorskip("mlflow")
+    monkeypatch.chdir(tmp_path)
+    cfg = _enable_mlflow(_make_config(tmp_path, ["bpe"], [90]), tmp_path)
+    sample_path, _ = prepare_inputs(cfg)
+    train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+
+    summary = train_sweep(cfg, ["bpe-90"], max_workers=1)
+
+    assert summary.skipped == ["bpe-90"]
+    assert (cfg.output_root / "bpe-90" / MLFLOW_LINK_FILENAME).exists()
+
+
+def test_morphological_and_large_runs_queue_first():
+    """The slowest runs lead the pool: morphological backends, then larger vocabularies."""
+    keys = ["bpe-16000", "morphbpe-16000", "bpe-128000", "morphpiece-128000"]
+    assert longest_first(keys) == ["morphpiece-128000", "morphbpe-16000", "bpe-128000", "bpe-16000"]
+
+
+def test_unreachable_mlflow_refuses_to_train(tmp_path: Path, monkeypatch):
+    """With tracking on and no server, the sweep stops before training anything."""
+    from slm4ie.tokenizers import train as train_module
+
+    cfg = dataclasses.replace(_make_config(tmp_path, ["bpe"], [90]), mlflow_enabled=True)
+    monkeypatch.setattr(train_module.ml, "ensure_experiment", lambda *a, **k: False)
+    with pytest.raises(RuntimeError, match="MLflow unreachable"):
+        train_sweep(cfg, ["bpe-90"], max_workers=1)
+    assert not (cfg.output_root / "bpe-90").exists()
+
+
+def test_forced_training_keeps_the_sample(tmp_path: Path):
+    """Retraining with force reuses the drawn sample instead of redrawing it."""
+    cfg = _make_config(tmp_path, ["bpe"], [90])
+    sample_path, _ = prepare_inputs(cfg)
+    with gzip.open(sample_path, "wt", encoding="utf-8") as handle:
+        handle.write("hiša stoji\nmačka spi\n")
+    before = sample_path.read_bytes()
+
+    summary = train_sweep(cfg, ["bpe-90"], force=True, max_workers=1)
+
+    assert summary.trained == ["bpe-90"]
+    assert sample_path.read_bytes() == before
+
+
 def _enable_mlflow(cfg: SweepConfig, tmp_path: Path) -> SweepConfig:
     """Return a copy of `cfg` with MLflow enabled against a local file store.
 
@@ -189,12 +248,40 @@ class TestLogTrainingToMlflow:
             for run in client.search_runs([experiment.experiment_id])
             if run.data.tags.get("mlflow.parentRunId")
         }
-        input_90 = children["bpe-90"].inputs.dataset_inputs
-        assert [d.dataset.name for d in input_90] == ["tokenizer/bpe-90"]
+        produced = {
+            key: [d.dataset for d in run.inputs.dataset_inputs if d.dataset.name.startswith("tokenizer/")]
+            for key, run in children.items()
+        }
+        assert [d.name for d in produced["bpe-90"]] == ["tokenizer/bpe-90"]
         # Distinct tokenizers hash to distinct digests (identity for lineage).
-        digest_90 = input_90[0].dataset.digest
-        digest_120 = children["bpe-120"].inputs.dataset_inputs[0].dataset.digest
+        digest_90 = produced["bpe-90"][0].digest
+        digest_120 = produced["bpe-120"][0].digest
         assert digest_90 and digest_120 and digest_90 != digest_120
+
+    def test_child_carries_labflow_tags_and_sample_digest(self, tmp_path: Path, monkeypatch):
+        """A train child run carries the configured tags, base_commit and the training sample's content digest."""
+        pytest.importorskip("mlflow")
+        import mlflow
+
+        from slm4ie.utils.mlflow import MAX_DATASET_DIGEST_LEN
+        from slm4ie.utils.versioning import file_sha256
+
+        monkeypatch.chdir(tmp_path)
+        cfg = _enable_mlflow(_make_config(tmp_path, ["bpe"], [90]), tmp_path)
+        cfg = dataclasses.replace(cfg, mlflow_tags={"tier": "scratch", "type": "metric-validity"})
+        sample_path, _ = prepare_inputs(cfg)
+        train_one("bpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None)
+        log_train_runs(["bpe-90"], cfg)
+
+        mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
+        client = mlflow.MlflowClient()
+        experiment = client.get_experiment_by_name(cfg.mlflow_experiment)
+        child = next(r for r in client.search_runs([experiment.experiment_id]) if r.data.tags.get("mlflow.parentRunId"))
+        assert child.data.tags["tier"] == "scratch"
+        assert child.data.tags["type"] == "metric-validity"
+        assert "base_commit" in child.data.tags
+        digests = {d.dataset.name: d.dataset.digest for d in child.inputs.dataset_inputs}
+        assert digests["sweep/train-sample"] == f"sha256:{file_sha256(sample_path)}"[:MAX_DATASET_DIGEST_LEN]
 
 
 class TestResolveRunSelection:
@@ -242,3 +329,27 @@ class TestResolveRunSelection:
         cfg = _make_config(tmp_path, ["bpe"], [16000])
         with pytest.raises(ValueError):
             resolve_sweep_runs(cfg, all_runs=False, tokenizer="bpe", vocab_size=99999)
+
+
+def test_sample_alphabet_is_none_at_full_coverage(tmp_path: Path):
+    """At coverage 1.0 the sample is not counted and every backend keeps all characters."""
+    cfg = _make_config(tmp_path, ["charbpe"], [90])
+    assert sample_alphabet(cfg, tmp_path / "never-read.txt") is None
+
+
+def test_sample_alphabet_caps_the_rare_characters(tmp_path: Path):
+    """Below full coverage, the sample's rarest character falls out of the alphabet."""
+    cfg = dataclasses.replace(_make_config(tmp_path, ["charbpe"], [90]), character_coverage=0.99)
+    sample = write_sample(iter(["a" * 200 + "ž"]), tmp_path / "sample.txt")
+    assert sample_alphabet(cfg, sample) == {"a"}
+
+
+def test_train_stats_record_the_alphabet(tmp_path: Path):
+    """A run's stats carry the coverage and the size of the alphabet it trained with."""
+    cfg = dataclasses.replace(_make_config(tmp_path, ["charbpe"], [90]), character_coverage=0.99)
+    sample_path, _ = prepare_inputs(cfg)
+    alphabet = sample_alphabet(cfg, sample_path)
+    out = train_one("charbpe-90", cfg=cfg, sample_path=sample_path, lexicon_path=None, alphabet=alphabet)
+    stats = json.loads((out / TRAIN_STATS_FILENAME).read_text())
+    assert stats["character_coverage"] == 0.99
+    assert stats["alphabet_size"] == len(alphabet)

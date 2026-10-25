@@ -1,0 +1,79 @@
+# sweep-vocab-size.yaml — the morph-gold-slovenian sweep: six tokenizers at four
+# vocabulary sizes, trained on the training side of an 80/20 corpus split.
+#
+# A dial over the shared registry configs/tokenizers/sweep.yaml (same keys, see
+# its Notes); it differs in the keys below.
+#
+# Notes:
+#   corpus.split   train_share splits every source's documents 80/20 by a hash
+#     rank (D3); `sample` fits it once into <output.root>/corpus_split.json. With
+#     source_weights empty, each sample takes every source in proportion to its
+#     bytes on that side.
+#   vocab_sizes    128k joins the June sizes (Q1).
+#   character_coverage  the share of the sample's character occurrences the
+#     base alphabet of charbpe, wordpiece, morphbpe and unigram covers (D14);
+#     the rest encode as <unk>. Byte-level bpe and morphpiece are unaffected.
+#   morphology     heldout_lexeme_share holds 20% of the Sloleks 3.2 lexemes,
+#     stratified by word class and status, out of the morpheme table (D4).
+#   mlflow.tags    labflow's run tags; `base_commit` is the commit the run
+#     executes from, and `sweep_tokenizers.py train|evaluate --tier` sets `tier`.
+#   output.root    the experiment's data folder; holds the split, both samples,
+#     the morpheme table and one subdir per tokenizer.
+#
+# Run: uv run python scripts/sweep_tokenizers.py sample --config <this file> --max-workers 4
+
+# --- Training corpus ----------------------------------------------------
+corpus:
+  root: /vault/data/SLM4IE/pretrain/06_sentence_dedup  # shared build of 2026-10-08
+  datasets: []                    # [] = all dataset subdirs
+  split:
+    train_share: 0.8
+  budget:
+    max_bytes: 2_000_000_000      # ~2 GB from the training side
+    max_docs: null
+    seed: 13
+    weight_key: dataset
+    source_weights: {}            # empty = proportional to the side's bytes
+
+# --- Sweep --------------------------------------------------------------
+tokenizers: [bpe, charbpe, wordpiece, unigram, morphbpe, morphpiece]
+vocab_sizes: [16000, 32000, 64000, 128000]
+special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
+character_coverage: 0.9999        # 236 of 6,074 characters; 1.0 keeps every character
+
+# --- Morphology ---------------------------------------------------------
+morphology:
+  sloleks_path: /vault/data/SLM4IE/tokenization/sloleks.jsonl.gz
+  sloleks_relations_path: /vault/data/SLM4IE/tokenization/sloleks_relations.jsonl.gz
+  inflection_path: /vault/data/SLM4IE/tokenization/sloleks_inflection.jsonl.gz
+  heldout_lexeme_share: 0.2
+  min_stem_len: 2
+
+# --- Output -------------------------------------------------------------
+output:
+  root: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/final/sweep-vocab-size
+  report_dir: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/final/sweep-vocab-size/_reports
+
+# --- Evaluation ---------------------------------------------------------
+eval:
+  corpus_budget:
+    max_bytes: 200_000_000        # ~200 MB from the evaluation side
+    seed: 99
+  renyi_alpha: 2.5
+
+# --- Statistics ---------------------------------------------------------
+stats:
+  n_resamples: 2000
+  ci_level: 0.95
+  seed: 12345
+  morph_form_sample: 200000
+
+# --- MLflow -------------------------------------------------------------
+mlflow:
+  enabled: true
+  experiment: slm4ie/validation/morph-gold-slovenian
+  tracking_uri: null              # null -> $MLFLOW_TRACKING_URI
+  tags:                           # on every train and eval run; --tier adds tier
+    branch: exp/morph-gold-slovenian
+    type: metric-validity
+    language: sl

@@ -1,0 +1,14 @@
+cut,pos,items,items_with_prefix
+treebank rows,all,93048,
+first occurrence,all,32134,
+stem equals lemma,all,11450,
+no digit,all,11450,
+one cut per form,all,11450,
+one cut per form,NOUN,5736,0
+one cut per form,ADJ,4168,41
+one cut per form,PROPN,1314,0
+one cut per form,DET,176,1
+one cut per form,NUM,36,0
+one cut per form,PRON,9,0
+one cut per form,X,6,0
+one cut per form,ADV,5,0

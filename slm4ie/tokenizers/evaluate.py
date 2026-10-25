@@ -30,7 +30,7 @@ from slm4ie.utils.parallel import (
     run_parallel,
 )
 from slm4ie.tokenizers import stats as st
-from slm4ie.tokenizers.corpus import iter_sample, sample_corpus, write_sample
+from slm4ie.tokenizers.corpus import check_sample_side, iter_sample, materialize_sample
 from slm4ie.tokenizers.metrics import (
     METRIC_DIRECTIONS,
     corpus_doc_stats,
@@ -46,9 +46,18 @@ from slm4ie.tokenizers.morphology import (
     load_lexicon,
     sample_segmentations,
     save_lexicon,
+    split_lexemes,
+    without_forms,
 )
 from slm4ie.tokenizers.registry import get_tokenizer
-from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, parse_sweep_run_key
+from slm4ie.tokenizers.train import (
+    MLFLOW_LINK_FILENAME,
+    corpus_split_for,
+    log_sweep_lineage,
+    parse_sweep_run_key,
+    run_tags,
+    sweep_inputs,
+)
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.tokenizers.config import SweepConfig
@@ -744,12 +753,16 @@ def log_evaluate_runs(
         "morph_coverage_deriv",
         "vocab_used",
     ]
-    with ml.mlflow_run("sweep-eval", tags={"run_type": "sweep", "phase": "eval"}):
+    tags = run_tags(cfg)
+    gold_paths = {"sloleks-inflection": cfg.inflection_path} if cfg.inflection_path else {}
+    inputs = sweep_inputs({"corpus-split": cfg.corpus_split_path, "eval-sample": cfg.eval_sample_path, **gold_paths})
+    with ml.mlflow_run("sweep-eval", tags={**tags, "run_type": "sweep", "phase": "eval"}):
         for record in results:
             with ml.mlflow_run(
                 record["run_key"],
                 nested=True,
                 tags={
+                    **tags,
                     "model_type": record["tokenizer"],
                     "model_version": str(record["vocab_size"]),
                     "run_type": "sweep",
@@ -765,6 +778,7 @@ def log_evaluate_runs(
                         "renyi_alpha": cfg.renyi_alpha,
                     }
                 )
+                log_sweep_lineage(cfg, inputs, context="eval")
                 ml.log_metrics({k: record[k] for k in metric_keys if k in record})
                 ci_metrics: Dict[str, float] = {}
                 for metric in (*_DECOMPOSABLE_METRICS, *_DERIV_DECOMPOSABLE_METRICS):
@@ -839,7 +853,8 @@ def prepare_eval_inputs(
 
     Args:
         cfg (SweepConfig): The resolved sweep configuration.
-        force (bool): Rebuild the eval sample and lexicons even if present.
+        force (bool): Rebuild the gold lexicons even if present. The eval
+            sample is drawn only when missing; `sample --force` redraws it.
         morph_form_sample (int): Size of the shared morph form sample.
 
     Returns:
@@ -849,9 +864,12 @@ def prepare_eval_inputs(
             gold is configured).
     """
     eval_path = cfg.eval_sample_path
-    if force or not eval_path.exists():
+    if not eval_path.exists():
         logger.info("Sampling held-out evaluation corpus -> %s", eval_path)
-        write_sample(sample_corpus(cfg.corpus_root, cfg.eval_budget), eval_path)
+        split = corpus_split_for(cfg)
+        materialize_sample(cfg.corpus_root, cfg.eval_budget, eval_path, split, "eval" if split else None)
+    elif cfg.corpus_train_share is not None:
+        check_sample_side(eval_path, "eval")
     eval_docs = [iter_words(line) for line in iter_sample(eval_path)]
     logger.info("Evaluation sample: %d documents, %d word tokens", len(eval_docs), sum(len(d) for d in eval_docs))
 
@@ -860,6 +878,11 @@ def prepare_eval_inputs(
         logger.info("Deriving inflectional gold lexicon from %s", cfg.sloleks_path)
         save_lexicon(build_morph_lexicon(cfg.sloleks_path, min_stem_len=cfg.min_stem_len), infl_path)
     lexicon = load_lexicon(infl_path)
+    heldout = None
+    if cfg.heldout_lexeme_share is not None:
+        # Only held-out forms are scored: every other form is in the morph backends' table.
+        heldout = split_lexemes(cfg.inflection_path, cfg.heldout_lexeme_share).heldout_forms
+        lexicon = without_forms(lexicon, frozenset(lexicon.by_form.keys() - heldout))
     morph_sample = sample_segmentations(lexicon, morph_form_sample, cfg.stats_seed)
     logger.info("Inflectional gold: %d forms; morph sample: %d forms", len(lexicon.by_form), len(morph_sample))
 
@@ -870,6 +893,8 @@ def prepare_eval_inputs(
             logger.info("Deriving derivational gold lexicon from %s", cfg.sloleks_relations_path)
             save_lexicon(build_derivational_lexicon(cfg.sloleks_relations_path), deriv_path)
         deriv_lexicon = load_lexicon(deriv_path)
+        if heldout is not None:
+            deriv_lexicon = without_forms(deriv_lexicon, frozenset(deriv_lexicon.by_form.keys() - heldout))
         deriv_sample = sample_segmentations(deriv_lexicon, morph_form_sample, cfg.stats_seed)
         logger.info(
             "Derivational gold: %d forms; deriv sample: %d forms", len(deriv_lexicon.by_form), len(deriv_sample)
@@ -895,7 +920,7 @@ def evaluate_sweep(
     Args:
         cfg (SweepConfig): The resolved sweep configuration.
         keys (List[str]): Run keys (`<name>-<vocab>`) with trained artifacts.
-        force (bool): Rebuild the evaluation sample and gold lexicons.
+        force (bool): Rebuild the gold lexicons; the evaluation sample is kept.
         morph_form_sample (Optional[int]): Override for the config's morph
             form-sample size, or None to use the configured value.
         n_resamples (Optional[int]): Override for the config's bootstrap

@@ -11,11 +11,12 @@ table at inference. It differs from `charbpe` only in which merges it learns.
 
 from __future__ import annotations
 
+import unicodedata
 from collections import Counter
 from typing import Iterable
 
 from slm4ie.tokenizers.backends._hf_base import HfBackend, build_char_bpe_from_merges
-from slm4ie.tokenizers.base import TrainContext, split_words
+from slm4ie.tokenizers.base import TrainContext, keep_alphabet, split_words
 from slm4ie.tokenizers.bpe_core import learn_bpe
 from slm4ie.tokenizers.registry import register_tokenizer
 
@@ -35,7 +36,9 @@ class MorphBpeTokenizer(HfBackend):
 
         Pair counts are taken over morpheme chunks for known words and over the
         whole word for out-of-vocabulary words, so no merge crosses a known
-        morpheme boundary. The learned merges are loaded into a `tokenizers`
+        morpheme boundary. Characters outside `config.alphabet` are dropped
+        from the chunks, as the `tokenizers` trainer drops them, and encode as
+        the unknown token. The learned merges are loaded into a `tokenizers`
         BPE model for ordinary inference.
 
         Args:
@@ -52,14 +55,18 @@ class MorphBpeTokenizer(HfBackend):
 
         word_freqs: Counter = Counter()
         for line in corpus:
-            word_freqs.update(split_words(line))
+            # NFC first, as the inference normalizer and the alphabet count do.
+            word_freqs.update(split_words(unicodedata.normalize("NFC", line)))
 
         chunk_freqs: Counter = Counter()
         for word, freq in word_freqs.items():
             segmentation = lexicon.by_form.get(word)
             chunks = segmentation.morphemes if segmentation is not None else [word]
             for chunk in chunks:
-                chunk_freqs[chunk] += freq
+                if config.alphabet is not None:
+                    chunk = keep_alphabet(chunk, config.alphabet)
+                if chunk:
+                    chunk_freqs[chunk] += freq
 
         budget = max(1, vocab_size - len(config.special_tokens))
         tokens, merges = learn_bpe(dict(chunk_freqs), budget)

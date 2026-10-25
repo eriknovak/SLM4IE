@@ -49,4 +49,10 @@ _No experiments recorded yet._
 
 ## validation
 
-_No experiments recorded yet._
+### [Whether the Sloleks 3.2 stem-ending split ranks Slovene tokenizers as the lemma-alignment gold does](validation/morph-gold-slovenian/) · partial · 2026-10-25
+
+The first experiment of the [Slovene tokenizer choice](programmes/tokenizer-choice-slovenian.md) programme, and the first check of the morphological gold that every morph metric of the tokenizer sweep rests on. The project's own gold cuts an inflected form where it first differs from its lemma; the Sloleks 3.2 authors released a stem-ending split of their own. Twenty-four tokenizers, six algorithms at four vocabulary sizes, were retrained on a held-out corpus split and ranked under each gold on morpheme-boundary F1. The two golds rank them alike, so the gold does not decide which tokenizer looks best. The manually checked forms rank them differently from all forms, through their word-class mix, so the morph score is reported on manual forms first from here on. The record reads partial: the first claim holds and the second fails.
+
+- **[F1](validation/morph-gold-slovenian/#f1--the-heuristic-gold-and-the-sloleks-gold-rank-the-tokenizers-alike) — The heuristic gold and the Sloleks gold rank the tokenizers alike.** The two golds rank the tokenizers with a Kendall's τ of 0.86, and the whole bootstrap interval sits above the 0.8 bar.
+- **[F2](validation/morph-gold-slovenian/#f2--the-manually-checked-forms-rank-the-tokenizers-differently-from-all-forms) — The manually checked forms rank the tokenizers differently from all forms.** Ranking the tokenizers on the manually checked forms alone agrees with the all-forms ranking at τ 0.69, below the 0.9 bar.
+- **[F3](validation/morph-gold-slovenian/#f3--on-all-forms-only-unigrams-morpheme-boundary-f1-still-rises-at-the-largest-vocabulary-while-compression-and-morph-edit-distance-keep-improving-for-every-algorithm) — On all forms only Unigram's morpheme-boundary F1 still rises at the largest vocabulary, while compression and Morph-Edit-Distance keep improving for every algorithm.** From 64k to 128k every algorithm still gains on fertility and Morph-Edit-Distance, but on all forms morpheme-boundary F1 rises for Unigram alone.

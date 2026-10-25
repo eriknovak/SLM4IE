@@ -127,3 +127,23 @@ class TestMorphBackends:
         tokenizer.save(tmp_path)
         loaded = get_tokenizer(name).load(tmp_path)
         assert loaded.encode("hišami gradijo") == tokenizer.encode("hišami gradijo")
+
+
+def test_morphbpe_capped_alphabet_leaves_out_the_rest():
+    """MorphBPE learns no token holding a character outside the alphabet; it encodes as `<unk>`."""
+    alphabet = frozenset("".join(_CORPUS)) - {"š", " "}
+    tokenizer = get_tokenizer("morphbpe")()
+    context = TrainContext(special_tokens=["<unk>"], lexicon=_build_lexicon(), alphabet=alphabet)
+    tokenizer.train(iter(_CORPUS), 80, config=context)
+    assert not any("š" in token for token in tokenizer.vocab)
+    assert "<unk>" in tokenizer.encode("hiša")
+
+
+def test_morphbpe_composes_accents_before_the_alphabet_filter():
+    """A decomposed "š" in the corpus trains as "š", not as a bare "s" with its accent stripped."""
+    corpus = [line.replace("š", "s\u030c") for line in _CORPUS]
+    alphabet = frozenset("".join(_CORPUS)) - {" "}
+    tokenizer = get_tokenizer("morphbpe")()
+    context = TrainContext(special_tokens=["<unk>"], lexicon=_build_lexicon(), alphabet=alphabet)
+    tokenizer.train(iter(corpus), 80, config=context)
+    assert "š" in tokenizer.vocab

@@ -37,10 +37,20 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Wall hours** (wall clock): elapsed time a step took on the machine that ran it, at the worker count it was given.
 - **Agresti–Coull interval** (Agresti–Coull adjustment): a normal-approximation confidence interval for a share that first adds about two successes and two failures, so a share of 0 or 1 still gets a width; summed over independent shares, it gives the interval on a total such as bad text gained.
 - **Share needed**: the target divided by the count, the lowest share of a count that must truly belong to its domain for the count to stay above the target; a share above 1 means the count falls short even if every item is right.
+- **Kendall's τ** (Kendall, Kendall tau, rank agreement): agreement between two rankings of the same items, the share of item pairs ordered alike minus the share ordered oppositely; 1 is the same order, 0 unrelated, −1 reversed.
+- **Bootstrap** (bootstrap interval): a confidence interval found by redrawing the scored items with replacement many times and recomputing the statistic on each draw; the interval spans the middle 95% of those values.
+- **Morpheme-boundary F1** (morph boundary F1, MorphScore): F1 of the cuts a tokenizer makes inside a word against the cuts a morphological gold makes there, pooled over all scored forms.
+- **Morph-Edit-Distance**: the number of token insertions, deletions and substitutions that turn a word's tokens into its gold morphemes, averaged over forms; lower is closer to the gold.
+- **Morph-Consistency**: F1 of whether two words that share a gold morpheme also share a token, over sampled word pairs; high means a morpheme is spelled by the same token wherever it appears. Pairs are drawn per shared morpheme, at most 200 each, so on a stem-ending gold the many stems outweigh the few endings.
+- **Fertility**: tokens per word over a held-out text sample; 1 means every word is one token, and higher means words are cut into more pieces.
+- **Compression** (characters per token, bytes per token, tokens per byte): how much text one token covers on a held-out sample; higher means shorter token sequences.
+- **Rényi efficiency**: Rényi entropy of the token frequencies (order 2.5) divided by its maximum for the vocabulary size; it is high when tokens are used evenly, low when a few tokens dominate.
+- **Quarter rule** (levelled off, still improving, no early gain): the levelling rule of the vocabulary sweep. A metric has levelled off for an algorithm when its gain from 64k to 128k is under a quarter of its gain from 16k to 32k; it falls when that late gain is negative, and the rule does not apply when there was no early gain.
 - **Off-source precision** (precision off the source, off-source read): a domain's precision read only on documents whose source carries a different label, so the classifier has to find the domain from the text rather than inherit it from the source.
 
 ## Terms
 
+- **CJVT**: the Centre for Language Resources and Technologies of the University of Ljubljana, which maintains Sloleks.
 - **q05, q50, q95** (q05, q50, q95): the 5th, 50th (median) and 95th percentiles of a distribution.
 - **Curation pipeline**: the eight stages that turn extracted text into the pretraining corpus, in order convert, language, spam, quality, repetition, exact dedup, sentence dedup and statistics; the six from language to sentence dedup each keep or drop every document.
 - **Content filter**: one of the four curation stages that judge a document's content — the language, spam, quality and repetition filters — as opposed to the two dedup stages, which remove copies.
@@ -107,3 +117,22 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Medical leaflet source** (medical source, povejmo_vemo_med): the one dataset in the download registry labelled medical, PoVeJMo-VeMo-Med 1.0, drug package leaflets from the Slovene central drug database; its release ships the same texts twice, so its converted count is about three times its distinct texts.
 - **KAS-term**: a terminology-identification dataset built from KAS, the corpus of Slovene academic theses, with the spans of technical terms marked in each text.
 - **HUMADEX**: a medical named-entity dataset machine-translated into Slovene, with entity spans; large, but not native Slovene text.
+- **BPE** (byte-pair encoding, byte-level BPE): a tokenizer trained by repeatedly merging the most frequent adjacent pair of symbols into one token; byte-level BPE starts from the 256 byte values, so it can encode any string.
+- **Character BPE** (charBPE, character-level BPE): BPE started from the characters of the training text rather than from bytes, so a character outside its alphabet becomes an unknown token.
+- **WordPiece**: the tokenizer of BERT, which merges the symbol pair that most raises the likelihood of the training text and marks word-internal pieces with a prefix.
+- **Unigram** (SentencePiece Unigram): a tokenizer that starts from a large candidate vocabulary and prunes the pieces whose removal least lowers the likelihood of the training text; a word's tokens are its most likely segmentation.
+- **MorphBPE**: BPE whose training forbids merges across the morpheme boundaries of a morpheme table, so a token never straddles a morpheme; at inference it is standard BPE.
+- **MorphPiece**: byte-level BPE applied after the words listed in a morpheme table are first split by the table.
+- **Morpheme table** (morph table, morpheme lexicon): the list of words with their morpheme cuts that MorphBPE and MorphPiece read while training.
+- **Unknown token** (`<unk>`): the token a tokenizer emits for a character its alphabet does not hold.
+- **Lexeme** (paradigm): a dictionary entry with its whole set of inflected forms; the paradigm is that set of forms.
+- **Stem-ending split** (stem, ending): a cut of an inflected form into the part shared by its whole paradigm, the stem, and the part that carries case, number, person or gender, the ending.
+- **Manual forms** (manually checked forms, automatic rows): in Sloleks 3.2, the forms of lexemes whose cuts the lexicon's authors checked by hand; the rest are generated by rules and called automatic.
+- **Heuristic gold** (lemma-alignment gold, corrected heuristic): the project's own morphological gold, which cuts an inflected form where it first differs from its lemma, with rules for the usual stem changes.
+- **Sloleks gold** (Sloleks 3.2 gold, Sloleks 3.2 split): the morphological gold cut from the Sloleks 3.2 stem-ending split, one cut per form.
+- **NFC**: Unicode normalisation form C, which composes an accented letter and its accent into one code point so that the same letter is counted once.
+- **CC BY-SA** (CC, Creative Commons): the Creative Commons attribution, share-alike licence, under which a dataset may be reused and redistributed when its authors are credited and derived data carries the same licence.
+- **JSONL** (JSON lines): a text file with one JSON object per line, the shape of every converted dataset in the project.
+- **NUL** (NUL character): the byte value zero, which never belongs in text; in the corpus it stands where a letter was lost upstream.
+- **SSJ** (ssj500k, UD Slovenian SSJ): the manually annotated Slovene reference corpus, whose Universal Dependencies treebank the MorphScore v2 Slovene items are drawn from.
+- **UD** (Universal Dependencies): a cross-lingual scheme of part-of-speech tags, morphological features and syntactic dependencies, with one annotated treebank per language.

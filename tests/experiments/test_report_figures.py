@@ -44,3 +44,15 @@ def test_save_figure_takes_a_figure_or_a_builder(tmp_path: Path) -> None:
         text = (tmp_path / name).read_text(encoding="utf-8")
         assert "<dc:date>" not in text
         assert "Instrument Sans" in text
+
+
+def test_save_figure_writes_the_same_bytes_twice(tmp_path: Path) -> None:
+    """Two saves of one figure are identical, so a rerun leaves an unchanged file untouched in git."""
+    from datachart.charts import LineChart
+
+    def build():
+        return LineChart([{"x": 1, "y": 1}, {"x": 2, "y": 3}])
+
+    report_figures.save_figure(build, tmp_path / "first.svg")
+    report_figures.save_figure(build, tmp_path / "second.svg")
+    assert (tmp_path / "first.svg").read_bytes() == (tmp_path / "second.svg").read_bytes()

@@ -96,3 +96,45 @@ class TestBackendTraining:
         assert loaded.encode("hiše velike") == tokenizer.encode("hiše velike")
         assert loaded.vocab == tokenizer.vocab
         assert loaded.vocab_size == tokenizer.vocab_size
+
+
+class TestUnigramLongLines:
+    """SentencePiece drops lines over its length limit, so Unigram cuts documents first."""
+
+    def test_chunks_stay_under_the_limit_and_keep_every_word(self):
+        """A long line splits into pieces under the byte limit, in order, with no word lost."""
+        from slm4ie.tokenizers.backends.sp_unigram import chunk_line
+
+        line = " ".join(["mačka"] * 50)
+        pieces = list(chunk_line(line, max_bytes=40))
+        assert all(len(piece.encode("utf-8")) <= 40 for piece in pieces)
+        assert " ".join(pieces) == line
+
+    def test_trains_on_documents_longer_than_the_limit(self):
+        """A corpus of only over-long lines still trains, since no line is dropped whole."""
+        long_document = " ".join(_CORPUS)
+        assert len(long_document.encode("utf-8")) > 4192
+        tokenizer = get_tokenizer("unigram")()
+        tokenizer.train(iter([long_document] * 3), 160, config=TrainContext(special_tokens=_SPECIAL_TOKENS))
+        assert len(tokenizer.vocab) > 2 * len(_SPECIAL_TOKENS)
+        assert "<unk>" not in tokenizer.encode("hiša stoji")
+
+
+@pytest.mark.parametrize("name", ["charbpe", "wordpiece"])
+def test_capped_alphabet_leaves_out_the_rest(name: str):
+    """A character outside the given alphabet gets no token and encodes as `<unk>`."""
+    alphabet = frozenset("".join(_CORPUS)) - {"č", " "}
+    tokenizer = get_tokenizer(name)()
+    context = TrainContext(special_tokens=_SPECIAL_TOKENS, alphabet=alphabet)
+    tokenizer.train(iter(_CORPUS), 160, config=context)
+    assert not any("č" in token for token in tokenizer.vocab)
+    assert "<unk>" in tokenizer.encode("mačka")
+
+
+def test_unigram_capped_alphabet_leaves_out_the_rest():
+    """Unigram gets the same alphabet as the other backends; a character outside it has no piece."""
+    alphabet = frozenset("".join(_CORPUS)) - {"č", " "}
+    tokenizer = get_tokenizer("unigram")()
+    context = TrainContext(special_tokens=_SPECIAL_TOKENS, alphabet=alphabet)
+    tokenizer.train(iter(_CORPUS), 160, config=context)
+    assert not any("č" in token for token in tokenizer.vocab)
