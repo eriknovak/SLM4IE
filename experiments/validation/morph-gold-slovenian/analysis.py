@@ -82,6 +82,7 @@ from slm4ie.tokenizers.train import MLFLOW_LINK_FILENAME, parse_sweep_run_key
 from slm4ie.utils.config import load_yaml
 from slm4ie.utils.io import open_output, open_text_stream
 from slm4ie.utils.parallel import run_parallel
+from slm4ie.utils.versioning import file_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -637,22 +638,6 @@ def _sample_counts(tokenizer: Any, side: str, *, specials: Set[str], edges: Sequ
     }
 
 
-def _sha256(path: Path) -> str:
-    """Hash a file's content.
-
-    Args:
-        path: The file.
-
-    Returns:
-        str: Its SHA-256 hex digest.
-    """
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def scoring_digest(analysis: AnalysisConfig, cfg: SweepConfig) -> str:
     """Hash everything but the tokenizer that a cached score depends on.
 
@@ -666,10 +651,10 @@ def scoring_digest(analysis: AnalysisConfig, cfg: SweepConfig) -> str:
     Returns:
         str: A SHA-256 hex digest.
     """
-    parts = [_sha256(analysis.golds_dir / f"{gold}.jsonl.gz") for gold in GOLDS]
-    parts.append(_sha256(analysis.morphscore_gold))
+    parts = [file_sha256(analysis.golds_dir / f"{gold}.jsonl.gz") for gold in GOLDS]
+    parts.append(file_sha256(analysis.morphscore_gold))
     for sample in (cfg.corpus_sample_path, cfg.eval_sample_path):
-        parts.append(_sha256(sample.with_name(sample.name + ".sources.json")))
+        parts.append(file_sha256(sample.with_name(sample.name + ".sources.json")))
     parts.append(json.dumps([cfg.special_tokens, list(analysis.count_bins), cfg.renyi_alpha]))
     parts.append(inspect.getsource(score_tokenizer) + inspect.getsource(_sample_counts))
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
