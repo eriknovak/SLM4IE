@@ -28,7 +28,7 @@ concluded: 2026-10-25
 
 ## TL;DR
 
-- **Hypothesis**: refuted (concluded 2026-10-25) — the stem-ending split of the Sloleks authors ranks the tokenizers as the corrected heuristic does, but the manually checked forms rank them differently from all forms, so later morph scores are read on the manually checked forms first.
+- **Hypothesis**: partial (concluded 2026-10-25) — the stem-ending split of the Sloleks authors ranks the tokenizers as the corrected heuristic does, but the manually checked forms rank them differently from all forms, so later morph scores are read on the manually checked forms first.
 - **F1 — The heuristic gold and the Sloleks gold rank the tokenizers alike.** The two golds rank the tokenizers with a Kendall's τ of 0.86, and the whole bootstrap interval sits above the 0.8 bar.
 - **F2 — The manually checked forms rank the tokenizers differently from all forms.** Ranking the tokenizers on the manually checked forms alone agrees with the all-forms ranking at τ 0.69, below the 0.9 bar.
 - **F3 — On all forms only Unigram's morpheme-boundary F1 still rises at the largest vocabulary, while compression and Morph-Edit-Distance keep improving for every algorithm.** From 64k to 128k every algorithm still gains on fertility and Morph-Edit-Distance, but on all forms morpheme-boundary F1 rises for Unigram alone.
@@ -47,9 +47,9 @@ concluded: 2026-10-25
   - **H1 — The heuristic gold and the Sloleks 3.2 gold rank the tokenizers alike**: confirmed if τ between the two rankings is at least 0.8; refuted if it is below 0.8 — the heuristic's cut placement then decides which tokenizer looks morphologically best, and only the authors' split can serve as gold.
   - **H2 — The manually checked forms rank the tokenizers as all forms do**: confirmed if τ between the manual-only and the all-forms ranking under Sloleks 3.2 is at least 0.9; refuted if it is below 0.9 — errors in the automatic rows then move the ranking, and the manual-only score becomes the primary one.
   - **Q1 — Which metrics still improve as the vocabulary grows, and which have levelled off by 128k?**: read on the curves of every metric against vocabulary size per algorithm (fertility, compression, Rényi efficiency, and the three morph metrics under Sloleks 3.2). A metric has levelled off for an algorithm when its gain from 64k to 128k is under a quarter of its gain from 16k to 32k. Robust if each morph metric's reading is the same on the manual-only and the all-forms score — the answer sets the vocabulary sizes the later tokenizer experiments train.
-  - **Verdict rule**: confirmed when H1 and H2 both hold; refuted when H1 is refuted; inconclusive when an interval of τ straddles its bar. H2 refuted with H1 confirmed is the automatic-rows reading: the golds agree, but the score is reported on manual forms first. Q1 is read beside that outcome and does not change it.
+  - **Verdict rule**: confirmed when H1 and H2 both hold; refuted when H1 is refuted; inconclusive when an interval of τ straddles its bar. H2 refuted with H1 confirmed is the automatic-rows reading: the golds agree, but the score is reported on manual forms first. Q1 is read beside that outcome and does not change it. — Note added 2026-10-25 at conclusion: the automatic-rows reading takes the outcome word partial, since the rule named the reading without a word and a split of the bars takes neither side's word.
   - **Read beside the clauses, not as clauses**: forms scored per gold and slice; τ for H1 and H2 on the 16 tokenizers that train without a morpheme table ([D5]); morpheme-boundary F1 on multi-token forms only ([D7]), without forms that have no ending ([D8]) and weighted by corpus frequency ([D9]); τ against the MorphScore v2 Slovene ranking ([D10]); the share of each vocabulary that occurs rarely in the training and evaluation samples ([D12]); the uncorrected June heuristic's scores, as the size of the tag bug; training time and peak memory of the 128k tokenizers.
-- **Outcome**: refuted
+- **Outcome**: partial
 
 ## Design
 
@@ -393,12 +393,12 @@ concluded: 2026-10-25
 
 ## Verdict
 
-- **Outcome**: refuted
+- **Outcome**: partial — the automatic-rows reading
 - **Evidence**: [F1] the two golds rank the tokenizers alike, with τ above its bar; [F2] the manually checked forms rank them differently from all forms, with τ below its bar; [F3] only Unigram's morpheme-boundary F1 still rises at the largest vocabulary, while compression improves everywhere.
 - **Discussion**:
-  - **The Sloleks 3.2 split ranks the tokenizers as the corrected heuristic does, but which forms are scored matters more than which gold cuts them.** The two golds put the same algorithms in the same order and only swap vocabulary sizes within an algorithm ([F1]). Scoring the manually checked forms alone reorders the tokenizers ([F2]), and the hypothesis fails on that second claim, so the record reads refuted although the golds agree.
+  - **The Sloleks 3.2 split ranks the tokenizers as the corrected heuristic does, but which forms are scored matters more than which gold cuts them.** The two golds put the same algorithms in the same order and only swap vocabulary sizes within an algorithm ([F1]). Scoring the manually checked forms alone reorders the tokenizers ([F2]), so the first bar holds and the second fails: the automatic-rows reading the Verdict rule named.
   - **The reordering is a word-class effect the design did not anticipate.** The manual slice holds about half the share of nouns that all forms hold, and the word classes rank the tokenizers apart ([F4]). A pooled morph score therefore follows the class mix of the scored set, and is only comparable between sets with the same mix.
-  - **The verdict rule had no word for this case, and the levelling rule reads noise as movement.** Refuted is the one word that fits a two-part statement with one part false. Q1's quarter rule turns morpheme-boundary F1 changes narrower than their intervals into falls or gains ([F3]). A follow-up inherits the Sloleks gold, the manual-first score, a per-class reading and a band rule for levelling.
+  - **The verdict rule named this split without an outcome word, and the levelling rule reads noise as movement.** The split takes the word partial, added to the rule at conclusion: yes for the gold, no for the slice. Q1's quarter rule turns morpheme-boundary F1 changes narrower than their intervals into falls or gains ([F3]). A follow-up inherits the Sloleks gold, the manual-first score and a band rule for levelling.
 - **Adoption candidate**: the project's shared tokenizer sweep, `scripts/sweep_tokenizers.py`, scores on the Sloleks 3.2 gold with the manual-forms score first. The pieces to lift are the Sloleks gold builder and the lexeme holdout in `slm4ie/tokenizers/morphology.py`, and the Slovene word-class fix in the heuristic gold. The capped alphabet and the Unigram document cut in `slm4ie/tokenizers/train.py` and the lexeme bootstrap of `analysis.py` go with them.
 - **Next**:
   - The next experiment, on new morph metrics, reports every morph score on the manual forms first and per word class beside the pooled score. It reads levelling with a band from the bootstrap intervals rather than the quarter rule ([Q1]).

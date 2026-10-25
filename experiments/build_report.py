@@ -181,7 +181,7 @@ def record_kind(cids: list[str]) -> str:
 WARNING = re.compile(
     r"\(cap \d+\)|sentence|cites \[|numbers beyond|one paragraph|TL;DR line|carries no gloss|is minor but|"
     r"is supporting but|content outside|cites a ticket|constraints|will scroll|Predictions has no|names a topic|"
-    r"names no entry under"
+    r"names no entry under|clauses split"
 )
 # a decision or method title shorter than this names a topic, not the choice or the step
 TITLE_MIN_WORDS = 4
@@ -561,6 +561,14 @@ class Record:
                 if not any(clause_outcome(f, c["id"]) for f in c["findings"]):
                     self.problems.append(
                         f"{c['id']} is decided by no key finding: no Reading sentence names [{c['id']}] with {outcome_words(c['id'])}"
+                    )
+            # clauses of one type that split between yes and no read `partial`, never one side's word
+            for letter, sides, one_sided in (("H", ("confirmed", "refuted"), ("confirmed", "refuted")), ("C", ("better", "worse"), ("adopted", "rejected"))):
+                verdicts = {c["id"]: clause_verdict(self, c) for c in clause_rows(self) if c["id"].startswith(letter)}
+                if self.outcome in one_sided and all(side in verdicts.values() for side in sides):
+                    split = ", ".join(f"{cid} {v}" for cid, v in verdicts.items())
+                    self.problems.append(
+                        f"clauses split ({split}) under Outcome `{self.outcome}`: a split reads `partial`, with the Verdict rule naming the reading"
                     )
         for f in self.findings:
             fid, kv = f.id, f.kv
@@ -3426,7 +3434,8 @@ def build(out: Path, warnings: bool = False) -> int:
         ideas = f"{len(ref.ideas.items)} ideas from the {ref.ideas.source}" if ref.ideas.source else "no ideas loaded"
         print(f"  reference: {len(ref.topics)} topics, {len(ref.entries)} entries, {ideas}")
     for r, p in problems:
-        print(f"  {r.path.relative_to(EXPERIMENTS.parent)}: {p}", file=sys.stderr)
+        where = r if isinstance(r, str) else r.path.relative_to(EXPERIMENTS.parent)
+        print(f"  {where}: {p}", file=sys.stderr)
     counts: dict[Path, int] = {}
     for r, p in advice:
         counts[r.path] = counts.get(r.path, 0) + 1
