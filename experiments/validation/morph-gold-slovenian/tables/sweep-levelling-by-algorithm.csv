@@ -1,0 +1,61 @@
+metric,slice,algorithm,gain_16k_to_32k,gain_64k_to_128k,late_to_early,reading
+fertility,evaluation sample,bpe,0.1492,0.0706,0.473,still improving
+tokens_per_byte,evaluation sample,bpe,0.0266,0.0126,0.473,still improving
+chars_per_token,evaluation sample,bpe,0.4489,0.3012,0.671,still improving
+renyi_efficiency,evaluation sample,bpe,-0.0527,-0.0362,,no early gain
+morph_score_f1,all forms,bpe,0.0018,0.0009,0.521,still improving
+morph_edit_distance,all forms,bpe,0.2791,0.2578,0.924,still improving
+morph_consistency,all forms,bpe,0.0351,0.0312,0.89,still improving
+morph_score_f1,manual forms,bpe,-0.0026,-0.0026,,no early gain
+morph_edit_distance,manual forms,bpe,0.2919,0.2512,0.86,still improving
+morph_consistency,manual forms,bpe,0.0369,0.0113,0.307,still improving
+fertility,evaluation sample,charbpe,0.1358,0.0647,0.476,still improving
+tokens_per_byte,evaluation sample,charbpe,0.0242,0.0115,0.476,still improving
+chars_per_token,evaluation sample,charbpe,0.4294,0.283,0.659,still improving
+renyi_efficiency,evaluation sample,charbpe,-0.0461,-0.0339,,no early gain
+morph_score_f1,all forms,charbpe,0.0007,-0.0012,-1.609,falls
+morph_edit_distance,all forms,charbpe,0.2608,0.2329,0.893,still improving
+morph_consistency,all forms,charbpe,0.0359,0.0318,0.886,still improving
+morph_score_f1,manual forms,charbpe,-0.0023,-0.0034,,no early gain
+morph_edit_distance,manual forms,charbpe,0.2635,0.2217,0.842,still improving
+morph_consistency,manual forms,charbpe,0.035,0.0084,0.239,levelled off
+fertility,evaluation sample,wordpiece,0.1511,0.0698,0.462,still improving
+tokens_per_byte,evaluation sample,wordpiece,0.027,0.0124,0.462,still improving
+chars_per_token,evaluation sample,wordpiece,0.4585,0.3007,0.656,still improving
+renyi_efficiency,evaluation sample,wordpiece,-0.0513,-0.0362,,no early gain
+morph_score_f1,all forms,wordpiece,0.0071,-0.0051,-0.715,falls
+morph_edit_distance,all forms,wordpiece,0.3279,0.2717,0.829,still improving
+morph_consistency,all forms,wordpiece,0.0388,0.0434,1.119,still improving
+morph_score_f1,manual forms,wordpiece,0.001,0.0092,9.682,still improving
+morph_edit_distance,manual forms,wordpiece,0.3215,0.2976,0.926,still improving
+morph_consistency,manual forms,wordpiece,0.05,0.0363,0.726,still improving
+fertility,evaluation sample,unigram,0.1519,0.0702,0.462,still improving
+tokens_per_byte,evaluation sample,unigram,0.0271,0.0125,0.462,still improving
+chars_per_token,evaluation sample,unigram,0.4529,0.2972,0.656,still improving
+renyi_efficiency,evaluation sample,unigram,-0.0387,-0.0333,,no early gain
+morph_score_f1,all forms,unigram,0.0126,0.0117,0.927,still improving
+morph_edit_distance,all forms,unigram,0.3254,0.335,1.029,still improving
+morph_consistency,all forms,unigram,0.0266,0.0417,1.566,still improving
+morph_score_f1,manual forms,unigram,0.0033,0.0222,6.807,still improving
+morph_edit_distance,manual forms,unigram,0.339,0.356,1.05,still improving
+morph_consistency,manual forms,unigram,0.0447,0.0344,0.771,still improving
+fertility,evaluation sample,morphbpe,0.1091,0.0661,0.606,still improving
+tokens_per_byte,evaluation sample,morphbpe,0.0194,0.0118,0.606,still improving
+chars_per_token,evaluation sample,morphbpe,0.2503,0.1914,0.765,still improving
+renyi_efficiency,evaluation sample,morphbpe,-0.0381,-0.0305,,no early gain
+morph_score_f1,all forms,morphbpe,0.0011,-0.0037,-3.25,falls
+morph_edit_distance,all forms,morphbpe,0.2842,0.2362,0.831,still improving
+morph_consistency,all forms,morphbpe,0.0481,0.0369,0.767,still improving
+morph_score_f1,manual forms,morphbpe,-0.0008,-0.0057,,no early gain
+morph_edit_distance,manual forms,morphbpe,0.2932,0.2346,0.8,still improving
+morph_consistency,manual forms,morphbpe,0.0448,0.0057,0.127,levelled off
+fertility,evaluation sample,morphpiece,0.1141,0.0562,0.493,still improving
+tokens_per_byte,evaluation sample,morphpiece,0.0203,0.01,0.493,still improving
+chars_per_token,evaluation sample,morphpiece,0.1996,0.1197,0.6,still improving
+renyi_efficiency,evaluation sample,morphpiece,-0.0502,-0.0298,,no early gain
+morph_score_f1,all forms,morphpiece,0.0007,0.0002,0.321,still improving
+morph_edit_distance,all forms,morphpiece,0.3238,0.274,0.846,still improving
+morph_consistency,all forms,morphpiece,0.0422,0.034,0.806,still improving
+morph_score_f1,manual forms,morphpiece,-0.0026,-0.0019,,no early gain
+morph_edit_distance,manual forms,morphpiece,0.3298,0.265,0.804,still improving
+morph_consistency,manual forms,morphpiece,0.0528,0.0276,0.522,still improving

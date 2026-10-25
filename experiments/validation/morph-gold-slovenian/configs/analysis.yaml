@@ -1,0 +1,32 @@
+# analysis.yaml — the data files analysis.py reads and writes, and its scoring
+# settings. The sweep itself (tokenizers, golds' sources, bootstrap draws) is
+# read from sweep-vocab-size.yaml.
+#
+# Notes:
+#   paths.golds_dir      the three golds cut to the held-out forms (D4), frozen
+#     by `analysis.py data`; `analysis.py scores` scores every tokenizer on them.
+#   paths.scores_cache   one file pair per tokenizer with its per-form counts
+#     and corpus counts; regenerable, so it sits under interim/.
+#   scoring.count_bins   lower edges of the D12 bins of vocabulary-token counts:
+#     0, 1–9, 10–99, 100–999 and 1,000 or more.
+#   scoring.rare_below   a vocabulary token is rare when it occurs fewer times
+#     than this in a sample, the share read beside Q1 (D12).
+#   scoring.levelled_ratio  a metric has levelled off when its 64k→128k gain is
+#     under this share of its 16k→32k gain (Q1).
+#
+# Run: uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py {data,scores}
+
+paths:
+  golds_dir: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/final/morph-golds-heldout-forms
+  form_counts: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/final/heldout-form-counts/eval-sample.jsonl.gz
+  morphscore_gold: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/final/morphscore-slovene-items/morphscore.jsonl.gz
+  morphscore_items: /vault/data/SLM4IE/tokenization/morphscore_slovenian.jsonl.gz
+  dataset_statistics: /vault/data/SLM4IE/pretrain/07_statistics/per_dataset
+  june_gold: /vault/data/SLM4IE/tokenizers/morph_lexicon_infl.jsonl.gz
+  scores_cache: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/interim/tokenizer-scores
+
+scoring:
+  max_workers: 4
+  count_bins: [0, 1, 10, 100, 1000]
+  rare_below: 10
+  levelled_ratio: 0.25
