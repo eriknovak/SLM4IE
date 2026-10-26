@@ -17,7 +17,7 @@
 #   metadata     Optional; two unrelated uses (see Notes: metadata).
 #   include      Optional; shell globs matched against each input file's path
 #                under raw/<key>/ (`*` also crosses `/`). Keeps only matching
-#                files; file-based extractors only (conllu, tei, text, macocu).
+#                files; file-based extractors only (conllu, tei, text, macocu, json).
 #                Use it when a source ships the same documents twice (layers,
 #                corrected/original versions), since doc_id must be unique
 #                within a dataset (CONTEXT.md, "Document id").
@@ -101,6 +101,8 @@ datasets:
   povejmo_vemo_med:
     extractor: json
     domain: medical
+    # Original texts only: the -deduplicated.json is a subset of the same texts.
+    include: ["*/PoVeJMo-VeMo-Med_1.0.json"]
 
   oss:
     extractor: conllu

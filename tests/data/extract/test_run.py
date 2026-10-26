@@ -1058,6 +1058,19 @@ class TestIncludeFilter:
         lines = (out / "ds.jsonl").read_text().splitlines()
         assert [json.loads(line)["text"] for line in lines] == ["ud"]
 
+    def test_include_narrows_json_release_to_one_file(self, tmp_path: Path) -> None:
+        """A JSON release shipping an original and a deduplicated file is read once."""
+        raw = tmp_path / "raw" / "ds" / "Release_1.0"
+        raw.mkdir(parents=True)
+        (raw / "Release_1.0.json").write_text(json.dumps([{"text": "one"}, {"text": "two"}]))
+        (raw / "Release_1.0-deduplicated.json").write_text(json.dumps([{"text": "one"}]))
+        out = tmp_path / "out"
+        out.mkdir()
+        cfg = {"extractor": "json", "domain": "test", "include": ["*/Release_1.0.json"]}
+        _extract_one("ds", cfg, tmp_path / "raw", out, force=True)
+        lines = (out / "ds.jsonl").read_text().splitlines()
+        assert [json.loads(line)["text"] for line in lines] == ["one", "two"]
+
     def test_include_matching_nothing_raises(self, tmp_path: Path) -> None:
         """A pattern that selects no file is a config error, not an empty dataset."""
         raw = tmp_path / "raw" / "ds"

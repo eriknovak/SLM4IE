@@ -37,6 +37,21 @@ class TestJsonExtractor:
             "Second record.",
         ]
 
+    def test_iter_input_files_lists_json_files_sorted(self, extractor: JsonExtractor, tmp_path: Path) -> None:
+        """File enumeration is recursive, sorted and limited to .json files."""
+        (tmp_path / "sub").mkdir()
+        _write_json(tmp_path / "sub" / "b.json", [])
+        _write_json(tmp_path / "a.json", [])
+        (tmp_path / "README.txt").write_text("not data", encoding="utf-8")
+        assert extractor.iter_input_files(tmp_path) == [tmp_path / "a.json", tmp_path / "sub" / "b.json"]
+
+    def test_extract_files_reads_only_the_given_files(self, extractor: JsonExtractor, tmp_path: Path) -> None:
+        """A narrowed file list leaves the other files in the directory unread."""
+        _write_json(tmp_path / "keep.json", [{"text": "kept"}])
+        _write_json(tmp_path / "skip.json", [{"text": "skipped"}])
+        docs = list(extractor.extract_files([tmp_path / "keep.json"], "src", "med", tmp_path))
+        assert [d.text for d in docs] == ["kept"]
+
     def test_extra_fields_become_metadata(self, extractor: JsonExtractor, tmp_path: Path) -> None:
         """Non-text, non-doc_id fields are surfaced as metadata."""
         _write_json(
