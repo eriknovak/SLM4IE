@@ -56,7 +56,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
@@ -71,32 +71,46 @@ DEFAULT_ID_FIELD = "doc_id"
 _STRUCTURAL_FIELDS = {"paragraphs", "conll"}
 
 
-class JsonExtractor(BaseExtractor):
+class JsonExtractor(FileBasedExtractor):
     """Extracts Documents from JSON files containing a top-level array.
 
-    Recursively discovers .json files under the given directory.
-    Each file is expected to be a JSON array of objects; non-array
-    top-level structures are skipped with a warning. One Document is
-    produced per array element with a non-empty text field. The text
-    field, id field, and the set of record fields kept as metadata
-    are configurable through the `metadata:` config block (see the
-    module docstring).
+    Recursively discovers .json files under the given directory; the
+    `include:` knob in extract.yaml narrows them, as for every
+    file-based extractor. Each file is expected to be a JSON array of
+    objects; non-array top-level structures are skipped with a warning.
+    One Document is produced per array element with a non-empty text
+    field. The text field, id field, and the set of record fields kept
+    as metadata are configurable through the `metadata:` config block
+    (see the module docstring).
     """
 
-    def extract(
-        self,
-        input_dir: Path,
-        source: str,
-        domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Document]:
-        """Yield Documents from all JSON array files under input_dir.
+    def iter_input_files(self, input_dir: Path) -> List[Path]:
+        """Return sorted .json files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing .json files
-                (searched recursively).
+            input_dir (Path): Directory searched recursively.
+
+        Returns:
+            List[Path]: Sorted .json file paths.
+        """
+        return sorted(p for p in input_dir.rglob("*.json") if p.is_file())
+
+    def extract_files(
+        self,
+        files: List[Path],
+        source: str,
+        domain: str,
+        input_dir: Path,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield Documents from the given JSON array files.
+
+        Args:
+            files (List[Path]): .json files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            input_dir (Path): Dataset root; unused, every record is
+                self-contained.
             metadata (Optional[Dict[str, Any]]): Optional `metadata:`
                 config block. Recognized keys: `text_field` (record
                 field copied into `text`, default `text`), `id_field`
@@ -108,6 +122,7 @@ class JsonExtractor(BaseExtractor):
         Yields:
             Document: One document per record with non-empty text.
         """
+        del input_dir
         cfg = metadata or {}
         text_field = str(cfg.get("text_field", DEFAULT_TEXT_FIELD))
         id_field = str(cfg.get("id_field", DEFAULT_ID_FIELD))
@@ -115,7 +130,6 @@ class JsonExtractor(BaseExtractor):
         metadata_fields: Optional[List[str]] = (
             [str(f) for f in metadata_fields_raw] if metadata_fields_raw is not None else None
         )
-        files = sorted(p for p in input_dir.rglob("*.json") if p.is_file())
 
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, text_field, id_field, metadata_fields)
