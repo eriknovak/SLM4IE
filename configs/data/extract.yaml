@@ -97,6 +97,8 @@ datasets:
   coleslaw:
     extractor: coleslaw
     domain: legal
+    # PISRS/evidenca-normodajalcev.jsonl repeats the six other PISRS files;
+    # left as is until this extractor takes `include:` (#37).
 
   povejmo_vemo_med:
     extractor: json
