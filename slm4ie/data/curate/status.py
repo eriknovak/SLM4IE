@@ -2,10 +2,11 @@
 
 `status` judges every unit — current, stale with the reason, or missing — from
 sentinels, the extracted files' recorded hashes and the lock file, without
-running a stage or reading shards. `adopt_legacy` gives sentinels written
-before lineage tracking (or before code versions) their full lineage by
-reading each unit once, so a corpus built earlier becomes current without a
-rebuild.
+running a stage or reading shards. It also lists orphaned units: built units
+of datasets the selection does not keep (see `orphaned_units`).
+`adopt_legacy` gives sentinels written before lineage tracking (or before
+code versions) their full lineage by reading each unit once, so a corpus
+built earlier becomes current without a rebuild.
 """
 
 import logging
@@ -46,6 +47,7 @@ from slm4ie.data.curate.stages import (
     upstream_stage,
 )
 from slm4ie.data.curate.stages.convert import convert_input_files, input_files_digest
+from slm4ie.data.download.config import SELECTED
 from slm4ie.utils.versioning import (
     ScanRequest,
     UnitScan,
@@ -67,6 +69,14 @@ LOCK_DIFFERS = "differs from lock"
 NO_INPUT = "no input; output kept"
 
 
+#: State of a built unit whose dataset the selection does not keep.
+ORPHANED = "orphaned"
+
+
+#: Reason for an orphaned unit whose dataset `extract.yaml` does not declare.
+NOT_DECLARED = "not declared in extract.yaml"
+
+
 @dataclass(frozen=True)
 class UnitStatus:
     """Whether one unit is current, as `status` reports it.
@@ -74,10 +84,12 @@ class UnitStatus:
     Attributes:
         stage: Stage name.
         dataset: Dataset key, or `None` for a corpus stage.
-        state: `current`, `stale` (a run would rebuild it) or `missing`
-            (nothing to build it from).
+        state: `current`, `stale` (a run would rebuild it), `missing`
+            (nothing to build it from) or `orphaned` (its dataset is not
+            selected).
         reason: Why the unit is stale, else `None`; a pass-through unit
-            carries `pass-through` here, alone when current.
+            carries `pass-through` here, alone when current; an orphaned
+            unit carries its dataset's selection status.
     """
 
     stage: str
@@ -116,6 +128,35 @@ def _unit_status(
     if reason is None and lock_exists and locked != lock_entry(sentinel):
         reason = LOCK_DIFFERS
     return UnitStatus(stage, dataset, "stale" if reason else "current", reason)
+
+
+def orphaned_units(setup: CurateConfig) -> List[UnitStatus]:
+    """Find every built unit of a scoped stage whose dataset the selection does not keep.
+
+    A unit counts when its folder holds a sentinel and its dataset is outside
+    the roster. Its reason is the dataset's selection status as `status`
+    prints it (`skipped: contained in siparl`, `skipped: disabled`, ...).
+
+    Args:
+        setup: The loaded setup.
+
+    Returns:
+        One `orphaned` `UnitStatus` per such unit, in pipeline order, then by dataset.
+    """
+    selected = set(setup.roster)
+    orphans: List[UnitStatus] = []
+    for stage in SCOPED_STAGES:
+        folder = setup.paths.stage_dir(stage)
+        if not folder.is_dir():
+            continue
+        for unit in sorted(folder.iterdir()):
+            key = unit.name
+            if not unit.is_dir() or key in selected or key.startswith((".", "_")) or read_sentinel(unit) is None:
+                continue
+            state = setup.selection.status.get(key)
+            reason = state if state is not None and state != SELECTED else NOT_DECLARED
+            orphans.append(UnitStatus(stage, key, ORPHANED, reason))
+    return orphans
 
 
 def selection_report(setup: CurateConfig) -> List[str]:
@@ -176,7 +217,7 @@ def status(
     adopt: bool = False,
     workers: int = 1,
 ) -> List[UnitStatus]:
-    """Report every unit as current, stale (with the reason) or missing.
+    """Report every unit as current, stale (with the reason) or missing, then the orphaned ones.
 
     Read-only unless *adopt* is set: no stage runs and no data is written.
     Only `convert` may read data, to rehash an extracted file whose size or
@@ -192,7 +233,8 @@ def status(
         workers: Processes used to read shards when adopting.
 
     Returns:
-        One `UnitStatus` per roster unit, in pipeline order.
+        One `UnitStatus` per roster unit, in pipeline order, followed by
+        the orphaned units (see `orphaned_units`).
     """
     setup = load_curate_config(input_dir, output_dir, pretrain_config, extract_config)
     if adopt:
@@ -217,7 +259,7 @@ def status(
             reason = corpus_reason(setup, stage, corpus_inputs(setup, stage))[0] if sentinel is not None else None
             buildable = corpus_has_input(setup, stage)
             results.append(_unit_status(stage, None, sentinel, reason, buildable, lock.get(stage), lock_exists))
-    return results
+    return results + orphaned_units(setup)
 
 
 def _scan_all(requests: Dict[Tuple[str, str], ScanRequest], workers: int) -> Dict[Tuple[str, str], UnitScan]:

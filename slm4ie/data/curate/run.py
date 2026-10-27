@@ -76,7 +76,7 @@ from slm4ie.data.curate.stages import (
     run_stage,
     upstream_stage,
 )
-from slm4ie.data.curate.status import selection_report
+from slm4ie.data.curate.status import orphaned_units, selection_report
 from slm4ie.utils.versioning import EMPTY_DIGEST, merge_digests, shard_files
 
 logger = logging.getLogger(__name__)
@@ -253,6 +253,26 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
         list(scoped_affected),
         dataset_keys,
     )
+
+
+def _handle_orphans(setup: CurateConfig, prune: bool) -> None:
+    """Delete the orphaned units when *prune* is set, else name them in one warning.
+
+    Args:
+        setup: The loaded setup.
+        prune: Delete each orphaned unit folder instead of keeping it.
+    """
+    orphans = orphaned_units(setup)
+    if not orphans:
+        return
+    if not prune:
+        names = ", ".join(f"{unit.stage}/{unit.dataset}" for unit in orphans)
+        logger.warning("%d orphaned unit(s) kept; pass --prune to remove them: %s", len(orphans), names)
+        return
+    for unit in orphans:
+        folder = setup.paths.stage_dir(unit.stage) / cast(str, unit.dataset)
+        shutil.rmtree(folder)
+        logger.warning("--prune: removed %s (%s)", folder, unit.reason)
 
 
 def _run_scoped_bucket(
@@ -601,6 +621,7 @@ def curate(
     force: bool,
     workers: int,
     pretrain_config: Path,
+    prune: bool = False,
     extract_config: Optional[Path] = None,
     mlflow_enabled: Optional[bool] = None,
 ) -> None:
@@ -620,18 +641,23 @@ def curate(
         workers: Worker count (0 = auto).
         pretrain_config: Path to the curation config. Required, so an
             experiment's own corpus variant is never assumed away.
+        prune: Delete orphaned units before the build; requires `run_all`.
+            An `--all` run without it keeps them and warns once.
         extract_config: Path to extract.yaml, or None for the default.
         mlflow_enabled: Tri-state override for MLflow pretrain tracking. None
             defers to the pretrain config's `mlflow.enabled`; True/False force it
             on/off. Tracking only runs after a full `--all` build.
 
     Raises:
-        ValueError: If `datasets` is non-empty while `run_all` is True.
+        ValueError: If `datasets` is non-empty while `run_all` is True, or
+            `prune` is set without `run_all`.
         RuntimeError: If a unit still carries a legacy sentinel, or a stage's
             output fails its integrity check.
     """
     if run_all and datasets:
         raise ValueError("datasets must be empty when run_all is True")
+    if prune and not run_all:
+        raise ValueError("prune requires run_all")
     setup = load_curate_config(input_dir, output_dir, pretrain_config, extract_config)
     cfg = setup.cfg
     paths = setup.paths
@@ -671,6 +697,8 @@ def curate(
             f"{len(legacy)} unit(s) lack lineage or a code version (e.g. {legacy[0]}). "
             "Run `curate_pretraining_corpus.py status --adopt` first to adopt them without a rebuild."
         )
+    if run_all:
+        _handle_orphans(setup, prune)
 
     info = run_info(setup.project_root)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -695,6 +723,7 @@ def curate(
             log_curate_run(
                 output_dir,
                 cfg,
+                setup.roster,
                 enabled=True,
                 experiment=mlflow_cfg.get("experiment", DEFAULT_EXPERIMENT),
                 tracking_uri=mlflow_cfg.get("tracking_uri"),

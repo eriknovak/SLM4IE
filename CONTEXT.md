@@ -196,6 +196,12 @@ One stage for one dataset (a scoped stage) or one corpus stage: the smallest
 piece of the pipeline that is built, versioned and rebuilt on its own.
 _Avoid_: job, step, task
 
+**Orphaned unit**:
+A built unit of a scoped stage whose dataset the selection does not keep:
+contained in another, disabled, or of another role. It is outside the funnel
+and the lock file, and is kept on disk until a run prunes it.
+_Avoid_: stale unit, leftover, dangling unit
+
 **Sentinel**:
 The completion marker a stage writes, carrying the config hash, stage version
 and input digest that produced it plus the document digest of what it wrote.
@@ -220,7 +226,7 @@ What a unit was built from: the upstream units' document digests, or for
 _Avoid_: input fingerprint, upstream hash
 
 **Lock file**:
-The committed record of every sentinel's hashes and digests, so each commit
+The committed record of every selected unit's sentinel hashes and digests, so each commit
 names the corpus it expects and `status` can report where the disk differs.
 _Avoid_: manifest, snapshot, dvc.lock
 

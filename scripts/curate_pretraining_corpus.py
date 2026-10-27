@@ -12,10 +12,13 @@ Eight subcommands:
   `extract.yaml`, minus those contained in another selected one, skipping
   sentinels that are already current. Every run first prints the selection.
   The corpus stages (exact_dedup, sentence_dedup, statistics) require `--all` -- `--stage exact_dedup` without it is an error.
+  An `--all` run warns about orphaned units (built units of datasets the
+  selection does not keep); `--all --prune` deletes them before the build.
 * `status` prints the selection (every catalog entry as selected or skipped
   with the reason, then the overlap warnings), then reports every unit (stage
   x dataset, or corpus stage) as current, stale with the reason, or missing,
-  and exits non-zero when any is stale.
+  then every orphaned unit (a built unit of a dataset the selection does not
+  keep) with its skip reason, and exits non-zero when any is stale.
   Read-only; `--adopt` first gives legacy sentinels their lineage by reading
   each unit once, and rewrites only sentinels.
 * `diagnose` samples the finished corpus and reports where foreign-language
@@ -85,7 +88,7 @@ from typing import List, Optional
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.inspect.diagnose import diagnose_language_leakage
 from slm4ie.data.curate.run import curate
-from slm4ie.data.curate.status import selection_status, status
+from slm4ie.data.curate.status import ORPHANED, selection_status, status
 from slm4ie.data.curate.inspect.duplication import (
     DEDUP_STAGES,
     assess_dedup,
@@ -162,6 +165,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help=(
             "Force re-run. With --stage X: drop X's sentinel and all downstream sentinels. "
             "Without --stage: nuke <output_dir>."
+        ),
+    )
+    run_parser.add_argument(
+        "--prune",
+        action="store_true",
+        help=(
+            "With --all: delete every orphaned unit (a built unit of a dataset the selection "
+            "does not keep) before the build starts. Without it, orphans are kept and named in a warning."
         ),
     )
     run_parser.add_argument(
@@ -340,6 +351,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         validate_keys(parser, args, "datasets")
         if args.datasets and args.stage in CORPUS_STAGES:
             parser.error(f"--stage {args.stage} is corpus-wide; run it with --all, not with positional dataset keys.")
+        if args.prune and not args.all:
+            parser.error("--prune removes units outside the selection; run it with --all, not with dataset keys.")
     return args
 
 
@@ -485,7 +498,8 @@ def main() -> None:
         for unit in results:
             print(f"{unit.stage:<15} {unit.dataset or '-':<28} {unit.state:<8} {unit.reason or ''}".rstrip())
         stale = sum(unit.state == "stale" for unit in results)
-        print(f"{len(results)} unit(s), {stale} stale")
+        orphaned = sum(unit.state == ORPHANED for unit in results)
+        print(f"{len(results)} unit(s), {stale} stale, {orphaned} orphaned")
         if stale:
             raise SystemExit(1)
         return
@@ -497,6 +511,7 @@ def main() -> None:
         input_dir=args.input_dir,
         output_dir=args.output_dir,
         force=args.force,
+        prune=args.prune,
         workers=args.workers,
         pretrain_config=args.config,
         extract_config=args.extract_config,
