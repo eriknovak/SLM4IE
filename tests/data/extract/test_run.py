@@ -1071,6 +1071,19 @@ class TestIncludeFilter:
         lines = (out / "ds.jsonl").read_text().splitlines()
         assert [json.loads(line)["text"] for line in lines] == ["one", "two"]
 
+    def test_include_narrows_coleslaw_to_named_files(self, tmp_path: Path) -> None:
+        """A COLESLAW view file left out of `include:` contributes no rows."""
+        pisrs = tmp_path / "raw" / "ds" / "COLESLAW 1.0" / "PISRS"
+        pisrs.mkdir(parents=True)
+        (pisrs / "register-predpisov.jsonl").write_text(json.dumps({"id": 1, "text": "kept"}) + "\n")
+        (pisrs / "evidenca-normodajalcev.jsonl").write_text(json.dumps({"id": 1, "text": "repeat"}) + "\n")
+        out = tmp_path / "out"
+        out.mkdir()
+        cfg = {"extractor": "coleslaw", "domain": "test", "include": ["*/PISRS/register-predpisov.jsonl"]}
+        _extract_one("ds", cfg, tmp_path / "raw", out, force=True)
+        lines = (out / "ds.jsonl").read_text().splitlines()
+        assert [json.loads(line)["text"] for line in lines] == ["kept"]
+
     def test_include_matching_nothing_raises(self, tmp_path: Path) -> None:
         """A pattern that selects no file is a config error, not an empty dataset."""
         raw = tmp_path / "raw" / "ds"

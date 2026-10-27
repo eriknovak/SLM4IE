@@ -206,6 +206,25 @@ class TestColeslawExtractor:
         assert docs == []
         assert caplog.records == []
 
+    def test_lists_jsonl_files_sorted(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
+        """Input discovery returns every .jsonl under the root, sorted, and nothing else."""
+        _write_jsonl(tmp_path / "USRS" / "usrs.jsonl", [{"id": 1, "fullText": "u"}])
+        _write_jsonl(tmp_path / "PISRS" / "a.jsonl", [{"id": 1, "text": "a"}])
+        (tmp_path / "PISRS" / "readme.txt").write_text("not data", encoding="utf-8")
+        files = extractor.iter_input_files(tmp_path)
+        assert [f.relative_to(tmp_path).as_posix() for f in files] == ["PISRS/a.jsonl", "USRS/usrs.jsonl"]
+
+    def test_extract_files_reads_only_the_given_files(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
+        """A narrowed file list keeps only that file's documents, with ids and subcorpus unchanged."""
+        _write_jsonl(tmp_path / "PISRS" / "register-predpisov.jsonl", [{"id": 7, "text": "kept"}])
+        _write_jsonl(tmp_path / "PISRS" / "evidenca-normodajalcev.jsonl", [{"id": 7, "text": "repeat"}])
+        docs = list(
+            extractor.extract_files([tmp_path / "PISRS" / "register-predpisov.jsonl"], "coleslaw", "legal", tmp_path)
+        )
+        assert [d.text for d in docs] == ["kept"]
+        assert docs[0].doc_id == "PISRS/register-predpisov:00000000"
+        assert docs[0].metadata["subcorpus"] == "PISRS"
+
     def test_invalid_lines_logged_and_skipped(self, extractor: ColeslawExtractor, tmp_path: Path) -> None:
         """Malformed JSON lines are skipped, valid ones still extracted."""
         path = tmp_path / "PISRS" / "f.jsonl"
