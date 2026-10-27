@@ -58,16 +58,18 @@ FINAL_CORPUS_DIR = STAGE_DIRS["sentence_dedup"]
 _MAX_PARAM_LEN = 500
 
 
-def build_curate_funnel(output_dir: Path) -> List[Dict[str, Any]]:
+def build_curate_funnel(output_dir: Path, dataset_keys: List[str]) -> List[Dict[str, Any]]:
     """Read the per-stage survival funnel from the pipeline sentinels.
 
     For each stage in `STAGE_NAMES`, reads `records_in` / `records_out` from its
-    sentinel(s): scoped stages aggregate their per-dataset sentinels (keeping
-    the per-dataset breakdown), corpus stages read the single corpus-level
-    sentinel. Stages with no sentinel on disk are reported with null counts.
+    sentinel(s): scoped stages aggregate the sentinels of the selected datasets
+    (keeping the per-dataset breakdown), corpus stages read the single
+    corpus-level sentinel. Stages with no sentinel on disk are reported with
+    null counts. Unit folders of other datasets are ignored.
 
     Args:
         output_dir: The pretrain output root (holding `00_convert/` .. ).
+        dataset_keys: The datasets the build selected (its roster).
 
     Returns:
         A list of per-stage dicts, ordered by stage position, each with
@@ -88,20 +90,17 @@ def build_curate_funnel(output_dir: Path) -> List[Dict[str, Any]]:
         if stage in SCOPED_STAGES:
             total_in = total_out = 0
             found = False
-            if stage_folder.is_dir():
-                for sub in sorted(stage_folder.iterdir()):
-                    if not sub.is_dir():
-                        continue
-                    sentinel = read_sentinel(sub)
-                    if sentinel is None:
-                        continue
-                    found = True
-                    entry["by_dataset"][sub.name] = {
-                        "records_in": sentinel.records_in,
-                        "records_out": sentinel.records_out,
-                    }
-                    total_in += sentinel.records_in
-                    total_out += sentinel.records_out
+            for key in dataset_keys:
+                sentinel = read_sentinel(stage_folder / key)
+                if sentinel is None:
+                    continue
+                found = True
+                entry["by_dataset"][key] = {
+                    "records_in": sentinel.records_in,
+                    "records_out": sentinel.records_out,
+                }
+                total_in += sentinel.records_in
+                total_out += sentinel.records_out
             if found:
                 entry["records_in"] = total_in
                 entry["records_out"] = total_out
@@ -202,6 +201,7 @@ def _aggregate_metrics(aggregate: Dict[str, Any]) -> Dict[str, float]:
 def log_curate_run(
     output_dir: Path,
     config: Dict[str, Any],
+    dataset_keys: List[str],
     *,
     enabled: bool = True,
     experiment: str = DEFAULT_EXPERIMENT,
@@ -219,6 +219,7 @@ def log_curate_run(
     Args:
         output_dir: The pretrain output root.
         config: The resolved pretrain config as a dict (logged as params).
+        dataset_keys: The datasets the build selected; the funnel counts only these.
         enabled: When False, does nothing and returns None.
         experiment: MLflow experiment name.
         tracking_uri: Tracking URI override; resolved when None.
@@ -250,7 +251,7 @@ def log_curate_run(
     if existing is not None:
         ml.delete_run(existing, tracking_uri=tracking_uri)
 
-    funnel = build_curate_funnel(output_dir)
+    funnel = build_curate_funnel(output_dir, dataset_keys)
     aggregate = read_aggregate_stats(output_dir)
 
     artifact_root = artifact_dir if artifact_dir is not None else Path(tempfile.mkdtemp(prefix="pretrain-track-"))

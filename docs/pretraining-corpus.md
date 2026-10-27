@@ -183,13 +183,22 @@ dataset whose extracted file is absent is skipped, never emptied.
 **Lock file.** After every successful run — a dataset subset, a single stage
 or `--all` — `configs/data/curate.lock.yaml` (beside whichever config was
 passed; the first run creates it) is rebuilt from the sentinels on disk: one
-entry per unit with its lineage and counts. It is rewritten only when an entry
+entry per unit of a selected dataset with its lineage and counts. Orphaned
+units stay out of it. It is rewritten only when an entry
 changed, so a run that rebuilt nothing leaves it untouched. Committed, it names
 the corpus each commit expects.
 
 **Status.** `status` reports every unit as `current`, `stale` with the reason,
 or `missing` (nothing to build it from), compares the lock file too, and exits
 1 when any unit is stale. It reads no shards and rebuilds nothing.
+
+**Orphaned units.** A built unit whose dataset the selection no longer keeps
+(contained in another, disabled, or of another role) is orphaned. `status`
+lists each one with its skip reason and counts them beside the stale units;
+they do not fail it. The MLflow funnel and the lock file leave them out. A
+`run --all` keeps them and names them in one warning; `run --all --prune`
+deletes them before the build. A pruned dataset that is selected again is
+rebuilt like any missing unit.
 
 **Adopting sentinels from before lineage tracking.** `run` refuses to start
 while legacy sentinels remain. `status --adopt` reads each legacy unit once,

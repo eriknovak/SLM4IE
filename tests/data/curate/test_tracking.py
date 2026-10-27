@@ -69,13 +69,26 @@ def _build_tree(root: Path) -> None:
     (stats_dir / "per_dataset" / "alpha.json").write_text("{}", encoding="utf-8")
 
 
+def _add_orphan(root: Path, key: str = "gamma") -> None:
+    """Give every scoped stage a sentinel-bearing folder for a deselected dataset."""
+    for stage in SCOPED_STAGES:
+        write_dataset_sentinel(
+            root / STAGE_DIRS[stage],
+            key,
+            config_slice={"s": stage},
+            config_hash_value="h",
+            records_in=1000,
+            records_out=900,
+        )
+
+
 class TestFunnel:
     """Tests for reading the per-stage funnel from sentinels."""
 
     def test_scoped_and_corpus_counts(self, tmp_path: Path):
         """Scoped stages aggregate per-dataset; corpus stages read one sentinel."""
         _build_tree(tmp_path)
-        funnel = tracking.build_curate_funnel(tmp_path)
+        funnel = tracking.build_curate_funnel(tmp_path, list(DATASETS))
         assert [e["stage"] for e in funnel] == list(STAGE_NAMES)
 
         convert = funnel[0]
@@ -88,10 +101,20 @@ class TestFunnel:
         assert exact["by_dataset"] == {}
         assert exact["records_out"] == 200 - 5 - 1
 
+    def test_deselected_dataset_is_left_out(self, tmp_path: Path):
+        """A sentinel of a dataset outside the selection adds nothing to any scoped stage."""
+        _build_tree(tmp_path)
+        _add_orphan(tmp_path)
+        funnel = tracking.build_curate_funnel(tmp_path, list(DATASETS))
+        for entry in funnel:
+            if entry["scoped"]:
+                assert set(entry["by_dataset"]) == set(DATASETS)
+                assert entry["records_in"] == 2 * (100 - entry["index"])
+
     def test_missing_stage_has_null_counts(self, tmp_path: Path):
         """A stage with no sentinel reports null counts."""
         (tmp_path / STAGE_DIRS["convert"]).mkdir(parents=True)
-        funnel = tracking.build_curate_funnel(tmp_path)
+        funnel = tracking.build_curate_funnel(tmp_path, list(DATASETS))
         assert all(e["records_out"] is None for e in funnel)
 
 
@@ -119,8 +142,8 @@ class TestLogPretrainRun:
 
     def test_disabled_and_missing_corpus_return_none(self, tmp_path: Path):
         """Disabled tracking and an absent final corpus are no-ops."""
-        assert tracking.log_curate_run(tmp_path, {}, enabled=False) is None
-        assert tracking.log_curate_run(tmp_path, {}, enabled=True) is None
+        assert tracking.log_curate_run(tmp_path, {}, list(DATASETS), enabled=False) is None
+        assert tracking.log_curate_run(tmp_path, {}, list(DATASETS), enabled=True) is None
 
     def test_config_output_dir_does_not_clash_with_the_resolved_path(self, store, tmp_path: Path):
         """The run records the resolved output path, not two values for one param."""
@@ -129,7 +152,7 @@ class TestLogPretrainRun:
         out = tmp_path / "pretrain"
         _build_tree(out)
         experiment = "slm4ie/data/test-pretrain-output-dir"
-        tracking.log_curate_run(out, {"output_dir": "./data/pretrain"}, experiment=experiment)
+        tracking.log_curate_run(out, {"output_dir": "./data/pretrain"}, list(DATASETS), experiment=experiment)
         client = mlflow.MlflowClient()
         run = client.search_runs([client.get_experiment_by_name(experiment).experiment_id])[0]
         assert run.data.params["output_dir"] == str(out)
@@ -142,7 +165,7 @@ class TestLogPretrainRun:
         out = tmp_path / "pretrain"
         _build_tree(out)
         experiment = "slm4ie/data/test-pretrain"
-        digest = tracking.log_curate_run(out, {"language": {"k": 1}}, experiment=experiment)
+        digest = tracking.log_curate_run(out, {"language": {"k": 1}}, list(DATASETS), experiment=experiment)
         assert digest and digest.startswith("sha256:")
 
         client = mlflow.MlflowClient()
@@ -158,6 +181,22 @@ class TestLogPretrainRun:
         artifacts = [f.path for f in client.list_artifacts(run.info.run_id)]
         assert "funnel.json" in artifacts and "aggregate.json" in artifacts
 
+    def test_deselected_dataset_logs_no_metric(self, store, tmp_path: Path):
+        """A deselected dataset gets no per-source metric and stays out of the stage totals."""
+        import mlflow
+
+        out = tmp_path / "pretrain"
+        _build_tree(out)
+        _add_orphan(out)
+        experiment = "slm4ie/data/test-pretrain-orphan"
+        tracking.log_curate_run(out, {}, list(DATASETS), experiment=experiment)
+
+        client = mlflow.MlflowClient()
+        run = client.search_runs([client.get_experiment_by_name(experiment).experiment_id])[0]
+        assert "docs_remaining__gamma" not in run.data.metrics
+        history = client.get_metric_history(run.info.run_id, "docs_remaining")
+        assert next(p.value for p in history if p.step == 0) == 2 * (100 - 0 - 1)
+
     def test_upsert_skips_then_force_replaces(self, store, tmp_path: Path):
         """Re-logging the same digest skips unless force replaces the run."""
         import mlflow
@@ -165,12 +204,12 @@ class TestLogPretrainRun:
         out = tmp_path / "pretrain"
         _build_tree(out)
         experiment = "slm4ie/data/test-pretrain"
-        tracking.log_curate_run(out, {}, experiment=experiment)
-        tracking.log_curate_run(out, {}, experiment=experiment)
+        tracking.log_curate_run(out, {}, list(DATASETS), experiment=experiment)
+        tracking.log_curate_run(out, {}, list(DATASETS), experiment=experiment)
 
         client = mlflow.MlflowClient()
         exp = client.get_experiment_by_name(experiment)
         assert len(client.search_runs([exp.experiment_id])) == 1
 
-        tracking.log_curate_run(out, {}, experiment=experiment, force=True)
+        tracking.log_curate_run(out, {}, list(DATASETS), experiment=experiment, force=True)
         assert len(client.search_runs([exp.experiment_id])) == 1

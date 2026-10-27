@@ -667,6 +667,88 @@ def test_lock_records_selection_and_status_reports_a_change(family: _Env, capsys
     assert "selection differs from lock: small now selected" in capsys.readouterr().out
 
 
+def test_lock_lists_only_selected_units(family: _Env) -> None:
+    """A unit of a dataset outside the selection, built by name, stays out of the lock."""
+    family.run("small", "--stage", "convert")
+    family.run("--all", "--stage", "convert")
+    lock = read_lock(family.root / "curation.lock.yaml")
+    assert sorted(lock["convert"]) == ["big", "web_a", "web_b"]
+
+
+def test_status_reports_orphaned_units_with_their_skip_reason(family: _Env) -> None:
+    """A built unit of a contained, disabled or benchmark dataset is orphaned with the selection's reason."""
+    family.roster.append("gold")
+    _write_extracted(Path(family.cfg["input_dir"]), ["gold"])
+    family.run("small", "off", "gold", "--stage", "convert")
+    family.run("--all", "--stage", "convert")
+    code, units = family.status()
+    assert units[("convert", "small")] == ("orphaned", "skipped: contained in big")
+    assert units[("convert", "off")] == ("orphaned", "skipped: disabled")
+    assert units[("convert", "gold")] == ("orphaned", "skipped: role benchmark")
+    assert units[("convert", "big")][0] == "current"
+
+
+def test_status_counts_orphans_without_failing(family: _Env, capsys: pytest.CaptureFixture[str]) -> None:
+    """`status` ends with an orphan count beside the stale count; orphans alone do not fail it."""
+    family.run("small", "--stage", "convert")
+    family.run("--all")
+    capsys.readouterr()
+    code, units = family.status()
+    orphaned = sum(state == "orphaned" for state, _ in units.values())
+    assert orphaned == 1
+    assert code == 0
+    assert capsys.readouterr().out.rstrip().splitlines()[-1].endswith(", 0 stale, 1 orphaned")
+
+
+def test_status_prints_each_orphan_with_its_reason(family: _Env, capsys: pytest.CaptureFixture[str]) -> None:
+    """The printed report has one row per orphaned unit carrying its skip reason."""
+    family.run("small", "--stage", "convert")
+    family.run("--all", "--stage", "convert")
+    capsys.readouterr()
+    family.status()
+    rows = [line.split(maxsplit=3) for line in capsys.readouterr().out.splitlines()]
+    assert ["convert", "small", "orphaned", "skipped: contained in big"] in rows
+
+
+def test_run_keeps_orphans_and_warns_once(family: _Env, caplog: pytest.LogCaptureFixture) -> None:
+    """Without `--prune`, a run deletes no orphaned unit and warns once naming them all."""
+    family.run("small")
+    with caplog.at_level("WARNING"):
+        family.run("--all")
+    assert all((family.output_dir / STAGE_DIRS[s] / "small").is_dir() for s in curate_stages.SCOPED_STAGES)
+    warnings = [r.getMessage() for r in caplog.records if "orphaned" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "convert/small" in warnings[0] and "repetition/small" in warnings[0]
+
+
+def test_prune_removes_every_orphaned_unit(family: _Env, caplog: pytest.LogCaptureFixture) -> None:
+    """`--all --prune` deletes each orphaned unit folder and logs every one it removes."""
+    family.run("small")
+    with caplog.at_level("WARNING"):
+        family.run("--all", "--prune")
+    assert not any((family.output_dir / STAGE_DIRS[s] / "small").exists() for s in curate_stages.SCOPED_STAGES)
+    removed = [r.getMessage() for r in caplog.records if "--prune: removed" in r.getMessage()]
+    assert len(removed) == len(curate_stages.SCOPED_STAGES)
+    assert family.status()[1].get(("convert", "small")) is None
+
+
+def test_prune_requires_all(family: _Env) -> None:
+    """`--prune` with dataset keys is rejected before anything runs."""
+    with pytest.raises(SystemExit):
+        family.run("big", "--prune")
+    assert family.stub.ran == []
+
+
+def test_pruned_dataset_selected_again_rebuilds_from_convert(family: _Env) -> None:
+    """A pruned dataset that the selection keeps again is rebuilt like any missing unit."""
+    family.run("small")
+    family.run("--all", "--prune")
+    _write_catalog(family.root, {"big": {}, "small": {}, "web_a": {}, "web_b": {}, "off": {"enabled": False}})
+    family.run("--all")
+    assert any(stage == "convert" and "small" in keys for stage, keys in family.stub.ran)
+    assert read_sentinel(family.output_dir / STAGE_DIRS["repetition"] / "small") is not None
+
+
 def _write_stage_shards(stage_dir: Path, key: str, n_shards: int) -> None:
     """Write *n_shards* placeholder shards for *key* under *stage_dir*.
 

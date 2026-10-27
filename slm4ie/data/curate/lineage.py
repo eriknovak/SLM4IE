@@ -640,23 +640,22 @@ def selection_entry(selection: Selection) -> Dict[str, Any]:
 
 
 def refresh_lock(setup: CurateConfig) -> None:
-    """Rewrite the lock file from every unit's sentinel on disk, if anything changed.
+    """Rewrite the lock file from the roster's sentinels on disk, if anything changed.
 
-    The lock mirrors the sentinels, so any run — a dataset subset, a single
-    stage, or `--all` — leaves it describing the corpus on disk, and a run that
-    rebuilt nothing leaves the file untouched. It also records the resolved
-    selection, so `status` can tell when a containment change would alter the
-    corpus.
+    The lock mirrors the sentinels of the selected datasets, so any run — a
+    dataset subset, a single stage, or `--all` — leaves it describing the
+    corpus on disk, and a run that rebuilt nothing leaves the file untouched.
+    Orphaned units stay out of it. It also records the resolved selection, so
+    `status` can tell when a containment change would alter the corpus.
 
     Args:
         setup: The loaded setup.
     """
     entries: Dict[str, Any] = {}
-    keys = dataset_keys_on_disk(setup)
     for stage in STAGE_NAMES:
         folder = setup.paths.stage_dir(stage)
         if is_scoped(stage):
-            units = {key: read_sentinel(folder / key) for key in keys}
+            units = {key: read_sentinel(folder / key) for key in setup.roster}
             entries[stage] = {key: lock_entry(s) for key, s in units.items() if s is not None}
         else:
             sentinel = read_sentinel(folder)
