@@ -97,8 +97,19 @@ datasets:
   coleslaw:
     extractor: coleslaw
     domain: legal
-    # PISRS/evidenca-normodajalcev.jsonl repeats the six other PISRS files;
-    # left as is until this extractor takes `include:` (#37).
+    # Every file but PISRS/evidenca-normodajalcev.jsonl, which repeats the six PISRS subcollections uncategorised.
+    include:
+      - "*/PISRS/drugi-splosni-in-posamicni-akti.jsonl"
+      - "*/PISRS/neveljavni-predpisi.jsonl"
+      - "*/PISRS/obsoletni-in-konzumirani-predpisi.jsonl"
+      - "*/PISRS/predpisi-v-pripravi.jsonl"
+      - "*/PISRS/register-predpisov.jsonl"
+      - "*/PISRS/splosni-akti-za-izvrsevanje-javnih-pooblastil.jsonl"
+      - "*/SodnaPraksa/sp_claims.jsonl"
+      - "*/SodnaPraksa/sp_courts.jsonl"
+      - "*/USRS/usrs.jsonl"
+      - "*/UradniList/ul-razglasni.jsonl"
+      - "*/UradniList/ul-uredbeni.jsonl"
 
   povejmo_vemo_med:
     extractor: json

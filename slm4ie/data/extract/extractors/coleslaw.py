@@ -54,8 +54,8 @@ Document ids:
     `sp_claims` and `sp_courts` share ids for the same case, and in
     `ul-uredbeni` it is the item number inside a gazette issue (148k
     rows carry 6.4k distinct ids). So `doc_id` is the positional id of
-    `assembly.positional_doc_id`: the file's path under the dataset dir
-    plus the record's 0-based line index, e.g.
+    `assembly.positional_doc_id`: the file's subcorpus directory name and
+    stem plus the record's 0-based line index, e.g.
     `UradniList/ul-uredbeni:00001234`. The raw `id` is kept as
     `native_id`.
 """
@@ -65,7 +65,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
+from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
@@ -143,37 +143,50 @@ def _candidate_texts(record: Dict[str, Any]) -> List[Tuple[str, str]]:
     return candidates
 
 
-class ColeslawExtractor(BaseExtractor):
+class ColeslawExtractor(FileBasedExtractor):
     """Extracts Documents from the COLESLAW v1.0 corpus.
 
-    Recursively discovers .jsonl files under input_dir. The name of
-    the immediate parent directory (PISRS, UradniList, SodnaPraksa,
-    USRS) is recorded in metadata under the subcorpus key.
+    Recursively discovers .jsonl files under input_dir, so the catalogue's
+    `include:` can narrow them. The name of the immediate parent directory
+    (PISRS, UradniList, SodnaPraksa, USRS) is recorded in metadata under
+    the subcorpus key.
     """
 
-    def extract(
-        self,
-        input_dir: Path,
-        source: str,
-        domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Iterator[Document]:
-        """Yield Documents from all COLESLAW JSONL files under input_dir.
+    def iter_input_files(self, input_dir: Path) -> List[Path]:
+        """Return sorted .jsonl files under input_dir.
 
         Args:
             input_dir (Path): Directory containing the COLESLAW
                 subcorpora (searched recursively).
+
+        Returns:
+            List[Path]: Sorted .jsonl file paths.
+        """
+        return sorted(p for p in input_dir.rglob("*.jsonl") if p.is_file())
+
+    def extract_files(
+        self,
+        files: List[Path],
+        source: str,
+        domain: str,
+        input_dir: Path,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Document]:
+        """Yield Documents from the given COLESLAW JSONL files.
+
+        Args:
+            files (List[Path]): JSONL files to parse, in order.
             source (str): Dataset key assigned to every Document.
             domain (str): Domain label assigned to every Document.
+            input_dir (Path): Dataset root; unused, as ids key off each
+                file's subcorpus directory and stem.
             metadata (Optional[Dict[str, Any]]): Ignored; this
                 extractor sources metadata from each record itself.
 
         Yields:
             Document: One document per record with non-empty text.
         """
-        del metadata
-        files = sorted(p for p in input_dir.rglob("*.jsonl") if p.is_file())
-
+        del input_dir, metadata
         # Subcorpus dir + stem, not the full path: "COLESLAW 1.0/" has a space.
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, f"{filepath.parent.name}/{filepath.stem}")
@@ -191,9 +204,9 @@ class ColeslawExtractor(BaseExtractor):
             filepath (Path): Path to the JSONL file.
             source (str): Dataset key.
             domain (str): Domain label.
-            unit (str): The file's path under the dataset dir without
-                suffix (e.g. "PISRS/register-predpisov"); the id
-                prefix, and its first segment is the subcorpus.
+            unit (str): The file's subcorpus directory name and stem
+                (e.g. "PISRS/register-predpisov"); the id prefix, and
+                its first segment is the subcorpus.
 
         Yields:
             Document: One document per valid line with usable text.
