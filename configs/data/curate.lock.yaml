@@ -40,10 +40,10 @@ convert:
   povejmo_vemo_med:
     config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
     stage_version: sha256:4a24b58e9c4d8a30e8f14fc9f969d2db4345fb9a5583da4259880613ffbed1f8
-    input_digest: sha256:3b3e9adc0e12ec7c7d00548931abeb746116d9efda8d86a60b1b8b87a7f6a4ba
-    document_digest: sum256:ffd334a959536f4e87f405416579ca9ba90bbd9206790530ed5a001a21f69b0b
-    records_in: 23542
-    records_out: 23542
+    input_digest: sha256:b8d547e2ed9f0b9b24aaecc63106e07764d698aba78ca12eeec2d10740664ec6
+    document_digest: sum256:fa212f00bc1b9a6721cdcffdedae2603a32dbeb2bda29954bc20ba8d0b1eefb5
+    records_in: 17701
+    records_out: 17701
   oss:
     config_hash: sha256:b778b181eb0e6bbcb4f67b0538ecf1a3a14f0b21ea63aaf40cca968ed8288cc1
     stage_version: sha256:4a24b58e9c4d8a30e8f14fc9f969d2db4345fb9a5583da4259880613ffbed1f8
@@ -167,10 +167,10 @@ language:
   povejmo_vemo_med:
     config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
     stage_version: sha256:95bcd89b1086c1975aba781bb44bf2f969f79114d2191c1b752e91f004f08ff3
-    input_digest: sum256:ffd334a959536f4e87f405416579ca9ba90bbd9206790530ed5a001a21f69b0b
-    document_digest: sum256:a15daa682fbd53de0aa1f36c449da586dcb2ca5c22b3440ed6ee3c8b825d0a7f
-    records_in: 23542
-    records_out: 23530
+    input_digest: sum256:fa212f00bc1b9a6721cdcffdedae2603a32dbeb2bda29954bc20ba8d0b1eefb5
+    document_digest: sum256:c28388cf4d17e692bd4923f23659450d1c24978811a4355eb11b8c0fc9992580
+    records_in: 17701
+    records_out: 17691
   oss:
     config_hash: sha256:61bfefcf6fdd81494cc568cd309ff5cc72f58a77c81b7e2f229061c3064dcf69
     stage_version: sha256:95bcd89b1086c1975aba781bb44bf2f969f79114d2191c1b752e91f004f08ff3
@@ -294,10 +294,10 @@ spam:
   povejmo_vemo_med:
     config_hash: sha256:dcdb60059839f517d67cf17c274712cce3eb985abc789d696a68bc8f4b46dfca
     stage_version: sha256:a9193e8d2223062c6cbdb09df0628cc9f2caefc00c01084834c942b6e623d369
-    input_digest: sum256:a15daa682fbd53de0aa1f36c449da586dcb2ca5c22b3440ed6ee3c8b825d0a7f
-    document_digest: sum256:14f2a6996e2bf1fafcad9b425749901667484d21f07cc7663b5c701378dff65f
-    records_in: 23530
-    records_out: 23142
+    input_digest: sum256:c28388cf4d17e692bd4923f23659450d1c24978811a4355eb11b8c0fc9992580
+    document_digest: sum256:ace8317d83dac388e9b7e14eb43a23636ddaea5d1e93f8ea7769aa972c18563f
+    records_in: 17691
+    records_out: 17408
   oss:
     config_hash: sha256:dcdb60059839f517d67cf17c274712cce3eb985abc789d696a68bc8f4b46dfca
     stage_version: sha256:a9193e8d2223062c6cbdb09df0628cc9f2caefc00c01084834c942b6e623d369
@@ -385,126 +385,126 @@ spam:
 quality:
   classla_web_sl:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:c657317913ec4d15f353817b59c10b68ca78594004e12fb76fcf7d5ba038a991
     document_digest: sum256:8f5b9736752d6e7b3fe5161c28dcc3cb8f89058097e8e92fadf3866c9b99b452
     records_in: 4745146
     records_out: 3963526
   classlawiki_sl:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:bf44051e2bf4924c8407e0080908271b06c28d79ad811960a95c9035da2c1138
     document_digest: sum256:0343624c0ab96741190b47fb353d97964f90fb7a076538edca1479be185fc232
     records_in: 157793
     records_out: 60072
   macocu_sl:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:9e19f2054359689f7274371bc24a628cbafd2bd5b3924a5c72308b1bd4b6b4dd
     document_digest: sum256:b55445a2415ba9fc971382c695cf5215414837c56ca8f0af8ad7de5d90e6aa7a
     records_in: 6187011
     records_out: 4265083
   kas:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:4af3763e3ac5c3d7b2f9bc596983e673f7078b3a401e1b2be2fc29808b8b28c7
     document_digest: sum256:28ae367a8d7e3e6aeefbf352948c184ce373ab2ae2f4c3b9e9fdd2dbe8350096
     records_in: 79461
     records_out: 54464
   coleslaw:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:c3c8e282ab60ad5dd316f4348e77ce7e03c47a67182243eec8bce511571bf3df
     document_digest: sum256:af46214225d1756269e9cebf3221776aca3fb8804d679c2083c2e1c37b62a8a7
     records_in: 540121
     records_out: 277644
   povejmo_vemo_med:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
-    input_digest: sum256:14f2a6996e2bf1fafcad9b425749901667484d21f07cc7663b5c701378dff65f
-    document_digest: sum256:24dbd4d60a1c51b63abc1caaf3fb779e2423ca4db58759e56b2f6ce825380333
-    records_in: 23142
-    records_out: 3599
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
+    input_digest: sum256:ace8317d83dac388e9b7e14eb43a23636ddaea5d1e93f8ea7769aa972c18563f
+    document_digest: sum256:6405bbea0627f0ffd59e77479776d449e72d274a54509c12f4abcf451b3db25b
+    records_in: 17408
+    records_out: 2533
   oss:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:106696ebb31a070420ce7c255b272398a9488510665e94bcaa5c95e540988ddb
     document_digest: sum256:8247b788224636d0f199ac1c6bd78e5e6291a94822decf98fcb711e3084de2c5
     records_in: 82965
     records_out: 21035
   siparl:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:be3321416bac1156f0dacd3c20e2f0f6b08855a4792938cad59004a3b1cbdea1
     document_digest: sum256:93ab2c63e6e561abbf461d5e2407f32d8d9e05f808a26a8193d566ea22ee43f0
     records_in: 1124653
     records_out: 675252
   kzb:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:c884f4bd1e82fa149cd04ff11b06d6b6e373cb05ac594ef8a4237f96d27cea08
     document_digest: sum256:2a38ea7b3bb3811e27577e6eb3b8eaea04b40a1cb48639281347bc4ee949494e
     records_in: 786
     records_out: 501
   solar:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:96c8f6c5ed8371596945ebfb648fa9c8e8b3486a128cad0ab75cec07263404b7
     document_digest: sum256:06daf98c30cc1ce6a2ec2385cbd08a36411b634171f45e8cdd46403d6d76a2f9
     records_in: 5454
     records_out: 4844
   finepdf:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:2b73a6f83726e081770529d43e53986c76b46c7d135e86d19b62c56b2b801cc9
     document_digest: sum256:80ddda2011f8bb274a754f3e772e614f2192d2d56ee6dde2492f00ee6b8d2e79
     records_in: 920153
     records_out: 347994
   fineweb2:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:98381dabd9a1d684ffdf132472277e88f77f32664ae61bc60fcc056761034fa0
     document_digest: sum256:75568bb666a8a5900462810a575e219f3c0abba067357ffefdf83c7383143c01
     records_in: 11602409
     records_out: 10361292
   culturax:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:d465d0b898d304c11bf2d45cf0eaa58339b9739212f314feb53d2d6859d4c2b9
     document_digest: sum256:42cf4bf61afeec1977550529ee417541686bff284a6da1a62c9713ca5b734561
     records_in: 7258455
     records_out: 5934588
   slovenian_news:
     config_hash: sha256:2780c52cf481c848c9d225aa4f4396ed5fb4012aea43243a235a2509d52766c4
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:2bf6a48c118ba8298003fd420150bb64f0e3dff76832472de5e97d95d43c97b6
     document_digest: sum256:addeb405cabca72b0771202565f4ce17c768b57a23573549a55d0bd1c858ebe3
     records_in: 4613350
     records_out: 3473701
   c4:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:dbfbe6282d3f9f057b96e4495380b308cb6c132443e624efdadd990ac9f3414b
     document_digest: sum256:373577b60cc95449c3f6d916936bac294beaf2df5185dfb6211b246c5dd91f07
     records_in: 7841299
     records_out: 4337845
   hplt:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:a8c15d8e03c7900f7aad2c89e0ee855a7df8fdd4e7ad63080c2609445c76ec49
     document_digest: sum256:0a1abdaee1b0066c0a2874fa5e7c90473a4432486406f7c730377b4f860f1e2f
     records_in: 10128754
     records_out: 7330538
   cc100:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:c49741cdb6a60fa646faca2e3969276c1eaac063a59abdf357ba822e0c872ade
     document_digest: sum256:a14a9f89a366dd9299440c27b420d2eb33be05f978054c1a6af5f1865266a96f
     records_in: 5838434
     records_out: 3253907
   gigafida:
     config_hash: sha256:251baebbc90134c386dcb9c6630aaad6e682617e250667f8df7845344c8cb9de
-    stage_version: sha256:1dbc7a7c5a0081f967f79a25e5e5c6ceffe22d55b25009d80138547563c48d84
+    stage_version: sha256:85048fe7c3793409485ec73ea7a91864875b8083981d9f92a677ce3e164e0d00
     input_digest: sum256:54890b773c581ca26111a83f59c250b252c29ad1638882b531f1b2f98c59a704
     document_digest: sum256:b550e53eff04d68cd316fa723a379faf0fbefd2cc02299650abec77fcc2cd22c
     records_in: 722848
@@ -548,10 +548,10 @@ repetition:
   povejmo_vemo_med:
     config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
     stage_version: sha256:2bcea19ba65eb56ba1b6b4d4ceff3c1fff58ec1775b6c40c60c44e635c4d1f1d
-    input_digest: sum256:24dbd4d60a1c51b63abc1caaf3fb779e2423ca4db58759e56b2f6ce825380333
-    document_digest: sum256:3de8f02d6b941298f68e24eff39fc1ff6b4dcbb47138ad748b4066103e202e4d
-    records_in: 3599
-    records_out: 1155
+    input_digest: sum256:6405bbea0627f0ffd59e77479776d449e72d274a54509c12f4abcf451b3db25b
+    document_digest: sum256:bd5b45997e90ca6df059069051edba0b68a09822318ff67c22b1c6a4f915ac6d
+    records_in: 2533
+    records_out: 791
   oss:
     config_hash: sha256:68e9e86b6926cc2b37df96b5e61bb8cabdab276272bb73f6767e420c3ead0663
     stage_version: sha256:2bcea19ba65eb56ba1b6b4d4ceff3c1fff58ec1775b6c40c60c44e635c4d1f1d
@@ -638,24 +638,24 @@ repetition:
     records_out: 616924
 exact_dedup:
   config_hash: sha256:456590fb2537f569991f0f52c3150003add4631de385536078a9f26d4d27594e
-  stage_version: sha256:e6a2efe7481110b19eedc347ab08a875a1f992c5fdd7b67c9b2fc95b0e86c91c
-  input_digest: sha256:1a5bd46b29375bc44852d1e6644514a5e46253df88f11d7d7aa8f9543a138a33
-  document_digest: sum256:717c6276edc09f7ccdbc964ebadd2f9a3622231ac4787d8c4a1a3a9588a31df2
-  records_in: 43536873
-  records_out: 39416065
+  stage_version: sha256:2e9c9143b12ed9ebd7c99ba7f7c580e8a7af5c76dca11b069298a88b0194bdd3
+  input_digest: sha256:190ac8620eaa5348d895d81d3bc037a0ffc9e942bec16a15fd7afd6e0ba23b3c
+  document_digest: sum256:1f9c1faf060a6395aeaab376f7813a06af9b414090194e0a8b1bb74f0d9930ed
+  records_in: 43536509
+  records_out: 39415975
 sentence_dedup:
   config_hash: sha256:7d64a87925dc8d8567437a0195859f50a1a4f54c66f98ee7910ab3d82bb205b3
-  stage_version: sha256:e6a2efe7481110b19eedc347ab08a875a1f992c5fdd7b67c9b2fc95b0e86c91c
-  input_digest: sum256:717c6276edc09f7ccdbc964ebadd2f9a3622231ac4787d8c4a1a3a9588a31df2
-  document_digest: sum256:33daf5663a48cb2d6fb5cf8cacc91d69752bbd42233972e81e3d75dc9d13edb8
-  records_in: 39416065
-  records_out: 29609722
+  stage_version: sha256:2e9c9143b12ed9ebd7c99ba7f7c580e8a7af5c76dca11b069298a88b0194bdd3
+  input_digest: sum256:1f9c1faf060a6395aeaab376f7813a06af9b414090194e0a8b1bb74f0d9930ed
+  document_digest: sum256:e753cb2ba307f1a35c167b65047a930632b5d144e8b0562918ddd3b157f87bc6
+  records_in: 39415975
+  records_out: 29609719
 statistics:
   config_hash: sha256:3614b39f6069ffb981dcc5929463f6d45a20eda5af3c9bb46dbc5d11f1e984c5
   stage_version: sha256:7b451954037d7dcf2d3074e50d5e6ea2a08c739194e1d8b1a9fabbecc6be0c40
-  input_digest: sum256:33daf5663a48cb2d6fb5cf8cacc91d69752bbd42233972e81e3d75dc9d13edb8
+  input_digest: sum256:e753cb2ba307f1a35c167b65047a930632b5d144e8b0562918ddd3b157f87bc6
   document_digest: null
-  records_in: 29609722
+  records_in: 29609719
   records_out: 0
 selection:
   selected:
@@ -690,4 +690,6 @@ selection:
     superglue_sl: role benchmark
     sentinews: role benchmark
     sloleks: role lexicon
+    sloleks_inflection: role lexicon
+    morphscore_slovenian: role lexicon
     sloleks_relations: role lexicon
