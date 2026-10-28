@@ -453,13 +453,15 @@ def test_stale_shards_cannot_survive_a_rebuild(env: _Env) -> None:
     assert sorted(p.name for p in quality.glob("*.jsonl.gz")) == ["00000.jsonl.gz"]
 
 
-@pytest.mark.parametrize("stage", ["quality", "exact_dedup"])
-def test_integrity_failure_keeps_previous_output(env: _Env, stage: str) -> None:
+@pytest.mark.parametrize(
+    ("stage", "knob", "value"), [("quality", "min_doc_words", 100), ("exact_dedup", "only_dedup_in_index", False)]
+)
+def test_integrity_failure_keeps_previous_output(env: _Env, stage: str, knob: str, value: object) -> None:
     """A stage that writes an id more often than it read it raises and promotes nothing."""
     env.run("--all")
     unit = env.unit(stage)
     before = {p.relative_to(unit): p.read_bytes() for p in unit.rglob("*") if p.is_file()}
-    env.cfg[stage]["tweak"] = True
+    env.cfg[stage][knob] = value
     env.stub.duplicate = stage
     with pytest.raises(RuntimeError, match="integrity check failed"):
         env.run("--all")

@@ -156,6 +156,7 @@ sentence_dedup:
   n_sentences: 3                  # sentences per sliding window compared across docs
   min_doc_words: 50               # drop a doc whose surviving text has fewer words
   min_num_sentences: 2            # drop a doc with fewer surviving sentences
+  min_kept_fraction: 0.5          # drop a trimmed doc keeping under this fraction of its words (0 = off)
   split_sentences: true           # split into sentences (vs. lines) before building windows
 
 # --- Stage 7: statistics (07_statistics) --------------------------------

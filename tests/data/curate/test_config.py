@@ -4,6 +4,7 @@ from dataclasses import fields
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytest.importorskip("datatrove")
 
@@ -14,6 +15,7 @@ from slm4ie.data.curate.config import (
     effective_stage_config,
     load_curate_config,
     resolve_profiles,
+    validate_dedup_knobs,
     validate_overrides,
     validate_spam_knobs,
 )
@@ -454,3 +456,44 @@ def test_loader_resolves_profiles_into_overrides(tmp_path: Path) -> None:
     )
     setup = load_curate_config(tmp_path, tmp_path, config, None)
     assert setup.overrides == {"a": {"spam": {"enabled": False}, "quality": {"min_doc_words": 5}}}
+
+
+# ---------------------------------------------------------------------------
+# Dedup blocks: known keys and the kept-fraction range, checked at load.
+# ---------------------------------------------------------------------------
+
+
+def _write_config(tmp_path: Path, body: str) -> Path:
+    config = tmp_path / "curate.yaml"
+    config.write_text(body)
+    return config
+
+
+@pytest.mark.parametrize("stage", ["exact_dedup", "sentence_dedup"])
+def test_load_curate_config_rejects_unknown_dedup_knob(tmp_path: Path, stage: str) -> None:
+    """A misspelt key in either dedup block fails at load, naming the block and the key."""
+    config = _write_config(tmp_path, f"{stage}:\n  min_kept_fractoin: 0.5\n")
+    with pytest.raises(OverrideConfigError, match=f"{stage}: unknown knob.*min_kept_fractoin"):
+        load_curate_config(tmp_path, tmp_path, config, None)
+
+
+@pytest.mark.parametrize("value", ["1.5", "-0.1", "half", "true"])
+def test_load_curate_config_rejects_kept_fraction_out_of_range(tmp_path: Path, value: str) -> None:
+    """`min_kept_fraction` outside [0, 1], or not a number, fails at load with the key and the value."""
+    config = _write_config(tmp_path, f"sentence_dedup:\n  min_kept_fraction: {value}\n")
+    with pytest.raises(OverrideConfigError, match=r"sentence_dedup\.min_kept_fraction: expected a number in \[0, 1\]"):
+        load_curate_config(tmp_path, tmp_path, config, None)
+
+
+@pytest.mark.parametrize("value", ["0", "0.5", "1"])
+def test_load_curate_config_accepts_kept_fraction_in_range(tmp_path: Path, value: str) -> None:
+    """The ends of the range and the default load."""
+    config = _write_config(tmp_path, f"sentence_dedup:\n  min_kept_fraction: {value}\n")
+    setup = load_curate_config(tmp_path, tmp_path, config, None)
+    assert setup.cfg["sentence_dedup"]["min_kept_fraction"] == float(value)
+
+
+def test_validate_dedup_knobs_accepts_the_shipped_registry() -> None:
+    """Every key the shipped registry writes in its dedup blocks is known."""
+    registry = Path(__file__).resolve().parents[3] / "configs" / "data" / "curate.yaml"
+    validate_dedup_knobs(yaml.safe_load(registry.read_text(encoding="utf-8")))

@@ -119,6 +119,21 @@ STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
     ),
 }
 
+#: Knobs the two corpus-wide dedup stages read from their global blocks; the
+#: stage runners in `stages/dedup.py` read exactly these keys.
+DEDUP_KNOBS: Dict[str, FrozenSet[str]] = {
+    "exact_dedup": frozenset({"precision", "hash_fc", "only_dedup_in_index"}),
+    "sentence_dedup": frozenset(
+        {
+            "n_sentences",
+            "min_doc_words",
+            "min_num_sentences",
+            "min_kept_fraction",
+            "split_sentences",
+        }
+    ),
+}
+
 
 class OverrideConfigError(ValueError):
     """Raised when the `overrides:` block is malformed or out of bounds."""
@@ -144,10 +159,50 @@ def validate_spam_knobs(knobs: Dict[str, Any], where: str) -> None:
             value = knobs[name]
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise OverrideConfigError(f"{where}.{name}: expected an integer >= 1, got {value!r}")
-    if "keep_fraction" in knobs:
-        value = knobs["keep_fraction"]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
-            raise OverrideConfigError(f"{where}.keep_fraction: expected a number in [0, 1], got {value!r}")
+    _check_fraction(knobs, "keep_fraction", where)
+
+
+def _check_fraction(knobs: Dict[str, Any], name: str, where: str) -> None:
+    """Require `knobs[name]`, when present, to be a number in `[0, 1]`.
+
+    Args:
+        knobs: One stage's config slice.
+        name: The knob to check.
+        where: Config path of the slice, used in the error message.
+
+    Raises:
+        OverrideConfigError: If the value is a boolean, not a number, or
+            outside `[0, 1]`.
+    """
+    if name not in knobs:
+        return
+    value = knobs[name]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        raise OverrideConfigError(f"{where}.{name}: expected a number in [0, 1], got {value!r}")
+
+
+def validate_dedup_knobs(cfg: Dict[str, Any]) -> None:
+    """Check the two dedup blocks' keys, and the kept-fraction floor's range.
+
+    The dedup stages run over the whole corpus, so their blocks are never
+    overridden and skip `_validate_sections`; this is their only key check.
+
+    Args:
+        cfg: The parsed curation config.
+
+    Raises:
+        OverrideConfigError: If a dedup block is not a mapping, holds a key
+            its stage does not read, or `sentence_dedup.min_kept_fraction`
+            is not a number in `[0, 1]`.
+    """
+    for stage, known in DEDUP_KNOBS.items():
+        knobs = cfg.get(stage) or {}
+        if not isinstance(knobs, dict):
+            raise OverrideConfigError(f"{stage}: expected a mapping of knob -> value")
+        unknown = set(knobs) - known
+        if unknown:
+            raise OverrideConfigError(f"{stage}: unknown knob(s) {sorted(unknown)}; allowed: {sorted(known)}")
+    _check_fraction(cfg.get("sentence_dedup") or {}, "min_kept_fraction", "sentence_dedup")
 
 
 def _validate_sections(sections: Any, where: str) -> None:
@@ -618,13 +673,15 @@ def load_curate_config(
 
     Raises:
         OverrideConfigError: If the global `spam:` slice is out of bounds,
-            or a profile is invalid or unknown.
+            a dedup block holds an unknown key or an out-of-range
+            `min_kept_fraction`, or a profile is invalid or unknown.
         ConfigError: If the download catalog's relations are invalid.
     """
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
     cfg = _load_yaml(pretrain_config)
     validate_spam_knobs(cfg.get("spam") or {}, "spam")
+    validate_dedup_knobs(cfg)
     overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
