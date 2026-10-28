@@ -42,7 +42,7 @@ import sys
 from collections import Counter
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Set
 
 import numpy as np
 from datachart.charts import LineChart, ScatterChart
@@ -84,7 +84,15 @@ from slm4ie.utils.io import open_output, open_text_stream
 from slm4ie.utils.parallel import run_parallel
 from slm4ie.utils.versioning import file_sha256
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 HERE = Path(__file__).resolve().parent
 TABLES_DIR = HERE / "tables"
@@ -92,22 +100,28 @@ FIGURES_DIR = HERE / "figures"
 SWEEP_CONFIG = HERE / "configs" / "sweep-vocab-size.yaml"
 ANALYSIS_CONFIG = HERE / "configs" / "analysis.yaml"
 
-# JOS category letters of the word classes Sloleks 3.2 splits.
+# JOS category letters of the word classes Sloleks 3.2 splits
 WORD_CLASSES = {"S": "noun", "P": "adjective", "G": "verb", "R": "adverb"}
 
-# A corpus word for the D9 counts: a maximal run of letters, compared lowercased.
+# a corpus word for the D9 counts: a maximal run of letters, compared lowercased
 WORD = re.compile(r"[^\W\d_]+")
 
 GOLDS = ("sloleks", "heuristic", "june")
-# The algorithms that train on the morpheme table, left out of the D5 and D10 readings.
+# the algorithms that train on the morpheme table, left out of the D5 and D10 readings
 TABLE_ALGORITHMS = frozenset({"morphbpe", "morphpiece"})
 SAMPLE_NAMES = {"train": "training sample", "eval": "evaluation sample"}
 H1_BAR = 0.8
 H2_BAR = 0.9
-# Bootstrap draws per matrix product; bounds the draw matrix at about 50 MB.
+# bootstrap draws per matrix product; bounds the draw matrix at about 50 MB
 BOOTSTRAP_BATCH = 100
-# The corpus metrics Q1 reads, all on the evaluation sample.
+# the corpus metrics Q1 reads, all on the evaluation sample
 CORPUS_METRICS = ("fertility", "tokens_per_byte", "chars_per_token", "renyi_efficiency")
+# documents per chunk when counting the word types of a sample
+CHUNK_DOCS = 5000
+SECONDS_PER_HOUR = 3600
+BYTES_PER_GB = 1e9
+# the vocabulary sizes Q1's levelling rule reads
+LEVELLING_VOCAB_SIZES = 4
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,7 +151,7 @@ class AnalysisConfig:
     june_gold: Path
     scores_cache: Path
     max_workers: int
-    count_bins: Tuple[int, ...]
+    count_bins: tuple[int, ...]
     rare_below: int
     levelled_ratio: float
 
@@ -149,7 +163,7 @@ def load_analysis_config(path: Path) -> AnalysisConfig:
         path: The analysis config.
 
     Returns:
-        AnalysisConfig: Its paths and scoring settings.
+        Its paths and scoring settings.
 
     Raises:
         KeyError: If a section or key is missing.
@@ -166,10 +180,12 @@ def load_analysis_config(path: Path) -> AnalysisConfig:
     )
 
 
-# --- Golds and dataset statistics (`data`) -------------------------------
+# ===============================
+# Golds and Dataset Statistics (`data`)
+# ===============================
 
 
-def build_golds(cfg: SweepConfig, june_gold: Path) -> Dict[str, MorphLexicon]:
+def build_golds(cfg: SweepConfig, june_gold: Path) -> dict[str, MorphLexicon]:
     """Build or load the three golds from the shared tokenization files.
 
     Args:
@@ -177,7 +193,7 @@ def build_golds(cfg: SweepConfig, june_gold: Path) -> Dict[str, MorphLexicon]:
         june_gold: The heuristic gold the June sweep saved.
 
     Returns:
-        Dict[str, MorphLexicon]: The `sloleks`, `heuristic` and `june` golds.
+        The `sloleks`, `heuristic` and `june` golds.
     """
     return {
         "sloleks": build_inflection_lexicon(cfg.inflection_path),
@@ -186,7 +202,7 @@ def build_golds(cfg: SweepConfig, june_gold: Path) -> Dict[str, MorphLexicon]:
     }
 
 
-def restrict_to_scored_forms(golds: Dict[str, MorphLexicon], lexemes: LexemeSplit) -> Dict[str, MorphLexicon]:
+def restrict_to_scored_forms(golds: dict[str, MorphLexicon], lexemes: LexemeSplit) -> dict[str, MorphLexicon]:
     """Cut every gold down to the held-out forms all golds cover, in the Sloleks gold's order.
 
     The manual flag and the tag of each form are taken from the Sloleks gold,
@@ -198,12 +214,15 @@ def restrict_to_scored_forms(golds: Dict[str, MorphLexicon], lexemes: LexemeSpli
         lexemes: The lexeme split (D4).
 
     Returns:
-        Dict[str, MorphLexicon]: One lexicon per gold over the scored forms.
+        One lexicon per gold over the scored forms.
     """
+    # keep the held-out forms every gold covers
     reference = golds["sloleks"].by_form
     heldout = lexemes.heldout_forms
     scored = [form for form in reference if form in heldout and all(form in gold.by_form for gold in golds.values())]
-    cut: Dict[str, MorphLexicon] = {}
+
+    # re-cut every gold over those forms
+    cut: dict[str, MorphLexicon] = {}
     for name, gold in golds.items():
         lexicon = MorphLexicon()
         for form in scored:
@@ -218,7 +237,7 @@ def restrict_to_scored_forms(golds: Dict[str, MorphLexicon], lexemes: LexemeSpli
     return cut
 
 
-def count_forms_in_sample(texts: Iterable[str], forms: Iterable[str]) -> Dict[str, int]:
+def count_forms_in_sample(texts: Iterable[str], forms: Iterable[str]) -> dict[str, int]:
     """Count each form's occurrences as a corpus word in `texts` (D9).
 
     A corpus word is a maximal run of letters; words and forms are compared
@@ -230,7 +249,7 @@ def count_forms_in_sample(texts: Iterable[str], forms: Iterable[str]) -> Dict[st
         forms: The forms to count.
 
     Returns:
-        Dict[str, int]: Every form to its count, zero when absent.
+        Every form to its count, zero when absent.
     """
     forms = list(forms)
     keys = {form.lower() for form in forms}
@@ -240,7 +259,7 @@ def count_forms_in_sample(texts: Iterable[str], forms: Iterable[str]) -> Dict[st
     return {form: counts[form.lower()] for form in forms}
 
 
-def save_form_counts(counts: Dict[str, int], path: Path) -> Path:
+def save_form_counts(counts: dict[str, int], path: Path) -> Path:
     """Write one `{"form", "count"}` line per form.
 
     Args:
@@ -248,7 +267,7 @@ def save_form_counts(counts: Dict[str, int], path: Path) -> Path:
         path: Destination `.jsonl.gz` path.
 
     Returns:
-        Path: `path`, for chaining.
+        `path`, for chaining.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open_output(path) as out:
@@ -257,16 +276,16 @@ def save_form_counts(counts: Dict[str, int], path: Path) -> Path:
     return path
 
 
-def load_form_counts(path: Path) -> Dict[str, int]:
+def load_form_counts(path: Path) -> dict[str, int]:
     """Read the counts `save_form_counts` wrote.
 
     Args:
         path: The `.jsonl.gz` counts file.
 
     Returns:
-        Dict[str, int]: Form to its count in the evaluation sample.
+        Form to its count in the evaluation sample.
     """
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     with open_text_stream(path) as handle:
         for line in handle:
             if line.strip():
@@ -276,8 +295,8 @@ def load_form_counts(path: Path) -> Dict[str, int]:
 
 
 def statistics_rows(
-    full: Dict[str, MorphLexicon], cut: Dict[str, MorphLexicon], counts: Dict[str, int]
-) -> List[Dict[str, Any]]:
+    full: dict[str, MorphLexicon], cut: dict[str, MorphLexicon], counts: dict[str, int]
+) -> list[dict[str, Any]]:
     """Count forms per gold, slice and word class, before and after the cut.
 
     Args:
@@ -286,22 +305,22 @@ def statistics_rows(
         counts: Each scored form's count in the evaluation sample.
 
     Returns:
-        List[Dict[str, Any]]: One row per gold, slice and word class with the
+        One row per gold, slice and word class with the
             forms in the full gold, the scored forms, their lexemes, the
             scored forms the gold splits, those seen in the evaluation sample,
             those holding a non-letter (never counted), and the occurrences
             there, each case group summed once.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for name, lexicon in cut.items():
         for slice_name in ("all", "manual"):
             scored: Counter = Counter()
             split: Counter = Counter()
             seen: Counter = Counter()
             uncountable: Counter = Counter()
-            # Keyed by lowercased form: case variants share one count, summed once.
-            occurrences: Dict[str, Dict[str, int]] = {}
-            units: Dict[str, Set[str]] = {}
+            # keyed by lowercased form: case variants share one count, summed once
+            occurrences: dict[str, dict[str, int]] = {}
+            units: dict[str, set[str]] = {}
             for segmentation in lexicon.by_form.values():
                 if slice_name == "manual" and not segmentation.verified:
                     continue
@@ -333,19 +352,19 @@ def statistics_rows(
     return rows
 
 
-def lexeme_split_rows(split: LexemeSplit) -> List[Dict[str, Any]]:
+def lexeme_split_rows(split: LexemeSplit) -> list[dict[str, Any]]:
     """Name the word classes of the lexeme split's per-stratum counts.
 
     Args:
         split: The lexeme split.
 
     Returns:
-        List[Dict[str, Any]]: One row per side, word class and status.
+        One row per side, word class and status.
     """
     return [{**row, "word_class": WORD_CLASSES.get(row["word_class"], row["word_class"])} for row in split.counts]
 
 
-def morphscore_rows(items_path: Path, gold: MorphLexicon) -> List[Dict[str, Any]]:
+def morphscore_rows(items_path: Path, gold: MorphLexicon) -> list[dict[str, Any]]:
     """Table the MorphScore v2 Slovene items through each default filter, then per part of speech.
 
     Args:
@@ -353,7 +372,7 @@ def morphscore_rows(items_path: Path, gold: MorphLexicon) -> List[Dict[str, Any]
         gold: The MorphScore gold built from it.
 
     Returns:
-        List[Dict[str, Any]]: Rows of `cut`, `pos`, `items` and
+        Rows of `cut`, `pos`, `items` and
             `items_with_prefix`: one per filter over all parts of speech, then
             one per part of speech of the gold.
     """
@@ -367,7 +386,7 @@ def morphscore_rows(items_path: Path, gold: MorphLexicon) -> List[Dict[str, Any]
             funnel["first occurrence"] += item["is_unique"]
             funnel["stem equals lemma"] += item["is_unique"] and item["stem"] == item["lemma"]
             funnel["no digit"] += is_morphscore_scored(item)
-    rows: List[Dict[str, Any]] = [
+    rows: list[dict[str, Any]] = [
         {"cut": cut, "pos": "all", "items": n, "items_with_prefix": ""} for cut, n in funnel.items()
     ]
     rows.append({"cut": "one cut per form", "pos": "all", "items": len(gold.by_form), "items_with_prefix": ""})
@@ -381,14 +400,14 @@ def morphscore_rows(items_path: Path, gold: MorphLexicon) -> List[Dict[str, Any]
     return rows
 
 
-def source_domains(statistics_dir: Path) -> Dict[str, str]:
+def source_domains(statistics_dir: Path) -> dict[str, str]:
     """Read each source's domain from the corpus statistics stage.
 
     Args:
         statistics_dir: The statistics stage's per-source folder.
 
     Returns:
-        Dict[str, str]: Source name to its domain label.
+        Source name to its domain label.
     """
     return {
         path.stem: json.loads(path.read_text(encoding="utf-8"))["domain"]
@@ -396,7 +415,7 @@ def source_domains(statistics_dir: Path) -> Dict[str, str]:
     }
 
 
-def corpus_split_rows(cfg: SweepConfig, statistics_dir: Path) -> List[Dict[str, Any]]:
+def corpus_split_rows(cfg: SweepConfig, statistics_dir: Path) -> list[dict[str, Any]]:
     """Table documents, words and bytes per source and side, for the split and both samples.
 
     Args:
@@ -404,13 +423,13 @@ def corpus_split_rows(cfg: SweepConfig, statistics_dir: Path) -> List[Dict[str, 
         statistics_dir: The statistics stage's per-source folder.
 
     Returns:
-        List[Dict[str, Any]]: One row per set (`split` or `sample`), side and
+        One row per set (`split` or `sample`), side and
             source, plus an `all` row per set and side.
     """
     split = load_corpus_split(cfg.corpus_split_path)
     domains = source_domains(statistics_dir)
     samples = {"train": cfg.corpus_sample_path, "eval": cfg.eval_sample_path}
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for side in SPLIT_SIDES:
         sources_file = samples[side].with_name(samples[side].name + ".sources.json")
         sample_counts = json.loads(sources_file.read_text(encoding="utf-8"))["sources"]
@@ -426,7 +445,7 @@ def corpus_split_rows(cfg: SweepConfig, statistics_dir: Path) -> List[Dict[str, 
     return rows
 
 
-def rounded(rows: List[Dict[str, Any]], digits: int) -> List[Dict[str, Any]]:
+def rounded(rows: list[dict[str, Any]], digits: int) -> list[dict[str, Any]]:
     """Round every float in `rows` for a table.
 
     Args:
@@ -434,12 +453,12 @@ def rounded(rows: List[Dict[str, Any]], digits: int) -> List[Dict[str, Any]]:
         digits: Decimal places kept.
 
     Returns:
-        List[Dict[str, Any]]: New rows with the floats rounded.
+        New rows with the floats rounded.
     """
     return [{k: round(v, digits) if isinstance(v, float) else v for k, v in row.items()} for row in rows]
 
 
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
     """Write rows as a CSV with the first row's keys as header.
 
     Args:
@@ -447,7 +466,7 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
         rows: Rows sharing one key set.
 
     Returns:
-        Path: `path`, for chaining.
+        `path`, for chaining.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as handle:
@@ -464,40 +483,49 @@ def build_data(cfg: SweepConfig, analysis: AnalysisConfig) -> None:
         cfg: The sweep dial.
         analysis: The analysis paths.
     """
+    # build the golds and cut them to the scored forms
     lexemes = split_lexemes(cfg.inflection_path, cfg.heldout_lexeme_share)
     full = build_golds(cfg, analysis.june_gold)
     cut = restrict_to_scored_forms(full, lexemes)
     analysis.golds_dir.mkdir(parents=True, exist_ok=True)
     for name, lexicon in cut.items():
         save_lexicon(lexicon, analysis.golds_dir / f"{name}.jsonl.gz")
+
+    # count the scored forms in the evaluation sample
     texts = tqdm(iter_sample(cfg.eval_sample_path), desc="count held-out forms", unit="doc")
     counts = count_forms_in_sample(texts, cut["sloleks"].by_form)
     save_form_counts(counts, analysis.form_counts)
+
+    # build the MorphScore gold
     morphscore = build_morphscore_lexicon(analysis.morphscore_items)
     analysis.morphscore_gold.parent.mkdir(parents=True, exist_ok=True)
     save_lexicon(morphscore, analysis.morphscore_gold)
+
+    # write the dataset statistics
     write_csv(TABLES_DIR / "dataset-morph-golds-statistics.csv", statistics_rows(full, cut, counts))
     write_csv(TABLES_DIR / "dataset-morphscore-statistics.csv", morphscore_rows(analysis.morphscore_items, morphscore))
     write_csv(TABLES_DIR / "dataset-lexeme-split-statistics.csv", lexeme_split_rows(lexemes))
     write_csv(TABLES_DIR / "dataset-corpus-split-statistics.csv", corpus_split_rows(cfg, analysis.dataset_statistics))
 
 
-# --- Per-tokenizer counts (`scores`) -------------------------------------
+# ===============================
+# Per-Tokenizer Counts (`scores`)
+# ===============================
 
-# Read-only inputs shared with the scoring workers by fork, never pickled per task.
-_SCORED: Dict[str, List[MorphemeSegmentation]] = {}
-_MORPHSCORE: List[MorphemeSegmentation] = []
-_WORD_TYPES: Dict[str, Tuple[List[str], List[int]]] = {}
+# read-only inputs shared with the scoring workers by fork, never pickled per task
+_SCORED: dict[str, list[MorphemeSegmentation]] = {}
+_MORPHSCORE: list[MorphemeSegmentation] = []
+_WORD_TYPES: dict[str, tuple[list[str], list[int]]] = {}
 
 
-def _count_chunk(texts: List[str]) -> Counter:
+def _count_chunk(texts: list[str]) -> Counter:
     """Count the `split_words` tokens of a chunk of documents.
 
     Args:
         texts: The documents.
 
     Returns:
-        Counter: Word token to its count.
+        Word token to its count.
     """
     counts: Counter = Counter()
     for text in texts:
@@ -505,7 +533,7 @@ def _count_chunk(texts: List[str]) -> Counter:
     return counts
 
 
-def count_word_types(path: Path, workers: int, chunk_docs: int = 5000) -> Tuple[List[str], List[int]]:
+def count_word_types(path: Path, workers: int, chunk_docs: int = CHUNK_DOCS) -> tuple[list[str], list[int]]:
     """Count every word and punctuation token of a sample, as the corpus metrics split it.
 
     Args:
@@ -514,12 +542,12 @@ def count_word_types(path: Path, workers: int, chunk_docs: int = 5000) -> Tuple[
         chunk_docs: Documents per chunk.
 
     Returns:
-        Tuple[List[str], List[int]]: The distinct tokens and their counts, in
+        The distinct tokens and their counts, in
             the same order.
     """
 
-    def chunks() -> Iterable[List[str]]:
-        chunk: List[str] = []
+    def chunks() -> Iterable[list[str]]:
+        chunk: list[str] = []
         for text in iter_sample(path):
             chunk.append(text)
             if len(chunk) == chunk_docs:
@@ -536,14 +564,14 @@ def count_word_types(path: Path, workers: int, chunk_docs: int = 5000) -> Tuple[
     return words, [total[word] for word in words]
 
 
-def count_bin_labels(edges: Sequence[int]) -> List[str]:
+def count_bin_labels(edges: Sequence[int]) -> list[str]:
     """Name the count bins whose lower edges are `edges`.
 
     Args:
         edges: Increasing lower edges, the first 0.
 
     Returns:
-        List[str]: One label per bin, such as `0`, `1–9` and `1000+`.
+        One label per bin, such as `0`, `1–9` and `1000+`.
     """
     labels = []
     for low, high in zip(edges, [*edges[1:], None]):
@@ -556,7 +584,7 @@ def count_bin_labels(edges: Sequence[int]) -> List[str]:
     return labels
 
 
-def vocabulary_bins(token_counts: Counter, vocab: Iterable[str], edges: Sequence[int]) -> List[Dict[str, Any]]:
+def vocabulary_bins(token_counts: Counter, vocab: Iterable[str], edges: Sequence[int]) -> list[dict[str, Any]]:
     """Bin a vocabulary by how often each token occurs in a sample (D12).
 
     Args:
@@ -565,14 +593,14 @@ def vocabulary_bins(token_counts: Counter, vocab: Iterable[str], edges: Sequence
         edges: Increasing lower edges of the bins, the first 0.
 
     Returns:
-        List[Dict[str, Any]]: One row per bin with its `count_bin` label, the
+        One row per bin with its `count_bin` label, the
             share of the vocabulary in it and the share of the sample's tokens
             those vocabulary tokens make up.
     """
     vocab = list(vocab)
     in_bin = np.searchsorted(np.asarray(edges), [token_counts.get(token, 0) for token in vocab], side="right") - 1
     occurrences = np.asarray([token_counts.get(token, 0) for token in vocab], dtype=np.int64)
-    # The shares are over the binned tokens' occurrences, so they sum to one without the special tokens.
+    # shares are over the binned tokens' occurrences, so they sum to one without the specials
     binned_tokens = int(occurrences.sum())
     return [
         {
@@ -649,7 +677,7 @@ def scoring_digest(analysis: AnalysisConfig, cfg: SweepConfig) -> str:
         cfg: The sweep dial.
 
     Returns:
-        str: A SHA-256 hex digest.
+        A SHA-256 hex digest.
     """
     parts = [file_sha256(analysis.golds_dir / f"{gold}.jsonl.gz") for gold in GOLDS]
     parts.append(file_sha256(analysis.morphscore_gold))
@@ -668,7 +696,7 @@ def cache_key(digest: str, artifact_dir: Path) -> str:
         artifact_dir: The tokenizer's folder.
 
     Returns:
-        str: A SHA-256 hex digest over the digest and each file's name, size
+        A SHA-256 hex digest over the digest and each file's name, size
             and modification time.
     """
     listing = [(path.name, path.stat().st_size, path.stat().st_mtime_ns) for path in sorted(artifact_dir.iterdir())]
@@ -684,7 +712,7 @@ def is_cached(key: str, cache_dir: Path, expected: str) -> bool:
         expected: The `cache_key` of the current inputs.
 
     Returns:
-        bool: True when both cache files exist and the summary carries `expected`.
+        True when both cache files exist and the summary carries `expected`.
     """
     summary = cache_dir / f"{key}.json"
     if not summary.exists() or not (cache_dir / f"{key}.npz").exists():
@@ -760,7 +788,9 @@ def score_tokenizer(
     return key
 
 
-# --- Rankings and rank agreement (`scores`) ------------------------------
+# ===============================
+# Rankings and Rank Agreement (`scores`)
+# ===============================
 
 
 @dataclasses.dataclass
@@ -775,11 +805,11 @@ class SweepScores:
         summaries: Each key's cached JSON summary.
     """
 
-    keys: List[str]
-    algorithms: List[str]
-    vocab_sizes: List[int]
-    forms: Dict[str, np.ndarray]
-    summaries: List[Dict[str, Any]]
+    keys: list[str]
+    algorithms: list[str]
+    vocab_sizes: list[int]
+    forms: dict[str, np.ndarray]
+    summaries: list[dict[str, Any]]
 
 
 @dataclasses.dataclass
@@ -801,7 +831,7 @@ class Reading:
     units: np.ndarray
 
 
-def load_scores(keys: List[str], cache_dir: Path, n_forms: int) -> SweepScores:
+def load_scores(keys: list[str], cache_dir: Path, n_forms: int) -> SweepScores:
     """Stack the cached counts of every tokenizer.
 
     Args:
@@ -810,7 +840,7 @@ def load_scores(keys: List[str], cache_dir: Path, n_forms: int) -> SweepScores:
         n_forms: The scored forms every cached array must be aligned to.
 
     Returns:
-        SweepScores: The stacked counts.
+        The stacked counts.
 
     Raises:
         ValueError: If a cached array does not hold one count per scored form.
@@ -830,8 +860,8 @@ def load_scores(keys: List[str], cache_dir: Path, n_forms: int) -> SweepScores:
 
 
 def define_readings(
-    scores: SweepScores, reference: List[MorphemeSegmentation], counts: Dict[str, int]
-) -> List[Reading]:
+    scores: SweepScores, reference: list[MorphemeSegmentation], counts: dict[str, int]
+) -> list[Reading]:
     """Define every ranking the clauses and the readings beside them compare.
 
     Every reading scores only the forms every tokenizer's tokens tile, so all
@@ -844,7 +874,7 @@ def define_readings(
         counts: Each scored form's count in the evaluation sample (D9).
 
     Returns:
-        List[Reading]: The Sloleks and heuristic readings, the June reading and
+        The Sloleks and heuristic readings, the June reading and
             the MorphScore reading, in table order.
 
     Raises:
@@ -862,7 +892,7 @@ def define_readings(
     _, lexemes = np.unique([segmentation.lexeme for segmentation in reference], return_inverse=True)
     ones = np.ones(len(reference))
     weighted = np.asarray([counts[segmentation.form] + 1 for segmentation in reference], dtype=float)
-    readings: List[Reading] = []
+    readings: list[Reading] = []
     for gold, label in (("sloleks", "Sloleks gold"), ("heuristic", "heuristic gold")):
         readings += [
             Reading(f"{label}, all forms", gold, every, ones, lexemes),
@@ -875,7 +905,7 @@ def define_readings(
                 f"{label}, manual multi-token forms", gold, every & manual & (forms["n_tokens"] >= 2), ones, lexemes
             ),
         ]
-    # The manual slice has a different word-class mix, so H2 is also read within each class.
+    # the manual slice has a different word-class mix, so H2 is also read within each class
     word_classes = np.asarray([WORD_CLASSES.get((segmentation.msd or "?")[:1], "other") for segmentation in reference])
     for word_class in ("noun", "adjective", "verb"):
         in_class = every & (word_classes == word_class)
@@ -912,15 +942,15 @@ def _f1(sums: np.ndarray) -> np.ndarray:
         sums: `(..., 2 * tokenizers)` sums, true positives at even columns.
 
     Returns:
-        np.ndarray: `(..., tokenizers)` F1, zero where nothing was counted.
+        `(..., tokenizers)` F1, zero where nothing was counted.
     """
     true_positive, denominator = sums[..., 0::2], sums[..., 1::2]
     return np.divide(2 * true_positive, denominator, out=np.zeros_like(true_positive), where=denominator > 0)
 
 
 def f1_distributions(
-    readings: List[Reading], forms: Dict[str, np.ndarray], n_resamples: int, seed: int
-) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    readings: list[Reading], forms: dict[str, np.ndarray], n_resamples: int, seed: int
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Score every tokenizer under every reading, with a bootstrap over its units (D6).
 
     Each form's counts are summed per unit, and each draw reweights the units
@@ -935,14 +965,14 @@ def f1_distributions(
         seed: Seed of the draws.
 
     Returns:
-        Dict[str, Tuple[np.ndarray, np.ndarray]]: Reading name to its point F1
+        Reading name to its point F1
             per tokenizer and its `(draws, tokenizers)` bootstrap F1.
     """
     rng = np.random.default_rng(seed)
-    groups: Dict[int, List[Reading]] = {}
+    groups: dict[int, list[Reading]] = {}
     for reading in readings:
         groups.setdefault(id(reading.units), []).append(reading)
-    result: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+    result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for group in groups.values():
         units = group[0].units
         n_units = int(units.max()) + 1
@@ -966,7 +996,7 @@ def f1_distributions(
     return result
 
 
-# (clause, ranking a, ranking b, tokenizers, bar): the rank agreements tabled, clauses first.
+# (clause, ranking a, ranking b, tokenizers, bar): the rank agreements tabled, clauses first
 COMPARISONS = [
     ("H1", "heuristic gold, all forms", "Sloleks gold, all forms", "all", H1_BAR),
     ("H2", "Sloleks gold, manual forms", "Sloleks gold, all forms", "all", H2_BAR),
@@ -1003,8 +1033,8 @@ COMPARISONS = [
 
 
 def rank_agreement_rows(
-    scores: SweepScores, f1: Dict[str, Tuple[np.ndarray, np.ndarray]], ci_level: float
-) -> List[Dict[str, Any]]:
+    scores: SweepScores, f1: dict[str, tuple[np.ndarray, np.ndarray]], ci_level: float
+) -> list[dict[str, Any]]:
     """Kendall's tau between two rankings for every comparison, with its bootstrap interval.
 
     Draw `b` of one ranking is paired with draw `b` of the other; for the
@@ -1016,7 +1046,7 @@ def rank_agreement_rows(
         ci_level: Central mass of the interval.
 
     Returns:
-        List[Dict[str, Any]]: One row per comparison in `COMPARISONS`.
+        One row per comparison in `COMPARISONS`.
     """
     without_table = np.asarray([algorithm not in TABLE_ALGORITHMS for algorithm in scores.algorithms])
     rows = []
@@ -1041,8 +1071,8 @@ def rank_agreement_rows(
 
 
 def boundary_f1_rows(
-    scores: SweepScores, readings: List[Reading], f1: Dict[str, Tuple[np.ndarray, np.ndarray]], ci_level: float
-) -> List[Dict[str, Any]]:
+    scores: SweepScores, readings: list[Reading], f1: dict[str, tuple[np.ndarray, np.ndarray]], ci_level: float
+) -> list[dict[str, Any]]:
     """Table each tokenizer's boundary F1 under every reading, best first within a reading.
 
     Args:
@@ -1052,7 +1082,7 @@ def boundary_f1_rows(
         ci_level: Central mass of the interval.
 
     Returns:
-        List[Dict[str, Any]]: One row per reading and tokenizer.
+        One row per reading and tokenizer.
     """
     rows = []
     for reading in readings:
@@ -1073,12 +1103,14 @@ def boundary_f1_rows(
     return rows
 
 
-# --- Metric curves, levelling and the readings beside Q1 -----------------
+# ===============================
+# Metric Curves, Levelling and the Readings Beside Q1
+# ===============================
 
 
 def metric_rows(
-    scores: SweepScores, readings: List[Reading], f1: Dict[str, Tuple[np.ndarray, np.ndarray]], ci_level: float
-) -> List[Dict[str, Any]]:
+    scores: SweepScores, readings: list[Reading], f1: dict[str, tuple[np.ndarray, np.ndarray]], ci_level: float
+) -> list[dict[str, Any]]:
     """Table every Q1 metric per tokenizer: the corpus metrics and the Sloleks morph metrics.
 
     Morph-Edit-Distance is the mean edit distance over the slice's forms every
@@ -1091,7 +1123,7 @@ def metric_rows(
         ci_level: Central mass of the F1 interval.
 
     Returns:
-        List[Dict[str, Any]]: One row per tokenizer, metric and slice.
+        One row per tokenizer, metric and slice.
     """
     by_name = {reading.name: reading for reading in readings}
     rows = []
@@ -1119,7 +1151,7 @@ def metric_rows(
     return rows
 
 
-def levelling_rows(metrics: List[Dict[str, Any]], vocab_sizes: List[int], ratio: float) -> List[Dict[str, Any]]:
+def levelling_rows(metrics: list[dict[str, Any]], vocab_sizes: list[int], ratio: float) -> list[dict[str, Any]]:
     """Read Q1's rule per metric, slice and algorithm: has the metric levelled off by 128k?
 
     A gain is the change in the metric's better direction. The metric has
@@ -1133,14 +1165,14 @@ def levelling_rows(metrics: List[Dict[str, Any]], vocab_sizes: List[int], ratio:
         ratio: The levelling share.
 
     Returns:
-        List[Dict[str, Any]]: One row per metric, slice and algorithm.
+        One row per metric, slice and algorithm.
 
     Raises:
         ValueError: If the sweep does not have exactly four vocabulary sizes.
     """
-    if len(vocab_sizes) != 4:
+    if len(vocab_sizes) != LEVELLING_VOCAB_SIZES:
         raise ValueError(f"Q1's rule reads four vocabulary sizes, not {vocab_sizes}")
-    values: Dict[Tuple[str, str, str], Dict[int, float]] = {}
+    values: dict[tuple[str, str, str], dict[int, float]] = {}
     for row in metrics:
         values.setdefault((row["metric"], row["slice"], row["algorithm"]), {})[row["vocab_size"]] = row["value"]
     small, second, third, large = vocab_sizes
@@ -1168,14 +1200,14 @@ def levelling_rows(metrics: List[Dict[str, Any]], vocab_sizes: List[int], ratio:
     return rows
 
 
-def vocabulary_count_rows(scores: SweepScores) -> List[Dict[str, Any]]:
+def vocabulary_count_rows(scores: SweepScores) -> list[dict[str, Any]]:
     """Table each vocabulary's count bins in both samples (D12), training sample first.
 
     Args:
         scores: The stacked counts.
 
     Returns:
-        List[Dict[str, Any]]: One row per tokenizer, sample and bin.
+        One row per tokenizer, sample and bin.
     """
     rows = []
     for side in ("train", "eval"):
@@ -1196,14 +1228,14 @@ def vocabulary_count_rows(scores: SweepScores) -> List[Dict[str, Any]]:
     return rows
 
 
-def unknown_token_rows(scores: SweepScores) -> List[Dict[str, Any]]:
+def unknown_token_rows(scores: SweepScores) -> list[dict[str, Any]]:
     """Table the share of unknown tokens per tokenizer on both samples and the scored forms, worst first.
 
     Args:
         scores: The stacked counts.
 
     Returns:
-        List[Dict[str, Any]]: One row per tokenizer and set; on the scored
+        One row per tokenizer and set; on the scored
             forms a word is a form.
     """
     rows = []
@@ -1242,7 +1274,7 @@ def unknown_token_rows(scores: SweepScores) -> List[Dict[str, Any]]:
     ]
 
 
-def training_cost_rows(scores: SweepScores, output_root: Path, runs: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+def training_cost_rows(scores: SweepScores, output_root: Path, runs: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     """Table each tokenizer's training time and peak memory with its run, largest vocabulary first.
 
     Args:
@@ -1251,7 +1283,7 @@ def training_cost_rows(scores: SweepScores, output_root: Path, runs: Dict[str, D
         runs: Each key's training run, from `tracked_train_runs`.
 
     Returns:
-        List[Dict[str, Any]]: One row per tokenizer.
+        One row per tokenizer.
     """
     rows = []
     for key in scores.keys:
@@ -1261,8 +1293,8 @@ def training_cost_rows(scores: SweepScores, output_root: Path, runs: Dict[str, D
                 "algorithm": stats["tokenizer"],
                 "vocab_size": stats["vocab_size"],
                 "tier": runs[key]["tier"],
-                "train_hours": round(stats["train_seconds"] / 3600, 2),
-                "peak_memory_gb": round(stats["peak_rss_bytes"] / 1e9, 2),
+                "train_hours": round(stats["train_seconds"] / SECONDS_PER_HOUR, 2),
+                "peak_memory_gb": round(stats["peak_rss_bytes"] / BYTES_PER_GB, 2),
                 "run_id": runs[key]["run_id"],
             }
         )
@@ -1270,22 +1302,24 @@ def training_cost_rows(scores: SweepScores, output_root: Path, runs: Dict[str, D
     return rows
 
 
-# --- Figures -------------------------------------------------------------
+# ===============================
+# Figures
+# ===============================
 
 
-def _vocab_ticks(vocab_sizes: List[int]) -> Dict[str, Any]:
+def _vocab_ticks(vocab_sizes: list[int]) -> dict[str, Any]:
     """Place the vocabulary sizes at even steps, labelled in thousands.
 
     Args:
         vocab_sizes: The sweep's vocabulary sizes, ascending.
 
     Returns:
-        Dict[str, Any]: The `xticks` and `xticklabels` of a chart.
+        The `xticks` and `xticklabels` of a chart.
     """
     return {"xticks": list(range(len(vocab_sizes))), "xticklabels": [f"{size // 1000}k" for size in vocab_sizes]}
 
 
-def _curves(rows: List[Dict[str, Any]], algorithms: List[str], vocab_sizes: List[int], value: str) -> List[List[Dict]]:
+def _curves(rows: list[dict[str, Any]], algorithms: list[str], vocab_sizes: list[int], value: str) -> list[list[dict]]:
     """Turn rows of one metric into one line per algorithm over the vocabulary positions.
 
     Args:
@@ -1295,7 +1329,7 @@ def _curves(rows: List[Dict[str, Any]], algorithms: List[str], vocab_sizes: List
         value: The key of the plotted value.
 
     Returns:
-        List[List[Dict]]: One `{"x", "y"}` record list per algorithm.
+        One `{"x", "y"}` record list per algorithm.
     """
     position = {size: index for index, size in enumerate(vocab_sizes)}
     return [
@@ -1307,14 +1341,14 @@ def _curves(rows: List[Dict[str, Any]], algorithms: List[str], vocab_sizes: List
     ]
 
 
-def rank_agreement_figure(rows: List[Dict[str, Any]]) -> Any:
+def rank_agreement_figure(rows: list[dict[str, Any]]) -> Any:
     """Draw each Kendall's tau with its interval against the two bars.
 
     Args:
         rows: The rows of `rank_agreement_rows`.
 
     Returns:
-        Any: The datachart figure.
+        The datachart figure.
     """
     ordered = list(reversed(rows))
     points = [
@@ -1340,7 +1374,7 @@ def rank_agreement_figure(rows: List[Dict[str, Any]]) -> Any:
     )
 
 
-def boundary_f1_figure(rows: List[Dict[str, Any]], algorithms: List[str]) -> Any:
+def boundary_f1_figure(rows: list[dict[str, Any]], algorithms: list[str]) -> Any:
     """Draw each tokenizer's boundary F1 under the heuristic gold against the Sloleks gold.
 
     Args:
@@ -1348,7 +1382,7 @@ def boundary_f1_figure(rows: List[Dict[str, Any]], algorithms: List[str]) -> Any
         algorithms: The algorithms, in legend order.
 
     Returns:
-        Any: The datachart figure.
+        The datachart figure.
     """
     f1 = {(row["ranking"], row["algorithm"], row["vocab_size"]): row["f1"] for row in rows}
     sizes = sorted({row["vocab_size"] for row in rows})
@@ -1386,7 +1420,7 @@ METRIC_LABELS = {
 
 
 def metric_curves_figure(
-    rows: List[Dict[str, Any]], panels: List[Tuple[str, str]], algorithms: List[str], vocab_sizes: List[int], title: str
+    rows: list[dict[str, Any]], panels: list[tuple[str, str]], algorithms: list[str], vocab_sizes: list[int], title: str
 ) -> Any:
     """Draw one panel of metric-against-vocabulary curves per (metric, slice), one line per algorithm.
 
@@ -1398,12 +1432,12 @@ def metric_curves_figure(
         title: The grid's title.
 
     Returns:
-        Any: The datachart grid.
+        The datachart grid.
     """
     charts = []
     for position, (metric, slice_name) in enumerate(panels):
         selected = [row for row in rows if row["metric"] == metric and row["slice"] == slice_name]
-        # The y label names the metric; three panels per row leave room only for the slice.
+        # the y label names the metric; three panels per row leave room only for the slice
         charts.append(
             LineChart(
                 _curves(selected, algorithms, vocab_sizes, "value"),
@@ -1420,7 +1454,7 @@ def metric_curves_figure(
 
 
 def rare_vocabulary_figure(
-    rows: List[Dict[str, Any]], rare_labels: Set[str], algorithms: List[str], vocab_sizes: List[int]
+    rows: list[dict[str, Any]], rare_labels: set[str], algorithms: list[str], vocab_sizes: list[int]
 ) -> Any:
     """Draw the share of each vocabulary that is rare in each sample, one line per algorithm (D12).
 
@@ -1431,11 +1465,11 @@ def rare_vocabulary_figure(
         vocab_sizes: The vocabulary sizes, ascending.
 
     Returns:
-        Any: The datachart grid.
+        The datachart grid.
     """
     charts = []
     for position, sample in enumerate(SAMPLE_NAMES.values()):
-        shares: Dict[Tuple[str, int], float] = Counter()
+        shares: dict[tuple[str, int], float] = Counter()
         for row in rows:
             if row["sample"] == sample and row["count_bin"] in rare_labels:
                 shares[(row["algorithm"], row["vocab_size"])] += row["vocab_share"]
@@ -1455,10 +1489,12 @@ def rare_vocabulary_figure(
     return Grid(charts, max_cols=2, title="Rare vocabulary tokens", figsize=FIG_SIZE.FULL_MEDIUM)
 
 
-# --- Lineage --------------------------------------------------------------
+# ===============================
+# Lineage
+# ===============================
 
 
-def tracked_train_runs(client: Any, keys: List[str], output_root: Path) -> Dict[str, Dict[str, str]]:
+def tracked_train_runs(client: Any, keys: list[str], output_root: Path) -> dict[str, dict[str, str]]:
     """Check that every tokenizer was trained by a finished tracked run, all on one commit.
 
     Args:
@@ -1467,14 +1503,14 @@ def tracked_train_runs(client: Any, keys: List[str], output_root: Path) -> Dict[
         output_root: The sweep's tokenizer folders, each holding its run link.
 
     Returns:
-        Dict[str, Dict[str, str]]: Each key's `run_id`, `parent_run_id`,
+        Each key's `run_id`, `parent_run_id`,
             `tier` and `base_commit`.
 
     Raises:
         RuntimeError: If a tokenizer comes from a scratch or unfinished run, or
             the runs span several commits.
     """
-    runs: Dict[str, Dict[str, str]] = {}
+    runs: dict[str, dict[str, str]] = {}
     for key in keys:
         link = json.loads((output_root / key / MLFLOW_LINK_FILENAME).read_text(encoding="utf-8"))
         run = client.get_run(link["run_id"])
@@ -1510,15 +1546,20 @@ def build_scores(cfg: SweepConfig, analysis: AnalysisConfig, force: bool) -> Non
     uri = os.environ.get("MLFLOW_TRACKING_URI")
     if not uri:
         raise RuntimeError("MLFLOW_TRACKING_URI is unset: run `scores` through tracking-env.sh")
+
+    # check the tokenizers come from tracked runs
     client = MlflowClient(uri)
     keys = [f"{algorithm}-{size}" for algorithm in cfg.tokenizers for size in sorted(cfg.vocab_sizes)]
     runs = tracked_train_runs(client, keys, cfg.output_root)
 
+    # load the frozen golds
     for gold in GOLDS:
         _SCORED[gold] = list(load_lexicon(analysis.golds_dir / f"{gold}.jsonl.gz").by_form.values())
     if any([s.form for s in _SCORED[gold]] != [s.form for s in _SCORED["sloleks"]] for gold in GOLDS):
         raise RuntimeError(f"the golds under {analysis.golds_dir} do not list the same forms in the same order")
     reference = _SCORED["sloleks"]
+
+    # score the tokenizers missing from the cache
     digest = scoring_digest(analysis, cfg)
     todo = [
         key
@@ -1548,6 +1589,7 @@ def build_scores(cfg: SweepConfig, analysis: AnalysisConfig, force: bool) -> Non
         if failures:
             raise RuntimeError(f"tokenizers failed to score: {[key for key, _error in failures]}") from failures[0][1]
 
+    # rank the tokenizers under every reading
     scores = load_scores(keys, analysis.scores_cache, len(reference))
     readings = define_readings(scores, reference, load_form_counts(analysis.form_counts))
     f1 = f1_distributions(readings, scores.forms, cfg.stats_n_resamples, cfg.stats_seed)
@@ -1556,9 +1598,11 @@ def build_scores(cfg: SweepConfig, analysis: AnalysisConfig, force: bool) -> Non
     metrics = metric_rows(scores, readings, f1, cfg.stats_ci_level)
     vocabulary = vocabulary_count_rows(scores)
     vocab_sizes = sorted(cfg.vocab_sizes)
+
+    # write the tables
     write_csv(TABLES_DIR / "sweep-rank-agreement-by-ranking-pair.csv", agreement)
     write_csv(TABLES_DIR / "sweep-boundary-f1-by-tokenizer.csv", boundary)
-    # Q1's rule reads the unrounded values; the table rounds them.
+    # Q1's rule reads the unrounded values; the table rounds them
     write_csv(
         TABLES_DIR / "sweep-levelling-by-algorithm.csv", levelling_rows(metrics, vocab_sizes, analysis.levelled_ratio)
     )
@@ -1567,6 +1611,7 @@ def build_scores(cfg: SweepConfig, analysis: AnalysisConfig, force: bool) -> Non
     write_csv(TABLES_DIR / "sweep-unknown-tokens-by-tokenizer.csv", unknown_token_rows(scores))
     write_csv(TABLES_DIR / "sweep-training-cost-by-tokenizer.csv", training_cost_rows(scores, cfg.output_root, runs))
 
+    # define the figures
     algorithms = list(cfg.tokenizers)
     edges = list(analysis.count_bins)
     rare = {label for label, low in zip(count_bin_labels(edges), edges) if low < analysis.rare_below}
@@ -1586,13 +1631,16 @@ def build_scores(cfg: SweepConfig, analysis: AnalysisConfig, force: bool) -> Non
             vocabulary, rare, algorithms, vocab_sizes
         ),
     }
+
+    # save the figures and log them to the parent run
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     parent_run = {run["parent_run_id"] for run in runs.values()}
     for name, build in figures.items():
         save_figure(build, FIGURES_DIR / name)
         for run_id in parent_run:
             client.log_artifact(run_id, str(FIGURES_DIR / name), artifact_path="analysis")
-    # The settings behind the intervals, on the sweep's parent run beside the figures.
+
+    # log the settings behind the intervals on the sweep's parent run
     for run_id in parent_run:
         for name, value in {
             "analysis_n_resamples": cfg.stats_n_resamples,
@@ -1611,9 +1659,13 @@ def main() -> None:
     scores = steps.add_parser("scores", help="score every tokenizer and write the step-8 tables and figures")
     scores.add_argument("--force", action="store_true", help="rescore tokenizers already in the scores cache")
     args = parser.parse_args()
+
+    # set up logging and load the configs
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = load_sweep_config(SWEEP_CONFIG)
     analysis = load_analysis_config(ANALYSIS_CONFIG)
+
+    # run the step
     if args.step == "data":
         build_data(cfg, analysis)
     else:

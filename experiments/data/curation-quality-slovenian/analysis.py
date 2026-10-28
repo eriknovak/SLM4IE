@@ -26,22 +26,26 @@ import argparse
 import csv
 import json
 import math
+import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
-
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
+from typing import Any
 
 import yaml
 
-from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.inspect.judge import interleave
+from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
 from slm4ie.utils.stats import cohen_kappa, wilson
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from report_figures import save_figure  # noqa: E402  # the path is set on the line above
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-quality-slovenian")
@@ -53,10 +57,10 @@ TABLES_DIR = Path(__file__).resolve().parent / "tables"
 FIGURES_DIR = Path(__file__).resolve().parent / "figures"
 
 #: The stages whose decisions are scored against the judge, in pipeline order.
-STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_dedup", "sentence_dedup")
+STAGES: tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_dedup", "sentence_dedup")
 
 #: How a pair can come out once both orders are read, in the order reported.
-PAIRWISE_CALLS: Tuple[str, ...] = ("kept", "dropped", "tie", "orders_differ")
+PAIRWISE_CALLS: tuple[str, ...] = ("kept", "dropped", "tie", "orders_differ")
 
 #: Stages that remove duplicates rather than bad text (D9).
 DEDUP_STAGES = frozenset({"exact_dedup", "sentence_dedup"})
@@ -64,12 +68,32 @@ DEDUP_STAGES = frozenset({"exact_dedup", "sentence_dedup"})
 #: Text shapes that are bad whatever the coherence score says.
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
 
+#: Highest coherence score that counts as bad at the lenient bar (D8).
+LENIENT_COHERENCE_FLOOR = 2
+
+#: Highest coherence score that counts as bad at the strict bar (D8).
+STRICT_COHERENCE_FLOOR = 3
+
+#: Seconds in an hour, for turning machine seconds into hours.
+SECONDS_PER_HOUR = 3600
+
+#: Fixed SVG hash salt, so a rerun on unchanged tables leaves the committed SVG untouched.
+SVG_HASH_SALT = "curation-quality-slovenian"
+
+#: Bar colour of the "kept" part in the loss figure; the palette holds six colours.
+NEUTRAL_BAR_COLOR = "#b8b8b8"
+
+#: How many conflicts the adjudication draw takes by default.
+ADJUDICATION_SIZE = 30
+
+#: Seed fixing the adjudication draw and its order.
+ADJUDICATION_SEED = 20260930
 
 #: Every executor step the curation run launches, in pipeline order. A scoped
 #: stage launches one executor per config bucket, each under its own folder
 #: named in the stage's bucket index; a stage folder without an index holds
 #: one bucket's logs.
-LOG_STEPS: Tuple[Tuple[str, str], ...] = (
+LOG_STEPS: tuple[tuple[str, str], ...] = (
     ("language", ""),
     ("spam", ""),
     ("quality", ""),
@@ -88,7 +112,7 @@ LOG_STEPS: Tuple[Tuple[str, str], ...] = (
 CORPUS_STAGES = frozenset({"exact_dedup", "sentence_dedup", "statistics"})
 
 #: The curated corpus, as folders, from conversion to the finished text.
-FUNNEL_STAGES: Tuple[str, ...] = (
+FUNNEL_STAGES: tuple[str, ...] = (
     "00_convert",
     "01_language",
     "02_spam",
@@ -96,8 +120,12 @@ FUNNEL_STAGES: Tuple[str, ...] = (
     "04_repetition",
 )
 
+# ===============================
+# Helper functions
+# ===============================
 
-def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a JSONL file written by the sampler or the judge.
 
     Args:
@@ -106,12 +134,11 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     Returns:
         One dict per non-empty line, in file order.
     """
-    # split("\n"), not splitlines(): document text carries line separators such
-    # as U+2028, which splitlines() would honour and so tear a JSON row in half.
+    # split on newline only: U+2028 in document text would tear a row under splitlines()
     return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
-def is_bad(verdict: Dict[str, Any], strict: bool = False, stage: Optional[str] = None) -> bool:
+def is_bad(verdict: dict[str, Any], strict: bool = False, stage: str | None = None) -> bool:
     """Decide whether a judged document falls below the bar (D8).
 
     At the language filter a document is also bad when the judge does not call
@@ -128,15 +155,15 @@ def is_bad(verdict: Dict[str, Any], strict: bool = False, stage: Optional[str] =
     Returns:
         True when the document counts as bad text for that stage.
     """
-    floor = 3 if strict else 2
+    floor = STRICT_COHERENCE_FLOOR if strict else LENIENT_COHERENCE_FLOOR
     if stage == "language" and verdict.get("language", "sl") != "sl":
         return True
     return verdict["coherence"] <= floor or verdict["text_type"] in BAD_TEXT_TYPES or bool(verdict["adult_or_spam"])
 
 
 def _cells(
-    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]
-) -> Dict[Tuple[str, str, str], List[Dict[str, Any]]]:
+    sample: Iterable[dict[str, Any]], verdicts: dict[str, dict[str, Any]]
+) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
     """Group judged documents by the source, stage and decision they came from.
 
     A document can be drawn into several cells — kept by one stage and dropped
@@ -150,7 +177,7 @@ def _cells(
     Returns:
         Verdicts keyed by source, stage and decision.
     """
-    grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in sample:
         verdict = verdicts.get(row["id"])
         if verdict is None:
@@ -160,7 +187,7 @@ def _cells(
     return grouped
 
 
-def _rate(verdicts: List[Dict[str, Any]], strict: bool, stage: str) -> Tuple[int, int, float, float, float]:
+def _rate(verdicts: list[dict[str, Any]], strict: bool, stage: str) -> tuple[int, int, float, float, float]:
     """Score one cell at one bar.
 
     Args:
@@ -177,7 +204,7 @@ def _rate(verdicts: List[Dict[str, Any]], strict: bool, stage: str) -> Tuple[int
     return bad, total, (bad / total if total else 0.0), low, high
 
 
-def stage_rows(grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]], by_source: bool) -> List[Dict[str, Any]]:
+def stage_rows(grouped: dict[tuple[str, str, str], list[dict[str, Any]]], by_source: bool) -> list[dict[str, Any]]:
     """Score every stage's decisions, pooled or per source.
 
     Args:
@@ -188,7 +215,7 @@ def stage_rows(grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]], by_sou
         Rows ready for `write_csv`, in pipeline order.
     """
     sources = sorted({key[0] for key in grouped})
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for stage in STAGES:
         for source in sources if by_source else [None]:
             dropped = [
@@ -205,14 +232,13 @@ def stage_rows(grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]], by_sou
             ]
             if not dropped and not kept:
                 continue
-            row: Dict[str, Any] = {"stage": stage}
+            row: dict[str, Any] = {"stage": stage}
             if by_source:
                 row["source"] = source
             for name, verdicts in (("drop_precision", dropped), ("residual_bad_rate", kept)):
                 for bar, strict in (("", False), ("_strict", True)):
                     bad, total, share, low, high = _rate(verdicts, strict, stage)
-                    # A cell the sample never reached has no rate, and writing 0
-                    # there would read as "this stage drops only good text".
+                    # an unreached cell has no rate; 0 would read as "drops only good text"
                     empty = total == 0
                     row[f"{name}{bar}"] = "" if empty else round(share, 4)
                     if not bar:
@@ -224,7 +250,7 @@ def stage_rows(grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]], by_sou
     return rows
 
 
-def lost_text_rows(unmatched: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def lost_text_rows(unmatched: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Score what the dedup stages lost, rather than what they dropped.
 
     A dedup drop whose twin survives costs the corpus nothing, so only the
@@ -240,7 +266,7 @@ def lost_text_rows(unmatched: List[Dict[str, Any]], verdicts: Dict[str, Dict[str
     Returns:
         One row per dedup stage, in the order the stages appear.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for stage in (name for name in STAGES if any(row["stage"] == name for row in unmatched)):
         lost = [row for row in unmatched if row["stage"] == stage]
         judged = [verdicts[row["id"]] for row in lost if row["id"] in verdicts]
@@ -263,7 +289,7 @@ def lost_text_rows(unmatched: List[Dict[str, Any]], verdicts: Dict[str, Dict[str
     return rows
 
 
-def funnel_rows(pretrain_dir: Path, extra_counts: Optional[Dict[str, Dict[str, int]]] = None) -> List[Dict[str, Any]]:
+def funnel_rows(pretrain_dir: Path, extra_counts: dict[str, dict[str, int]] | None = None) -> list[dict[str, Any]]:
     """Report how many documents each source keeps at every stage.
 
     The scoped stages record their own counts in a sentinel beside their
@@ -286,7 +312,7 @@ def funnel_rows(pretrain_dir: Path, extra_counts: Optional[Dict[str, Dict[str, i
     Raises:
         FileNotFoundError: If the statistics stage has not run.
     """
-    counts: Dict[str, Dict[str, int]] = defaultdict(dict)
+    counts: dict[str, dict[str, int]] = defaultdict(dict)
     for stage, source, _, records_out in iter_stage_sentinels(pretrain_dir, FUNNEL_STAGES):
         counts[source][stage] = records_out
     for stage, per_source in (extra_counts or {}).items():
@@ -298,12 +324,12 @@ def funnel_rows(pretrain_dir: Path, extra_counts: Optional[Dict[str, Dict[str, i
         raise FileNotFoundError(f"no corpus statistics at {stats_dir}; run the statistics stage first")
     final = {path.stem: json.loads(path.read_text(encoding="utf-8")) for path in stats_dir.glob("*.json")}
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for source, stages in counts.items():
         converted = stages.get("00_convert", 0)
         if source not in final or not converted:
             continue
-        row: Dict[str, Any] = {"source": source, "domain": final[source]["domain"]}
+        row: dict[str, Any] = {"source": source, "domain": final[source]["domain"]}
         row.update({stage[3:]: stages.get(stage, "") for stage in (*FUNNEL_STAGES, *sorted(extra_counts or ()))})
         row["final"] = final[source]["doc_count"]
         row["final_words"] = final[source]["word_count"]
@@ -312,7 +338,7 @@ def funnel_rows(pretrain_dir: Path, extra_counts: Optional[Dict[str, Dict[str, i
         rows.append(row)
 
     rows.sort(key=lambda row: row["retained"])
-    total: Dict[str, Any] = {"source": "TOTAL", "domain": ""}
+    total: dict[str, Any] = {"source": "TOTAL", "domain": ""}
     for stage in (*FUNNEL_STAGES, *sorted(extra_counts or ())):
         total[stage[3:]] = sum(row[stage[3:]] for row in rows if isinstance(row[stage[3:]], int))
     total["final"] = sum(row["final"] for row in rows)
@@ -323,7 +349,7 @@ def funnel_rows(pretrain_dir: Path, extra_counts: Optional[Dict[str, Dict[str, i
     return rows
 
 
-def domain_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
+def domain_rows(pretrain_dir: Path) -> list[dict[str, Any]]:
     """Compare the corpus's domain mix before curation with the mix after it.
 
     Each source declares one domain, so the mix going in is its document counts
@@ -338,9 +364,9 @@ def domain_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
         One row per domain, largest final word share first.
     """
     rows = [row for row in funnel_rows(pretrain_dir) if row["source"] != "TOTAL"]
-    before: Dict[str, int] = defaultdict(int)
-    after: Dict[str, int] = defaultdict(int)
-    words: Dict[str, int] = defaultdict(int)
+    before: dict[str, int] = defaultdict(int)
+    after: dict[str, int] = defaultdict(int)
+    words: dict[str, int] = defaultdict(int)
     for row in rows:
         before[row["domain"]] += row["convert"]
         after[row["domain"]] += row["final"]
@@ -364,7 +390,7 @@ def domain_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
     )
 
 
-def gated_rows(pretrain_dir: Path, extract_config: Path) -> List[Dict[str, Any]]:
+def gated_rows(pretrain_dir: Path, extract_config: Path) -> list[dict[str, Any]]:
     """Split the corpus totals by whether a source can be redistributed.
 
     A public release cannot ship the sources whose licence is login-bound, so
@@ -381,11 +407,11 @@ def gated_rows(pretrain_dir: Path, extract_config: Path) -> List[Dict[str, Any]]
     """
     access = _access(extract_config)
     rows = [row for row in funnel_rows(pretrain_dir) if row["source"] != "TOTAL"]
-    groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         groups[access.get(row["source"], "open")].append(row)
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for name in ("open", "gated"):
         group = groups.get(name, [])
         out.append(
@@ -409,7 +435,7 @@ def gated_rows(pretrain_dir: Path, extract_config: Path) -> List[Dict[str, Any]]
     return out
 
 
-def _access(extract_config: Path) -> Dict[str, str]:
+def _access(extract_config: Path) -> dict[str, str]:
     """Read whether each source may be redistributed.
 
     Args:
@@ -423,7 +449,7 @@ def _access(extract_config: Path) -> Dict[str, str]:
     return {key: (entry or {}).get("access", "open") for key, entry in entries.items() if isinstance(entry, dict)}
 
 
-def corpus_dataset_rows(funnel: List[Dict[str, Any]], extract_config: Path) -> List[Dict[str, Any]]:
+def corpus_dataset_rows(funnel: list[dict[str, Any]], extract_config: Path) -> list[dict[str, Any]]:
     """Describe every source of the curated corpus, for the record's Datasets section.
 
     Args:
@@ -450,7 +476,7 @@ def corpus_dataset_rows(funnel: List[Dict[str, Any]], extract_config: Path) -> L
     ]
 
 
-def sample_dataset_rows(sample: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def sample_dataset_rows(sample: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Count the judged sample per stage and decision.
 
     Args:
@@ -460,7 +486,7 @@ def sample_dataset_rows(sample: List[Dict[str, Any]], verdicts: Dict[str, Dict[s
     Returns:
         One row per stage and decision, in pipeline order.
     """
-    cells: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    cells: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in sample:
         for cell in row["cells"]:
             cells[(cell["stage"], cell["decision"])].append(row)
@@ -478,7 +504,7 @@ def sample_dataset_rows(sample: List[Dict[str, Any]], verdicts: Dict[str, Dict[s
     ]
 
 
-def pairs_dataset_rows(pairs: List[Dict[str, Any]], answers: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def pairs_dataset_rows(pairs: list[dict[str, Any]], answers: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Count the pairwise drawing per stage.
 
     Args:
@@ -506,8 +532,8 @@ def pairs_dataset_rows(pairs: List[Dict[str, Any]], answers: Dict[str, Dict[str,
 
 
 def labels_dataset_rows(
-    calibration: List[Dict[str, Any]], adjudication: List[Dict[str, Any]], sample: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    calibration: list[dict[str, Any]], adjudication: list[dict[str, Any]], sample: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Describe the two sets of hand labels.
 
     Args:
@@ -530,7 +556,7 @@ def labels_dataset_rows(
     ]
 
 
-def profile_rows(profiles: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def profile_rows(profiles: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Flatten the corpus profile into one row per source.
 
     Args:
@@ -566,7 +592,7 @@ def profile_rows(profiles: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(rows, key=lambda row: -row["words_p50"])
 
 
-def _block_seconds(block: Dict) -> float:
+def _block_seconds(block: dict) -> float:
     """Returns a pipeline block's total CPU seconds from its datatrove stats.
 
     Args:
@@ -592,7 +618,7 @@ def _block_label(name: str) -> str:
     return " ".join("".join(char for char in name.split(" - ", 1)[-1] if char.isascii()).split())
 
 
-def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
+def _step_timings(logging_dir: Path) -> dict[str, Any] | None:
     """Read one executor's task timings out of its log folder.
 
     A task's end is its stats file's modification time, which is the only
@@ -620,9 +646,9 @@ def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
     if not executor_path.is_file():
         return None
     executor = json.loads(executor_path.read_text(encoding="utf-8"))
-    ends: List[float] = []
-    durations: List[float] = []
-    blocks: Dict[str, float] = defaultdict(float)
+    ends: list[float] = []
+    durations: list[float] = []
+    blocks: dict[str, float] = defaultdict(float)
     documents = 0
     for path in executor_task_stats(logging_dir):
         stats = json.loads(path.read_text(encoding="utf-8"))
@@ -647,7 +673,7 @@ def _step_timings(logging_dir: Path) -> Optional[Dict[str, Any]]:
     }
 
 
-def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
+def throughput_rows(pretrain_dir: Path) -> list[dict[str, Any]]:
     """Report what every pipeline step cost in machine time.
 
     Two numbers say different things. CPU hours is what the step consumed and
@@ -669,10 +695,10 @@ def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
         One row per executor in pipeline order, each naming the block that
         set its pace, with a totals row over the corpus-wide steps last.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for stage, step in LOG_STEPS:
         stage_logs = pretrain_dir / "_logs" / stage
-        executors: List[Tuple[Path, str, str]] = [(stage_logs / step, "corpus", "")]
+        executors: list[tuple[Path, str, str]] = [(stage_logs / step, "corpus", "")]
         if stage not in CORPUS_STAGES:
             index = read_bucket_index(stage_logs)
             executors = [
@@ -698,7 +724,7 @@ def throughput_rows(pretrain_dir: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def _throughput_row(stage: str, step: str, scope: str, datasets: str, timings: Dict[str, Any]) -> Dict[str, Any]:
+def _throughput_row(stage: str, step: str, scope: str, datasets: str, timings: dict[str, Any]) -> dict[str, Any]:
     """Turn one executor's timings into a throughput table row.
 
     Args:
@@ -723,8 +749,8 @@ def _throughput_row(stage: str, step: str, scope: str, datasets: str, timings: D
         "tasks": timings["tasks"],
         "workers": timings["workers"],
         "documents": documents or "",
-        "cpu_hours": round(cpu / 3600, 2),
-        "wall_hours": round(wall / 3600, 2),
+        "cpu_hours": round(cpu / SECONDS_PER_HOUR, 2),
+        "wall_hours": round(wall / SECONDS_PER_HOUR, 2),
         "docs_per_second": round(documents / wall, 1) if documents and wall else "",
         "docs_per_cpu_second": round(documents / cpu, 1) if documents and cpu else "",
         "worker_use": round(cpu / (wall * timings["workers"]), 3) if wall else "",
@@ -732,7 +758,7 @@ def _throughput_row(stage: str, step: str, scope: str, datasets: str, timings: D
     }
 
 
-def pairwise_rows(pairs: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def pairwise_rows(pairs: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Report how often the judge preferred what each stage kept over what it dropped.
 
     Every pair was asked twice with the documents swapped, and a pair counts
@@ -750,7 +776,7 @@ def pairwise_rows(pairs: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any
         One row per stage pooled over sources (source `ALL`), then one per
         stage and source.
     """
-    outcomes: Dict[Tuple[str, str, int], List[str]] = defaultdict(list)
+    outcomes: dict[tuple[str, str, int], list[str]] = defaultdict(list)
     for comparison in pairs:
         verdict = verdicts.get(comparison["id"])
         if verdict is None:
@@ -759,24 +785,24 @@ def pairwise_rows(pairs: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any
         side = "tie" if better == "tie" else ("kept" if better == comparison["kept"] else "dropped")
         outcomes[(comparison["stage"], comparison["dataset"], comparison["pair"])].append(side)
 
-    grouped: Dict[Tuple[str, str], Counter] = defaultdict(Counter)
+    grouped: dict[tuple[str, str], Counter] = defaultdict(Counter)
     for (stage, source, _), sides in outcomes.items():
         call = sides[0] if len(sides) == 2 and sides[0] == sides[1] else "orders_differ"
         grouped[(stage, "ALL")][call] += 1
         grouped[(stage, source)][call] += 1
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for (stage, source), calls in sorted(
         grouped.items(), key=lambda item: (item[0][1] != "ALL", item[0][1], STAGES.index(item[0][0]))
     ):
         total = sum(calls.values())
-        row: Dict[str, Any] = {"stage": stage, "source": source, "pairs": total}
+        row: dict[str, Any] = {"stage": stage, "source": source, "pairs": total}
         row.update({call: round(calls[call] / total, 4) for call in PAIRWISE_CALLS})
         rows.append(row)
     return rows
 
 
-def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def loss_rows(funnel: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Split each source's converted documents by the stage that dropped them.
 
     A source the stale-shard defect inflated (issue #9) leaves the language
@@ -791,13 +817,13 @@ def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         One row per source, in the funnel's order, with one share per stage and
         the share kept, summing to one.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for row in funnel:
         if row["source"] == "TOTAL":
             continue
         inflated = row["duplicated_input"] is True
         base = row["language"] if inflated else row["convert"]
-        loss: Dict[str, Any] = {"source": row["source"], "base": base, "inflated_input": inflated}
+        loss: dict[str, Any] = {"source": row["source"], "base": base, "inflated_input": inflated}
         previous = base
         for stage in STAGES:
             current = row["final"] if stage == "sentence_dedup" else row[stage]
@@ -812,12 +838,12 @@ def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def draw_figures(
     figures_dir: Path,
-    pooled: List[Dict[str, Any]],
-    per_source: List[Dict[str, Any]],
-    pairwise: List[Dict[str, Any]],
-    losses: List[Dict[str, Any]],
-    throughput: List[Dict[str, Any]],
-) -> List[Path]:
+    pooled: list[dict[str, Any]],
+    per_source: list[dict[str, Any]],
+    pairwise: list[dict[str, Any]],
+    losses: list[dict[str, Any]],
+    throughput: list[dict[str, Any]],
+) -> list[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
     Each figure carries one finding and is drawn from a table that is also
@@ -838,20 +864,19 @@ def draw_figures(
     from datachart.charts import BarChart, DumbbellChart, Heatmap
     from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, VALUE_FORMAT
 
-    # fixed clip-path ids, so a rerun on unchanged tables leaves the committed SVG untouched
-    plt.rcParams["svg.hashsalt"] = "curation-quality-slovenian"
+    # fixed clip-path ids
+    plt.rcParams["svg.hashsalt"] = SVG_HASH_SALT
     figures_dir.mkdir(parents=True, exist_ok=True)
     horizontal = {"orientation": ORIENTATION.HORIZONTAL, "show_values": True}
 
-    # a legend inside the axes would sit on marks that reach their edge, and one
-    # beside them would squeeze the plot with its long labels, so it goes below
-    def below(ncols: int) -> Dict[str, Any]:
+    # legend below the axes: inside it covers marks, beside it squeezes the plot
+    def below(ncols: int) -> dict[str, Any]:
         return {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": ncols}}
 
-    figures: Dict[str, Any] = {}
+    figures: dict[str, Any] = {}
 
     # the gap between the dots is how well a stage separates bad text from good
-    # the axis ends at least half a tick past the largest share so its value label stays inside
+    # the axis ends half a tick past the largest share so its label stays inside
     xmax = math.ceil(max(max(row["drop_precision"], row["residual_bad_rate"]) for row in pooled) * 10 + 0.5) / 10
     figures["judge-rubric-drop-precision-by-stage"] = DumbbellChart(
         [{"label": row["stage"], "start": row["residual_bad_rate"], "end": row["drop_precision"]} for row in pooled],
@@ -915,7 +940,7 @@ def draw_figures(
         bar_mode=BAR_MODE.STACK,
         orientation=ORIENTATION.HORIZONTAL,
         # the palette holds six colours, so the seventh part gets a neutral one
-        style=[None] * len(STAGES) + [{"plot_bar_color": "#b8b8b8"}],
+        style=[None] * len(STAGES) + [{"plot_bar_color": NEUTRAL_BAR_COLOR}],
         figsize=FIG_SIZE.FULL_TALL,
         **below(2),
     )
@@ -944,8 +969,8 @@ def draw_figures(
 
 
 def agreement_rows(
-    labels: List[Dict[str, Any]], runs: Dict[str, Dict[str, Dict[str, Any]]], reference: str
-) -> List[Dict[str, Any]]:
+    labels: list[dict[str, Any]], runs: dict[str, dict[str, dict[str, Any]]], reference: str
+) -> list[dict[str, Any]]:
     """Report how far each judge run agrees with the person, and the runs with each other.
 
     Agreement is taken on the collapsed keep-or-drop decision at both bars
@@ -961,7 +986,7 @@ def agreement_rows(
         One row per run against the person, then one per other run against
         the reference run over every document both judged.
     """
-    comparisons: List[Tuple[str, str, List[Tuple[Dict[str, Any], Dict[str, Any]]]]] = []
+    comparisons: list[tuple[str, str, list[tuple[dict[str, Any], dict[str, Any]]]]] = []
     for name, verdicts in runs.items():
         comparisons.append(
             (name, "person", [(label, verdicts[label["id"]]) for label in labels if label["id"] in verdicts])
@@ -972,7 +997,7 @@ def agreement_rows(
         shared = [(runs[reference][doc_id], verdicts[doc_id]) for doc_id in runs[reference] if doc_id in verdicts]
         comparisons.append((name, reference, shared))
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for name, against, pairs in comparisons:
         lenient, raw = cohen_kappa([(is_bad(first), is_bad(second)) for first, second in pairs])
         strict, _ = cohen_kappa([(is_bad(first, strict=True), is_bad(second, strict=True)) for first, second in pairs])
@@ -993,12 +1018,12 @@ def agreement_rows(
 
 
 def draw_adjudications(
-    sample: List[Dict[str, Any]],
-    verdicts: Dict[str, Dict[str, Any]],
+    sample: list[dict[str, Any]],
+    verdicts: dict[str, dict[str, Any]],
     labelled_sources: Iterable[str],
-    size: int = 30,
-    seed: int = 20260930,
-) -> List[Dict[str, Any]]:
+    size: int = ADJUDICATION_SIZE,
+    seed: int = ADJUDICATION_SEED,
+) -> list[dict[str, Any]]:
     """Choose the documents where the judge and the pipeline flatly conflict.
 
     A flat conflict is a content filter dropping text the judge calls clean
@@ -1025,7 +1050,7 @@ def draw_adjudications(
         under `conflicts`.
     """
     skip = set(labelled_sources)
-    strata: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    strata: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for document in sample:
         verdict = verdicts.get(document["id"])
         if verdict is None or document["dataset"] in skip:
@@ -1045,7 +1070,7 @@ def draw_adjudications(
     return interleave(strata, size, seed)
 
 
-def adjudication_rows(adjudications: List[Dict[str, Any]], labels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def adjudication_rows(adjudications: list[dict[str, Any]], labels: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Report how often a person sides with the judge where it and the pipeline conflict.
 
     Every document here was drawn because the two disagree, so agreement
@@ -1062,7 +1087,7 @@ def adjudication_rows(adjudications: List[Dict[str, Any]], labels: List[Dict[str
         Wilson interval.
     """
     by_id = {label["id"]: label for label in labels}
-    sided: Dict[str, List[bool]] = defaultdict(list)
+    sided: dict[str, list[bool]] = defaultdict(list)
     for document in adjudications:
         label = by_id.get(document["id"])
         if label is None:
@@ -1074,7 +1099,7 @@ def adjudication_rows(adjudications: List[Dict[str, Any]], labels: List[Dict[str
         sided[direction].append(with_judge)
         sided["all"].append(with_judge)
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for direction, calls in sorted(sided.items(), key=lambda item: item[0] == "all"):
         low, high = wilson(sum(calls), len(calls))
         rows.append(
@@ -1090,7 +1115,7 @@ def adjudication_rows(adjudications: List[Dict[str, Any]], labels: List[Dict[str
     return rows
 
 
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
     """Write rows to a CSV, creating the directory if needed.
 
     Args:
@@ -1113,7 +1138,7 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     return path
 
 
-def print_stage_table(rows: List[Dict[str, Any]]) -> None:
+def print_stage_table(rows: list[dict[str, Any]]) -> None:
     """Print the pooled per-stage table the way the record quotes it.
 
     Args:
@@ -1132,7 +1157,7 @@ def print_stage_table(rows: List[Dict[str, Any]]) -> None:
         )
 
 
-def print_funnel(rows: List[Dict[str, Any]]) -> None:
+def print_funnel(rows: list[dict[str, Any]]) -> None:
     """Print the survival funnel the way the record quotes it.
 
     Args:
@@ -1145,7 +1170,7 @@ def print_funnel(rows: List[Dict[str, Any]]) -> None:
         print(f"{row['source']:18s}{row['convert']:12,}{row['final']:12,}{retained:>10s}{row['final_words']:16,}{flag}")
 
 
-def print_throughput(rows: List[Dict[str, Any]]) -> None:
+def print_throughput(rows: list[dict[str, Any]]) -> None:
     """Print the machine cost of each step the way the record quotes it.
 
     Args:
@@ -1161,7 +1186,12 @@ def print_throughput(rows: List[Dict[str, Any]]) -> None:
         print(f"{name:26s}{docs:>12s}{row['cpu_hours']:>9.2f}{row['wall_hours']:>8.2f}{rate:>13s}{used:>14s}{flag}")
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+# ===============================
+# Main function
+# ===============================
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
@@ -1201,6 +1231,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main() -> None:
     """Write the record's tables and figures and print the headline ones."""
     args = parse_args()
+
+    # load the sample and the judge verdicts
     sample = read_jsonl(args.data_root / "interim" / "sample.jsonl")
     verdicts = {row["id"]: row for row in read_jsonl(args.data_root / "interim" / args.verdicts)}
     print(f"{len(verdicts)} verdicts over {len(sample)} sampled documents")
@@ -1215,6 +1247,7 @@ def main() -> None:
         print(f"wrote {len(drawn)} conflicts to {destination}")
         return
 
+    # score the stage decisions
     grouped = _cells(sample, verdicts)
     pooled = stage_rows(grouped, by_source=False)
     per_source = stage_rows(grouped, by_source=True)
@@ -1224,8 +1257,7 @@ def main() -> None:
         write_csv(args.tables / "source-stage-decisions.csv", per_source),
     ]
 
-    # Two runs of one judge: the calibration pass the gate was read on, and the
-    # full-sample pass every stage metric uses.
+    # compare the calibration pass with the full-sample pass
     calibration_labels = read_jsonl(args.data_root / "final" / "human-labels-calibration.jsonl")
     runs = {
         "calibration pass": {
@@ -1240,13 +1272,13 @@ def main() -> None:
         )
     written.append(write_csv(args.tables / "calibration-agreement.csv", agreement))
 
+    # score the pairwise answers
     answers_path = args.data_root / "interim" / args.pairwise
     answers = {row["id"]: row for row in read_jsonl(answers_path)}
     pairwise = pairwise_rows(read_jsonl(answers_path.with_suffix(".pairs.jsonl")), answers)
     written.append(write_csv(args.tables / "pairwise-outcomes.csv", pairwise))
 
-    # Written by the counting job for the stages that keep no per-source
-    # sentinel; the funnel simply leaves their column out when it is absent.
+    # build the funnel; stages without a per-source sentinel are counted by a separate job
     counts_path = args.data_root / "interim" / "stage-counts.json"
     extra_counts = json.loads(counts_path.read_text(encoding="utf-8")) if counts_path.is_file() else None
     funnel = funnel_rows(args.pretrain_dir, extra_counts)
@@ -1260,14 +1292,14 @@ def main() -> None:
         write_csv(args.tables / "throughput.csv", throughput),
     ]
 
+    # profile the corpus
     profile_path = args.data_root / "interim" / "corpus-profile.json"
     if profile_path.is_file():
         written.append(
             write_csv(args.tables / "corpus-profile.csv", profile_rows(json.loads(profile_path.read_text())))
         )
 
-    # Written by `curate_pretraining_corpus.py duplication`, which has to read
-    # the corpus; absent until that has run.
+    # score the text the dedup stages lost; absent until `duplication` has run
     unmatched_path = args.data_root / "interim" / "dedup-unmatched.jsonl"
     if unmatched_path.is_file():
         lost = lost_text_rows(read_jsonl(unmatched_path), verdicts)
@@ -1278,6 +1310,7 @@ def main() -> None:
             )
         written.append(write_csv(args.tables / "dedup-lost-text.csv", lost))
 
+    # describe the datasets
     adjudication_labels_path = args.data_root / "final" / "human-labels-adjudication.jsonl"
     written += [
         write_csv(args.tables / "dataset-corpus-statistics.csv", corpus_dataset_rows(funnel, args.extract_config)),
@@ -1296,9 +1329,10 @@ def main() -> None:
         ),
     ]
 
+    # score the losses and the adjudications
     losses = loss_rows(funnel)
     written.append(write_csv(args.tables / "source-losses.csv", losses))
-    # Labelled by hand in label.py (--set adjudication), then frozen to final/.
+    # score the hand labels from label.py (--set adjudication)
     adjudicated_path = args.data_root / "final" / "human-labels-adjudication.jsonl"
     if adjudicated_path.is_file():
         adjudicated = adjudication_rows(
@@ -1311,6 +1345,7 @@ def main() -> None:
             )
         written.append(write_csv(args.tables / "adjudication.csv", adjudicated))
 
+    # draw the figures
     written += draw_figures(args.figures, pooled, per_source, pairwise, losses, throughput)
     for path in written:
         print(f"wrote {path}")

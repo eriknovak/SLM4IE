@@ -35,7 +35,6 @@ import dataclasses
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from slm4ie.utils.parallel import configure_script_logging
 from slm4ie.tokenizers.evaluate import evaluate_sweep
@@ -46,7 +45,23 @@ from slm4ie.tokenizers.train import corpus_split_for, prepare_inputs, resolve_sw
 from slm4ie.utils.cli import add_workers
 from slm4ie.utils.mlflow import DEFAULT_TRACKING_URI, resolve_tracking_uri
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
+
+BYTES_PER_MIB = 1024 * 1024
+FAILED_EXIT_CODE = 2
+NO_ARTIFACTS_EXIT_CODE = 1
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _add_config_argument(parser: argparse.ArgumentParser) -> None:
@@ -93,7 +108,7 @@ def _add_tier_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
@@ -158,7 +173,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _select_runs(cfg: SweepConfig, args: argparse.Namespace) -> List[str]:
+def _select_runs(cfg: SweepConfig, args: argparse.Namespace) -> list[str]:
     """Resolve the run keys named by the CLI selection.
 
     Args:
@@ -175,10 +190,10 @@ def _select_runs(cfg: SweepConfig, args: argparse.Namespace) -> List[str]:
         return resolve_sweep_runs(cfg, all_runs=args.all, tokenizer=args.tokenizer, vocab_size=args.vocab_size)
     except ValueError as exc:
         logger.error("%s", exc)
-        sys.exit(2)
+        sys.exit(FAILED_EXIT_CODE)
 
 
-def _trained_runs(cfg: SweepConfig, args: argparse.Namespace) -> List[str]:
+def _trained_runs(cfg: SweepConfig, args: argparse.Namespace) -> list[str]:
     """Resolve the selection down to runs that have a trained artifact.
 
     Args:
@@ -194,7 +209,7 @@ def _trained_runs(cfg: SweepConfig, args: argparse.Namespace) -> List[str]:
     keys = [k for k in _select_runs(cfg, args) if (cfg.output_root / k / "metadata.json").exists()]
     if not keys:
         logger.error("No trained artifacts found under %s. Run `sweep_tokenizers.py train` first.", cfg.output_root)
-        sys.exit(1)
+        sys.exit(NO_ARTIFACTS_EXIT_CODE)
     return keys
 
 
@@ -209,7 +224,7 @@ def _describe(path: Path) -> str:
         cannot be read.
     """
     try:
-        mib = path.stat().st_size / (1024 * 1024)
+        mib = path.stat().st_size / BYTES_PER_MIB
     except OSError:
         return str(path)
     return f"{path} ({mib:.1f} MiB)"
@@ -227,8 +242,12 @@ def _run_sample(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """
     configure_script_logging(parallel=False, console_level=logging.INFO)
     cfg.output_root.mkdir(parents=True, exist_ok=True)
+
+    # prepare the training sample and lexicon
     max_workers = max(1, args.max_workers)
     sample_path, lexicon_path = prepare_inputs(cfg, force=args.force, max_workers=max_workers)
+
+    # materialize the evaluation sample
     split = corpus_split_for(cfg, max_workers)
     if split is not None and (args.force or not cfg.eval_sample_path.exists()):
         materialize_sample(cfg.corpus_root, cfg.eval_budget, cfg.eval_sample_path, split, "eval")
@@ -236,12 +255,14 @@ def _run_sample(cfg: SweepConfig, args: argparse.Namespace) -> int:
     elif split is not None:
         check_sample_side(cfg.eval_sample_path, "eval")
 
+    # report what is ready
     logger.info("Training sample ready: %s", _describe(sample_path))
     if lexicon_path is not None:
         logger.info("Morpheme lexicon ready: %s", _describe(lexicon_path))
     else:
         logger.info("No morphological backend in the sweep; lexicon not built.")
 
+    # check the sample exists
     if not sample_path.exists():
         logger.error("Sample was not materialized: %s", sample_path)
         return 1
@@ -263,7 +284,7 @@ def _run_train(cfg: SweepConfig, args: argparse.Namespace) -> int:
         logger.warning("No runs selected; nothing to do.")
         return 0
     summary = train_sweep(cfg, keys, force=args.force, max_workers=args.max_workers)
-    return 2 if summary.failed else 0
+    return FAILED_EXIT_CODE if summary.failed else 0
 
 
 def _run_evaluate(cfg: SweepConfig, args: argparse.Namespace) -> int:
@@ -284,7 +305,7 @@ def _run_evaluate(cfg: SweepConfig, args: argparse.Namespace) -> int:
         n_resamples=args.n_resamples,
         max_workers=args.max_workers,
     )
-    return 2 if summary.failed else 0
+    return FAILED_EXIT_CODE if summary.failed else 0
 
 
 def _run_export(cfg: SweepConfig, args: argparse.Namespace) -> int:
@@ -299,12 +320,19 @@ def _run_export(cfg: SweepConfig, args: argparse.Namespace) -> int:
     """
     configure_script_logging(parallel=False, console_level=logging.INFO)
     summary = export_sweep_runs(cfg.output_root, _trained_runs(cfg, args))
-    return 2 if summary.failed else 0
+    return FAILED_EXIT_CODE if summary.failed else 0
+
+
+# ===============================
+# Main function
+# ===============================
 
 
 def main() -> None:
     """Dispatch the selected subcommand."""
     args = parse_args()
+
+    # load the config and tag the run tier
     cfg = load_sweep_config(args.config)
     if getattr(args, "tier", None):
         cfg = dataclasses.replace(cfg, mlflow_tags={**cfg.mlflow_tags, "tier": args.tier})
@@ -313,6 +341,8 @@ def main() -> None:
             sys.exit(
                 f"--tier tracked needs MLFLOW_TRACKING_URI set; refusing the local {DEFAULT_TRACKING_URI} fallback"
             )
+
+    # dispatch the subcommand
     handlers = {
         "sample": _run_sample,
         "train": _run_train,

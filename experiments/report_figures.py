@@ -11,45 +11,54 @@ themes, so no dark variant is drawn and nothing is ever inverted.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Union
 
 import matplotlib
 from datachart.config import config
 from datachart.utils import save_figure as save_datachart_figure
 
+# ===============================
+# Defaults
+# ===============================
+
 THEME = "slm4ie"
 
-# The report renders figure text in its own face. datachart drops font names
-# that are not installed on the machine drawing the figure, so the stack is
-# written into the saved SVG instead, where the reader's browser resolves it.
+# the report's font stack, written into the SVG because datachart drops fonts not installed here
 FONT_STACK = "'Instrument Sans', 'Helvetica', 'Arial', sans-serif"
 FONT_FAMILY = re.compile(r"font-family: [^;\"]+")
-# matplotlib stamps the save time into the SVG; without it a rerun on unchanged
-# tables leaves the committed file untouched
+# drop the save time matplotlib stamps into the SVG, so reruns leave the file unchanged
 SVG_DATE = re.compile(r"\s*<dc:date>[^<]*</dc:date>")
 
+
+# ===============================
+# Check theme
+# ===============================
+
+# fail unless datachart started in the project theme
 if config.theme != THEME:
     raise RuntimeError(
         f"datachart started in the {config.theme!r} theme, not {THEME!r}: "
         "install the analysis group (`uv sync --group analysis`) so datachart-themes is present"
     )
-# text stays text rather than glyph outlines: smaller SVGs, selectable labels,
-# and the report's font face resolves at render
+
+# keep text as text so the report's font face resolves at render
 matplotlib.rcParams["svg.fonttype"] = "none"
-# a fixed salt keeps clip-path and marker ids stable, so a rerun on unchanged
-# tables leaves the committed file untouched
+# fixed salt keeps clip-path and marker ids stable across reruns
 matplotlib.rcParams["svg.hashsalt"] = THEME
 
+# ===============================
+# Main function
+# ===============================
 
-def save_figure(figure: Union[object, Callable[[], object]], path: Union[str, Path]) -> None:
+
+def save_figure(figure: object | Callable[[], object], path: str | Path) -> None:
     """Writes one figure, transparent, drawn for the report's light plate.
 
     Args:
-        figure (Union[object, Callable[[], object]]): The datachart figure, or a
-            zero-argument callable that builds it; either draws in the project
-            theme, which datachart starts in.
-        path (Union[str, Path]): Destination of the figure.
+        figure: The datachart figure, or a zero-argument callable that builds
+            it; either draws in the project theme, which datachart starts in.
+        path: Destination of the figure.
 
     Raises:
         ValueError: If `path` has no suffix.
@@ -57,9 +66,13 @@ def save_figure(figure: Union[object, Callable[[], object]], path: Union[str, Pa
     target = Path(path)
     if not target.suffix:
         raise ValueError(f"figure path needs a suffix: {target}")
+
+    # build the figure if given a builder, then save it
     if callable(figure):
         figure = figure()
     save_datachart_figure(figure, str(target), transparent=True)
+
+    # pin the font stack and drop the save time in SVGs
     if target.suffix.lower() == ".svg":
         text = target.read_text(encoding="utf-8")
         text = SVG_DATE.sub("", FONT_FAMILY.sub(f"font-family: {FONT_STACK}", text))

@@ -33,7 +33,6 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from slm4ie.data.download.run import download_datasets
 from slm4ie.data.extract.run import extract_datasets
@@ -49,7 +48,22 @@ from slm4ie.utils.cli import (
     validate_keys,
 )
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
+
+ERROR_EXIT_CODE = 1
+FAILED_EXIT_CODE = 2
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _add_download_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -182,7 +196,7 @@ def _add_tokenization_parser(subparsers: argparse._SubParsersAction) -> None:
     add_workers(parser, "Datasets processed in parallel. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
@@ -223,6 +237,7 @@ def _run_download(args: argparse.Namespace) -> int:
     log_dir = stamped_log_dir("download")
     print(f"Logs: {log_dir}", file=sys.stderr)
 
+    # download the datasets
     try:
         download_datasets(
             config_path=config_path,
@@ -236,7 +251,7 @@ def _run_download(args: argparse.Namespace) -> int:
         )
     except Exception as exc:
         logger.error("Download failed: %s", exc)
-        return 1
+        return ERROR_EXIT_CODE
     return 0
 
 
@@ -254,6 +269,7 @@ def _run_extract(args: argparse.Namespace) -> int:
     log_dir = stamped_log_dir("extract")
     print(f"Logs: {log_dir}", file=sys.stderr)
 
+    # extract the datasets
     try:
         extract_datasets(
             config_path=config_path,
@@ -267,7 +283,7 @@ def _run_extract(args: argparse.Namespace) -> int:
         )
     except Exception as exc:
         logger.error("Extraction failed: %s", exc)
-        return 1
+        return ERROR_EXIT_CODE
     return 0
 
 
@@ -281,6 +297,8 @@ def _run_tasks(args: argparse.Namespace) -> int:
         Process exit code.
     """
     config_path = resolve_config(args.config, "configs", "data", "tasks.yaml")
+
+    # convert the task entries
     try:
         summary = convert_tasks(
             config_path=config_path,
@@ -291,10 +309,10 @@ def _run_tasks(args: argparse.Namespace) -> int:
             options={"variant": args.variant},
         )
     except KeyError as exc:
-        # KeyError's str() wraps the message in quotes; print the message itself.
+        # print the message itself: str(KeyError) wraps it in quotes
         logger.error("%s", exc.args[0] if exc.args else exc)
-        return 1
-    return 2 if summary.failed else 0
+        return ERROR_EXIT_CODE
+    return FAILED_EXIT_CODE if summary.failed else 0
 
 
 def _run_tokenization(args: argparse.Namespace) -> int:
@@ -306,6 +324,7 @@ def _run_tokenization(args: argparse.Namespace) -> int:
     Returns:
         Process exit code.
     """
+    # convert the datasets
     summary = convert_tokenization_datasets(
         config_path=resolve_config(args.config, "configs", "data", "tokenization.yaml"),
         download_config_path=resolve_config(args.download_config, "configs", "data", "download.yaml"),
@@ -313,18 +332,21 @@ def _run_tokenization(args: argparse.Namespace) -> int:
         force=args.force,
         max_workers=args.max_workers,
     )
+
+    # map the summary to an exit code
     if summary.failed:
-        return 2
-    # An explicitly named dataset that produced nothing is a failed request,
-    # unlike a catalog-wide run where a missing download is expected.
+        return FAILED_EXIT_CODE
+    # a named dataset that produced nothing failed; in an --all run a missing download is expected
     if not args.all and summary.skipped:
-        return 1
+        return ERROR_EXIT_CODE
     return 0
 
 
 def main() -> None:
     """Dispatch the selected subcommand."""
     args = parse_args()
+
+    # dispatch the subcommand
     handlers = {
         "download": _run_download,
         "extract": _run_extract,

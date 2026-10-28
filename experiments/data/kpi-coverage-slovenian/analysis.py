@@ -24,15 +24,16 @@ import statistics
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, NamedTuple
 
 import sklearn
 import yaml
 from datachart.charts import BarChart, DumbbellChart, LineChart
 from datachart.constants import AXIS_SCALE, BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
 
+# make the shared figure helper importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
+from report_figures import save_figure  # noqa: E402
 
 from slm4ie.data.curate.inspect.domains import DecisionRule, DomainLexicons, assign_domain, load_lexicons, score_text
 from slm4ie.data.curate.inspect.judge import DOMAINS
@@ -41,6 +42,10 @@ from slm4ie.data.curate.inspect.supervised import DomainClassifier, fit_classifi
 from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.utils.config import load_yaml
 
+# ===============================
+# Defaults
+# ===============================
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 TABLES_DIR = HERE / "tables"
@@ -48,7 +53,7 @@ FIGURES_DIR = HERE / "figures"
 EXTRACT_CONFIG = ROOT / "configs" / "data" / "extract.yaml"
 
 # The validated build (D1) and the shared build tabled beside it, with the commit each was built at.
-BUILDS: Dict[str, Path] = {
+BUILDS: dict[str, Path] = {
     "loosened": ROOT
     / "data"
     / "experiments"
@@ -64,24 +69,11 @@ BUILD_COMMITS = {"loosened": "8e21f67", "baseline": "2ece205"}
 SCOPED_STAGES = ("00_convert", "01_language", "02_spam", "03_quality", "04_repetition")
 # Exact dedup runs over the whole corpus, so its per-source counts are read off its shards.
 COUNTED_STAGE = "05_exact_dedup"
+SENTENCE_STAGE = "06_sentence_dedup"
+STATISTICS_STAGE = "07_statistics"
 COUNT_WORKERS = 20
-
-
-def stage_column(stage: str) -> str:
-    """Name a funnel column after a stage folder, without the folder's order prefix.
-
-    Args:
-        stage: A stage folder name such as `03_quality`.
-
-    Returns:
-        The column name, such as `quality`.
-    """
-    return stage[3:]
-
-
-#: The documents after each stage, in pipeline order (M1).
-STAGE_COLUMNS = (*(stage_column(stage) for stage in SCOPED_STAGES), "exact_dedup", "sentence_dedup")
-FUNNEL_COLUMNS = (*STAGE_COLUMNS, "words_final", "tokens_estimated")
+# a stage folder starts with its two-digit order and an underscore
+STAGE_PREFIX_CHARS = 3
 
 GOLD_DATA = ROOT / "data" / "experiments" / "data" / "curation-quality-slovenian"
 GOLD_SAMPLE = GOLD_DATA / "interim" / "sample.jsonl"
@@ -100,6 +92,7 @@ SPLIT_DIR = EXPERIMENT_DATA / "final" / "gold-tune-test-split"
 SPLIT_SEED = 20261020
 # Copies of one text are grouped on this many opening characters, so no copy lands on both sides.
 GROUP_CHARS = 500
+GROUP_KEY_CHARS = 16
 WHITESPACE = re.compile(r"\s+")
 
 # A token is estimated as two words, the conversion every KPI reading in the project uses.
@@ -111,6 +104,7 @@ SEED_TOP = 150
 SEED_MIN_COUNT = 5
 SEED_MIN_CHARS = 2
 SEED_PRIOR = 0.01
+SEED_SCORE_DECIMALS = 2
 
 #: The lexicon classifier's config; its rule must carry the tune-side pick (M3).
 LEXICON_CONFIG = HERE / "configs" / "classifier-lexicon.yaml"
@@ -118,25 +112,25 @@ LEXICON_CONFIG = HERE / "configs" / "classifier-lexicon.yaml"
 LEXICON_FREEZE = EXPERIMENT_DATA / "final" / "classifier-lexicon.frozen.json"
 #: The supervised candidates tried when the lexicons fail the gate (M4), and where each fit is kept.
 SUPERVISED_CONFIG = HERE / "configs" / "classifier-supervised.yaml"
-SUPERVISED_CANDIDATES: Tuple[str, ...] = ("tfidf", "embeddings")
+SUPERVISED_CANDIDATES: tuple[str, ...] = ("tfidf", "embeddings")
 SUPERVISED_MODELS = EXPERIMENT_DATA / "final" / "classifier-supervised"
 #: The thresholds and margins searched on the tune side, in weighted hits per thousand words.
-GRID_THRESHOLDS: Tuple[float, ...] = tuple(float(value) for value in range(0, 101, 5))
-GRID_MARGINS: Tuple[float, ...] = tuple(float(value) for value in range(0, 41, 5))
+GRID_THRESHOLDS: tuple[float, ...] = tuple(float(value) for value in range(0, 101, 5))
+GRID_MARGINS: tuple[float, ...] = tuple(float(value) for value in range(0, 41, 5))
 #: The gate's floors on the test side (D3), and the domain whose precision it reads off that domain's own source.
 GATE_MACRO_F1 = 0.7
 GATE_PRECISION = 0.8
 GATE_DOMAIN = "medical"
 #: Judge labels folded into one for scoring and fitting (D2): both are science writing, and the judge's
 #: line between them is the classifier's largest confusion.
-LABEL_MERGE: Dict[str, str] = {"scientific": "science", "academic": "science"}
+LABEL_MERGE: dict[str, str] = {"scientific": "science", "academic": "science"}
 #: The labels scored, the judge's order with the merged ones collapsed into one at the first's place.
-LABELS: Tuple[str, ...] = tuple(dict.fromkeys(LABEL_MERGE.get(label, label) for label in DOMAINS))
+LABELS: tuple[str, ...] = tuple(dict.fromkeys(LABEL_MERGE.get(label, label) for label in DOMAINS))
 #: Scores and metrics are tabled, and rules compared, at this many decimals.
 DECIMALS = 4
 
 #: Each build's corpus pass (M5): documents and words per source and assigned label, and the gold ids it holds.
-CORPUS_LABELS: Dict[str, Path] = {build: EXPERIMENT_DATA / "final" / f"corpus-labels-{build}.json" for build in BUILDS}
+CORPUS_LABELS: dict[str, Path] = {build: EXPERIMENT_DATA / "final" / f"corpus-labels-{build}.json" for build in BUILDS}
 #: The candidate whose saved fit labelled both corpora (M5), and the hash both tracked passes logged for it;
 #: a refit stops the analysis, since the corpus counts would no longer match the gate.
 CORPUS_CLASSIFIER = "tfidf"
@@ -146,15 +140,39 @@ CORPUS_TOKEN_TARGET = 5_000_000_000
 DOMAIN_TOKEN_TARGET = 500_000
 DOMAIN_DOCUMENT_TARGET = 10_000
 #: The domains the per-domain targets are read for, science folded (D2).
-TARGET_DOMAINS: Tuple[str, ...] = ("science", "medical")
+TARGET_DOMAINS: tuple[str, ...] = ("science", "medical")
 #: What a count counts: words read as two tokens each, words read as one token each, and documents.
-MEASURES: Tuple[str, ...] = ("estimated tokens", "words", "documents")
+MEASURES: tuple[str, ...] = ("estimated tokens", "words", "documents")
 #: A document counts under its source's label, or under the label the classifier assigned it.
-LABELLING_RULES: Tuple[str, ...] = ("source", "document")
+LABELLING_RULES: tuple[str, ...] = ("source", "document")
 #: Every source, or only those a public release may carry, mapped to whether the gated ones are left out.
-SOURCE_SETS: Dict[str, bool] = {"all": False, "open": True}
+SOURCE_SETS: dict[str, bool] = {"all": False, "open": True}
 #: The catalogue's annotation value for datasets annotated with extraction spans, KPI 2's second reading.
 IE_ANNOTATION = "IE spans"
+#: The notes written beside the frozen split and the frozen lexicon hash.
+SPLIT_NOTE = "Gold halved per judge domain, copies together (D3): tune picks the classifier, test reads its gate."
+LEXICON_FREEZE_NOTE = "The lexicons the test side was first read with (M3); a changed lexicon reads it again."
+
+# ===============================
+# Helper functions
+# ===============================
+
+
+def stage_column(stage: str) -> str:
+    """Name a funnel column after a stage folder, without the folder's order prefix.
+
+    Args:
+        stage: A stage folder name such as `03_quality`.
+
+    Returns:
+        The column name, such as `quality`.
+    """
+    return stage[STAGE_PREFIX_CHARS:]
+
+
+#: The documents after each stage, in pipeline order (M1).
+STAGE_COLUMNS = (*(stage_column(stage) for stage in SCOPED_STAGES), "exact_dedup", "sentence_dedup")
+FUNNEL_COLUMNS = (*STAGE_COLUMNS, "words_final", "tokens_estimated")
 
 
 class Labelled(NamedTuple):
@@ -171,7 +189,7 @@ class Labelled(NamedTuple):
     fallback: str
 
 
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
     """Write rows as a CSV with the first row's keys as the header.
 
     Args:
@@ -189,7 +207,7 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     return path
 
 
-def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read one JSON object per line.
 
     Args:
@@ -202,7 +220,7 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def read_sources(extract_config: Path) -> Dict[str, Dict[str, str]]:
+def read_sources(extract_config: Path) -> dict[str, dict[str, str]]:
     """Read each source's domain label and whether it may be redistributed.
 
     Args:
@@ -230,13 +248,13 @@ def check_build_commit(build: str, pretrain_dir: Path) -> None:
     Raises:
         ValueError: If the statistics sentinel names another commit.
     """
-    sentinel = read_sentinel(pretrain_dir / "07_statistics")
+    sentinel = read_sentinel(pretrain_dir / STATISTICS_STAGE)
     commit = sentinel.info.get("git_commit", "unknown") if sentinel else "unknown"
     if not commit.startswith(BUILD_COMMITS[build]):
         raise ValueError(f"{build} build statistics written at {commit}, record names {BUILD_COMMITS[build]}")
 
 
-def build_rows(builds: Dict[str, Path], sources: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+def build_rows(builds: dict[str, Path], sources: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     """Read the final-stage size of every source in each build.
 
     Args:
@@ -247,10 +265,10 @@ def build_rows(builds: Dict[str, Path], sources: Dict[str, Dict[str, str]]) -> L
         One row per build and source with its domain label, access, documents,
         words, mean words per document and estimated tokens.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for build, pretrain_dir in builds.items():
         check_build_commit(build, pretrain_dir)
-        aggregate = json.loads((pretrain_dir / "07_statistics" / "aggregate.json").read_text(encoding="utf-8"))
+        aggregate = json.loads((pretrain_dir / STATISTICS_STAGE / "aggregate.json").read_text(encoding="utf-8"))
         for source, final in read_final_statistics(pretrain_dir).items():
             rows.append(
                 {
@@ -270,7 +288,7 @@ def build_rows(builds: Dict[str, Path], sources: Dict[str, Dict[str, str]]) -> L
     return rows
 
 
-def read_final_statistics(pretrain_dir: Path) -> Dict[str, Dict[str, Any]]:
+def read_final_statistics(pretrain_dir: Path) -> dict[str, dict[str, Any]]:
     """Read the statistics stage's file per source.
 
     Args:
@@ -280,13 +298,13 @@ def read_final_statistics(pretrain_dir: Path) -> Dict[str, Dict[str, Any]]:
         The statistics per source, in source order. A source that reached the
         final corpus with no document has no file and is absent.
     """
-    files = sorted((pretrain_dir / "07_statistics" / "per_dataset").glob("*.json"))
+    files = sorted((pretrain_dir / STATISTICS_STAGE / "per_dataset").glob("*.json"))
     return {path.stem: json.loads(path.read_text(encoding="utf-8")) for path in files}
 
 
 def funnel_source_rows(
-    build: str, pretrain_dir: Path, exact_counts: Dict[str, int], sources: Dict[str, Dict[str, str]]
-) -> List[Dict[str, Any]]:
+    build: str, pretrain_dir: Path, exact_counts: dict[str, int], sources: dict[str, dict[str, str]]
+) -> list[dict[str, Any]]:
     """Follow each source's documents through every curation stage of one build.
 
     The per-source stages stamp the documents they read and wrote in their
@@ -310,15 +328,18 @@ def funnel_source_rows(
         ValueError: If a stage read other than what the stage before it wrote,
             or the statistics stage names a source no stage converted.
     """
-    scoped: Dict[str, Dict[str, Tuple[int, int]]] = defaultdict(dict)
+    # read the per-source stage sentinels and the final statistics
+    scoped: dict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
     for stage, source, read, written in iter_stage_sentinels(pretrain_dir, SCOPED_STAGES):
         scoped[source][stage] = (read, written)
     finals = read_final_statistics(pretrain_dir)
     if unconverted := sorted(set(finals) - set(scoped)):
         raise ValueError(f"{build}: statistics name sources no stage converted: {unconverted}")
-    rows: List[Dict[str, Any]] = []
+
+    # follow each source through the stages
+    rows: list[dict[str, Any]] = []
     for source in sorted(scoped):
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "build": build,
             "source": source,
             "source_domain": sources[source]["domain"],
@@ -335,13 +356,15 @@ def funnel_source_rows(
         row["sentence_dedup"] = final["doc_count"]
         row["words_final"] = final["word_count"]
         row["tokens_estimated"] = final["word_count"] * TOKENS_PER_WORD
-        row["retained"] = round(row["sentence_dedup"] / row["convert"], 4)
+        row["retained"] = round(row["sentence_dedup"] / row["convert"], DECIMALS)
         rows.append(row)
+
+    # check the sums against the dedup sentinels
     check_corpus_stages(build, pretrain_dir, rows)
     return rows
 
 
-def check_corpus_stages(build: str, pretrain_dir: Path, rows: List[Dict[str, Any]]) -> None:
+def check_corpus_stages(build: str, pretrain_dir: Path, rows: list[dict[str, Any]]) -> None:
     """Fail unless the per-source counts add up to what the two dedup stages recorded.
 
     Args:
@@ -353,7 +376,7 @@ def check_corpus_stages(build: str, pretrain_dir: Path, rows: List[Dict[str, Any
         ValueError: If a column's sum differs from the corpus-wide sentinel.
     """
     exact = read_sentinel(pretrain_dir / COUNTED_STAGE)
-    sentence = read_sentinel(pretrain_dir / "06_sentence_dedup")
+    sentence = read_sentinel(pretrain_dir / SENTENCE_STAGE)
     if exact is None or sentence is None:
         raise ValueError(f"{build}: a dedup stage under {pretrain_dir} has no completed sentinel")
     expected = [
@@ -370,7 +393,7 @@ def check_corpus_stages(build: str, pretrain_dir: Path, rows: List[Dict[str, Any
             )
 
 
-def funnel_domain_rows(source_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def funnel_domain_rows(source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Sum the per-source funnel over the sources sharing a domain label.
 
     Args:
@@ -381,7 +404,7 @@ def funnel_domain_rows(source_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
         its source count, its documents after every stage, its final words and
         estimated tokens, and the share of its converted documents kept.
     """
-    totals: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    totals: dict[tuple[str, str], dict[str, Any]] = {}
     for row in source_rows:
         total = totals.setdefault(
             (row["build"], row["source_domain"]),
@@ -393,7 +416,7 @@ def funnel_domain_rows(source_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
             total[column] += row[column]
     rows = sorted(totals.values(), key=lambda total: (total["build"], -total["tokens_estimated"]))
     for row in rows:
-        row["retained"] = round(row["sentence_dedup"] / row["convert"], 4)
+        row["retained"] = round(row["sentence_dedup"] / row["convert"], DECIMALS)
     return rows
 
 
@@ -412,7 +435,7 @@ def check_frozen(path: Path, expected: str) -> None:
         raise ValueError(f"{path.name} hashes to {actual}, frozen as {expected}")
 
 
-def gold_documents(sample_path: Path, verdicts_path: Path) -> List[Dict[str, Any]]:
+def gold_documents(sample_path: Path, verdicts_path: Path) -> list[dict[str, Any]]:
     """Join the judged sample to its verdicts, keeping what the classifier is scored on.
 
     The kept flag is the decision of the stage the document was drawn at, in
@@ -461,10 +484,10 @@ def text_group(text: str) -> str:
         The hash of its opening characters with whitespace and case folded.
     """
     opening = WHITESPACE.sub(" ", text.lower()).strip()[:GROUP_CHARS]
-    return hashlib.sha256(opening.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(opening.encode("utf-8")).hexdigest()[:GROUP_KEY_CHARS]
 
 
-def split_gold(gold: List[Dict[str, Any]], seed: int) -> Dict[str, str]:
+def split_gold(gold: list[dict[str, Any]], seed: int) -> dict[str, str]:
     """Halve the gold into a tune and a test side, copies together, domains balanced.
 
     Each group of copies is filed under the judge domain most of its members
@@ -479,14 +502,17 @@ def split_gold(gold: List[Dict[str, Any]], seed: int) -> Dict[str, str]:
     Returns:
         `tune` or `test` per document id.
     """
-    members_of: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    # group the copies under their majority judge domain
+    members_of: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for document in gold:
         members_of[document["group"]].append(document)
-    groups: Dict[str, List[List[str]]] = defaultdict(list)
+    groups: dict[str, list[list[str]]] = defaultdict(list)
     for members in members_of.values():
         domain = Counter(document["judge_domain"] for document in members).most_common(1)[0][0]
         groups[domain].append(sorted(document["id"] for document in members))
-    side_of: Dict[str, str] = {}
+
+    # deal the groups of each domain to the smaller side
+    side_of: dict[str, str] = {}
     for domain in sorted(groups):
         members = sorted(groups[domain])
         random.Random(f"{seed}:{domain}").shuffle(members)
@@ -498,7 +524,7 @@ def split_gold(gold: List[Dict[str, Any]], seed: int) -> Dict[str, str]:
     return side_of
 
 
-def write_split(gold: List[Dict[str, Any]], side_of: Dict[str, str], split_dir: Path, seed: int) -> None:
+def write_split(gold: list[dict[str, Any]], side_of: dict[str, str], split_dir: Path, seed: int) -> None:
     """Write the two halves to `final/`, or check that what is there is the same split.
 
     Args:
@@ -510,6 +536,7 @@ def write_split(gold: List[Dict[str, Any]], side_of: Dict[str, str], split_dir: 
     Raises:
         ValueError: If a half already on disk differs from the one computed now.
     """
+    # write each half, or check it against the one on disk
     split_dir.mkdir(parents=True, exist_ok=True)
     for side in ("tune", "test"):
         lines = [
@@ -522,18 +549,20 @@ def write_split(gold: List[Dict[str, Any]], side_of: Dict[str, str], split_dir: 
         if path.exists() and path.read_text(encoding="utf-8") != content:
             raise ValueError(f"{path} differs from the split computed under seed {seed}; final/ is fixed")
         path.write_text(content, encoding="utf-8")
+
+    # write the meta file
     meta = {
         "seed": seed,
         "group_chars": GROUP_CHARS,
         "sample_sha256": GOLD_SAMPLE_SHA256,
         "tune": sum(side == "tune" for side in side_of.values()),
         "test": sum(side == "test" for side in side_of.values()),
-        "note": "Gold halved per judge domain, copies together (D3): tune picks the classifier, test reads its gate.",
+        "note": SPLIT_NOTE,
     }
     (split_dir / "split.meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
-def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[str, Any]]:
+def lexicon_seed_rows(sample_path: Path, gold: list[dict[str, Any]], side_of: dict[str, str]) -> list[dict[str, Any]]:
     """Rank, per judge domain, the words most distinctive of its tune-side documents (the M2 seed).
 
     A word's score is its log-odds of appearing in the domain's documents
@@ -550,8 +579,9 @@ def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Di
     Returns:
         The top words per judge domain with their score and counts, best first.
     """
+    # count the words of the tune-side documents per domain
     domain_of = {document["id"]: document["judge_domain"] for document in gold if side_of[document["id"]] == "tune"}
-    per_domain: Dict[str, Counter] = defaultdict(Counter)
+    per_domain: dict[str, Counter] = defaultdict(Counter)
     overall: Counter = Counter()
     for document in read_jsonl(sample_path):
         if document["id"] not in domain_of:
@@ -560,8 +590,10 @@ def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Di
         counts = Counter(word for word in words if len(word) > SEED_MIN_CHARS and not word.isdigit())
         per_domain[domain_of[document["id"]]].update(counts)
         overall.update(counts)
+
+    # rank each domain's words by smoothed log-odds
     total = sum(overall.values())
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for domain in sorted(per_domain):
         counts = per_domain[domain]
         in_domain = sum(counts.values())
@@ -581,7 +613,7 @@ def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Di
                 "judge_domain": domain,
                 "rank": rank,
                 "word": word,
-                "z": round(z, 2),
+                "z": round(z, SEED_SCORE_DECIMALS),
                 "tune_domain": count,
                 "tune_all": all_,
             }
@@ -590,7 +622,7 @@ def lexicon_seed_rows(sample_path: Path, gold: List[Dict[str, Any]], side_of: Di
     return rows
 
 
-def gold_texts(sample_path: Path, gold: List[Dict[str, Any]]) -> Dict[str, str]:
+def gold_texts(sample_path: Path, gold: list[dict[str, Any]]) -> dict[str, str]:
     """Read the text of every judged document.
 
     Args:
@@ -605,11 +637,18 @@ def gold_texts(sample_path: Path, gold: List[Dict[str, Any]]) -> Dict[str, str]:
 
 
 def merge_label(label: str) -> str:
-    """Return the label a judge or classifier label is scored as, folding the merged ones ([D2])."""
+    """Return the label a judge or classifier label is scored as, folding the merged ones ([D2]).
+
+    Args:
+        label: A judge or classifier label.
+
+    Returns:
+        The label it is scored as.
+    """
     return LABEL_MERGE.get(label, label)
 
 
-def score_gold(texts: Dict[str, str], gold: List[Dict[str, Any]], lexicons: DomainLexicons) -> List[Dict[str, Any]]:
+def score_gold(texts: dict[str, str], gold: list[dict[str, Any]], lexicons: DomainLexicons) -> list[dict[str, Any]]:
     """Score every judged document against the lexicons once, so every rule is read on the same scores.
 
     Args:
@@ -637,7 +676,7 @@ def score_gold(texts: Dict[str, str], gold: List[Dict[str, Any]], lexicons: Doma
     return rows
 
 
-def label_scored(scored: List[Dict[str, Any]], rule: DecisionRule) -> List[Labelled]:
+def label_scored(scored: list[dict[str, Any]], rule: DecisionRule) -> list[Labelled]:
     """Read one decision rule over scored documents.
 
     Args:
@@ -657,7 +696,7 @@ def label_scored(scored: List[Dict[str, Any]], rule: DecisionRule) -> List[Label
     ]
 
 
-def label_metrics(labelled: List[Labelled], labels: Tuple[str, ...]) -> Dict[str, Dict[str, float]]:
+def label_metrics(labelled: list[Labelled], labels: tuple[str, ...]) -> dict[str, dict[str, float]]:
     """Compute precision, recall and F1 per label.
 
     Args:
@@ -686,24 +725,46 @@ def label_metrics(labelled: List[Labelled], labels: Tuple[str, ...]) -> Dict[str
     return metrics
 
 
-def macro_f1(metrics: Dict[str, Dict[str, float]]) -> float:
-    """Average F1 over every label of `label_metrics`, each label counting once whatever its size."""
+def macro_f1(metrics: dict[str, dict[str, float]]) -> float:
+    """Average F1 over every label of `label_metrics`, each label counting once whatever its size.
+
+    Args:
+        metrics: The result of `label_metrics`.
+
+    Returns:
+        The macro-averaged F1.
+    """
     return statistics.mean(label["f1"] for label in metrics.values())
 
 
-def off_source(labelled: List[Labelled], label: str) -> List[Labelled]:
-    """Keep the documents whose fallback label is not `label`, where only the lexicons can assign it."""
+def off_source(labelled: list[Labelled], label: str) -> list[Labelled]:
+    """Keep the documents whose fallback label is not `label`, where only the lexicons can assign it.
+
+    Args:
+        labelled: Judge domain, assigned label and fallback label per document.
+        label: The label whose own-source documents are left out.
+
+    Returns:
+        The documents kept.
+    """
     return [row for row in labelled if row.fallback != label]
 
 
-def rounded(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Round every float of a table row to `DECIMALS`, leaving counts and labels as they are."""
+def rounded(row: dict[str, Any]) -> dict[str, Any]:
+    """Round every float of a table row to `DECIMALS`, leaving counts and labels as they are.
+
+    Args:
+        row: A table row.
+
+    Returns:
+        The row with its floats rounded.
+    """
     return {key: round(value, DECIMALS) if isinstance(value, float) else value for key, value in row.items()}
 
 
 def rule_grid_rows(
-    scored: List[Dict[str, Any]], min_words: int, thresholds: Tuple[float, ...], margins: Tuple[float, ...]
-) -> List[Dict[str, Any]]:
+    scored: list[dict[str, Any]], min_words: int, thresholds: tuple[float, ...], margins: tuple[float, ...]
+) -> list[dict[str, Any]]:
     """Read every threshold and margin pair on the tune side and mark the pick.
 
     The pick is the pair with the highest macro-F1; ties go to the higher
@@ -739,7 +800,7 @@ def rule_grid_rows(
     return [{**row, "picked": row is picked} for row in rows]
 
 
-def check_rule_tuned(rule: DecisionRule, grid: List[Dict[str, Any]], config_path: Path) -> None:
+def check_rule_tuned(rule: DecisionRule, grid: list[dict[str, Any]], config_path: Path) -> None:
     """Stop unless the config's rule is the tune-side pick, so the test side is never read on an untuned rule.
 
     Args:
@@ -759,7 +820,14 @@ def check_rule_tuned(rule: DecisionRule, grid: List[Dict[str, Any]], config_path
 
 
 def settings_digest(settings: Any) -> str:
-    """Hash a JSON-serialisable value, the same way wherever a read is frozen."""
+    """Hash a JSON-serialisable value, the same way wherever a read is frozen.
+
+    Args:
+        settings: The value to hash.
+
+    Returns:
+        Its sha256 hex digest.
+    """
     return hashlib.sha256(json.dumps(settings, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
@@ -777,8 +845,9 @@ def check_lexicons_frozen(config_path: Path, freeze_path: Path) -> None:
     digest = settings_digest({key: config[key] for key in ("weights", "lexicons")})
     if not freeze_path.exists():
         freeze_path.parent.mkdir(parents=True, exist_ok=True)
-        note = "The lexicons the test side was first read with (M3); a changed lexicon reads it again."
-        freeze_path.write_text(json.dumps({"sha256": digest, "note": note}, indent=2) + "\n", encoding="utf-8")
+        freeze_path.write_text(
+            json.dumps({"sha256": digest, "note": LEXICON_FREEZE_NOTE}, indent=2) + "\n", encoding="utf-8"
+        )
         return
     expected = json.loads(freeze_path.read_text(encoding="utf-8"))["sha256"]
     if digest != expected:
@@ -788,7 +857,7 @@ def check_lexicons_frozen(config_path: Path, freeze_path: Path) -> None:
         )
 
 
-def gate_rows(labelled_by_side: Dict[str, List[Labelled]], settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+def gate_rows(labelled_by_side: dict[str, list[Labelled]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     """Read the gate's two numbers per side of the gold, with medical precision also off its own source.
 
     Args:
@@ -823,8 +892,8 @@ def gate_rows(labelled_by_side: Dict[str, List[Labelled]], settings: Dict[str, A
 
 
 def fit_or_load_candidate(
-    name: str, config_path: Path, tune: List[Dict[str, Any]], sample_sha256: str, models_dir: Path
-) -> Tuple[DomainClassifier, List[Dict[str, Any]]]:
+    name: str, config_path: Path, tune: list[dict[str, Any]], sample_sha256: str, models_dir: Path
+) -> tuple[DomainClassifier, list[dict[str, Any]]]:
     """Fit a supervised candidate on the tune side once, and reuse the saved fit after.
 
     The saved fit is what the test side is read with, so a change to anything
@@ -844,6 +913,7 @@ def fit_or_load_candidate(
     Raises:
         ValueError: If the saved fit came from other settings, documents or library than now.
     """
+    # hash everything the fit depends on
     config = load_yaml(config_path)
     digest = settings_digest(
         {
@@ -854,6 +924,7 @@ def fit_or_load_candidate(
             "scikit-learn": sklearn.__version__,
         }
     )
+    # reuse the saved fit when its inputs are unchanged
     model_path = models_dir / f"{name}.pkl"
     grid_path = models_dir / f"{name}.grid.json"
     if model_path.exists():
@@ -864,6 +935,8 @@ def fit_or_load_candidate(
                 f"delete {model_path} to refit, which reads the test side again"
             )
         return DomainClassifier.load(model_path), saved["grid"]
+
+    # fit on the tune side and save
     classifier, grid = fit_classifier(
         [document["text"] for document in tune],
         [document["judge_domain"] for document in tune],
@@ -876,7 +949,7 @@ def fit_or_load_candidate(
     return classifier, grid
 
 
-def label_predicted(scored: List[Dict[str, Any]], predicted: List[str]) -> List[Labelled]:
+def label_predicted(scored: list[dict[str, Any]], predicted: list[str]) -> list[Labelled]:
     """Pair each gold document with the label a classifier gave it.
 
     Args:
@@ -889,7 +962,7 @@ def label_predicted(scored: List[Dict[str, Any]], predicted: List[str]) -> List[
     return [Labelled(row["judge_domain"], label, row["fallback"]) for row, label in zip(scored, predicted)]
 
 
-def write_gate_tables(name: str, labelled: Dict[str, List[Labelled]], settings: Dict[str, Any]) -> bool:
+def write_gate_tables(name: str, labelled: dict[str, list[Labelled]], settings: dict[str, Any]) -> bool:
     """Write one classifier's gate, per-domain and confusion tables and print its test-side verdict.
 
     Args:
@@ -913,7 +986,7 @@ def write_gate_tables(name: str, labelled: Dict[str, List[Labelled]], settings: 
     return bool(test_gate["passes_gate"])
 
 
-def gate_domain_rows(labelled_by_side: Dict[str, List[Labelled]]) -> List[Dict[str, Any]]:
+def gate_domain_rows(labelled_by_side: dict[str, list[Labelled]]) -> list[dict[str, Any]]:
     """Table precision, recall and F1 per judge domain and side, over all documents and off the domain's own source.
 
     Args:
@@ -947,7 +1020,7 @@ def gate_domain_rows(labelled_by_side: Dict[str, List[Labelled]]) -> List[Dict[s
     return rows
 
 
-def confusion_rows(labelled_by_side: Dict[str, List[Labelled]]) -> List[Dict[str, Any]]:
+def confusion_rows(labelled_by_side: dict[str, list[Labelled]]) -> list[dict[str, Any]]:
     """Count, per side, the documents of each judge domain under each assigned label.
 
     Args:
@@ -967,7 +1040,7 @@ def confusion_rows(labelled_by_side: Dict[str, List[Labelled]]) -> List[Dict[str
     return rows
 
 
-def gold_rows(gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[str, Any]]:
+def gold_rows(gold: list[dict[str, Any]], side_of: dict[str, str]) -> list[dict[str, Any]]:
     """Summarise the judged gold per judge domain.
 
     Args:
@@ -980,7 +1053,7 @@ def gold_rows(gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[
         at kept, how many carry the same source label, how many the judge read
         only the opening of, and the median full length in characters.
     """
-    by_domain: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for document in gold:
         by_domain[document["judge_domain"]].append(document)
     rows = [
@@ -999,7 +1072,7 @@ def gold_rows(gold: List[Dict[str, Any]], side_of: Dict[str, str]) -> List[Dict[
     return sorted(rows, key=lambda row: -row["documents"])
 
 
-def catalogue_rows(datasets: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def catalogue_rows(datasets: list[dict[str, str]]) -> list[dict[str, Any]]:
     """Summarise the landscape catalogue per domain and access.
 
     A dataset listing several domains counts once under each.
@@ -1012,7 +1085,7 @@ def catalogue_rows(datasets: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         examples target, how many report a size, and their summed documents
         and estimated tokens.
     """
-    groups: Dict[Tuple[str, str], List[Dict[str, str]]] = defaultdict(list)
+    groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for dataset in datasets:
         for domain in dataset["domains"].split(","):
             groups[(CATALOGUE_DOMAINS.get(domain, domain), dataset["access"])].append(dataset)
@@ -1035,7 +1108,7 @@ def catalogue_rows(datasets: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     return rows
 
 
-def read_corpus_labels(path: Path, build: str, funnel: List[Dict[str, Any]]) -> Dict[str, Any]:
+def read_corpus_labels(path: Path, build: str, funnel: list[dict[str, Any]]) -> dict[str, Any]:
     """Read one build's corpus pass and check it against the statistics stage, source by source.
 
     Args:
@@ -1067,8 +1140,8 @@ def read_corpus_labels(path: Path, build: str, funnel: List[Dict[str, Any]]) -> 
 
 
 def domain_totals(
-    labels: Dict[str, Any], sources: Dict[str, Dict[str, str]], rule: str, open_only: bool
-) -> Dict[str, Tuple[int, int]]:
+    labels: dict[str, Any], sources: dict[str, dict[str, str]], rule: str, open_only: bool
+) -> dict[str, tuple[int, int]]:
     """Sum one corpus pass's documents and words per domain under one labelling rule.
 
     Under `source` every document counts under its source's registry label,
@@ -1084,7 +1157,7 @@ def domain_totals(
     Returns:
         Documents and words per domain.
     """
-    totals: Dict[str, List[int]] = defaultdict(lambda: [0, 0])
+    totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for source, by_label in labels["documents"].items():
         if open_only and sources[source]["access"] == "gated":
             continue
@@ -1096,13 +1169,22 @@ def domain_totals(
 
 
 def measure_count(documents: int, words: int, measure: str) -> int:
-    """Return the count one measure of `MEASURES` reads from a domain's documents and words."""
+    """Return the count one measure of `MEASURES` reads from a domain's documents and words.
+
+    Args:
+        documents: The domain's documents.
+        words: The domain's words.
+        measure: A member of `MEASURES`.
+
+    Returns:
+        The count the measure reads.
+    """
     return {"estimated tokens": words * TOKENS_PER_WORD, "words": words, "documents": documents}[measure]
 
 
 def kpi_row(
     build: str, domain: str, measure: str, labels: str, sources: str, count: int, is_readable: bool = True
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Read one count against its target.
 
     Args:
@@ -1138,8 +1220,8 @@ def kpi_row(
 
 
 def kpi_rows(
-    build: str, labels: Dict[str, Any], sources: Dict[str, Dict[str, str]], classifier_passes: bool
-) -> List[Dict[str, Any]]:
+    build: str, labels: dict[str, Any], sources: dict[str, dict[str, str]], classifier_passes: bool
+) -> list[dict[str, Any]]:
     """Read every target under every counting rule on one build ([M6]).
 
     The corpus is read in estimated tokens and in words; each target domain
@@ -1181,7 +1263,7 @@ def kpi_rows(
     return rows
 
 
-def corpus_domain_rows(build: str, labels: Dict[str, Any], sources: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+def corpus_domain_rows(build: str, labels: dict[str, Any], sources: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     """Total one build's documents and estimated tokens per domain under each labelling rule.
 
     Args:
@@ -1215,7 +1297,7 @@ def corpus_domain_rows(build: str, labels: Dict[str, Any], sources: Dict[str, Di
     )
 
 
-def corpus_source_rows(build: str, labels: Dict[str, Any], sources: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+def corpus_source_rows(build: str, labels: dict[str, Any], sources: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     """Table one build's documents and estimated tokens per source and assigned label.
 
     Args:
@@ -1244,7 +1326,7 @@ def corpus_source_rows(build: str, labels: Dict[str, Any], sources: Dict[str, Di
     return sorted(rows, key=lambda row: (order.get(row["assigned_domain"], len(order)), -row["documents"]))
 
 
-def domain_stage_counts(funnel: List[Dict[str, Any]], build: str, domain: str, open_only: bool) -> Dict[str, int]:
+def domain_stage_counts(funnel: list[dict[str, Any]], build: str, domain: str, open_only: bool) -> dict[str, int]:
     """Sum the documents after each stage over the sources whose label folds into one domain.
 
     Args:
@@ -1266,7 +1348,7 @@ def domain_stage_counts(funnel: List[Dict[str, Any]], build: str, domain: str, o
     return {column: sum(row[column] for row in members) for column in STAGE_COLUMNS}
 
 
-def gap_rows(kpi: List[Dict[str, Any]], funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def gap_rows(kpi: list[dict[str, Any]], funnel: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attribute every missed target to a missing source or to the curation stage that lost it ([M7]).
 
     A domain whose sources held no more than the target once converted has a
@@ -1286,7 +1368,7 @@ def gap_rows(kpi: List[Dict[str, Any]], funnel: List[Dict[str, Any]]) -> List[Di
     """
     rows = []
     for shortfall in kpi:
-        # A count that may not be read against its target ([D3]) is no shortfall to attribute.
+        # a count that may not be read against its target ([D3]) is no shortfall to attribute
         if shortfall["passes"] is not False:
             continue
         row = {key: shortfall[key] for key in ("build", "domain", "measure", "labels", "sources")}
@@ -1308,7 +1390,7 @@ def gap_rows(kpi: List[Dict[str, Any]], funnel: List[Dict[str, Any]]) -> List[Di
     return rows
 
 
-def read_catalogue(catalogue_path: Path) -> List[Dict[str, str]]:
+def read_catalogue(catalogue_path: Path) -> list[dict[str, str]]:
     """Read the landscape catalogue, one row per dataset.
 
     Args:
@@ -1321,14 +1403,21 @@ def read_catalogue(catalogue_path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def catalogue_domains(dataset: Dict[str, str]) -> List[str]:
-    """Return a catalogue dataset's domains under the judge's labels, science folded ([D2])."""
+def catalogue_domains(dataset: dict[str, str]) -> list[str]:
+    """Return a catalogue dataset's domains under the judge's labels, science folded ([D2]).
+
+    Args:
+        dataset: A catalogue row.
+
+    Returns:
+        Its distinct domains, in catalogue order.
+    """
     return list(
         dict.fromkeys(merge_label(CATALOGUE_DOMAINS.get(domain, domain)) for domain in dataset["domains"].split(","))
     )
 
 
-def catalogue_dataset_row(domain: str, dataset: Dict[str, str]) -> Dict[str, Any]:
+def catalogue_dataset_row(domain: str, dataset: dict[str, str]) -> dict[str, Any]:
     """Table one catalogue dataset under one of its domains.
 
     Args:
@@ -1352,15 +1441,22 @@ def catalogue_dataset_row(domain: str, dataset: Dict[str, str]) -> Dict[str, Any
     }
 
 
-def by_domain_then_documents(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort catalogue rows with the target domains first, then by documents, uncounted last."""
+def by_domain_then_documents(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort catalogue rows with the target domains first, then by documents, uncounted last.
+
+    Args:
+        rows: Rows from `catalogue_dataset_row`.
+
+    Returns:
+        The rows sorted.
+    """
     order = {domain: index for index, domain in enumerate(TARGET_DOMAINS)}
     return sorted(
         rows, key=lambda row: (order.get(row["domain"], len(order)), row["domain"], -(row["documents"] or -1))
     )
 
 
-def gap_catalogue_rows(gaps: List[Dict[str, Any]], catalogue: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def gap_catalogue_rows(gaps: list[dict[str, Any]], catalogue: list[dict[str, str]]) -> list[dict[str, Any]]:
     """List the open catalogue datasets of each domain that misses a target and the corpus does not yet hold.
 
     Args:
@@ -1380,7 +1476,7 @@ def gap_catalogue_rows(gaps: List[Dict[str, Any]], catalogue: List[Dict[str, str
     return by_domain_then_documents(rows)
 
 
-def ie_example_rows(catalogue: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def ie_example_rows(catalogue: list[dict[str, str]]) -> list[dict[str, Any]]:
     """List the catalogue datasets annotated for extraction, the second reading of the examples target.
 
     Args:
@@ -1400,8 +1496,8 @@ def ie_example_rows(catalogue: List[Dict[str, str]]) -> List[Dict[str, Any]]:
 
 
 def final_corpus_gate_rows(
-    test: List[Dict[str, Any]], labelled: List[Labelled], gold_ids: Dict[str, List[str]]
-) -> List[Dict[str, Any]]:
+    test: list[dict[str, Any]], labelled: list[Labelled], gold_ids: dict[str, list[str]]
+) -> list[dict[str, Any]]:
     """Read the gate's numbers again on the test-side documents each final corpus still holds.
 
     Args:
@@ -1426,7 +1522,7 @@ def final_corpus_gate_rows(
     return [{key: value for key, value in row.items() if key != "passes_gate"} for row in rows]
 
 
-def kpi_figure_rows(kpi: List[Dict[str, Any]], build: str) -> List[Dict[str, Any]]:
+def kpi_figure_rows(kpi: list[dict[str, Any]], build: str) -> list[dict[str, Any]]:
     """Pair each target's count under source and under document labels, as a multiple of the target.
 
     Args:
@@ -1463,7 +1559,7 @@ def kpi_figure_rows(kpi: List[Dict[str, Any]], build: str) -> List[Dict[str, Any
     return records
 
 
-def draw_kpi_figure(kpi: List[Dict[str, Any]]) -> None:
+def draw_kpi_figure(kpi: list[dict[str, Any]]) -> None:
     """Draw every target's count as a multiple of it, under source and document labels, per build.
 
     Args:
@@ -1487,7 +1583,7 @@ def draw_kpi_figure(kpi: List[Dict[str, Any]]) -> None:
     )
 
 
-def draw_medical_funnel_figure(funnel: List[Dict[str, Any]]) -> None:
+def draw_medical_funnel_figure(funnel: list[dict[str, Any]]) -> None:
     """Draw the medical source's documents after every curation stage, per build.
 
     Args:
@@ -1520,7 +1616,7 @@ def draw_medical_funnel_figure(funnel: List[Dict[str, Any]]) -> None:
     )
 
 
-def draw_medical_sources_figure(by_source: List[Dict[str, Any]]) -> None:
+def draw_medical_sources_figure(by_source: list[dict[str, Any]]) -> None:
     """Draw the documents the classifier labels medical in each source, per build.
 
     Args:
@@ -1529,7 +1625,7 @@ def draw_medical_sources_figure(by_source: List[Dict[str, Any]]) -> None:
     medical = {
         (row["build"], row["source"]): row["documents"] for row in by_source if row["assigned_domain"] == "medical"
     }
-    # Horizontal bars draw the first label at the bottom, so the largest source goes last to sit on top.
+    # horizontal bars draw the first label at the bottom, so the largest source goes last
     names = sorted({source for _, source in medical}, key=lambda source: medical.get(("loosened", source), 0))
     save_figure(
         lambda: BarChart(
@@ -1548,7 +1644,7 @@ def draw_medical_sources_figure(by_source: List[Dict[str, Any]]) -> None:
     )
 
 
-def draw_gold_figure(rows: List[Dict[str, Any]]) -> None:
+def draw_gold_figure(rows: list[dict[str, Any]]) -> None:
     """Draw the judged gold's documents per judge domain, split by the drawn stage's decision.
 
     Args:
@@ -1577,9 +1673,16 @@ def draw_gold_figure(rows: List[Dict[str, Any]]) -> None:
     )
 
 
+# ===============================
+# Main function
+# ===============================
+
+
 def main() -> None:
     """Write the dataset statistics, the funnel, the gates, the per-target verdicts and the figures."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    # tabulate the final size of every source in each build
     sources = read_sources(EXTRACT_CONFIG)
     builds = build_rows(BUILDS, sources)
     write_csv(TABLES_DIR / "dataset-builds-statistics.csv", builds)
@@ -1587,7 +1690,8 @@ def main() -> None:
         documents = sum(row["documents"] for row in builds if row["build"] == build)
         print(f"{build}: {documents:,} documents in the final corpus")
 
-    funnel: List[Dict[str, Any]] = []
+    # follow the documents through the curation stages
+    funnel: list[dict[str, Any]] = []
     for build, pretrain_dir in BUILDS.items():
         cache = EXPERIMENT_DATA / "interim" / f"{build}-build-exact-dedup-counts.json"
         exact_counts = cached_source_counts(pretrain_dir / COUNTED_STAGE, cache, COUNT_WORKERS)
@@ -1597,11 +1701,14 @@ def main() -> None:
     write_csv(TABLES_DIR / "funnel-documents-by-domain.csv", domains)
     print(f"funnel: {len(funnel)} source rows and {len(domains)} domain rows over {len(BUILDS)} builds")
 
+    # check the frozen gold and split it into tune and test
     check_frozen(GOLD_VERDICTS, json.loads(GOLD_META.read_text(encoding="utf-8"))["sha256"])
     check_frozen(GOLD_SAMPLE, GOLD_SAMPLE_SHA256)
     documents = gold_documents(GOLD_SAMPLE, GOLD_VERDICTS)
     side_of = split_gold(documents, SPLIT_SEED)
     write_split(documents, side_of, SPLIT_DIR, SPLIT_SEED)
+
+    # summarise the gold and seed the lexicons
     gold = gold_rows(documents, side_of)
     write_csv(TABLES_DIR / "dataset-gold-statistics.csv", gold)
     draw_gold_figure(gold)
@@ -1610,6 +1717,7 @@ def main() -> None:
     write_csv(TABLES_DIR / "classifier-lexicon-seed-words-by-domain.csv", seed)
     print(f"lexicon seed: {len(seed)} ranked words over {len({row['judge_domain'] for row in seed})} judge domains")
 
+    # tune the lexicon rule on the tune side
     lexicons = load_lexicons(LEXICON_CONFIG)
     texts = gold_texts(GOLD_SAMPLE, documents)
     scored = score_gold(texts, documents, lexicons)
@@ -1618,6 +1726,8 @@ def main() -> None:
     write_csv(TABLES_DIR / "classifier-lexicon-gate-by-rule.csv", rule_grid)
     check_rule_tuned(lexicons.rule, rule_grid, LEXICON_CONFIG)
     check_lexicons_frozen(LEXICON_CONFIG, LEXICON_FREEZE)
+
+    # read the lexicon gate on both sides
     lexicon_labelled = {side: label_scored(rows, lexicons.rule) for side, rows in by_side.items()}
     rule = lexicons.rule
     passes_by_name = {}
@@ -1625,12 +1735,13 @@ def main() -> None:
         "lexicon", lexicon_labelled, {"threshold": rule.threshold, "margin": rule.margin, "min_words": rule.min_words}
     )
 
+    # fit the supervised candidates when the lexicons fail the gate
     group_of = {document["id"]: document["group"] for document in documents}
     tune = [
         {"id": row["id"], "text": texts[row["id"]], "judge_domain": row["judge_domain"], "group": group_of[row["id"]]}
         for row in by_side["tune"]
     ]
-    candidate_labelled_by_name: Dict[str, Dict[str, List[Labelled]]] = {}
+    candidate_labelled_by_name: dict[str, dict[str, list[Labelled]]] = {}
     for name in SUPERVISED_CANDIDATES if not lexicon_passes else ():
         classifier, regularisation_grid = fit_or_load_candidate(
             name, SUPERVISED_CONFIG, tune, GOLD_SAMPLE_SHA256, SUPERVISED_MODELS
@@ -1645,11 +1756,13 @@ def main() -> None:
         )
         candidate_labelled_by_name[name] = candidate_labelled
 
+    # tabulate the catalogue
     catalogue = read_catalogue(CATALOGUE)
     catalogue_statistics = catalogue_rows(catalogue)
     write_csv(TABLES_DIR / "dataset-catalogue-statistics.csv", catalogue_statistics)
     print(f"catalogue: {len(catalogue_statistics)} domain and access groups")
 
+    # read the corpus passes and the gate on the final corpora
     check_frozen(SUPERVISED_MODELS / f"{CORPUS_CLASSIFIER}.pkl", CORPUS_CLASSIFIER_SHA256)
     labels = {build: read_corpus_labels(path, build, funnel) for build, path in CORPUS_LABELS.items()}
     classifier_passes = passes_by_name.get(CORPUS_CLASSIFIER, False)
@@ -1659,6 +1772,8 @@ def main() -> None:
             by_side["test"], candidate_labelled_by_name[CORPUS_CLASSIFIER]["test"], gold_held
         )
         write_csv(TABLES_DIR / f"classifier-{CORPUS_CLASSIFIER}-gate-by-final-corpus.csv", final_gate)
+
+    # read every target and tabulate the corpus
     kpi = [row for build in BUILDS for row in kpi_rows(build, labels[build], sources, classifier_passes)]
     write_csv(TABLES_DIR / "kpi-pass-by-rule.csv", kpi)
     print(
@@ -1669,11 +1784,15 @@ def main() -> None:
     write_csv(TABLES_DIR / "corpus-documents-by-source.csv", by_source)
     by_domain = [row for build in BUILDS for row in corpus_domain_rows(build, labels[build], sources)]
     write_csv(TABLES_DIR / "corpus-documents-by-domain.csv", by_domain)
+
+    # attribute the gaps and list the catalogue datasets
     gaps = gap_rows(kpi, funnel)
     write_csv(TABLES_DIR / "gap-attribution-by-stage.csv", gaps)
     write_csv(TABLES_DIR / "gap-catalogue-datasets.csv", gap_catalogue_rows(gaps, catalogue))
     print(f"gaps: {len(gaps)} missed targets, {sum(gap['cause'] == 'curation loss' for gap in gaps)} curation losses")
     write_csv(TABLES_DIR / "catalogue-ie-examples-by-domain.csv", ie_example_rows(catalogue))
+
+    # draw the figures
     draw_kpi_figure(kpi)
     draw_medical_funnel_figure(funnel)
     draw_medical_sources_figure(by_source)

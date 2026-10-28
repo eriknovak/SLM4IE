@@ -132,8 +132,7 @@ def position(documents, mo, start_at):
     Returns:
         The index state, its setter, and a bounded step function.
     """
-    # allow_self_loops: Enter is handled by an element `screen` defines itself,
-    # and marimo does not re-run the setter's own cell without this.
+    # self loops: Enter is handled by an element `screen` defines itself
     get_index, set_index = mo.state(start_at, allow_self_loops=True)
 
     def step(delta):
@@ -274,8 +273,7 @@ def navigation(mo, set_message, step):
         set_message("")
         step(delta)
 
-    # Alt-P / Alt-N: free in both Firefox and Chrome, and they still fire while
-    # the cursor sits in the command box.
+    # Alt-P / Alt-N are free in Firefox and Chrome and fire inside the command box
     previous_button = mo.ui.button(
         label="← previous",
         tooltip="Alt-P",
@@ -408,8 +406,7 @@ def instructions(mo):
           If it reads as an exercise rather than scholarship, it is `stu`.
         """
     )
-    # Rendered by `screen` as the right-hand column, so the document and the
-    # rules it is judged against are on the same screenful.
+    # the right-hand column of `screen`, beside the document
     guide = mo.vstack(
         [
             cheat_sheet,
@@ -459,8 +456,7 @@ def screen(
         )
     else:
         document = documents[index]
-        # Serif, generous line height: diacritics and long compounds are what is
-        # being judged, so the text has to be comfortable to read closely.
+        # serif with a generous line height, so diacritics read closely
         body = mo.Html(
             '<div style=\'font-family:Georgia,"Noto Serif",serif;font-size:1.06rem;line-height:1.75;'
             "white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;"

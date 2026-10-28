@@ -18,19 +18,22 @@ import csv
 import json
 import re
 import subprocess
+import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 from datachart.charts import BarChart
 from datachart.constants import BAR_MODE, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
 
-import sys
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  — path set above so the vendored helper resolves
+from report_figures import save_figure  # noqa: E402  # path set above so the vendored helper resolves
 
 from slm4ie.utils import mlflow as ml  # noqa: E402
+
+# ===============================
+# Defaults
+# ===============================
 
 MLFLOW_EXPERIMENT = "slm4ie/data/data-landscape-slovenian"
 
@@ -50,7 +53,7 @@ PROVENANCE_CHECK = RAW_DIR / "provenance-check.json"
 # One file per source family searched (D2), in the order that decides which
 # copy of a dataset catalogued twice is kept: the repository that publishes it
 # beats the aggregator that mirrors it.
-FAMILY_FILES: List[Tuple[str, str]] = [
+FAMILY_FILES: list[tuple[str, str]] = [
     ("clarin-si", "clarin-si.json"),
     ("lindat", "lindat.json"),
     ("zenodo", "zenodo.json"),
@@ -61,7 +64,7 @@ FAMILY_FILES: List[Tuple[str, str]] = [
 ]
 
 # The shared domain taxonomy (D5); the headline science figure is scientific + academic.
-DOMAINS: List[str] = [
+DOMAINS: list[str] = [
     "medical",
     "scientific",
     "academic",
@@ -74,16 +77,16 @@ DOMAINS: List[str] = [
     "finance",
     "other",
 ]
-KPI2_DOMAINS: Tuple[str, ...] = ("medical", "scientific", "academic")
+KPI2_DOMAINS: tuple[str, ...] = ("medical", "scientific", "academic")
 # The Predictions' domains, each the taxonomy domains it spans; a row counts once.
-CLAUSE_DOMAINS: List[Tuple[str, Tuple[str, ...]]] = [
+CLAUSE_DOMAINS: list[tuple[str, tuple[str, ...]]] = [
     ("medicine", ("medical",)),
     ("science", ("scientific", "academic")),
 ]
 
 # What each access filter of D8 admits: what anyone can download, what a
 # registered researcher can, and what exists at all.
-ACCESS_FILTERS: List[Tuple[str, Tuple[str, ...]]] = [
+ACCESS_FILTERS: list[tuple[str, tuple[str, ...]]] = [
     ("open", ("open",)),
     ("open+login", ("open", "login")),
     ("all", ("open", "login", "gated", "not_downloadable")),
@@ -91,12 +94,12 @@ ACCESS_FILTERS: List[Tuple[str, Tuple[str, ...]]] = [
 
 # Annotation types that make a row a source of information-extraction examples
 # rather than of pretraining text (D7's second reading of KPI 2).
-IE_ANNOTATIONS: Tuple[str, ...] = ("IE spans", "IE spans,labels", "labels")
+IE_ANNOTATIONS: tuple[str, ...] = ("IE spans", "IE spans,labels", "labels")
 
 # How a dataset's Slovene text came to exist (D11), read off the name and notes.
 # `generated` is tested first: a set that was translated and then automatically
 # annotated is machine output either way.
-GENERATED_TERMS: Tuple[str, ...] = (
+GENERATED_TERMS: tuple[str, ...] = (
     r"synthetic",
     r"generated",
     r"instruction[- ]following",
@@ -106,7 +109,7 @@ GENERATED_TERMS: Tuple[str, ...] = (
     r"\bllm\b",
     r"\bgpt\b",
 )
-TRANSLATED_TERMS: Tuple[str, ...] = (
+TRANSLATED_TERMS: tuple[str, ...] = (
     r"translat",
     r"parallel corpus",
     r"parallel translation",
@@ -116,7 +119,7 @@ TRANSLATED_TERMS: Tuple[str, ...] = (
 )
 
 # A checked provenance class, folded into the three-way reading the Predictions use.
-PROVENANCE_OF_CLASS: Dict[str, str] = {
+PROVENANCE_OF_CLASS: dict[str, str] = {
     "native": "native",
     "human_translated": "translated",
     "machine_translated": "translated",
@@ -124,19 +127,20 @@ PROVENANCE_OF_CLASS: Dict[str, str] = {
     "bilingual_resource": "translated",
     "synthetic": "generated",
 }
-PROVENANCE_CLASSES: List[str] = [*PROVENANCE_OF_CLASS, "unchecked"]
+PROVENANCE_CLASSES: list[str] = [*PROVENANCE_OF_CLASS, "unchecked"]
 
 # Short axis labels for translation systems whose model ids run long.
-SYSTEM_LABELS: Dict[str, str] = {"facebook/mbart-large-50-many-to-many-mmt": "mBART-50"}
+SYSTEM_LABELS: dict[str, str] = {"facebook/mbart-large-50-many-to-many-mmt": "mBART-50"}
 
 # The sizing pass's basis, as the catalogue's `words_basis` records it (D6).
-SIZE_BASIS: Dict[str, str] = {"full": "counted", "partial": "partial", "sampled": "sampled"}
+SIZE_BASIS: dict[str, str] = {"full": "counted", "partial": "partial", "sampled": "sampled"}
 
 TOKENS_PER_WORD = 2.0  # D6: an estimate until the project tokenizer exists
 KPI2_EXAMPLES = 10_000
 KPI4_TOKENS = 500_000
+PERCENT = 100
 
-CATALOGUE_COLUMNS: List[str] = [
+CATALOGUE_COLUMNS: list[str] = [
     "name",
     "url",
     "licence",
@@ -171,7 +175,7 @@ CATALOGUE_COLUMNS: List[str] = [
 
 # Registry entries fetched by hand, so they name no URL or Hub repo: matched on
 # a fragment of the catalogue's own name for the same corpus instead.
-REGISTRY_NAME_FRAGMENTS: Dict[str, str] = {
+REGISTRY_NAME_FRAGMENTS: dict[str, str] = {
     "gigafida22": "gigafida",
     "metafida10": "metafida",
     "slovenetrendi": "trendi",
@@ -179,7 +183,11 @@ REGISTRY_NAME_FRAGMENTS: Dict[str, str] = {
 
 # Registry entries the catalogue found at a different address than the one the
 # project downloads from: the Hub repo that publishes the same corpus.
-REGISTRY_REPO_ALIASES: Dict[str, str] = {"statmt/cc100": "cc100"}
+REGISTRY_REPO_ALIASES: dict[str, str] = {"statmt/cc100": "cc100"}
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def normalise(text: str) -> str:
@@ -194,7 +202,7 @@ def normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
-def number(value: object) -> Optional[int]:
+def number(value: object) -> int | None:
     """Reads a count from a catalogue field that may be blank.
 
     Args:
@@ -207,7 +215,7 @@ def number(value: object) -> Optional[int]:
     return int(text) if text.isdigit() else None
 
 
-def load_rows() -> List[Dict[str, str]]:
+def load_rows() -> list[dict[str, str]]:
     """Reads every source family's rows, tagged with the family it came from.
 
     Returns:
@@ -216,7 +224,7 @@ def load_rows() -> List[Dict[str, str]]:
     Raises:
         FileNotFoundError: If a family's evidence file is missing from `RAW_DIR`.
     """
-    rows: List[Dict[str, str]] = []
+    rows: list[dict[str, str]] = []
     for family, filename in FAMILY_FILES:
         path = RAW_DIR / filename
         if not path.exists():
@@ -226,7 +234,7 @@ def load_rows() -> List[Dict[str, str]]:
     return rows
 
 
-def merge_duplicates(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
+def merge_duplicates(rows: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     """Collapses datasets catalogued by more than one source family.
 
     The first row seen wins, because `FAMILY_FILES` is ordered publisher before
@@ -239,7 +247,7 @@ def merge_duplicates(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     Returns:
         One row per dataset, each carrying a `mirrors` field.
     """
-    merged: Dict[str, Dict[str, str]] = {}
+    merged: dict[str, dict[str, str]] = {}
     for row in rows:
         key = normalise(row["name"])
         kept = merged.get(key)
@@ -254,7 +262,7 @@ def merge_duplicates(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     return list(merged.values())
 
 
-def registry_index() -> Dict[str, Set[str]]:
+def registry_index() -> dict[str, set[str]]:
     """Collects, per registry entry, the identifiers a catalogue row can match.
 
     An entry is identified by its CLARIN or LINDAT handle or its Hugging Face
@@ -266,7 +274,7 @@ def registry_index() -> Dict[str, Set[str]]:
         Registry key to the identifiers `row_keys` can produce for it.
     """
     registry = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))["datasets"]
-    index: Dict[str, Set[str]] = {key: set() for key in registry}
+    index: dict[str, set[str]] = {key: set() for key in registry}
     for key, entry in registry.items():
         if entry.get("repo_id"):
             index[key].add(str(entry["repo_id"]).lower())
@@ -278,7 +286,7 @@ def registry_index() -> Dict[str, Set[str]]:
     return index
 
 
-def registry_match(row: Dict[str, str], index: Dict[str, Set[str]]) -> Optional[str]:
+def registry_match(row: dict[str, str], index: dict[str, set[str]]) -> str | None:
     """Names the registry entry the project downloads this dataset under.
 
     Args:
@@ -296,7 +304,7 @@ def registry_match(row: Dict[str, str], index: Dict[str, Set[str]]) -> Optional[
     return next((key for fragment, key in REGISTRY_NAME_FRAGMENTS.items() if fragment in name), None)
 
 
-def survey_sizes() -> Dict[str, Dict[str, str]]:
+def survey_sizes() -> dict[str, dict[str, str]]:
     """Reads what the sizing pass counted for the new native medical sources.
 
     Returns:
@@ -309,7 +317,7 @@ def survey_sizes() -> Dict[str, Dict[str, str]]:
         return {normalise(r["catalogue_name"]): r for r in csv.DictReader(handle)}
 
 
-def provenance_checks() -> Dict[str, Dict[str, str]]:
+def provenance_checks() -> dict[str, dict[str, str]]:
     """Reads the checked provenance of the rows the keyword reading marked non-native.
 
     Returns:
@@ -320,7 +328,7 @@ def provenance_checks() -> Dict[str, Dict[str, str]]:
     return {normalise(c["name"]): c for c in json.loads(PROVENANCE_CHECK.read_text(encoding="utf-8"))}
 
 
-def corpus_counts() -> Dict[str, Dict[str, int]]:
+def corpus_counts() -> dict[str, dict[str, int]]:
     """Reads what the pretraining build measured for each registry source.
 
     Returns:
@@ -332,7 +340,7 @@ def corpus_counts() -> Dict[str, Dict[str, int]]:
     return json.loads(CORPUS_STATISTICS.read_text(encoding="utf-8"))["by_dataset"]
 
 
-def url_keys(url: str) -> Set[str]:
+def url_keys(url: str) -> set[str]:
     """Extracts the identifiers a URL carries for registry matching.
 
     Args:
@@ -341,7 +349,7 @@ def url_keys(url: str) -> Set[str]:
     Returns:
         The handle and Hub repo found in the URL; empty when it carries neither.
     """
-    keys: Set[str] = set()
+    keys: set[str] = set()
     handle = re.search(r"(?:11356|11234)/\d+", url)
     if handle:
         keys.add(handle.group(0))
@@ -354,7 +362,7 @@ def url_keys(url: str) -> Set[str]:
     return keys
 
 
-def row_keys(row: Dict[str, str]) -> Set[str]:
+def row_keys(row: dict[str, str]) -> set[str]:
     """Extracts the identifiers a catalogue row offers for registry matching.
 
     Args:
@@ -363,13 +371,13 @@ def row_keys(row: Dict[str, str]) -> Set[str]:
     Returns:
         Identifiers from the row's own URL, its mirrors, and its name.
     """
-    keys: Set[str] = {normalise(row["name"])}
+    keys: set[str] = {normalise(row["name"])}
     for url in [row["url"], *str(row.get("mirrors", "")).split()]:
         keys |= url_keys(url)
     return keys
 
 
-def provenance(row: Dict[str, str]) -> str:
+def provenance(row: dict[str, str]) -> str:
     """Says how the Slovene text in a dataset came to exist.
 
     The hypothesis asks whether open sources cover the KPIs *without* synthetic
@@ -394,7 +402,7 @@ def provenance(row: Dict[str, str]) -> str:
     return "native"
 
 
-def kpi_fit(row: Dict[str, str]) -> Tuple[str, str]:
+def kpi_fit(row: dict[str, str]) -> tuple[str, str]:
     """Scores one row against KPI 2 and KPI 4.
 
     KPI 2 asks for more than 10k examples in medicine and in science, so it is
@@ -427,7 +435,7 @@ def kpi_fit(row: Dict[str, str]) -> Tuple[str, str]:
     return kpi2, kpi4
 
 
-def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
+def annotate(rows: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     """Adds the derived catalogue columns to every row.
 
     A size the source reported is kept as reported. A row whose source
@@ -450,7 +458,7 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     measured = corpus_counts()
     surveyed = survey_sizes()
     checks = provenance_checks()
-    annotated: List[Dict[str, str]] = []
+    annotated: list[dict[str, str]] = []
     for row in rows:
         key = registry_match(row, index)
         counts = measured.get(key or "", {})
@@ -461,8 +469,7 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
             ("corpus", number(counts.get("word_count"))),
         ]
         basis, words = next(((b, w) for b, w in candidates if w is not None), ("", None))
-        # the sizing pass counted the source's items itself, in the unit the
-        # catalogue means; a publisher's figure stands only where it did not
+        # take the sizing pass's item count over the publisher's figure
         documents = number(size.get("items_total"))
         if documents is None:
             documents = number(row["documents"])
@@ -501,7 +508,7 @@ def annotate(rows: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
     return annotated
 
 
-def write_table(path: Path, columns: List[str], rows: Iterable[Dict[str, object]]) -> None:
+def write_table(path: Path, columns: list[str], rows: Iterable[dict[str, object]]) -> None:
     """Writes one results table as CSV.
 
     Args:
@@ -516,7 +523,7 @@ def write_table(path: Path, columns: List[str], rows: Iterable[Dict[str, object]
         writer.writerows(rows)
 
 
-def survey_statistics(raw: List[Dict[str, str]], rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
+def survey_statistics(raw: list[dict[str, str]], rows: list[dict[str, str]]) -> list[dict[str, object]]:
     """Counts, per source family, what it returned and what survived the merge.
 
     Args:
@@ -526,7 +533,7 @@ def survey_statistics(raw: List[Dict[str, str]], rows: List[Dict[str, str]]) -> 
     Returns:
         One line per family plus a `total` line.
     """
-    lines: List[Dict[str, object]] = []
+    lines: list[dict[str, object]] = []
     for family in dict.fromkeys(f for f, _ in FAMILY_FILES):
         kept = [r for r in rows if r["family"] == family]
         lines.append(
@@ -565,7 +572,7 @@ def verdict(total: int, threshold: int, uncounted: int) -> str:
     return "unknown" if uncounted else "no"
 
 
-def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
+def summarise(rows: list[dict[str, str]]) -> list[dict[str, object]]:
     """Totals the catalogue per domain under each access filter.
 
     Totals cover only the rows whose size the source reported; the two
@@ -578,7 +585,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
     Returns:
         One entry per domain and access filter, in taxonomy order.
     """
-    summary: List[Dict[str, object]] = []
+    summary: list[dict[str, object]] = []
     for domain in DOMAINS:
         in_domain = [r for r in rows if domain in {d.strip() for d in str(r["domains"]).split(",")}]
         for label, admitted in ACCESS_FILTERS:
@@ -621,7 +628,7 @@ def summarise(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
     return summary
 
 
-def provenance_summary(rows: List[Dict[str, str]]) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+def provenance_summary(rows: list[dict[str, str]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Counts datasets per checked provenance class, and machine-translated ones per system.
 
     Args:
@@ -662,7 +669,7 @@ def provenance_summary(rows: List[Dict[str, str]]) -> Tuple[List[Dict[str, objec
     return classes, sorted(systems, key=lambda line: -int(line["datasets"]))
 
 
-def clause_supply(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
+def clause_supply(rows: list[dict[str, str]]) -> list[dict[str, object]]:
     """Totals what the Predictions count: native rows outside the registry.
 
     Each clause domain is read once per access filter, a row spanning two of
@@ -675,7 +682,7 @@ def clause_supply(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
     Returns:
         One entry per clause domain and access filter.
     """
-    lines: List[Dict[str, object]] = []
+    lines: list[dict[str, object]] = []
     for name, spans in CLAUSE_DOMAINS:
         in_domain = [r for r in rows if set(spans) & {d.strip() for d in str(r["domains"]).split(",")}]
         for label, admitted in ACCESS_FILTERS:
@@ -704,7 +711,7 @@ def clause_supply(rows: List[Dict[str, str]]) -> List[Dict[str, object]]:
     return lines
 
 
-def draw_figures(summary: List[Dict[str, object]]) -> None:
+def draw_figures(summary: list[dict[str, object]]) -> None:
     """Draws the share of each domain's open documents written in Slovene, the figure F1 links.
 
     Args:
@@ -716,7 +723,7 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     native_share = [
         {
             "label": f"{d}  ({opened[d]['documents']:,} docs)",
-            "y": 100 * opened[d]["documents_native"] / opened[d]["documents"] if opened[d]["documents"] else 0,
+            "y": PERCENT * opened[d]["documents_native"] / opened[d]["documents"] if opened[d]["documents"] else 0,
             "emphasis": EMPHASIS.HIGHLIGHT if d == "medical" else None,
         }
         for d in DOMAINS
@@ -739,7 +746,7 @@ def draw_figures(summary: List[Dict[str, object]]) -> None:
     )
 
 
-def draw_provenance_figures(rows: List[Dict[str, str]], systems: List[Dict[str, object]]) -> None:
+def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, object]]) -> None:
     """Draws the two provenance-check figures the record links.
 
     The first splits the checked rows by class into medical and other domains,
@@ -752,7 +759,7 @@ def draw_provenance_figures(rows: List[Dict[str, str]], systems: List[Dict[str, 
     """
     legend_out = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM}
     checked = [r for r in rows if r["provenance_checked"] == "yes"]
-    split: Dict[str, List[Dict[str, object]]] = {"medical": [], "other": []}
+    split: dict[str, list[dict[str, object]]] = {"medical": [], "other": []}
     for klass in PROVENANCE_CLASSES:
         in_class = [r for r in checked if r["provenance_class"] == klass]
         if not in_class:
@@ -816,7 +823,7 @@ def git_output(*args: str) -> str:
         return ""
 
 
-def log_lineage(rows: List[Dict[str, str]], summary: List[Dict[str, object]]) -> None:
+def log_lineage(rows: list[dict[str, str]], summary: list[dict[str, object]]) -> None:
     """Records this pass as a lineage run, with every table and figure as an artifact.
 
     The run is tagged the way `labflow:run` asks — tier, branch, base commit,
@@ -862,23 +869,30 @@ def log_lineage(rows: List[Dict[str, str]], summary: List[Dict[str, object]]) ->
         print(f"mlflow run {run.info.run_id} in {MLFLOW_EXPERIMENT}")
 
 
+# ===============================
+# Main function
+# ===============================
+
+
 def main() -> None:
     """Builds every table and figure the record links, and optionally logs the pass."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--mlflow", action="store_true", help="also record this pass as an MLflow lineage run")
     args = parser.parse_args()
 
+    # build the catalogue
     raw = load_rows()
     rows = annotate(merge_duplicates(raw))
     slovene = [r for r in rows if r.get("part") != "B"]
     fallback = [r for r in rows if r.get("part") == "B"]
 
+    # write the survey statistics and the catalogue tables
     statistics = survey_statistics(raw, rows)
     write_table(TABLES_DIR / "dataset-survey-rows-statistics.csv", list(statistics[0].keys()), statistics)
-
     write_table(TABLES_DIR / "catalogue.csv", CATALOGUE_COLUMNS, slovene)
     write_table(TABLES_DIR / "catalogue-medical-other-languages.csv", CATALOGUE_COLUMNS, fallback)
 
+    # write the supply tables and draw the figures
     summary = summarise(slovene)
     clauses = clause_supply(slovene)
     classes, systems = provenance_summary(slovene)
@@ -889,6 +903,7 @@ def main() -> None:
     draw_figures(summary)
     draw_provenance_figures(slovene, systems)
 
+    # report and optionally log the pass
     print(f"catalogue: {len(slovene)} Slovene rows, {len(fallback)} medical rows in other languages")
     print(f"tables -> {TABLES_DIR}")
     print(f"figures -> {FIGURES_DIR}")

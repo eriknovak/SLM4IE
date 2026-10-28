@@ -11,7 +11,8 @@ Eight subcommands:
   every stage for the selection: each enabled pretraining dataset in
   `extract.yaml`, minus those contained in another selected one, skipping
   sentinels that are already current. Every run first prints the selection.
-  The corpus stages (exact_dedup, sentence_dedup, statistics) require `--all` -- `--stage exact_dedup` without it is an error.
+  The corpus stages (exact_dedup, sentence_dedup, statistics) require `--all`:
+  `--stage exact_dedup` without it is an error.
   An `--all` run warns about orphaned units (built units of datasets the
   selection does not keep); `--all --prune` deletes them before the build.
 * `status` prints the selection (every catalog entry as selected or skipped
@@ -83,7 +84,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from slm4ie.data.curate import ALL_STAGE_NAMES
 from slm4ie.data.curate.inspect.diagnose import diagnose_language_leakage
@@ -104,6 +104,23 @@ from slm4ie.data.curate.inspect.sample import (
 from slm4ie.data.curate.stages import CORPUS_STAGES, STAGE_DIRS
 from slm4ie.utils.cli import add_keys, validate_keys
 from slm4ie.utils.versioning import file_sha256
+
+# ===============================
+# Defaults
+# ===============================
+
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+INTERRUPTED_EXIT_CODE = 130
+DEFAULT_SEED = 20260916
+DEFAULT_MAX_CHARS = 2000
+DEFAULT_PER_DATASET = 2000
+DEFAULT_PER_SOURCE = 2000
+DEFAULT_SAMPLE_DOCS = 1_000_000
+DEFAULT_SHARD_WORKERS = 10
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -128,7 +145,12 @@ def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-dir", type=Path, default=None, help="Override the config's output_dir.")
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+# ===============================
+# Main function
+# ===============================
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
@@ -226,7 +248,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=None,
         help="Corpus root to sample (default: the config's output_dir + final stage folder).",
     )
-    diagnose_parser.add_argument("--per-dataset", type=int, default=2000, help="Max docs sampled per dataset.")
+    diagnose_parser.add_argument(
+        "--per-dataset", type=int, default=DEFAULT_PER_DATASET, help="Max docs sampled per dataset."
+    )
     diagnose_parser.add_argument(
         "--max-shards-per-dataset", type=int, default=2, help="Max shards scanned per dataset."
     )
@@ -270,8 +294,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=3,
         help="Input shards searched for drops per cell, or 0 for all of them.",
     )
-    sample_parser.add_argument("--max-chars", type=int, default=2000, help="Characters of text kept per document.")
-    sample_parser.add_argument("--seed", type=int, default=20260916, help="Seed; the same seed redraws the sample.")
+    sample_parser.add_argument(
+        "--max-chars", type=int, default=DEFAULT_MAX_CHARS, help="Characters of text kept per document."
+    )
+    sample_parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Seed; the same seed redraws the sample.")
     sample_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Cells sampled in parallel.")
 
     duplication_parser = subparsers.add_parser(
@@ -293,7 +319,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=0.5,
         help="Share of a document's sentence windows a twin must hold to count as a match.",
     )
-    duplication_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards read at once.")
+    duplication_parser.add_argument(
+        "--max-workers", dest="workers", type=int, default=DEFAULT_SHARD_WORKERS, help="Shards read at once."
+    )
 
     describe_parser = subparsers.add_parser(
         "describe",
@@ -304,8 +332,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     describe_parser.add_argument(
         "--sloleks", type=Path, default=None, help="Sloleks JSONL for the out-of-vocabulary rate; skipped if absent."
     )
-    describe_parser.add_argument("--per-source", type=int, default=2000, help="Documents profiled per source.")
-    describe_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards counted at once.")
+    describe_parser.add_argument(
+        "--per-source", type=int, default=DEFAULT_PER_SOURCE, help="Documents profiled per source."
+    )
+    describe_parser.add_argument(
+        "--max-workers", dest="workers", type=int, default=DEFAULT_SHARD_WORKERS, help="Shards counted at once."
+    )
 
     overlap_parser = subparsers.add_parser(
         "overlap",
@@ -316,7 +348,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "datasets", nargs="*", help="Extracted corpora to compare (default: every <key>.jsonl in the input dir)."
     )
     overlap_parser.add_argument("--out-dir", type=Path, required=True, help="Folder for overlap.csv and hash arrays.")
-    overlap_parser.add_argument("--sample-docs", type=int, default=1_000_000, help="Documents sampled per corpus.")
+    overlap_parser.add_argument(
+        "--sample-docs", type=int, default=DEFAULT_SAMPLE_DOCS, help="Documents sampled per corpus."
+    )
     overlap_parser.add_argument("--seed", type=int, default=0, help="Seed of the document sample and unit slice.")
     overlap_parser.add_argument("--keep-one-in", type=int, default=16, help="Keep 1 in N sentence units by hash.")
     overlap_parser.add_argument("--max-workers", dest="workers", type=int, default=1, help="Corpora scanned at once.")
@@ -340,11 +374,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     classify_parser.add_argument(
         "--shards-per-source", type=int, default=None, help="Read only this many shards per source (smoke runs)."
     )
-    classify_parser.add_argument("--max-workers", dest="workers", type=int, default=10, help="Shards read at once.")
+    classify_parser.add_argument(
+        "--max-workers", dest="workers", type=int, default=DEFAULT_SHARD_WORKERS, help="Shards read at once."
+    )
 
     args = parser.parse_args(argv)
     if args.command == "classify" and any("=" not in tag for tag in args.tag):
         parser.error(f"--tag takes KEY=VALUE, got {[tag for tag in args.tag if '=' not in tag]}")
+    # draw the stratified sample
     if args.command == "sample":
         validate_keys(parser, args, "datasets")
     if args.command == "run":
@@ -358,9 +395,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main() -> None:
     """Dispatch the selected subcommand."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     args = parse_args()
 
+    # diagnose the language leakage
     if args.command == "diagnose":
         print(
             diagnose_language_leakage(
@@ -376,6 +414,7 @@ def main() -> None:
         )
         return
 
+    # assess the dedup drops
     if args.command == "duplication":
         rows, _ = assess_dedup(
             sample_path=args.sample,
@@ -397,6 +436,7 @@ def main() -> None:
         print(f"wrote {args.out}")
         return
 
+    # profile the corpus
     if args.command == "describe":
         for path in describe_corpus(
             pretrain_dir=resolve_sample_dir(args.config, args.output_dir),
@@ -422,6 +462,7 @@ def main() -> None:
         )
         return
 
+    # measure the corpus overlap
     if args.command == "overlap":
         setup = load_curate_config(args.input_dir, args.output_dir, args.config, args.extract_config)
         rows = measure_overlap(
@@ -436,12 +477,13 @@ def main() -> None:
         print(f"wrote {args.out_dir / 'overlap.csv'} ({len(rows)} pairs)")
         return
 
+    # label the corpus
     if args.command == "classify":
-        # Imported here: scikit-learn sits in the analysis group, not in corpus.
+        # imported here: scikit-learn sits in the analysis group, not in corpus
         from slm4ie.data.curate.inspect.supervised import label_corpus, track_corpus_labels
 
         setup = load_curate_config(args.input_dir, args.output_dir, args.config, args.extract_config)
-        # Resolved, so the logged path survives the snapshot worktree a tracked run starts in.
+        # resolve so the logged path survives the snapshot worktree a tracked run starts in
         stage_dir = (resolve_sample_dir(args.config, args.output_dir) / STAGE_DIRS["sentence_dedup"]).resolve()
         with args.gold.open(encoding="utf-8") as handle:
             gold_ids = frozenset(json.loads(line)["id"] for line in handle)
@@ -478,6 +520,7 @@ def main() -> None:
         print(f"wrote {args.out}; MLflow run {run_id}")
         return
 
+    # report the unit status
     if args.command == "status":
         for line in selection_status(
             input_dir=args.input_dir,
@@ -504,6 +547,7 @@ def main() -> None:
             raise SystemExit(1)
         return
 
+    # build the corpus
     curate(
         datasets=args.datasets,
         run_all=args.all,
@@ -523,4 +567,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        sys.exit(130)
+        sys.exit(INTERRUPTED_EXIT_CODE)

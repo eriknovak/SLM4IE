@@ -35,10 +35,11 @@ import math
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, fields
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Any, NamedTuple
 
 import yaml
 from datatrove.data import Document
@@ -61,8 +62,12 @@ from slm4ie.data.curate.stages.quality import LetterShareGopherQualityFilter, _b
 from slm4ie.data.curate.stages.repetition import _build_repetition_config  # noqa: E402
 from slm4ie.utils.stats import cohen_kappa, wilson  # noqa: E402
 
-# No tqdm monitor thread: process pools fork after a bar, and forking a threaded parent can deadlock.
+# no tqdm monitor thread: forking a threaded parent after a bar can deadlock
 tqdm.monitor_interval = 0
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Where this experiment's derived data lives, relative to the repository root.
 DATA_ROOT = Path("data/experiments/data/curation-thresholds-slovenian")
@@ -80,19 +85,31 @@ FIGURES_DIR = Path(__file__).resolve().parent / "figures"
 AUDIT_TABLES = Path(__file__).resolve().parents[1] / "curation-quality-slovenian" / "tables"
 
 #: The stage folders that keep one sentinel per source, in pipeline order.
-SCOPED_STAGES: Tuple[str, ...] = ("00_convert", "01_language", "02_spam", "03_quality", "04_repetition")
+SCOPED_STAGES: tuple[str, ...] = ("00_convert", "01_language", "02_spam", "03_quality", "04_repetition")
 
 #: The corpus-wide stage whose per-source output has to be counted.
 COUNTED_STAGE = "05_exact_dedup"
 
 #: A filter whose rules are read one by one.
-StageFilter = Union[LetterShareGopherQualityFilter, GopherRepetitionFilter]
+StageFilter = LetterShareGopherQualityFilter | GopherRepetitionFilter
 
 #: The stage folder each rule-based filter reads, holding every document that reaches it.
 FILTER_INPUTS = {"quality": "02_spam", "repetition": "03_quality"}
 
 #: Rows per filter the run prints from the rule breakdown.
 PRINTED_RULE_ROWS = 5
+
+#: Shards read at once by default.
+DEFAULT_WORKERS = 30
+
+#: Colour of the stacked bar for documents kept; the palette holds six colours.
+KEPT_BAR_COLOR = "#b8b8b8"
+
+#: Salt that fixes the SVG clip-path ids.
+SVG_HASH_SALT = "curation-thresholds-slovenian"
+
+#: Document ids shown when kept documents have no verdict.
+SHOWN_UNJUDGED = 5
 
 #: A document's id in a shard line, compact (datatrove) or spaced (convert), escapes kept.
 ID_PATTERN = re.compile(r'"id":\s*"((?:[^"\\]|\\.)*)"')
@@ -125,10 +142,10 @@ FIRST_TEXT_KEPT = "kept: one text per record"
 SECOND_TEXT_KEPT = "kept: a second text of a kept record"
 
 #: The corpus-wide stages after exact dedup, each with one sentinel for the whole corpus.
-CORPUS_STAGES: Tuple[str, ...] = ("06_sentence_dedup", "07_statistics")
+CORPUS_STAGES: tuple[str, ...] = ("06_sentence_dedup", "07_statistics")
 
 #: The stages that drop documents, named as in the record.
-DROP_STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_dedup", "sentence_dedup")
+DROP_STAGES: tuple[str, ...] = ("language", "spam", "quality", "repetition", "exact_dedup", "sentence_dedup")
 
 #: Subword tokens per word until the project tokenizer exists (GLOSSARY: estimated tokens).
 TOKENS_PER_WORD = 2
@@ -164,7 +181,7 @@ CALIBRATION_LABELS = AUDIT_DATA / "final" / "human-labels-calibration.jsonl"
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
 
 #: What each content filter is built to remove, as a test on one verdict (D1).
-TARGETS: Dict[str, Callable[[Dict[str, Any]], bool]] = {
+TARGETS: dict[str, Callable[[dict[str, Any]], bool]] = {
     "language": lambda verdict: verdict.get("language", "sl") != "sl",
     "spam": lambda verdict: bool(verdict["adult_or_spam"]),
     "quality": lambda verdict: verdict["coherence"] <= 2 or verdict["text_type"] == "garbage",
@@ -214,6 +231,11 @@ MAX_BAD_RATE_RISE = 0.02
 BASELINE_BUILD = "baseline"
 
 
+# ===============================
+# Helper functions
+# ===============================
+
+
 class FilterRescue(NamedTuple):
     """What one filter drops on one source and how much of it a setting variant keeps."""
 
@@ -223,7 +245,7 @@ class FilterRescue(NamedTuple):
     bad: int
 
 
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
     """Write rows as a CSV with the first row's keys as the header.
 
     Args:
@@ -241,7 +263,7 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]) -> Path:
     return path
 
 
-def read_csv(path: Path) -> List[Dict[str, str]]:
+def read_csv(path: Path) -> list[dict[str, str]]:
     """Read a CSV written by this script or the earlier audit's.
 
     Args:
@@ -254,7 +276,7 @@ def read_csv(path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def read_access(extract_config: Path) -> Dict[str, str]:
+def read_access(extract_config: Path) -> dict[str, str]:
     """Read whether each source may be redistributed.
 
     Args:
@@ -268,7 +290,7 @@ def read_access(extract_config: Path) -> Dict[str, str]:
     return {key: (entry or {}).get("access", "open") for key, entry in entries.items() if isinstance(entry, dict)}
 
 
-def scoped_counts(pretrain_dir: Path) -> Tuple[Dict[str, Dict[str, int]], Set[str]]:
+def scoped_counts(pretrain_dir: Path) -> tuple[dict[str, dict[str, int]], set[str]]:
     """Read each source's document count after every per-source stage.
 
     A stage must read exactly what the stage before it wrote for the same
@@ -285,8 +307,9 @@ def scoped_counts(pretrain_dir: Path) -> Tuple[Dict[str, Dict[str, int]], Set[st
     Raises:
         ValueError: If a stage read a different count than its predecessor wrote.
     """
-    counts: Dict[str, Dict[str, int]] = defaultdict(dict)
-    commits: Set[str] = set()
+    # read each sentinel and check it against the stage before
+    counts: dict[str, dict[str, int]] = defaultdict(dict)
+    commits: set[str] = set()
     for previous, stage in zip((None, *SCOPED_STAGES), SCOPED_STAGES):
         for path in sorted((pretrain_dir / stage).glob("*/.complete")):
             sentinel = json.loads(path.read_text(encoding="utf-8"))
@@ -301,7 +324,7 @@ def scoped_counts(pretrain_dir: Path) -> Tuple[Dict[str, Dict[str, int]], Set[st
     return counts, commits
 
 
-def funnel_rows(pretrain_dir: Path, exact_counts: Dict[str, int], access: Dict[str, str]) -> List[Dict[str, Any]]:
+def funnel_rows(pretrain_dir: Path, exact_counts: dict[str, int], access: dict[str, str]) -> list[dict[str, Any]]:
     """Report how many documents each source holds after every stage.
 
     Args:
@@ -315,16 +338,19 @@ def funnel_rows(pretrain_dir: Path, exact_counts: Dict[str, int], access: Dict[s
     Raises:
         FileNotFoundError: If the statistics stage has not run.
     """
-    counts, _ = scoped_counts(pretrain_dir)
     stats_dir = pretrain_dir / "07_statistics" / "per_dataset"
     if not stats_dir.is_dir():
         raise FileNotFoundError(f"no corpus statistics at {stats_dir}; run the statistics stage first")
+
+    # read the per-stage counts and the final statistics
+    counts, _ = scoped_counts(pretrain_dir)
     final = {path.stem: json.loads(path.read_text(encoding="utf-8")) for path in stats_dir.glob("*.json")}
 
-    rows: List[Dict[str, Any]] = []
+    # build one row per source
+    rows: list[dict[str, Any]] = []
     for source in sorted(final):
         stages = counts[source]
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "source": source,
             "domain": final[source]["domain"],
             "access": access.get(source, "open"),
@@ -338,7 +364,8 @@ def funnel_rows(pretrain_dir: Path, exact_counts: Dict[str, int], access: Dict[s
         rows.append(row)
     rows.sort(key=lambda row: row["retained"])
 
-    total: Dict[str, Any] = {"source": "TOTAL", "domain": "", "access": ""}
+    # add the totals row
+    total: dict[str, Any] = {"source": "TOTAL", "domain": "", "access": ""}
     for key in (*(stage[3:] for stage in SCOPED_STAGES), "exact_dedup", "final", "final_words", "tokens_estimated"):
         total[key] = sum(row[key] for row in rows)
     total["retained"] = round(total["final"] / total["convert"], 4)
@@ -346,7 +373,7 @@ def funnel_rows(pretrain_dir: Path, exact_counts: Dict[str, int], access: Dict[s
     return rows
 
 
-def loss_shares(row: Dict[str, Any]) -> Dict[str, float]:
+def loss_shares(row: dict[str, Any]) -> dict[str, float]:
     """Share of one source's converted documents that each drop stage removed, unrounded.
 
     Args:
@@ -355,7 +382,7 @@ def loss_shares(row: Dict[str, Any]) -> Dict[str, float]:
     Returns:
         The share per stage in `DROP_STAGES`.
     """
-    shares: Dict[str, float] = {}
+    shares: dict[str, float] = {}
     previous = row["convert"]
     for stage in DROP_STAGES:
         current = row["final"] if stage == "sentence_dedup" else row[stage]
@@ -364,7 +391,7 @@ def loss_shares(row: Dict[str, Any]) -> Dict[str, float]:
     return shares
 
 
-def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def loss_rows(funnel: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Split each source's converted documents by the stage that dropped them.
 
     Args:
@@ -385,7 +412,7 @@ def loss_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
-def build_comparison_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def build_comparison_rows(funnel: list[dict[str, Any]], audit_funnel: list[dict[str, str]]) -> list[dict[str, Any]]:
     """Set each source's retention in the rebuilt corpus beside the audit's build.
 
     A source the audit's build doubled kept its true converted count, so its
@@ -402,7 +429,7 @@ def build_comparison_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[
     """
     rebuilt = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
     audit = {row["source"]: row for row in audit_funnel if row["source"] != "TOTAL"}
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for source in sorted(set(rebuilt) | set(audit)):
         before, after = audit.get(source), rebuilt.get(source)
         retained_audit = float(before["retained"]) if before else ""
@@ -424,8 +451,8 @@ def build_comparison_rows(funnel: List[Dict[str, Any]], audit_funnel: List[Dict[
 
 
 def domain_token_rows(
-    funnel: List[Dict[str, Any]], earlier_funnel: List[Dict[str, Any]], earlier: str = "audit"
-) -> List[Dict[str, Any]]:
+    funnel: list[dict[str, Any]], earlier_funnel: list[dict[str, Any]], earlier: str = "audit"
+) -> list[dict[str, Any]]:
     """Total the finished corpus per domain in estimated tokens, against the KPIs.
 
     Domains are the labels each source declares (D4). Each domain is held to
@@ -439,10 +466,10 @@ def domain_token_rows(
     Returns:
         One row per domain, fewest tokens first, then the corpus total.
     """
-    tokens: Dict[str, int] = defaultdict(int)
-    documents: Dict[str, int] = defaultdict(int)
-    sources: Dict[str, int] = defaultdict(int)
-    earlier_tokens: Dict[str, int] = defaultdict(int)
+    tokens: dict[str, int] = defaultdict(int)
+    documents: dict[str, int] = defaultdict(int)
+    sources: dict[str, int] = defaultdict(int)
+    earlier_tokens: dict[str, int] = defaultdict(int)
     for row in funnel:
         if row["source"] == "TOTAL":
             continue
@@ -482,7 +509,7 @@ def domain_token_rows(
     return rows
 
 
-def corpus_dataset_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def corpus_dataset_rows(funnel: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Describe every source of the baseline corpus, for the record's Datasets section.
 
     Args:
@@ -507,7 +534,7 @@ def corpus_dataset_rows(funnel: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
-def read_routes(config: Path) -> Dict[str, str]:
+def read_routes(config: Path) -> dict[str, str]:
     """Read the route each source takes in a candidate build's config.
 
     Args:
@@ -522,8 +549,8 @@ def read_routes(config: Path) -> Dict[str, str]:
 
 
 def route_comparison_rows(
-    baseline: List[Dict[str, Any]], candidate: List[Dict[str, Any]], routes: Dict[str, str]
-) -> List[Dict[str, Any]]:
+    baseline: list[dict[str, Any]], candidate: list[dict[str, Any]], routes: dict[str, str]
+) -> list[dict[str, Any]]:
     """Set each source's retention in a candidate build beside the baseline's.
 
     Args:
@@ -564,8 +591,8 @@ def route_comparison_rows(
 
 
 def loss_change_rows(
-    baseline: List[Dict[str, Any]], candidate: List[Dict[str, Any]], routes: Dict[str, str]
-) -> List[Dict[str, Any]]:
+    baseline: list[dict[str, Any]], candidate: list[dict[str, Any]], routes: dict[str, str]
+) -> list[dict[str, Any]]:
     """Report how much more or less of each source every stage drops in a candidate build.
 
     Shares are over the source's converted documents, which both builds share
@@ -582,7 +609,7 @@ def loss_change_rows(
         per drop stage.
     """
     before = {row["source"]: loss_shares(row) for row in baseline if row["source"] != "TOTAL"}
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for row in candidate:
         if row["source"] == "TOTAL":
             continue
@@ -608,10 +635,13 @@ def check_lock(pretrain_dir: Path, config: Path) -> None:
         ValueError: If a unit on disk differs from its lock entry, is missing,
             or was built at settings other than the config's.
     """
+    # load the lock and the config's expected hashes
     lock = yaml.safe_load(lock_path_for(config).read_text(encoding="utf-8"))
     curate = load_curate_config(None, None, config, None)
     folders = {folder[3:]: folder for folder in (*SCOPED_STAGES, COUNTED_STAGE, *CORPUS_STAGES)}
-    mismatched: List[str] = []
+
+    # compare every unit on disk with its lock entry
+    mismatched: list[str] = []
     for stage, folder in folders.items():
         entries = lock[stage] if stage in (name[3:] for name in SCOPED_STAGES) else {"": lock[stage]}
         for source, entry in entries.items():
@@ -624,7 +654,7 @@ def check_lock(pretrain_dir: Path, config: Path) -> None:
         raise ValueError(f"{pretrain_dir} is not the build {lock_path_for(config).name} records: {mismatched}")
 
 
-def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Read a JSONL file written by the sampler or the judge.
 
     Args:
@@ -633,12 +663,11 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     Returns:
         One dict per non-empty line, in file order.
     """
-    # split("\n"), not splitlines(): document text carries U+2028, which
-    # splitlines() would honour and so tear a JSON row in half.
+    # split on \n, not splitlines(): U+2028 in text would tear a JSON row
     return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
-def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def judge_input_rows(sample: list[dict[str, Any]], calibration: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Spread the calibration documents evenly through a draw for one judge run.
 
     The judge reads documents in groups in file order, so spreading them puts
@@ -658,20 +687,23 @@ def judge_input_rows(sample: List[Dict[str, Any]], calibration: List[Dict[str, A
     Raises:
         ValueError: If the draw holds a calibration document's id with other text.
     """
+    # refuse calibration ids that clash with the draw
     texts = {document["id"]: document["text"] for document in sample}
     clashing = [doc["id"] for doc in calibration if doc["id"] in texts and texts[doc["id"]] != doc["text"]]
     if clashing:
         raise ValueError(f"calibration ids {clashing} are in the draw with other text")
+
+    # place the missing calibration documents at an even interval
     marked = [document for document in calibration if document["id"] not in texts]
     step = max(1, len(sample) // (len(marked) + 1))
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     placed = 0
     for index, document in enumerate(sample, start=1):
         rows.append(document)
         if index % step == 0 and placed < len(marked):
             rows.append(marked[placed])
             placed += 1
-    # A draw too short to hold every calibration document gets the rest at its end.
+    # a draw too short for every calibration document gets the rest at its end
     rows.extend(marked[placed:])
     return rows
 
@@ -686,21 +718,26 @@ def write_judge_input(sample_path: Path, destination: Path) -> None:
     Raises:
         KeyError: If a calibration label's document is missing from the earlier audit's sample.
     """
+    # read the audit sample and the calibration labels
     audit_path = AUDIT_DATA / "interim" / "sample.jsonl"
     audit_sample = {document["id"]: document for document in read_jsonl(audit_path)}
     labels = read_jsonl(CALIBRATION_LABELS)
     missing = [label["id"] for label in labels if label["id"] not in audit_sample]
     if missing:
         raise KeyError(f"calibration ids {missing} are not in {audit_path}")
+
+    # spread the calibration documents through the draw
     calibration = [audit_sample[label["id"]] for label in labels]
     sample = read_jsonl(sample_path)
     rows = judge_input_rows(sample, calibration)
+
+    # write the judge input
     with destination.open("w", encoding="utf-8") as handle:
         handle.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
     print(f"wrote {len(rows)} documents ({len(rows) - len(sample)} calibration added) to {destination}")
 
 
-def is_bad_text(verdict: Dict[str, Any]) -> bool:
+def is_bad_text(verdict: dict[str, Any]) -> bool:
     """Decide whether a judged document is bad text at the lenient bar.
 
     Args:
@@ -714,8 +751,8 @@ def is_bad_text(verdict: Dict[str, Any]) -> bool:
 
 
 def judged_drops(
-    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
-) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
+    sample: Iterable[dict[str, Any]], verdicts: dict[str, dict[str, Any]], sources: set[str]
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
     """Collect the verdicts on documents each content filter dropped, per source.
 
     Args:
@@ -727,7 +764,7 @@ def judged_drops(
     Returns:
         Verdicts keyed by stage and source.
     """
-    drops: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    drops: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in sample:
         verdict = verdicts.get(row["id"])
         if verdict is None or row["dataset"] not in sources:
@@ -754,8 +791,8 @@ def call_rate(share: float) -> str:
 
 
 def rate_columns(
-    name: str, verdicts: List[Dict[str, Any]], test: Optional[Callable[[Dict[str, Any]], bool]], call: bool
-) -> Dict[str, Any]:
+    name: str, verdicts: list[dict[str, Any]], test: Callable[[dict[str, Any]], bool] | None, call: bool
+) -> dict[str, Any]:
     """Score a group of verdicts on one test, with its Wilson interval.
 
     Args:
@@ -781,7 +818,7 @@ def rate_columns(
     }
 
 
-def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def precision_rows(drops: dict[tuple[str, str], list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Score each content filter's drops on its target and on bad text.
 
     Args:
@@ -793,7 +830,7 @@ def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[D
         with `read` false and no call; the language filter has no bad-text
         columns.
     """
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for stage, is_target in TARGETS.items():
         per_source = sorted((source, verdicts) for (stg, source), verdicts in drops.items() if stg == stage)
         pooled = [verdict for _, verdicts in per_source for verdict in verdicts]
@@ -813,7 +850,7 @@ def precision_rows(drops: Dict[Tuple[str, str], List[Dict[str, Any]]]) -> List[D
     return rows
 
 
-def agreement_rows(labels: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def agreement_rows(labels: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Measure how far the judge agrees with the person on each test a finding reads.
 
     Args:
@@ -831,8 +868,10 @@ def agreement_rows(labels: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, A
     missing = [label["id"] for label in labels if label["id"] not in verdicts]
     if missing:
         raise KeyError(f"calibration ids {missing} have no verdict in the judge run")
+
+    # score the judge against the person on each test
     pairs = [(label, verdicts[label["id"]]) for label in labels]
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for test_name, test in [("bad text", is_bad_text), *TARGETS.items()]:
         calls = [(test(label), test(verdict)) for label, verdict in pairs]
         kappa, raw = cohen_kappa(calls)
@@ -850,7 +889,7 @@ def agreement_rows(labels: List[Dict[str, Any]], verdicts: Dict[str, Dict[str, A
     return rows
 
 
-def clause_rows(precision: List[Dict[str, Any]], gate_passed: bool) -> List[Dict[str, Any]]:
+def clause_rows(precision: list[dict[str, Any]], gate_passed: bool) -> list[dict[str, Any]]:
     """Call each hypothesis clause from the rates it reads (Predictions, D2).
 
     Args:
@@ -863,13 +902,17 @@ def clause_rows(precision: List[Dict[str, Any]], gate_passed: bool) -> List[Dict
         how each was called, its lowest rate, and the clause's call: confirmed
         when every rate holds, refuted when any fails, inconclusive otherwise.
     """
-    # A filter with no judged drops has a pooled row but no rate to read.
+    # a filter with no judged drops has a pooled row but no rate to read
     read = [row for row in precision if row["read"] and row["drops_judged"]]
+
+    # collect the rates each clause reads
     rates_by_clause = {
         clause: [(row, "target") for row in read if row["stage"] == stage] for clause, stage in TARGET_CLAUSES.items()
     }
     rates_by_clause["H5"] = [(row, "bad_text") for row in read if row["stage"] in BAD_TEXT_STAGES]
-    rows: List[Dict[str, Any]] = []
+
+    # call each clause
+    rows: list[dict[str, Any]] = []
     for clause, scored in rates_by_clause.items():
         calls = [row[f"{column}_call"] for row, column in scored]
         if calls and all(call == "holds" for call in calls):
@@ -898,7 +941,7 @@ def clause_rows(precision: List[Dict[str, Any]], gate_passed: bool) -> List[Dict
 
 def _trade_off_row(
     stage: str, source: str, dropped: int, judged: int, bad_share: float, call: bool, gate_passed: bool
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Turn one filter's drops on one group into bad text removed and good text lost.
 
     Args:
@@ -928,8 +971,8 @@ def _trade_off_row(
 
 
 def trade_off_rows(
-    funnel: List[Dict[str, Any]], drops: Dict[Tuple[str, str], List[Dict[str, Any]]], gate_passed: bool
-) -> List[Dict[str, Any]]:
+    funnel: list[dict[str, Any]], drops: dict[tuple[str, str], list[dict[str, Any]]], gate_passed: bool
+) -> list[dict[str, Any]]:
     """Estimate, per filter and source, how much bad text a filter removes and how much good text it loses.
 
     Args:
@@ -951,9 +994,10 @@ def trade_off_rows(
     Raises:
         KeyError: If a source with judged drops is missing from the funnel.
     """
+    # estimate bad and good text per filter
     stage_columns = [stage[3:] for stage in SCOPED_STAGES]
     counts = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for previous, stage in zip(stage_columns, stage_columns[1:]):
         is_bad = is_bad_text if stage in BAD_TEXT_STAGES else TARGETS[stage]
         per_source = []
@@ -978,8 +1022,8 @@ def trade_off_rows(
 
 
 def filter_drops(
-    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str], stage: str
-) -> Dict[str, Dict[str, str]]:
+    sample: Iterable[dict[str, Any]], verdicts: dict[str, dict[str, Any]], sources: set[str], stage: str
+) -> dict[str, dict[str, str]]:
     """Pick the judged documents one filter dropped in a sample.
 
     Args:
@@ -991,7 +1035,7 @@ def filter_drops(
     Returns:
         Per source, the text the judge read (the document's opening) by document id.
     """
-    picked: Dict[str, Dict[str, str]] = defaultdict(dict)
+    picked: dict[str, dict[str, str]] = defaultdict(dict)
     for row in sample:
         if row["id"] not in verdicts or row["dataset"] not in sources:
             continue
@@ -1000,7 +1044,7 @@ def filter_drops(
     return dict(picked)
 
 
-def _documents_in_shard(task: Tuple[Path, Dict[str, str]]) -> List[Tuple[str, Optional[str]]]:
+def _documents_in_shard(task: tuple[Path, dict[str, str]]) -> list[tuple[str, str | None]]:
     """Read the wanted documents out of one shard.
 
     Args:
@@ -1011,10 +1055,10 @@ def _documents_in_shard(task: Tuple[Path, Dict[str, str]]) -> List[Tuple[str, Op
         full text, or None for the text when it does not start with the opening.
     """
     path, openings = task
-    found: List[Tuple[str, Optional[str]]] = []
+    found: list[tuple[str, str | None]] = []
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         for line in handle:
-            # A quote inside text is escaped, so the first match is the id key.
+            # a quote inside text is escaped, so the first match is the id key
             match = ID_PATTERN.search(line)
             if match is None or json.loads(f'"{match.group(1)}"') not in openings:
                 continue
@@ -1026,8 +1070,8 @@ def _documents_in_shard(task: Tuple[Path, Dict[str, str]]) -> List[Tuple[str, Op
 
 
 def fetch_full_texts(
-    stage_dir: Path, openings: Dict[str, Dict[str, str]], cache: Path, workers: int
-) -> Tuple[Dict[str, str], Set[str]]:
+    stage_dir: Path, openings: dict[str, dict[str, str]], cache: Path, workers: int
+) -> tuple[dict[str, str], set[str]]:
     """Fetch the full text of documents the judge read only the opening of.
 
     The sampler cut long documents short, and a filter has to see the whole
@@ -1045,6 +1089,7 @@ def fetch_full_texts(
         Full text by document id, for the documents the folder holds with the
         text the judge read; and the ids the folder holds only with other text.
     """
+    # key the cache on the openings and the stage's sentinels
     key = {
         "format": FETCH_FORMAT,
         "openings": hashlib.sha256(json.dumps(openings, sort_keys=True).encode("utf-8")).hexdigest(),
@@ -1053,24 +1098,30 @@ def fetch_full_texts(
             for source in sorted(openings)
         },
     }
+
+    # reuse the cache while its key is unchanged
     if cache.is_file():
         cached = json.loads(cache.read_text(encoding="utf-8"))
         if cached["key"] == key:
             return cached["texts"], set(cached["changed"])
+
+    # read the wanted documents from every shard
     tasks = [
         (shard, openings[source])
         for source in sorted(openings)
         for shard in sorted((stage_dir / source).glob("*.jsonl.gz"))
     ]
-    texts: Dict[str, str] = {}
-    seen: Set[str] = set()
+    texts: dict[str, str] = {}
+    seen: set[str] = set()
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for found in tqdm(pool.map(_documents_in_shard, tasks), total=len(tasks), desc=f"reading {stage_dir.name}"):
             for doc_id, text in found:
                 seen.add(doc_id)
-                # One id can carry several texts (issue #6); keep the one the judge read.
+                # one id can carry several texts (issue #6); keep the one the judge read
                 if text is not None:
                     texts.setdefault(doc_id, text)
+
+    # write the cache
     changed = seen - set(texts)
     cache.parent.mkdir(parents=True, exist_ok=True)
     partial = cache.with_suffix(".partial")
@@ -1082,8 +1133,8 @@ def fetch_full_texts(
 
 
 def candidate_filters(
-    config: Path, sources: Iterable[str], stage: str, settings: Optional[Dict[str, Any]] = None
-) -> Dict[str, Optional[StageFilter]]:
+    config: Path, sources: Iterable[str], stage: str, settings: dict[str, Any] | None = None
+) -> dict[str, StageFilter | None]:
     """Build the quality or repetition filter each source meets in a candidate build.
 
     Args:
@@ -1097,16 +1148,19 @@ def candidate_filters(
         Per source, its filter with its route's and its own settings; None
         where the route switches the filter off.
     """
+    # load the config's profiles and stop words
     cfg = yaml.safe_load(config.read_text(encoding="utf-8"))
     overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
     stopwords, _ = load_stopwords(cfg["stopwords"])
-    filters: Dict[str, Optional[StageFilter]] = {}
+
+    # build each source's filter
+    filters: dict[str, StageFilter | None] = {}
     for source in sources:
         knobs = {**effective_stage_config(cfg, overrides, source, stage), **(settings or {})}
         if knobs.get("enabled") is False:
             filters[source] = None
             continue
-        # The stages' own builders, so defaults and casts match the build exactly.
+        # use the stages' own builders so defaults and casts match the build
         if stage == "repetition":
             filters[source] = GopherRepetitionFilter(
                 **asdict(_build_repetition_config(knobs)), language=Languages.slovenian
@@ -1119,13 +1173,13 @@ def candidate_filters(
 
 
 def refilter_rows(
-    openings: Dict[str, Dict[str, str]],
-    texts: Dict[str, str],
-    changed: Set[str],
-    verdicts: Dict[str, Dict[str, Any]],
-    filters: Dict[str, Optional[LetterShareGopherQualityFilter]],
-    routes: Dict[str, str],
-) -> List[Dict[str, Any]]:
+    openings: dict[str, dict[str, str]],
+    texts: dict[str, str],
+    changed: set[str],
+    verdicts: dict[str, dict[str, Any]],
+    filters: dict[str, LetterShareGopherQualityFilter | None],
+    routes: dict[str, str],
+) -> list[dict[str, Any]]:
     """Re-apply a candidate's quality filter to the documents it dropped in the earlier audit.
 
     A document the candidate filter keeps is rescued; the rest are its drops,
@@ -1149,8 +1203,9 @@ def refilter_rows(
         drops' rates. A group with fewer than `MIN_SOURCE_DROPS` remaining
         drops gets no call.
     """
-    rescued: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    dropped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    # re-apply the filter to every judged drop
+    rescued: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    dropped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for source, ids in sorted(openings.items()):
         quality_filter = filters[source]
         for doc_id in sorted(ids):
@@ -1159,7 +1214,7 @@ def refilter_rows(
             kept = quality_filter is None or quality_filter.filter(Document(text=texts[doc_id], id=doc_id)) is True
             (rescued if kept else dropped)[source].append(verdicts[doc_id])
 
-    def group(route: str, source: str, members: List[str]) -> Dict[str, Any]:
+    def group(route: str, source: str, members: list[str]) -> dict[str, Any]:
         """Score one group of sources pooled together."""
         saved = [verdict for member in members for verdict in rescued[member]]
         still_dropped = [verdict for member in members for verdict in dropped[member]]
@@ -1180,7 +1235,8 @@ def refilter_rows(
             **rate_columns("bad_text", still_dropped, is_bad_text, read),
         }
 
-    by_route: Dict[str, List[str]] = defaultdict(list)
+    # score the groups: all sources, each route, each source
+    by_route: dict[str, list[str]] = defaultdict(list)
     for source in sorted(openings):
         by_route[routes.get(source, "")].append(source)
     rows = [group("all", "pooled", sorted(openings))]
@@ -1189,7 +1245,7 @@ def refilter_rows(
     return rows
 
 
-def _switch_off(stage_filter: StageFilter, reason: str) -> Tuple[str, StageFilter]:
+def _switch_off(stage_filter: StageFilter, reason: str) -> tuple[str, StageFilter]:
     """Name the setting behind a drop reason and switch it off on a copy of the filter.
 
     Args:
@@ -1212,13 +1268,13 @@ def _switch_off(stage_filter: StageFilter, reason: str) -> Tuple[str, StageFilte
         setting = "dup_n_grams"
         switched.dup_n_grams = ()
     else:
-        # The line and paragraph reasons are named after their own settings.
+        # the line and paragraph reasons are named after their own settings
         setting = reason
         setattr(switched, setting, None)
     return setting, switched
 
 
-def failing_rules(stage_filter: StageFilter, doc: Document) -> List[str]:
+def failing_rules(stage_filter: StageFilter, doc: Document) -> list[str]:
     """List every rule of a quality or repetition filter a document fails, in the filter's order.
 
     The filter stops at the first rule a document fails, so each failing rule
@@ -1232,7 +1288,7 @@ def failing_rules(stage_filter: StageFilter, doc: Document) -> List[str]:
         The failed rules, first failure first, named as `_switch_off` names
         them; empty for a kept document.
     """
-    failed: List[str] = []
+    failed: list[str] = []
     result = stage_filter.filter(doc)
     while result is not True:
         rule, stage_filter = _switch_off(stage_filter, result[1])
@@ -1242,12 +1298,12 @@ def failing_rules(stage_filter: StageFilter, doc: Document) -> List[str]:
 
 
 def drop_rule_rows(
-    openings: Dict[str, Dict[str, str]],
-    texts: Dict[str, str],
-    verdicts: Dict[str, Dict[str, Any]],
-    filters: Dict[str, Optional[LetterShareGopherQualityFilter]],
-    routes: Dict[str, str],
-) -> List[Dict[str, Any]]:
+    openings: dict[str, dict[str, str]],
+    texts: dict[str, str],
+    verdicts: dict[str, dict[str, Any]],
+    filters: dict[str, LetterShareGopherQualityFilter | None],
+    routes: dict[str, str],
+) -> list[dict[str, Any]]:
     """Group the documents a candidate's quality filter still drops by the rules they fail.
 
     Args:
@@ -1263,7 +1319,7 @@ def drop_rule_rows(
         to be the quality target or bad text. A set of one rule counts the
         documents that loosening that rule alone would keep.
     """
-    groups: Dict[Tuple[str, str, Tuple[str, ...]], List[Dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, str, tuple[str, ...]], list[dict[str, Any]]] = defaultdict(list)
     for source, ids in sorted(openings.items()):
         if filters[source] is None:
             continue
@@ -1287,7 +1343,7 @@ def drop_rule_rows(
     ]
 
 
-def merge_drops(*picked: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+def merge_drops(*picked: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
     """Merge several samples' judged drops of one filter, a later sample's opening winning.
 
     Args:
@@ -1296,7 +1352,7 @@ def merge_drops(*picked: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]
     Returns:
         Per source, every sample's openings by document id.
     """
-    merged: Dict[str, Dict[str, str]] = defaultdict(dict)
+    merged: dict[str, dict[str, str]] = defaultdict(dict)
     for openings in picked:
         for source, source_openings in openings.items():
             merged[source].update(source_openings)
@@ -1305,14 +1361,14 @@ def merge_drops(*picked: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]
 
 def rule_trade_off_rows(
     stage: str,
-    openings: Dict[str, Dict[str, str]],
-    texts: Dict[str, str],
-    verdicts: Dict[str, Dict[str, Any]],
-    fresh_ids: Set[str],
-    filters: Dict[str, Optional[StageFilter]],
-    funnel: List[Dict[str, Any]],
+    openings: dict[str, dict[str, str]],
+    texts: dict[str, str],
+    verdicts: dict[str, dict[str, Any]],
+    fresh_ids: set[str],
+    filters: dict[str, StageFilter | None],
+    funnel: list[dict[str, Any]],
     gate_passed: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Estimate, per source and set of failed rules, the bad text a filter removes and the good text it loses.
 
     Args:
@@ -1335,11 +1391,11 @@ def rule_trade_off_rows(
     stage_columns = [name[3:] for name in SCOPED_STAGES]
     previous = stage_columns[stage_columns.index(stage) - 1]
     counts = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for source, ids in sorted(openings.items()):
         if filters[source] is None:
             continue
-        groups: Dict[Tuple[str, ...], List[str]] = defaultdict(list)
+        groups: dict[tuple[str, ...], list[str]] = defaultdict(list)
         for doc_id in sorted(ids):
             if doc_id in texts:
                 failed = failing_rules(filters[source], Document(text=texts[doc_id], id=doc_id))
@@ -1368,7 +1424,7 @@ def rule_trade_off_rows(
     return sorted(rows, key=lambda row: -row["good_lost"])
 
 
-def read_setting_changes(path: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
+def read_setting_changes(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
     """Read the setting changes tried on each route.
 
     Args:
@@ -1388,10 +1444,10 @@ def read_setting_changes(path: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
         "repetition": {field.name for field in fields(_build_repetition_config({}))} | {"enabled"},
     }
     changes = yaml.safe_load(path.read_text(encoding="utf-8"))["changes"]
-    variants: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    variants: dict[str, dict[str, dict[str, Any]]] = {}
     for route, route_changes in changes.items():
         variants[route] = {}
-        merged: Dict[str, Dict[str, Any]] = defaultdict(dict)
+        merged: dict[str, dict[str, Any]] = defaultdict(dict)
         for name, change in route_changes.items():
             stage = change["stage"]
             if stage not in knobs:
@@ -1407,8 +1463,8 @@ def read_setting_changes(path: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 
 def _rescued_by_variant(
-    task: Tuple[str, str, StageFilter, List[Tuple[Optional[StageFilter], Optional[StageFilter]]]],
-) -> Optional[List[bool]]:
+    task: tuple[str, str, StageFilter, list[tuple[StageFilter | None, StageFilter | None]]],
+) -> list[bool] | None:
     """Run one judged drop through the filters as built and under each variant.
 
     Args:
@@ -1429,12 +1485,12 @@ def _rescued_by_variant(
 
 def rescue_outcomes(
     config: Path,
-    variants: Dict[str, Dict[str, Dict[str, Any]]],
-    routes: Dict[str, str],
-    openings: Dict[str, Dict[str, Dict[str, str]]],
-    texts: Dict[str, Dict[str, str]],
+    variants: dict[str, dict[str, dict[str, Any]]],
+    routes: dict[str, str],
+    openings: dict[str, dict[str, dict[str, str]]],
+    texts: dict[str, dict[str, str]],
     workers: int,
-) -> Dict[Tuple[str, str, str], Dict[str, bool]]:
+) -> dict[tuple[str, str, str], dict[str, bool]]:
     """Find which judged drops each setting variant would keep.
 
     A quality drop a variant keeps must also pass that variant's repetition
@@ -1453,8 +1509,9 @@ def rescue_outcomes(
         its route's variants keeps it. Sources on a route without changes,
         and those whose filter the build switches off, are left out.
     """
-    tasks: List[Tuple[str, str, StageFilter, List[Tuple[Optional[StageFilter], Optional[StageFilter]]]]] = []
-    keys: List[Tuple[Tuple[str, str, str], List[str]]] = []
+    # pair every judged drop with the filters of each variant
+    tasks: list[tuple[str, str, StageFilter, list[tuple[StageFilter | None, StageFilter | None]]]] = []
+    keys: list[tuple[tuple[str, str, str], list[str]]] = []
     for stage, stage_openings in openings.items():
         for route, route_variants in variants.items():
             sources = sorted(source for source in stage_openings if routes.get(source) == route)
@@ -1472,7 +1529,9 @@ def rescue_outcomes(
                     if doc_id in texts[stage]:
                         tasks.append((doc_id, texts[stage][doc_id], built[source], pairs[source]))
                         keys.append(((stage, source, doc_id), list(route_variants)))
-    outcomes: Dict[Tuple[str, str, str], Dict[str, bool]] = {}
+
+    # run the drops through the filters
+    outcomes: dict[tuple[str, str, str], dict[str, bool]] = {}
     with ProcessPoolExecutor(max_workers=workers) as pool:
         results = pool.map(_rescued_by_variant, tasks)
         for (key, names), rescued in tqdm(zip(keys, results), total=len(tasks), desc="trying setting changes"):
@@ -1481,7 +1540,7 @@ def rescue_outcomes(
     return outcomes
 
 
-def _rescue_row(route: str, variant: str, source: str, parts: List[FilterRescue], gate_passed: bool) -> Dict[str, Any]:
+def _rescue_row(route: str, variant: str, source: str, parts: list[FilterRescue], gate_passed: bool) -> dict[str, Any]:
     """Scale one group's rescued judged drops to the documents a variant would keep.
 
     Args:
@@ -1516,12 +1575,12 @@ def _rescue_row(route: str, variant: str, source: str, parts: List[FilterRescue]
 
 
 def setting_change_rows(
-    outcomes: Dict[Tuple[str, str, str], Dict[str, bool]],
-    routes: Dict[str, str],
-    verdicts: Dict[str, Dict[str, Any]],
-    funnel: List[Dict[str, Any]],
+    outcomes: dict[tuple[str, str, str], dict[str, bool]],
+    routes: dict[str, str],
+    verdicts: dict[str, dict[str, Any]],
+    funnel: list[dict[str, Any]],
     gate_passed: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Estimate, per route and setting change, the good and bad text it would keep.
 
     Args:
@@ -1540,12 +1599,15 @@ def setting_change_rows(
         its sources and is called `adopt` when less than half of what it
         keeps is bad (D12, D16).
     """
+    # group the judged drops by filter and source
     stage_columns = [name[3:] for name in SCOPED_STAGES]
     counts = {row["source"]: row for row in funnel if row["source"] != "TOTAL"}
-    judged: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+    judged: dict[tuple[str, str], list[str]] = defaultdict(list)
     for stage, source, doc_id in outcomes:
         judged[(stage, source)].append(doc_id)
-    parts: Dict[Tuple[str, str], Dict[str, List[FilterRescue]]] = defaultdict(lambda: defaultdict(list))
+
+    # count what each variant keeps
+    parts: dict[tuple[str, str], dict[str, list[FilterRescue]]] = defaultdict(lambda: defaultdict(list))
     for (stage, source), ids in sorted(judged.items()):
         previous = stage_columns[stage_columns.index(stage) - 1]
         dropped = counts[source][previous] - counts[source][stage]
@@ -1553,7 +1615,9 @@ def setting_change_rows(
             kept = [doc_id for doc_id in ids if outcomes[(stage, source, doc_id)][variant]]
             bad = sum(is_bad_text(verdicts[doc_id]) for doc_id in kept)
             parts[(routes[source], variant)][source].append(FilterRescue(dropped, len(ids), len(kept), bad))
-    rows: List[Dict[str, Any]] = []
+
+    # build the pooled and per-source rows
+    rows: list[dict[str, Any]] = []
     for (route, variant), by_source in parts.items():
         pooled = [part for source_parts in by_source.values() for part in source_parts]
         rows.append(_rescue_row(route, variant, "pooled", pooled, gate_passed))
@@ -1571,8 +1635,8 @@ class Gain(NamedTuple):
 
 
 def _gain_row(
-    route: str, source: str, gain: Gain, predicted: Optional[Dict[str, Any]], gate_passed: bool
-) -> Dict[str, Any]:
+    route: str, source: str, gain: Gain, predicted: dict[str, Any] | None, gate_passed: bool
+) -> dict[str, Any]:
     """Turn one group's measured gain into a row beside what step 10 predicted.
 
     Args:
@@ -1600,7 +1664,7 @@ def _gain_row(
     }
 
 
-def _route_variant(route: str, route_variants: Dict[str, Dict[str, Any]]) -> str:
+def _route_variant(route: str, route_variants: dict[str, dict[str, Any]]) -> str:
     """Name the variant that applies every setting change of a route.
 
     Args:
@@ -1623,8 +1687,8 @@ def _route_variant(route: str, route_variants: Dict[str, Dict[str, Any]]) -> str
 def _filter_gain(
     stage: str,
     source: str,
-    counts: Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]],
-    drops: Tuple[Dict[Tuple[str, str], List[Dict[str, Any]]], Dict[Tuple[str, str], List[Dict[str, Any]]]],
+    counts: tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]],
+    drops: tuple[dict[tuple[str, str], list[dict[str, Any]]], dict[tuple[str, str], list[dict[str, Any]]]],
 ) -> Gain:
     """Measure what one filter drops on one source in the frozen build less what it drops in the looser one.
 
@@ -1661,15 +1725,15 @@ def _filter_gain(
 
 
 def gain_rows(
-    frozen: List[Dict[str, Any]],
-    loosened: List[Dict[str, Any]],
-    frozen_drops: Dict[Tuple[str, str], List[Dict[str, Any]]],
-    loosened_drops: Dict[Tuple[str, str], List[Dict[str, Any]]],
-    routes: Dict[str, str],
-    variants: Dict[str, Dict[str, Dict[str, Any]]],
-    predicted: List[Dict[str, Any]],
+    frozen: list[dict[str, Any]],
+    loosened: list[dict[str, Any]],
+    frozen_drops: dict[tuple[str, str], list[dict[str, Any]]],
+    loosened_drops: dict[tuple[str, str], list[dict[str, Any]]],
+    routes: dict[str, str],
+    variants: dict[str, dict[str, dict[str, Any]]],
+    predicted: list[dict[str, Any]],
     gate_passed: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Measure the good and bad text a looser build keeps that the frozen build dropped.
 
     Both builds feed the same documents into the quality filter, so what the
@@ -1705,6 +1769,7 @@ def gain_rows(
             count in each build, or a filter its route leaves unchanged drops
             a different count in each build.
     """
+    # pick each route's variant and its predicted row
     counts = (
         {row["source"]: row for row in frozen if row["source"] != "TOTAL"},
         {row["source"]: row for row in loosened if row["source"] != "TOTAL"},
@@ -1712,7 +1777,8 @@ def gain_rows(
     chosen = {route: _route_variant(route, route_variants) for route, route_variants in variants.items()}
     predicted_by = {(row["route"], row["source"]): row for row in predicted if row["change"] == chosen[row["route"]]}
 
-    by_route: Dict[str, List[Tuple[str, Gain]]] = defaultdict(list)
+    # measure each source's gain
+    by_route: dict[str, list[tuple[str, Gain]]] = defaultdict(list)
     for source, route in sorted(routes.items()):
         if counts[0][source]["spam"] != counts[1][source]["spam"]:
             raise ValueError(f"{source} enters the quality filter with a different count in each build")
@@ -1731,7 +1797,8 @@ def gain_rows(
                 )
         by_route[route].append((source, Gain(*(sum(values) for values in zip(Gain(0.0, 0.0, 0.0), *parts)))))
 
-    rows: List[Dict[str, Any]] = []
+    # build the pooled and per-source rows
+    rows: list[dict[str, Any]] = []
     for route, measured in sorted(by_route.items()):
         pooled = Gain(*(sum(values) for values in zip(*(gain for _, gain in measured))))
         rows.append(_gain_row(route, "pooled", pooled, predicted_by.get((route, "pooled")), gate_passed))
@@ -1743,8 +1810,8 @@ def gain_rows(
 
 
 def judged_kept(
-    sample: Iterable[Dict[str, Any]], verdicts: Dict[str, Dict[str, Any]], sources: Set[str]
-) -> Dict[str, List[Dict[str, Any]]]:
+    sample: Iterable[dict[str, Any]], verdicts: dict[str, dict[str, Any]], sources: set[str]
+) -> dict[str, list[dict[str, Any]]]:
     """Collect the verdicts on documents a draw took from a build's kept corpus, per source.
 
     Args:
@@ -1758,7 +1825,7 @@ def judged_kept(
     Raises:
         KeyError: If a kept document of a selected source has no verdict.
     """
-    kept: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    kept: dict[str, list[dict[str, Any]]] = defaultdict(list)
     unjudged = []
     for row in sample:
         is_kept = any(cell["stage"] == KEPT_STAGE and cell["decision"] == "kept" for cell in row["cells"])
@@ -1769,7 +1836,7 @@ def judged_kept(
             continue
         kept[row["dataset"]].append(verdicts[row["id"]])
     if unjudged:
-        raise KeyError(f"kept documents {unjudged[:5]} ({len(unjudged)} in all) have no verdict")
+        raise KeyError(f"kept documents {unjudged[:SHOWN_UNJUDGED]} ({len(unjudged)} in all) have no verdict")
     return kept
 
 
@@ -1786,7 +1853,7 @@ class Residual(NamedTuple):
         return self.bad / self.kept
 
 
-def _source_residual(kept: int, verdicts: List[Dict[str, Any]]) -> Residual:
+def _source_residual(kept: int, verdicts: list[dict[str, Any]]) -> Residual:
     """Scale one source's judged kept documents to everything it keeps.
 
     Args:
@@ -1803,8 +1870,8 @@ def _source_residual(kept: int, verdicts: List[Dict[str, Any]]) -> Residual:
 
 
 def _pooled_residuals(
-    builds: Dict[str, Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]],
-) -> Dict[str, Tuple[Residual, Dict[str, Residual]]]:
+    builds: dict[str, tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]],
+) -> dict[str, tuple[Residual, dict[str, Residual]]]:
     """Estimate each build's residual bad documents per source and summed over its sources.
 
     Args:
@@ -1817,9 +1884,9 @@ def _pooled_residuals(
     Raises:
         ValueError: If a source keeps documents in a build but none of them was judged.
     """
-    estimates: Dict[str, Tuple[Residual, Dict[str, Residual]]] = {}
+    estimates: dict[str, tuple[Residual, dict[str, Residual]]] = {}
     for build, (funnel, kept) in builds.items():
-        per_source: Dict[str, Residual] = {}
+        per_source: dict[str, Residual] = {}
         for row in funnel:
             if row["source"] == "TOTAL" or not row[KEPT_STAGE]:
                 continue
@@ -1831,8 +1898,8 @@ def _pooled_residuals(
 
 
 def residual_rows(
-    builds: Dict[str, Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]],
-) -> List[Dict[str, Any]]:
+    builds: dict[str, tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]],
+) -> list[dict[str, Any]]:
     """Estimate the share of bad text among the documents each build keeps, per source and weighted by volume.
 
     Args:
@@ -1847,8 +1914,9 @@ def residual_rows(
         Agresti-Coull variances of the shares, each scaled by the source's
         kept documents squared.
     """
+    # one volume-weighted row per build
     estimates = _pooled_residuals(builds)
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for build, (pooled, _) in estimates.items():
         margin = INTERVAL_Z * math.sqrt(pooled.variance) / pooled.kept
         rows.append(
@@ -1863,6 +1931,8 @@ def residual_rows(
                 "good_kept": round(pooled.kept - pooled.bad),
             }
         )
+
+    # one row per source and build
     sources = sorted({source for _, per_source in estimates.values() for source in per_source})
     for source in sources:
         for build, (_, per_source) in estimates.items():
@@ -1886,9 +1956,9 @@ def residual_rows(
 
 
 def residual_rise_rows(
-    builds: Dict[str, Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]],
-    gate_passed: Dict[str, bool],
-) -> List[Dict[str, Any]]:
+    builds: dict[str, tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]],
+    gate_passed: dict[str, bool],
+) -> list[dict[str, Any]]:
     """Compare each build's volume-weighted residual bad rate and good text kept with the baseline's (D17).
 
     Args:
@@ -1908,7 +1978,7 @@ def residual_rise_rows(
     """
     estimates = _pooled_residuals(builds)
     baseline = estimates[BASELINE_BUILD][0]
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for build, (pooled, _) in estimates.items():
         if build == BASELINE_BUILD:
             continue
@@ -1929,7 +1999,7 @@ def residual_rise_rows(
     return rows
 
 
-def read_documents(folder: Path) -> List[Dict[str, Any]]:
+def read_documents(folder: Path) -> list[dict[str, Any]]:
     """Read every document in one source's stage folder.
 
     Args:
@@ -1938,14 +2008,14 @@ def read_documents(folder: Path) -> List[Dict[str, Any]]:
     Returns:
         The documents, shard by shard in name order.
     """
-    documents: List[Dict[str, Any]] = []
+    documents: list[dict[str, Any]] = []
     for shard in sorted(folder.glob("*.jsonl.gz")):
         with gzip.open(shard, "rt", encoding="utf-8") as handle:
             documents.extend(json.loads(line) for line in handle)
     return documents
 
 
-def _repeats_per_text_id(documents: Iterable[Dict[str, Any]]) -> int:
+def _repeats_per_text_id(documents: Iterable[dict[str, Any]]) -> int:
     """Count the documents past the first under each text id.
 
     Args:
@@ -1958,7 +2028,7 @@ def _repeats_per_text_id(documents: Iterable[Dict[str, Any]]) -> int:
     return len(documents) - len({document["metadata"]["text_id"] for document in documents})
 
 
-def copy_origin_rows(entering: List[Dict[str, Any]], kept: Set[str], finished: Set[str]) -> List[Dict[str, Any]]:
+def copy_origin_rows(entering: list[dict[str, Any]], kept: set[str], finished: set[str]) -> list[dict[str, Any]]:
     """Sort one source's documents at exact dedup by where their copies come from.
 
     Per distinct text, every document past the first under one text id is
@@ -1980,17 +2050,13 @@ def copy_origin_rows(entering: List[Dict[str, Any]], kept: Set[str], finished: S
         (for second texts, those whose record still has another text there);
         the drops first, then the kept documents.
     """
-    by_text: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    # group the entering documents by text
+    by_text: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for document in entering:
         by_text[document["text"]].append(document)
-    counts = dict.fromkeys(
-        (
-            SAME_RECORD_DROP,
-            OTHER_RECORD_DROP,
-            OTHER_SOURCE_DROP,
-        ),
-        0,
-    )
+
+    # count the drops by origin
+    counts = dict.fromkeys((SAME_RECORD_DROP, OTHER_RECORD_DROP, OTHER_SOURCE_DROP), 0)
     for group in by_text.values():
         kept_copies = sum(1 for document in group if document["id"] in kept)
         if not kept_copies:
@@ -1999,10 +2065,14 @@ def copy_origin_rows(entering: List[Dict[str, Any]], kept: Set[str], finished: S
         repeats = _repeats_per_text_id(group)
         counts[SAME_RECORD_DROP] += repeats
         counts[OTHER_RECORD_DROP] += len(group) - kept_copies - repeats
+
+    # count the kept documents and their second texts
     kept_documents = [document for document in entering if document["id"] in kept]
     finished_documents = [document for document in kept_documents if document["id"] in finished]
     second_texts = _repeats_per_text_id(kept_documents)
     second_finished = _repeats_per_text_id(finished_documents)
+
+    # list the origins, drops first
     rows = [(origin, n, 0) for origin, n in counts.items()]
     rows.append((FIRST_TEXT_KEPT, len(kept_documents) - second_texts, len(finished_documents) - second_finished))
     rows.append((SECOND_TEXT_KEPT, second_texts, second_finished))
@@ -2019,12 +2089,12 @@ def copy_origin_rows(entering: List[Dict[str, Any]], kept: Set[str], finished: S
 
 def draw_figures(
     figures_dir: Path,
-    losses: List[Dict[str, Any]],
-    comparison: List[Dict[str, Any]],
-    route_comparison: List[Dict[str, Any]],
-    residuals: List[Dict[str, Any]],
+    losses: list[dict[str, Any]],
+    comparison: list[dict[str, Any]],
+    route_comparison: list[dict[str, Any]],
+    residuals: list[dict[str, Any]],
     stem: str,
-) -> List[Path]:
+) -> list[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
     Args:
@@ -2038,19 +2108,21 @@ def draw_figures(
     Returns:
         The paths written.
     """
+    # import the plotting libraries here; they load only when figures are drawn
     import matplotlib.pyplot as plt
     from datachart.charts import BarChart, DumbbellChart
     from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION
 
-    # fixed clip-path ids, so a rerun on unchanged tables leaves the committed SVG untouched
-    plt.rcParams["svg.hashsalt"] = "curation-thresholds-slovenian"
+    # fixed clip-path ids keep a rerun on unchanged tables from changing the SVG
+    plt.rcParams["svg.hashsalt"] = SVG_HASH_SALT
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    # long legend labels would squeeze the plot beside it, so the legend goes below
-    def below(ncols: int) -> Dict[str, Any]:
+    # put the legend below; long labels would squeeze the plot
+    def below(ncols: int) -> dict[str, Any]:
         return {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": ncols}}
 
-    figures: Dict[str, Any] = {}
+    # losses by source
+    figures: dict[str, Any] = {}
     parts = (*DROP_STAGES, "kept")
     figures["curate-losses-by-source"] = BarChart(
         [[{"label": row["source"], "y": row[part]} for row in reversed(losses)] for part in parts],
@@ -2061,12 +2133,13 @@ def draw_figures(
         xmax=1.0,
         bar_mode=BAR_MODE.STACK,
         orientation=ORIENTATION.HORIZONTAL,
-        # the palette holds six colours, so the seventh part gets a neutral one
-        style=[None] * len(DROP_STAGES) + [{"plot_bar_color": "#b8b8b8"}],
+        # the seventh part gets a neutral colour
+        style=[None] * len(DROP_STAGES) + [{"plot_bar_color": KEPT_BAR_COLOR}],
         figsize=FIG_SIZE.FULL_TALL,
         **below(3),
     )
 
+    # retention in the audit's build and the rebuild
     both = [row for row in comparison if row["change"] != ""]
     both.sort(key=lambda row: row["retained_rebuild"])
     figures["curate-retention-by-build-and-source"] = DumbbellChart(
@@ -2089,6 +2162,7 @@ def draw_figures(
         **below(2),
     )
 
+    # retention under routes
     sources = sorted((row for row in route_comparison if row["source"] != "TOTAL"), key=lambda row: row["change"])
     figures[f"{stem}-retention-by-build-and-source"] = DumbbellChart(
         [
@@ -2110,6 +2184,7 @@ def draw_figures(
         **below(2),
     )
 
+    # residual bad rate by build
     pooled = [row for row in residuals if row["source"] == "pooled"]
     baseline_rate = next(row["bad_rate"] for row in pooled if row["build"] == BASELINE_BUILD)
     figures["residual-bad-rate-by-build"] = BarChart(
@@ -2129,6 +2204,7 @@ def draw_figures(
         **below(1),
     )
 
+    # save the figures
     written = []
     for name, figure in figures.items():
         path = figures_dir / f"{name}.svg"
@@ -2137,7 +2213,12 @@ def draw_figures(
     return written
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+# ===============================
+# Main function
+# ===============================
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the command line.
 
     Args:
@@ -2163,7 +2244,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--tables", type=Path, default=TABLES_DIR, help="Where the CSV tables are written.")
     parser.add_argument("--figures", type=Path, default=FIGURES_DIR, help="Where the SVG figures are written.")
     parser.add_argument(
-        "--workers", type=int, default=30, help="Shards read at once (exact-dedup counts, audit texts)."
+        "--workers", type=int, default=DEFAULT_WORKERS, help="Shards read at once (exact-dedup counts, audit texts)."
     )
     parser.add_argument("--sample", type=Path, default=AUDIT_DATA / "interim" / "sample.jsonl", help="Judged sample.")
     parser.add_argument(
@@ -2207,6 +2288,8 @@ def main() -> None:
     if args.write_judge_input:
         write_judge_input(args.judge_sample, args.write_judge_input)
         return
+
+    # build the baseline funnel
     _, commits = scoped_counts(args.pretrain_dir)
     print(f"baseline corpus built at {', '.join(sorted(commits))}")
 
@@ -2220,9 +2303,11 @@ def main() -> None:
     comparison = build_comparison_rows(funnel, audit_funnel)
     domains = domain_token_rows(funnel, audit_funnel)
 
+    # print the baseline tokens by domain
     for row in domains:
         print(f"{row['domain']:14s}{row['tokens_estimated']:>16,d} tokens  clears KPI: {row['clears_kpi']}")
 
+    # score the audit's drops
     verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.verdicts)}
     sources = {row["source"] for row in funnel if row["source"] != "TOTAL"}
     sample = read_jsonl(args.sample)
@@ -2233,6 +2318,8 @@ def main() -> None:
                 f"{row['stage']:12s} target {row['target_precision']} ({row['target_call']})"
                 f"  bad text {row['bad_text_precision']} ({row['bad_text_call']})  n={row['drops_judged']}"
             )
+
+    # build the candidate funnel
     stem = args.routes_config.stem
     routes = read_routes(args.routes_config)
     candidate_dir = args.candidate_dir or Path(
@@ -2253,6 +2340,7 @@ def main() -> None:
     for row in candidate_domains:
         print(f"{stem}: {row['domain']:14s}{row['tokens_estimated']:>16,d} tokens  clears KPI: {row['clears_kpi']}")
 
+    # re-apply the candidate's quality filter to the audit's quality drops
     openings = filter_drops(sample, verdicts, sources, "quality")
     texts_cache = args.data_root / "interim" / f"{stem}-audit-quality-drops.json"
     texts, changed = fetch_full_texts(candidate_dir / FILTER_INPUTS["quality"], openings, texts_cache, args.workers)
@@ -2267,6 +2355,7 @@ def main() -> None:
                 f" target {row['target_precision']} ({row['target_call']})"
             )
 
+    # trace the medical source's exact-dedup drops
     copy_origins = copy_origin_rows(
         read_documents(candidate_dir / SCOPED_STAGES[-1] / MEDICAL_SOURCE),
         {document["id"] for document in read_documents(candidate_dir / COUNTED_STAGE / MEDICAL_SOURCE)},
@@ -2275,6 +2364,7 @@ def main() -> None:
     for row in copy_origins:
         print(f"{stem}: {MEDICAL_SOURCE} {row['origin']:45s}{row['documents']:>8,d}")
 
+    # check the fresh judge run against the person
     fresh_verdicts = {verdict["id"]: verdict for verdict in read_jsonl(args.fresh_verdicts)}
     agreement = agreement_rows(read_jsonl(CALIBRATION_LABELS), fresh_verdicts)
     for row in agreement:
@@ -2283,6 +2373,8 @@ def main() -> None:
         )
     if not agreement[0]["passes_gate"]:
         print(f"{stem}: WARNING the fresh judge run fails the agreement gate; its clause calls are not findings (D3)")
+
+    # score the fresh draw's drops
     candidate_sources = {row["source"] for row in candidate if row["source"] != "TOTAL"}
     fresh_sample = read_jsonl(FRESH_SAMPLE)
     fresh_drops = judged_drops(fresh_sample, fresh_verdicts, candidate_sources)
@@ -2298,14 +2390,15 @@ def main() -> None:
                 f"  good lost {row['good_lost']:>11,d}"
             )
 
-    # Both samples' verdicts tune the next settings (D13); a document judged twice keeps its fresh verdict.
+    # merge both samples' verdicts (D13); a twice-judged document keeps its fresh one
     both_verdicts = {**verdicts, **fresh_verdicts}
     gate_passed = agreement[0]["passes_gate"]
     fresh_ids = {row["id"] for row in fresh_sample}
-    rule_trade_off: List[Dict[str, Any]] = []
-    stage_openings: Dict[str, Dict[str, Dict[str, str]]] = {}
-    stage_texts: Dict[str, Dict[str, str]] = {}
+    rule_trade_off: list[dict[str, Any]] = []
+    stage_openings: dict[str, dict[str, dict[str, str]]] = {}
+    stage_texts: dict[str, dict[str, str]] = {}
     for stage in FILTER_INPUTS:
+        # merge the drops of both samples and fetch their full text
         stage_openings[stage] = merge_drops(
             filter_drops(sample, verdicts, candidate_sources, stage),
             filter_drops(fresh_sample, fresh_verdicts, candidate_sources, stage),
@@ -2332,6 +2425,7 @@ def main() -> None:
             )
         rule_trade_off += stage_rows
 
+    # try the setting changes on the judged drops
     variants = read_setting_changes(args.setting_changes)
     outcomes = rescue_outcomes(
         args.routes_config,
@@ -2349,6 +2443,7 @@ def main() -> None:
                 f"  bad {row['bad_gained']:>10,d}  {row['call']}"
             )
 
+    # score the looser build against the prediction
     loosened_stem = args.loosened_config.stem
     loosened_dir = Path(yaml.safe_load(args.loosened_config.read_text(encoding="utf-8"))["output_dir"])
     check_lock(loosened_dir, args.loosened_config)
@@ -2376,7 +2471,7 @@ def main() -> None:
                 f" (predicted {row['predicted_bad_gained']!s:>8})"
             )
 
-    # The baseline rebuild was never drawn from, so its rates come from the earlier audit's build (D17).
+    # estimate each build's residual bad rate; the baseline uses the audit's draw (D17)
     kept_builds = {
         BASELINE_BUILD: (funnel, judged_kept(sample, verdicts, sources)),
         "frozen": (candidate, judged_kept(fresh_sample, fresh_verdicts, candidate_sources)),
@@ -2397,6 +2492,7 @@ def main() -> None:
             f"  meets bar {row['meets_bar']}"
         )
 
+    # write the tables and figures
     written = [
         write_csv(args.tables / "residual-bad-rate-by-build-and-source.csv", residuals),
         write_csv(args.tables / "residual-bad-rate-rise-by-build.csv", residual_rises),

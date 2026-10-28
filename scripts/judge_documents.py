@@ -42,7 +42,6 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from slm4ie.data.curate.inspect.judge import (
     BACKENDS,
@@ -52,8 +51,26 @@ from slm4ie.data.curate.inspect.judge import (
     judge_pairs,
 )
 
+# ===============================
+# Defaults
+# ===============================
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+INTERRUPTED_EXIT_CODE = 130
+DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_CONCURRENCY = 4
+DEFAULT_MAX_CHARS = 2000
+DEFAULT_TIMEOUT_SECONDS = 600
+DEFAULT_POLL_SECONDS = 60
+DEFAULT_PAIRS_PER_CELL = 20
+DEFAULT_SEED = 20260916
+
+# ===============================
+# Main function
+# ===============================
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
@@ -83,25 +100,34 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default="api",
         help="api: the Batch API, half price, answers within hours. cli: one subprocess per group.",
     )
-    parser.add_argument("--model", default="claude-sonnet-5", help="Model the judge should use.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model the judge should use.")
     parser.add_argument("--batch-size", type=int, default=None, help="Units per request; the task decides by default.")
-    parser.add_argument("--concurrency", type=int, default=4, help="Calls in flight at once (cli).")
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="Calls in flight at once (cli).")
     parser.add_argument("--max-batches", type=int, default=None, help="Stop after this many calls.")
-    parser.add_argument("--max-chars", type=int, default=2000, help="Characters of each document sent.")
+    parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS, help="Characters of each document sent.")
     parser.add_argument("--command", default="claude", help="The judge executable.")
-    parser.add_argument("--timeout", type=int, default=600, help="Seconds allowed per call (cli).")
-    parser.add_argument("--poll-seconds", type=int, default=60, help="Seconds between batch checks (api).")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="Seconds allowed per call (cli).")
+    parser.add_argument(
+        "--poll-seconds", type=int, default=DEFAULT_POLL_SECONDS, help="Seconds between batch checks (api)."
+    )
     parser.add_argument("--pairs", type=Path, default=None, help="Where the drawn comparisons are kept (pairwise).")
-    parser.add_argument("--pairs-per-cell", type=int, default=20, help="Comparisons per source and stage (pairwise).")
+    parser.add_argument(
+        "--pairs-per-cell",
+        type=int,
+        default=DEFAULT_PAIRS_PER_CELL,
+        help="Comparisons per source and stage (pairwise).",
+    )
     parser.add_argument("--stages", nargs="+", default=list(PAIRWISE_STAGES), help="Stages to compare (pairwise).")
-    parser.add_argument("--seed", type=int, default=20260916, help="Seed fixing the drawing (pairwise).")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Seed fixing the drawing (pairwise).")
     return parser.parse_args(argv)
 
 
 def main() -> None:
     """Run the judge over the sampled documents."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     args = parse_args()
+
+    # run the judge
     shared = {
         "source": args.source,
         "destination": args.out,
@@ -128,4 +154,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        sys.exit(130)
+        sys.exit(INTERRUPTED_EXIT_CODE)
