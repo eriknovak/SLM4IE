@@ -5,18 +5,23 @@ filter and write, passing signatures and duplicate lists through the stage's
 scratch folder. Besides the two builders and their runners, this module holds
 `doc_text` (the content getter for whole-document exact dedup), two
 `ExactDedupConfig` factories (`make_exact_config` for the form driven by
-`curate.yaml::exact_dedup`, `default_exact_config` as a zero-arg alias), and
+`curate.yaml::exact_dedup`, `default_exact_config` as a zero-arg alias),
 `CompactSentenceDedupSignature`, a memory-lean drop-in for datatrove's
-sentence-dedup signature step. Both stages share this module, so editing it
-reruns both.
+sentence-dedup signature step, and `KeptFractionSentenceDedupFilter`, the
+filter step with the kept-fraction floor. Both stages share this module, so
+editing it reruns both.
 """
 
+import contextlib
+import dataclasses
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, cast
 
 import numpy as np
 from datatrove.data import Document, DocumentsPipeline
 from datatrove.executor import LocalPipelineExecutor
+from datatrove.io import DataFolderLike
 from datatrove.pipeline.dedup import (
     ExactDedupConfig,
     ExactDedupFilter,
@@ -27,8 +32,12 @@ from datatrove.pipeline.dedup import (
     SentenceDedupSignature,
     SentenceFindDedups,
 )
+from datatrove.pipeline.writers.disk_base import DiskWriter
 from datatrove.utils.hashing import HashConfig
-from datatrove.utils.typeshelper import Languages, StatHints
+from datatrove.utils.logging import logger
+from datatrove.utils.text import split_into_sentences
+from datatrove.utils.typeshelper import ExtensionHelperSD, Languages, StatHints
+from tqdm import tqdm
 
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
@@ -150,6 +159,158 @@ class CompactSentenceDedupSignature(SentenceDedupSignature):
         self.save_hashes(rank, signatures)
 
 
+#: Kept-fraction floor when `sentence_dedup.min_kept_fraction` is unset: a
+#: document that lost over half its words to windows seen elsewhere is a later
+#: copy of a duplicated page (issue #40).
+DEFAULT_MIN_KEPT_FRACTION: float = 0.5
+
+#: Stat names of the filter step, one per reason a changed document is dropped.
+DROP_BELOW_KEPT_FRACTION: str = "dropped_below_kept_fraction"
+DROP_BELOW_MIN_DOC_WORDS: str = "dropped_below_min_doc_words"
+DROP_BELOW_MIN_NUM_SENTENCES: str = "dropped_below_min_num_sentences"
+DROP_EMPTY: str = "dropped_empty"
+
+
+class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
+    """Sentence-dedup filter step with a floor on the fraction of text that survives.
+
+    datatrove's `SentenceDedupFilter` keeps a document the find step changed
+    as long as the surviving text clears `min_doc_words` and
+    `min_num_sentences`. A later copy of a page that several sources crawled
+    then survives as a fragment of the few sentences that did not match
+    elsewhere. This subclass adds a third floor: a changed document whose
+    surviving word count is below `min_kept_fraction` of its original word
+    count is dropped. Both counts use the step's word tokenizer. An untouched
+    document is kept regardless, as in datatrove, and `min_kept_fraction=0`
+    disables the floor.
+
+    datatrove keeps the keep decision inline in `run`, so `run` and the index
+    loading in `_load_duplicates` are copied from datatrove 0.9.0 with the
+    decision moved into `drop_reason`; `remove_dup_sentences` and
+    `read_duplicates` are inherited. Every dropped
+    document is counted under the stat of the first floor it failed
+    (`DROP_BELOW_KEPT_FRACTION`, `DROP_BELOW_MIN_DOC_WORDS`,
+    `DROP_BELOW_MIN_NUM_SENTENCES`, or `DROP_EMPTY` when nothing survived),
+    so the per-task stats files say why the stage dropped what it dropped.
+    """
+
+    def __init__(
+        self,
+        data_folder: DataFolderLike,
+        config: Optional[SentDedupConfig] = None,
+        exclusion_writer: Optional[DiskWriter] = None,
+        language: str = Languages.english,
+        min_kept_fraction: float = DEFAULT_MIN_KEPT_FRACTION,
+    ) -> None:
+        """Build the step.
+
+        Args:
+            data_folder: Folder holding the find step's duplicate files.
+            config: Window size and the two datatrove floors.
+            exclusion_writer: Optional writer for the dropped and the trimmed originals.
+            language: ISO-3 code for the word and sentence tokenizer.
+            min_kept_fraction: Lowest fraction of a changed document's words that may
+                survive; `0` disables the floor.
+
+        Raises:
+            ValueError: If `min_kept_fraction` is outside `[0, 1]`.
+        """
+        super().__init__(data_folder, config=config, exclusion_writer=exclusion_writer, language=language)
+        if not 0 <= min_kept_fraction <= 1:
+            raise ValueError(f"min_kept_fraction must be in [0, 1], got {min_kept_fraction!r}")
+        self.min_kept_fraction = min_kept_fraction
+
+    def drop_reason(self, original: str, filtered: str) -> Optional[str]:
+        """Name the first floor a changed document fails, or None when it is kept.
+
+        Args:
+            original: The document's text before duplicate removal.
+            filtered: The text left after duplicate removal.
+
+        Returns:
+            One of the `DROP_*` stat names, or None.
+        """
+        if not filtered:
+            return DROP_EMPTY
+        kept_words = len(self.tokenizer.word_tokenize(filtered))
+        if self.min_kept_fraction > 0:
+            original_words = len(self.tokenizer.word_tokenize(original))
+            if kept_words < self.min_kept_fraction * original_words:
+                return DROP_BELOW_KEPT_FRACTION
+        if 0 < self.config.min_doc_words and kept_words < self.config.min_doc_words:
+            return DROP_BELOW_MIN_DOC_WORDS
+        if 0 < self.config.min_num_sentences:
+            if len(split_into_sentences(filtered, self.language)) < self.config.min_num_sentences:
+                return DROP_BELOW_MIN_NUM_SENTENCES
+        return None
+
+    def _load_duplicates(self, rank: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Read this rank's duplicate windows from every find-step folder.
+
+        Args:
+            rank: Task rank; names the duplicate files.
+
+        Returns:
+            The sorted `(doc, sent)` pairs and the index where each document's pairs start.
+        """
+        folders = self.data_folder.list_files(include_directories=True, recursive=False)
+        files = [
+            f
+            for f in [f"{folder}/{rank:05d}{ExtensionHelperSD.stage_2_duplicates}" for folder in folders]
+            if self.data_folder.exists(f)
+        ]
+        logger.info(f"Loading duplicate indexes from {len(files)} results files.")
+        all_dups = np.array([], dtype=[("doc", "<u4"), ("sent", "<u2")])
+        if files:
+            with ThreadPoolExecutor() as pool:
+                all_dups = np.concatenate(
+                    list(tqdm(pool.map(self.read_duplicates, self.data_folder.open_files(files)), total=len(files))),
+                    axis=0,
+                )
+            all_dups.sort()
+        _, doc_starts = np.unique(all_dups["doc"], return_index=True)
+        logger.info("Loaded duplicate indexes.")
+        return all_dups, doc_starts
+
+    def run(self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
+        """Remove the duplicate windows of each document and drop what falls below a floor.
+
+        Args:
+            data: Documents of this task, in the order the signature step saw them.
+            rank: Task rank; names the duplicate files.
+            world_size: Total number of tasks (unused, part of the step API).
+
+        Yields:
+            The kept documents, trimmed where a window was removed.
+        """
+        all_dups, doc_starts = self._load_duplicates(rank)
+        dups_doc_i = 0
+        with self.exclusion_writer if self.exclusion_writer else contextlib.nullcontext() as writer:
+            for doc_idx, doc in enumerate(data):
+                self.stat_update(StatHints.total)
+                with self.stats.time_stats:
+                    if dups_doc_i >= len(doc_starts) or all_dups["doc"][doc_starts[dups_doc_i]] > doc_idx:
+                        filtered_text, original_formatted = doc.text, None
+                    else:
+                        left = doc_starts[dups_doc_i]
+                        right = doc_starts[dups_doc_i + 1] if dups_doc_i + 1 < len(doc_starts) else None
+                        filtered_text, original_formatted = self.remove_dup_sentences(doc, all_dups["sent"][left:right])
+                        dups_doc_i += 1
+                    unchanged = filtered_text == doc.text
+                    reason = None if unchanged and filtered_text else self.drop_reason(doc.text, filtered_text)
+                if reason is None:
+                    self.update_doc_stats(doc)
+                    if not unchanged and writer:
+                        writer.write(dataclasses.replace(doc, text=original_formatted), rank=rank)
+                    doc.text = filtered_text
+                    yield doc
+                else:
+                    self.stat_update(reason)
+                    if writer:
+                        doc.text = original_formatted
+                        writer.write(doc, rank=rank)
+
+
 def build_exact_dedup_executors(
     paths: CuratePaths,
     *,
@@ -233,6 +394,7 @@ def build_sentence_dedup_executors(
     workers: Optional[int] = None,
     finder_workers: int = 1,
     sentence_config: Optional[SentDedupConfig] = None,
+    min_kept_fraction: float = DEFAULT_MIN_KEPT_FRACTION,
     language: str = Languages.slovenian,
     input_override: Optional[Path] = None,
     output_override: Optional[Path] = None,
@@ -242,7 +404,7 @@ def build_sentence_dedup_executors(
     Three executors chained via `depends`, mirroring the exact stage:
         1. (parallel) read 05_exact_dedup/ → CompactSentenceDedupSignature → <scratch>/sigs/
         2. (single)   SentenceFindDedups(<scratch>/sigs/) → <scratch>/dups/
-        3. (parallel) read 05_exact_dedup/ → SentenceDedupFilter → write 06_sentence_dedup/
+        3. (parallel) read 05_exact_dedup/ → KeptFractionSentenceDedupFilter → write 06_sentence_dedup/
 
     Args:
         paths: Resolved input/output locations.
@@ -251,6 +413,8 @@ def build_sentence_dedup_executors(
         workers: Tasks run at once; defaults to `tasks`.
         finder_workers: Worker count for the find executor.
         sentence_config: Optional `SentDedupConfig`.
+        min_kept_fraction: Lowest fraction of a changed document's words that
+            may survive the filter step; `0` disables the floor.
         language: ISO-3 code for the sentence tokenizer.
         input_override: Optional folder to read from instead of the
             exact-dedup stage's output, used to restrict the stage to the
@@ -294,7 +458,12 @@ def build_sentence_dedup_executors(
     filt = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
-            SentenceDedupFilter(data_folder=str(dups), config=cfg, language=language),
+            KeptFractionSentenceDedupFilter(
+                data_folder=str(dups),
+                config=cfg,
+                language=language,
+                min_kept_fraction=min_kept_fraction,
+            ),
             jsonl_writer(out),
         ],
         tasks=tasks,
@@ -361,6 +530,7 @@ def run_sentence_dedup(job: StageRun) -> Tuple[int, int]:
         tasks=job.tasks or job.workers,
         workers=job.workers,
         sentence_config=sentence_config,
+        min_kept_fraction=float(job.config.get("min_kept_fraction", DEFAULT_MIN_KEPT_FRACTION)),
         input_override=job.input_view,
         output_override=job.output_folder,
     )

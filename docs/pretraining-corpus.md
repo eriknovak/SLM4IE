@@ -94,7 +94,7 @@ result.
 | `quality`        | `03_quality/`        | per-doc     | Gopher within-document quality heuristics (length, word lengths, symbol/bullet/ellipsis ratios, stopword floor)                                         |
 | `repetition`     | `04_repetition/`     | per-doc     | Gopher within-document repetition heuristics (duplicate paragraphs/lines, top-n-gram saturation, dup-n-gram fractions)                                  |
 | `exact_dedup`    | `05_exact_dedup/`    | corpus-wide | whole-document exact dedup (xxhash64 of `doc.text`)                                                                                                     |
-| `sentence_dedup` | `06_sentence_dedup/` | corpus-wide | N-sentence sliding-window dedup (final corpus)                                                                                                          |
+| `sentence_dedup` | `06_sentence_dedup/` | corpus-wide | N-sentence sliding-window dedup; drops a trimmed doc below the word, sentence or kept-fraction floor (final corpus)                                     |
 | `statistics`     | `07_statistics/`     | corpus-wide | word/n-gram tables and (optional) classla TF-IDF keywords (single-process)                                                                              |
 
 The `spam` stage matches its lexicon by stem, so inflected forms count: an
@@ -376,6 +376,25 @@ classla-lemmatized keyword pass is toggled in the YAML with
 
 The first run of the keyword stage downloads the Slovenian classla model
 (~200 MB) under `~/.classla_resources/`.
+
+The `sentence_dedup` block holds three floors a document the stage trimmed
+must clear to stay in the corpus. An untouched document is kept whatever its
+length. `min_doc_words` and `min_num_sentences` are datatrove's knobs; the
+stage defaults them to 50 and 2. `min_kept_fraction` is the lowest share of
+the document's original words that may survive, both counts taken with the
+stage's word tokenizer. It defaults to 0.5, takes a number in `[0, 1]`, and
+`0` switches it off. The web crawls are different filterings of the same
+pages, so a page enters the stage several times. The first copy survives
+whole; each later copy is cut to its unmatched sentences, a fragment this
+floor drops. In the build of 2026-10-28, 17% of one fineweb2 shard's surviving
+documents held under 30% of their original text, and a sample found every cut
+passage whole in another source (issue #40). The filter step counts each
+dropped document under the first floor it failed
+(`dropped_below_kept_fraction`, `dropped_below_min_doc_words`,
+`dropped_below_min_num_sentences`), or under `dropped_empty` when no text is
+left, in its per-task stats under `_logs/sentence_dedup/3_filter/`, which the
+MLflow run uploads. The two dedup blocks accept only their known keys, so a
+misspelt floor fails at load.
 
 ## Diagnosing foreign-language leakage
 
