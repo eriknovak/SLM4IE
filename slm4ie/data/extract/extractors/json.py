@@ -53,22 +53,33 @@ Example:
 
 import json
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 DEFAULT_TEXT_FIELD = "text"
 DEFAULT_ID_FIELD = "doc_id"
 
-# Structural fields never copied into Document.metadata, on top of the
-# (configurable) text and id fields. Kept identical to the jsonl
-# extractor so the two stay consistent.
+# structural fields never copied into Document.metadata; same set as the jsonl extractor
 _STRUCTURAL_FIELDS = {"paragraphs", "conll"}
+
+# ===============================
+# Extractor class
+# ===============================
 
 
 class JsonExtractor(FileBasedExtractor):
@@ -84,34 +95,34 @@ class JsonExtractor(FileBasedExtractor):
     (see the module docstring).
     """
 
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return sorted .json files under input_dir.
 
         Args:
-            input_dir (Path): Directory searched recursively.
+            input_dir: Directory searched recursively.
 
         Returns:
-            List[Path]: Sorted .json file paths.
+            Sorted .json file paths.
         """
         return sorted(p for p in input_dir.rglob("*.json") if p.is_file())
 
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from the given JSON array files.
 
         Args:
-            files (List[Path]): .json files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root; unused, every record is
+            files: .json files to parse, in order.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            input_dir: Dataset root; unused, every record is
                 self-contained.
-            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
+            metadata: Optional `metadata:`
                 config block. Recognized keys: `text_field` (record
                 field copied into `text`, default `text`), `id_field`
                 (record field kept as `doc_id`, default `doc_id`), and
@@ -120,19 +131,26 @@ class JsonExtractor(FileBasedExtractor):
                 field is kept).
 
         Yields:
-            Document: One document per record with non-empty text.
+            One document per record with non-empty text.
         """
         del input_dir
+
+        # read the field settings
         cfg = metadata or {}
         text_field = str(cfg.get("text_field", DEFAULT_TEXT_FIELD))
         id_field = str(cfg.get("id_field", DEFAULT_ID_FIELD))
         metadata_fields_raw = cfg.get("metadata_fields")
-        metadata_fields: Optional[List[str]] = (
+        metadata_fields: list[str] | None = (
             [str(f) for f in metadata_fields_raw] if metadata_fields_raw is not None else None
         )
 
+        # parse each file
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, text_field, id_field, metadata_fields)
+
+    # =================================
+    # Private methods
+    # =================================
 
     def _parse_file(
         self,
@@ -141,24 +159,25 @@ class JsonExtractor(FileBasedExtractor):
         domain: str,
         text_field: str,
         id_field: str,
-        metadata_fields: Optional[List[str]],
+        metadata_fields: list[str] | None,
     ) -> Iterator[Document]:
         """Parse one JSON array file and yield Documents.
 
         Args:
-            filepath (Path): Path to the JSON file.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            text_field (str): Record field copied into `text`.
-            id_field (str): Record field kept as `doc_id`.
-            metadata_fields (Optional[List[str]]): Explicit whitelist of
+            filepath: Path to the JSON file.
+            source: Dataset key.
+            domain: Domain label.
+            text_field: Record field copied into `text`.
+            id_field: Record field kept as `doc_id`.
+            metadata_fields: Explicit whitelist of
                 record fields to keep as metadata, or None to keep every
                 field except the text field, the id field, and the
                 structural fields.
 
         Yields:
-            Document: One document per valid record.
+            One document per valid record.
         """
+        # load the payload
         try:
             with filepath.open(encoding="utf-8") as fh:
                 payload = json.load(fh)
@@ -166,7 +185,8 @@ class JsonExtractor(FileBasedExtractor):
             logger.warning("Invalid JSON in %s: %s", filepath, exc)
             return
 
-        records: List[Any]
+        # normalize to a list of records
+        records: list[Any]
         if isinstance(payload, list):
             records = payload
         elif isinstance(payload, dict):
@@ -179,6 +199,7 @@ class JsonExtractor(FileBasedExtractor):
             )
             return
 
+        # emit one document per valid record
         excluded = {text_field, id_field} | _STRUCTURAL_FIELDS
         for record in records:
             if not isinstance(record, dict):
@@ -204,5 +225,9 @@ class JsonExtractor(FileBasedExtractor):
                 metadata=doc_metadata,
             )
 
+
+# ===============================
+# Registration
+# ===============================
 
 register_extractor("json", JsonExtractor)

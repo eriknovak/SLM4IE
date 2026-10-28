@@ -16,20 +16,16 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, cast
 
 import numpy as np
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
-from slm4ie.utils.parallel import (
-    configure_script_logging,
-    cpu_default,
-    resolve_workers,
-    run_parallel,
-)
 from slm4ie.tokenizers import stats as st
+from slm4ie.tokenizers.config import SweepConfig
 from slm4ie.tokenizers.corpus import check_sample_side, iter_sample, materialize_sample
 from slm4ie.tokenizers.metrics import (
     METRIC_DIRECTIONS,
@@ -60,9 +56,22 @@ from slm4ie.tokenizers.train import (
 )
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
-from slm4ie.tokenizers.config import SweepConfig
+from slm4ie.utils.parallel import (
+    configure_script_logging,
+    cpu_default,
+    resolve_workers,
+    run_parallel,
+)
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Conservative upper bound on parallel eval workers so a large box is not
 #: saturated by default; raise it explicitly with the worker argument.
@@ -71,9 +80,9 @@ DEFAULT_MAX_WORKERS = 8
 #: Heavy, read-only eval inputs shared with process-pool workers via fork
 #: inheritance (copy-on-write) instead of being pickled per task. Populated by
 #: `evaluate_sweep` before the pool is created; read by `_evaluate_worker`.
-_EVAL_DOCS: List[List[str]] = []
-_MORPH_SAMPLE: List[MorphemeSegmentation] = []
-_DERIV_SAMPLE: List[MorphemeSegmentation] = []
+_EVAL_DOCS: list[list[str]] = []
+_MORPH_SAMPLE: list[MorphemeSegmentation] = []
+_DERIV_SAMPLE: list[MorphemeSegmentation] = []
 
 #: Metric columns shown in the report, in order.
 _REPORT_COLUMNS = [
@@ -123,15 +132,20 @@ EVAL_UNITS_FILENAME = "eval_units.npz"
 _DIRECTION_ARROW = {"higher": "↑", "lower": "↓"}
 
 
+# ===============================
+# Bootstrap helpers
+# ===============================
+
+
 def _safe_div(numerator: Any, denominator: Any) -> np.ndarray:
     """Divide elementwise, returning 0 where the denominator is 0.
 
     Args:
-        numerator (Any): Summed numerator (scalar or bootstrap-axis array).
-        denominator (Any): Summed denominator (scalar or bootstrap-axis array).
+        numerator: Summed numerator (scalar or bootstrap-axis array).
+        denominator: Summed denominator (scalar or bootstrap-axis array).
 
     Returns:
-        np.ndarray: The elementwise ratio with zeros where the denominator is 0.
+        The elementwise ratio with zeros where the denominator is 0.
     """
     num = np.asarray(numerator, dtype=np.float64)
     den = np.asarray(denominator, dtype=np.float64)
@@ -142,19 +156,19 @@ def _f1_combine(true_positive: Any, predicted: Any, gold: Any) -> np.ndarray:
     """Combine summed boundary counts into the MorphScore F1.
 
     Args:
-        true_positive (Any): Summed correct boundaries.
-        predicted (Any): Summed predicted boundaries.
-        gold (Any): Summed gold boundaries.
+        true_positive: Summed correct boundaries.
+        predicted: Summed predicted boundaries.
+        gold: Summed gold boundaries.
 
     Returns:
-        np.ndarray: The F1, elementwise over the bootstrap axis.
+        The F1, elementwise over the bootstrap axis.
     """
     precision = _safe_div(true_positive, predicted)
     recall = _safe_div(true_positive, gold)
     return _safe_div(2.0 * precision * recall, precision + recall)
 
 
-def _morph_point_estimates(stats: Dict[str, List[int]]) -> Dict[str, float]:
+def _morph_point_estimates(stats: dict[str, list[int]]) -> dict[str, float]:
     """Aggregate per-form morph statistics into point estimates.
 
     Used for the derivational track, which reports point estimates only (no
@@ -162,11 +176,11 @@ def _morph_point_estimates(stats: Dict[str, List[int]]) -> Dict[str, float]:
     inflectional track does.
 
     Args:
-        stats (Dict[str, List[int]]): Per-form arrays from `morph_form_stats`
+        stats: Per-form arrays from `morph_form_stats`
             (`tp`, `predicted`, `gold`, `edit`, `valid`).
 
     Returns:
-        Dict[str, float]: `f1`, `precision`, `recall` (boundary scores),
+        `f1`, `precision`, `recall` (boundary scores),
             `edit` (mean segment-edit distance), and `coverage` (fraction of
             forms the tokenizer tiled).
     """
@@ -188,14 +202,19 @@ def _morph_point_estimates(stats: Dict[str, List[int]]) -> Dict[str, float]:
     }
 
 
+# ===============================
+# Per-run evaluation
+# ===============================
+
+
 def load_tokenizer_artifact(artifact_dir: Path):
     """Load a trained tokenizer from its artifact directory.
 
     Args:
-        artifact_dir (Path): Directory holding `metadata.json` and the model.
+        artifact_dir: Directory holding `metadata.json` and the model.
 
     Returns:
-        BaseTokenizer: The reconstructed tokenizer.
+        The reconstructed tokenizer.
 
     Raises:
         FileNotFoundError: If no metadata sidecar is present.
@@ -215,7 +234,7 @@ def evaluate_artifact(
     morph_sample: Sequence[MorphemeSegmentation],
     deriv_sample: Sequence[MorphemeSegmentation] = (),
     alpha: float = 2.5,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Run all six metrics for one trained tokenizer run.
 
     Encodes the held-out documents and the shared morph sample once, derives the
@@ -226,19 +245,19 @@ def evaluate_artifact(
     tokenizer tiled.
 
     Args:
-        key (str): Run key (`<name>-<vocab>`).
-        output_root (Path): Directory holding per-run artifact subdirs.
-        eval_docs (Sequence[Sequence[str]]): Held-out evaluation word tokens,
+        key: Run key (`<name>-<vocab>`).
+        output_root: Directory holding per-run artifact subdirs.
+        eval_docs: Held-out evaluation word tokens,
             kept grouped per document (the corpus resampling unit).
-        morph_sample (Sequence[MorphemeSegmentation]): The shared, deterministic
+        morph_sample: The shared, deterministic
             sample of gold segmentations (the morph resampling unit).
-        deriv_sample (Sequence[MorphemeSegmentation]): The derivational gold
+        deriv_sample: The derivational gold
             sample; when non-empty, derivational point-estimate columns
             (`morph_score_f1_deriv` etc.) are added. Empty skips the track.
-        alpha (float): Renyi order.
+        alpha: Renyi order.
 
     Returns:
-        Optional[Dict[str, Any]]: A flat metrics record, or None when the
+        A flat metrics record, or None when the
             artifact is missing (skipped).
     """
     artifact_dir = output_root / key
@@ -246,15 +265,18 @@ def evaluate_artifact(
         logger.warning("No artifact for %s; skipping.", key)
         return None
 
+    # load the tokenizer
     name, vocab_size = parse_sweep_run_key(key)
     tokenizer = load_tokenizer_artifact(artifact_dir)
 
+    # corpus statistics per document
     corpus = corpus_doc_stats(tokenizer, eval_docs)
     doc_tokens = np.asarray(corpus["tokens"], dtype=np.int64)
     doc_words = np.asarray(corpus["words"], dtype=np.int64)
     doc_chars = np.asarray(corpus["chars"], dtype=np.int64)
     doc_bytes = np.asarray(corpus["bytes"], dtype=np.int64)
 
+    # morph statistics per form
     morph = morph_form_stats(tokenizer, morph_sample)
     form_tp = np.asarray(morph["tp"], dtype=np.int32)
     form_pred = np.asarray(morph["predicted"], dtype=np.int32)
@@ -262,6 +284,7 @@ def evaluate_artifact(
     form_edit = np.asarray(morph["edit"], dtype=np.int32)
     form_valid = np.asarray(morph["valid"], dtype=np.uint8)
 
+    # morph point estimates over the tiled forms
     valid = form_valid.astype(bool)
     tp_sum = int(form_tp[valid].sum())
     pred_sum = int(form_pred[valid].sum())
@@ -271,7 +294,8 @@ def evaluate_artifact(
     recall = tp_sum / gold_sum if gold_sum else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
 
-    record: Dict[str, Any] = {
+    # assemble the metrics record
+    record: dict[str, Any] = {
         "run_key": key,
         "tokenizer": name,
         "vocab_size": vocab_size,
@@ -280,7 +304,7 @@ def evaluate_artifact(
         "tokens_per_byte": _safe_div(doc_tokens.sum(), doc_bytes.sum()).item(),
         "chars_per_token": _safe_div(doc_chars.sum(), doc_tokens.sum()).item(),
         "ctc_total": float(doc_tokens.sum()),
-        "renyi_efficiency": renyi_efficiency(cast(Dict[str, int], corpus["freqs"]), alpha),
+        "renyi_efficiency": renyi_efficiency(cast(dict[str, int], corpus["freqs"]), alpha),
         "morph_score_f1": f1,
         "morph_score_precision": precision,
         "morph_score_recall": recall,
@@ -289,7 +313,8 @@ def evaluate_artifact(
         "morph_consistency": morph_consistency_over(tokenizer, morph_sample),
     }
 
-    arrays: Dict[str, np.ndarray] = {
+    # collect the per-unit arrays for the sidecar
+    arrays: dict[str, np.ndarray] = {
         "doc_tokens": doc_tokens,
         "doc_words": doc_words,
         "doc_chars": doc_chars,
@@ -301,6 +326,7 @@ def evaluate_artifact(
         "form_valid": form_valid,
     }
 
+    # add the derivational track
     if deriv_sample:
         deriv_stats = morph_form_stats(tokenizer, deriv_sample)
         deriv = _morph_point_estimates(deriv_stats)
@@ -314,8 +340,7 @@ def evaluate_artifact(
                 "morph_consistency_deriv": morph_consistency_over(tokenizer, deriv_sample),
             }
         )
-        # Persist the derivational per-form arrays so the aggregation can attach
-        # bootstrap CIs + paired significance to the derivational boundary metrics.
+        # persist the per-form arrays so the aggregation can bootstrap the derivational metrics
         arrays.update(
             {
                 "form_tp_deriv": np.asarray(deriv_stats["tp"], dtype=np.int32),
@@ -326,20 +351,26 @@ def evaluate_artifact(
             }
         )
 
+    # write the record and the sidecar
     (artifact_dir / "metrics.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     np.savez_compressed(artifact_dir / EVAL_UNITS_FILENAME, **arrays)
     return record
 
 
-def _load_units(output_root: Path, run_key: str) -> Dict[str, np.ndarray]:
+# ===============================
+# Statistics aggregation
+# ===============================
+
+
+def _load_units(output_root: Path, run_key: str) -> dict[str, np.ndarray]:
     """Load a run's per-unit sufficient-statistics sidecar.
 
     Args:
-        output_root (Path): Directory holding per-run artifact subdirs.
-        run_key (str): Run key (`<name>-<vocab>`).
+        output_root: Directory holding per-run artifact subdirs.
+        run_key: Run key (`<name>-<vocab>`).
 
     Returns:
-        Dict[str, np.ndarray]: The arrays stored in `eval_units.npz`.
+        The arrays stored in `eval_units.npz`.
 
     Raises:
         FileNotFoundError: If the sidecar is missing.
@@ -353,9 +384,9 @@ def _load_units(output_root: Path, run_key: str) -> Dict[str, np.ndarray]:
 
 def _components_for(
     metric: str,
-    units: Dict[str, np.ndarray],
-    contexts: Dict[str, Any],
-) -> Tuple[Tuple[np.ndarray, ...], st.CombineFn, np.ndarray]:
+    units: dict[str, np.ndarray],
+    contexts: dict[str, Any],
+) -> tuple[tuple[np.ndarray, ...], st.CombineFn, np.ndarray]:
     """Return the per-unit components, combine, and resample indices for a metric.
 
     Morph metrics carry a `_deriv` suffix when they score the derivational gold;
@@ -363,14 +394,14 @@ def _components_for(
     track's own valid-form mask. Both morph tracks share the dispatch below.
 
     Args:
-        metric (str): A decomposable metric name.
-        units (Dict[str, np.ndarray]): The run's per-unit arrays.
-        contexts (Dict[str, Any]): Resample contexts: `corpus` maps to the
+        metric: A decomposable metric name.
+        units: The run's per-unit arrays.
+        contexts: Resample contexts: `corpus` maps to the
             document-resample indices; `infl` and `deriv` each map to a
             `(valid_pos, morph_idx)` tuple for that morph track.
 
     Returns:
-        Tuple[Tuple[np.ndarray, ...], st.CombineFn, np.ndarray]: The components,
+        The components,
             the combine callable, and the resample-index matrix to use.
 
     Raises:
@@ -398,14 +429,14 @@ def _components_for(
 
 
 def _vocab_significance(
-    keys: List[str],
-    names: Dict[str, str],
-    points: Dict[str, float],
-    dists: Dict[str, np.ndarray],
+    keys: list[str],
+    names: dict[str, str],
+    points: dict[str, float],
+    dists: dict[str, np.ndarray],
     *,
     direction: str,
     ci_level: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the paired-significance block for one metric within one vocab.
 
     Runs every pairwise paired-bootstrap difference, Holm-corrects the family of
@@ -413,18 +444,19 @@ def _vocab_significance(
     (tokenizers sharing a letter are not significantly different).
 
     Args:
-        keys (List[str]): Run keys compared in this vocab.
-        names (Dict[str, str]): Run key to tokenizer name.
-        points (Dict[str, float]): Run key to point estimate.
-        dists (Dict[str, np.ndarray]): Run key to bootstrap distribution (drawn
+        keys: Run keys compared in this vocab.
+        names: Run key to tokenizer name.
+        points: Run key to point estimate.
+        dists: Run key to bootstrap distribution (drawn
             from the shared resample indices).
-        direction (str): `higher` or `lower` (which is better for the metric).
-        ci_level (float): Confidence level for the difference CIs.
+        direction: `higher` or `lower` (which is better for the metric).
+        ci_level: Confidence level for the difference CIs.
 
     Returns:
-        Dict[str, Any]: A block with `ranking` and `pairs` entries.
+        A block with `ranking` and `pairs` entries.
     """
-    pairs_raw: List[Tuple[str, str, float, Tuple[float, float], float]] = []
+    # paired bootstrap differences for every pair
+    pairs_raw: list[tuple[str, str, float, tuple[float, float], float]] = []
     for i in range(len(keys)):
         for j in range(i + 1, len(keys)):
             diff = dists[keys[i]] - dists[keys[j]]
@@ -437,10 +469,11 @@ def _vocab_significance(
                     st.bootstrap_p_value(diff),
                 )
             )
-    adjusted = st.holm_correction([pr[4] for pr in pairs_raw])
 
-    pairs: List[Dict[str, Any]] = []
-    significant_pair: Dict[Tuple[str, str], bool] = {}
+    # Holm-correct the p-values
+    adjusted = st.holm_correction([pr[4] for pr in pairs_raw])
+    pairs: list[dict[str, Any]] = []
+    significant_pair: dict[tuple[str, str], bool] = {}
     for (left, right, diff_median, diff_ci, p_raw), p_adj in zip(pairs_raw, adjusted):
         significant = p_adj < 0.05
         significant_pair[(left, right)] = significant
@@ -457,6 +490,7 @@ def _vocab_significance(
             }
         )
 
+    # rank best to worst with compact letters
     ordered = sorted(keys, key=lambda k: points[k], reverse=(direction == "higher"))
     n = len(ordered)
     not_different = [
@@ -468,24 +502,24 @@ def _vocab_significance(
 
 
 def _morph_context(
-    units: Dict[str, Dict[str, np.ndarray]],
-    keys: List[str],
+    units: dict[str, dict[str, np.ndarray]],
+    keys: list[str],
     valid_key: str,
     n_resamples: int,
     seed: int,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Build a morph track's cross-run valid mask and shared resample indices.
 
     Args:
-        units (Dict[str, Dict[str, np.ndarray]]): Per-run unit arrays by run key.
-        keys (List[str]): Run keys compared in this vocab.
-        valid_key (str): Per-form validity array name (`form_valid` or
+        units: Per-run unit arrays by run key.
+        keys: Run keys compared in this vocab.
+        valid_key: Per-form validity array name (`form_valid` or
             `form_valid_deriv`).
-        n_resamples (int): Bootstrap resamples (B).
-        seed (int): Seed for this track's resample indices.
+        n_resamples: Bootstrap resamples (B).
+        seed: Seed for this track's resample indices.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]: The form positions valid across every
+        The form positions valid across every
             compared run, and the resample-index matrix over those positions.
     """
     valid_stack = np.vstack([units[key][valid_key].astype(bool) for key in keys])
@@ -495,14 +529,14 @@ def _morph_context(
 
 
 def augment_with_statistics(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     output_root: Path,
     *,
     n_resamples: int,
     ci_level: float,
     seed: int,
     morph_form_sample: int,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Add bootstrap CIs to records and compute paired significance per vocab.
 
     For each vocab size, all tokenizers share one set of resample indices per
@@ -516,33 +550,33 @@ def augment_with_statistics(
     `morph_consistency`, and `morph_consistency_deriv` stay bare point estimates.
 
     Args:
-        records (List[Dict[str, Any]]): Per-run metric records (mutated in place).
-        output_root (Path): Directory holding per-run artifact subdirs.
-        n_resamples (int): Bootstrap resamples (B).
-        ci_level (float): Confidence level for the CIs.
-        seed (int): Base seed for the shared resample indices.
-        morph_form_sample (int): Size of the shared morph form sample (recorded).
+        records: Per-run metric records (mutated in place).
+        output_root: Directory holding per-run artifact subdirs.
+        n_resamples: Bootstrap resamples (B).
+        ci_level: Confidence level for the CIs.
+        seed: Base seed for the shared resample indices.
+        morph_form_sample: Size of the shared morph form sample (recorded).
 
     Returns:
-        Tuple[Dict[str, Any], Dict[str, Any]]: The `significance` section keyed
+        The `significance` section keyed
             `[vocab][metric]` and the `stats_config` section.
     """
-    by_vocab: Dict[int, List[Dict[str, Any]]] = {}
+    # group the records by vocab size
+    by_vocab: dict[int, list[dict[str, Any]]] = {}
     for record in records:
         by_vocab.setdefault(int(record["vocab_size"]), []).append(record)
 
-    significance: Dict[str, Any] = {}
+    significance: dict[str, Any] = {}
     for vocab, recs in sorted(by_vocab.items()):
         keys = [r["run_key"] for r in recs]
         names = {r["run_key"]: r["tokenizer"] for r in recs}
         rec_by_key = {r["run_key"]: r for r in recs}
         units = {key: _load_units(output_root, key) for key in keys}
 
-        # Per-track resample contexts. corpus uses base; inflectional uses base+1;
-        # derivational uses base+500_000 so its seed stays disjoint from both for
-        # every vocab size (vocab*2 stays well under 500_000).
+        # resample contexts: corpus uses base, inflectional base+1, derivational base+500_000
+        # (disjoint seeds for every vocab size; vocab*2 stays well under 500_000)
         base = seed * 1_000_003 + vocab * 2
-        contexts: Dict[str, Any] = {
+        contexts: dict[str, Any] = {
             "corpus": st.make_resample_indices(len(units[keys[0]]["doc_tokens"]), n_resamples, base),
             "infl": _morph_context(units, keys, "form_valid", n_resamples, base + 1),
         }
@@ -551,10 +585,11 @@ def augment_with_statistics(
             contexts["deriv"] = _morph_context(units, keys, "form_valid_deriv", n_resamples, base + 500_000)
             metrics += _DERIV_DECOMPOSABLE_METRICS
 
-        vocab_block: Dict[str, Any] = {}
+        # bootstrap every metric and rank the tokenizers
+        vocab_block: dict[str, Any] = {}
         for metric in metrics:
-            points: Dict[str, float] = {}
-            dists: Dict[str, np.ndarray] = {}
+            points: dict[str, float] = {}
+            dists: dict[str, np.ndarray] = {}
             for key in keys:
                 components, combine, idx = _components_for(metric, units[key], contexts)
                 dist = st.bootstrap_distribution(idx, components, combine)
@@ -581,29 +616,34 @@ def augment_with_statistics(
     return significance, stats_config
 
 
+# ===============================
+# Report
+# ===============================
+
+
 def _format_cell(value: Any) -> str:
     """Format a metric value for the Markdown table.
 
     Args:
-        value (Any): A metric value.
+        value: A metric value.
 
     Returns:
-        str: A 4-decimal float, or the string form for non-numbers.
+        A 4-decimal float, or the string form for non-numbers.
     """
     if isinstance(value, float):
         return f"{value:.4f}"
     return str(value)
 
 
-def _format_metric_cell(record: Dict[str, Any], metric: str) -> str:
+def _format_metric_cell(record: dict[str, Any], metric: str) -> str:
     """Format a metric cell, appending its bootstrap CI when available.
 
     Args:
-        record (Dict[str, Any]): A per-run record.
-        metric (str): The metric column name.
+        record: A per-run record.
+        metric: The metric column name.
 
     Returns:
-        str: The point estimate, with a `[lo, hi]` 95%-CI suffix for the five
+        The point estimate, with a `[lo, hi]` 95%-CI suffix for the five
             decomposable metrics that carry one.
     """
     value = _format_cell(record.get(metric, ""))
@@ -614,23 +654,24 @@ def _format_metric_cell(record: Dict[str, Any], metric: str) -> str:
 
 
 def build_report(
-    results: List[Dict[str, Any]],
-    significance: Optional[Dict[str, Any]] = None,
-    stats_config: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, Dict[str, Any]]:
+    results: list[dict[str, Any]],
+    significance: dict[str, Any] | None = None,
+    stats_config: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Build the Markdown comparison table and JSON payload.
 
     Args:
-        results (List[Dict[str, Any]]): Per-run metric records.
-        significance (Optional[Dict[str, Any]]): Paired-significance section
+        results: Per-run metric records.
+        significance: Paired-significance section
             keyed `[vocab][metric]`, or None when statistics were not computed.
-        stats_config (Optional[Dict[str, Any]]): The bootstrap configuration
+        stats_config: The bootstrap configuration
             recorded alongside the results, or None.
 
     Returns:
-        Tuple[str, Dict[str, Any]]: The Markdown report and a JSON payload
+        The Markdown report and a JSON payload
             carrying the results, directions, significance, and stats config.
     """
+    # header and explanatory text
     ordered = sorted(results, key=lambda r: (r["tokenizer"], r["vocab_size"]))
     columns = _REPORT_COLUMNS + [col for col in _DERIV_COLUMNS if any(col in r for r in results)]
     headers = ["tokenizer", "vocab"] + [
@@ -653,6 +694,8 @@ def build_report(
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
+
+    # one table row per run
     for record in ordered:
         row = [record["tokenizer"], str(record["vocab_size"])]
         row += [_format_metric_cell(record, col) for col in columns]
@@ -668,24 +711,27 @@ def build_report(
 
 
 def write_report(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     report_dir: Path,
-    significance: Optional[Dict[str, Any]] = None,
-    stats_config: Optional[Dict[str, Any]] = None,
-) -> Tuple[Path, Path]:
+    significance: dict[str, Any] | None = None,
+    stats_config: dict[str, Any] | None = None,
+) -> tuple[Path, Path]:
     """Write the Markdown and JSON reports under `report_dir`.
 
     Args:
-        results (List[Dict[str, Any]]): Per-run metric records.
-        report_dir (Path): Destination directory, created if missing.
-        significance (Optional[Dict[str, Any]]): Paired-significance section.
-        stats_config (Optional[Dict[str, Any]]): Bootstrap configuration.
+        results: Per-run metric records.
+        report_dir: Destination directory, created if missing.
+        significance: Paired-significance section.
+        stats_config: Bootstrap configuration.
 
     Returns:
-        Tuple[Path, Path]: The Markdown and JSON report paths.
+        The Markdown and JSON report paths.
     """
+    # build the report
     report_dir.mkdir(parents=True, exist_ok=True)
     markdown, payload = build_report(results, significance, stats_config)
+
+    # write the Markdown and JSON files
     md_path = report_dir / "report.md"
     json_path = report_dir / "report.json"
     md_path.write_text(markdown, encoding="utf-8")
@@ -693,7 +739,12 @@ def write_report(
     return md_path, json_path
 
 
-def _train_link_tags(artifact_dir: Path) -> Dict[str, str]:
+# ===============================
+# MLflow logging
+# ===============================
+
+
+def _train_link_tags(artifact_dir: Path) -> dict[str, str]:
     """Build cross-link tags pointing an eval run at its training run.
 
     Reads the `mlflow_train.json` sidecar written by the training logger and
@@ -701,10 +752,10 @@ def _train_link_tags(artifact_dir: Path) -> Dict[str, str]:
     an empty mapping when no sidecar exists (training was not MLflow-logged).
 
     Args:
-        artifact_dir (Path): The run's artifact directory.
+        artifact_dir: The run's artifact directory.
 
     Returns:
-        Dict[str, str]: Tags keyed `train_run_id` / `train_parent_run_id` /
+        Tags keyed `train_run_id` / `train_parent_run_id` /
             `train_run_name`, or an empty mapping when no linkage is present.
     """
     link_path = artifact_dir / MLFLOW_LINK_FILENAME
@@ -719,9 +770,9 @@ def _train_link_tags(artifact_dir: Path) -> Dict[str, str]:
 
 
 def log_evaluate_runs(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     cfg: SweepConfig,
-    report_paths: Tuple[Path, Path],
+    report_paths: tuple[Path, Path],
 ) -> None:
     """Log the sweep to MLflow as a parent run with nested per-run children.
 
@@ -732,9 +783,9 @@ def log_evaluate_runs(
     disabled.
 
     Args:
-        results (List[Dict[str, Any]]): Per-run metric records.
-        cfg (SweepConfig): The resolved sweep configuration.
-        report_paths (Tuple[Path, Path]): The Markdown and JSON report paths.
+        results: Per-run metric records.
+        cfg: The resolved sweep configuration.
+        report_paths: The Markdown and JSON report paths.
     """
     if not cfg.mlflow_enabled:
         return
@@ -742,6 +793,7 @@ def log_evaluate_runs(
         logger.warning("MLflow unavailable; skipping logging.")
         return
 
+    # settings shared by every run
     commit = ml.git_commit()
     metric_keys = [
         *_REPORT_COLUMNS,
@@ -756,6 +808,8 @@ def log_evaluate_runs(
     tags = run_tags(cfg)
     gold_paths = {"sloleks-inflection": cfg.inflection_path} if cfg.inflection_path else {}
     inputs = sweep_inputs({"corpus-split": cfg.corpus_split_path, "eval-sample": cfg.eval_sample_path, **gold_paths})
+
+    # log the parent run with one child per tokenizer
     with ml.mlflow_run("sweep-eval", tags={**tags, "run_type": "sweep", "phase": "eval"}):
         for record in results:
             with ml.mlflow_run(
@@ -780,7 +834,7 @@ def log_evaluate_runs(
                 )
                 log_sweep_lineage(cfg, inputs, context="eval")
                 ml.log_metrics({k: record[k] for k in metric_keys if k in record})
-                ci_metrics: Dict[str, float] = {}
+                ci_metrics: dict[str, float] = {}
                 for metric in (*_DECOMPOSABLE_METRICS, *_DERIV_DECOMPOSABLE_METRICS):
                     bounds = record.get(f"{metric}_ci")
                     if bounds is not None:
@@ -789,12 +843,18 @@ def log_evaluate_runs(
                 ml.log_metrics(ci_metrics)
                 ml.set_tags(_train_link_tags(cfg.output_root / record["run_key"]))
 
+        # best run and report artifacts
         best = max(results, key=lambda r: r["morph_score_f1"], default=None)
         if best is not None:
             ml.log_metrics({"best_morph_score_f1": best["morph_score_f1"]})
             ml.set_tags({"best_run_key": best["run_key"]})
         for path in report_paths:
             ml.log_artifact(path)
+
+
+# ===============================
+# Sweep orchestration
+# ===============================
 
 
 @dataclass
@@ -808,12 +868,12 @@ class EvaluateSummary:
             produced a record.
     """
 
-    records: List[Dict[str, Any]] = field(default_factory=list)
-    failed: List[str] = field(default_factory=list)
-    report_paths: Optional[Tuple[Path, Path]] = None
+    records: list[dict[str, Any]] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+    report_paths: tuple[Path, Path] | None = None
 
 
-def _evaluate_worker(key: str, *, output_root: Path, alpha: float) -> Optional[Dict[str, Any]]:
+def _evaluate_worker(key: str, *, output_root: Path, alpha: float) -> dict[str, Any] | None:
     """Evaluate one run, reading the shared eval docs and morph sample globals.
 
     The grouped evaluation documents and the shared morph and derivational form
@@ -822,12 +882,12 @@ def _evaluate_worker(key: str, *, output_root: Path, alpha: float) -> Optional[D
     (which would copy the multi-million-form inputs once per task).
 
     Args:
-        key (str): Run key (`<name>-<vocab>`).
-        output_root (Path): Directory holding per-run artifact subdirs.
-        alpha (float): Renyi order.
+        key: Run key (`<name>-<vocab>`).
+        output_root: Directory holding per-run artifact subdirs.
+        alpha: Renyi order.
 
     Returns:
-        Optional[Dict[str, Any]]: The metrics record, or None when skipped.
+        The metrics record, or None when skipped.
     """
     return evaluate_artifact(
         key,
@@ -843,7 +903,7 @@ def prepare_eval_inputs(
     cfg: SweepConfig,
     force: bool,
     morph_form_sample: int,
-) -> Tuple[List[List[str]], List[MorphemeSegmentation], List[MorphemeSegmentation]]:
+) -> tuple[list[list[str]], list[MorphemeSegmentation], list[MorphemeSegmentation]]:
     """Materialize the grouped eval docs and the shared morph form samples.
 
     The evaluation documents are kept grouped (one word list per document) so the
@@ -852,17 +912,17 @@ def prepare_eval_inputs(
     statistics align by index for the paired tests.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        force (bool): Rebuild the gold lexicons even if present. The eval
+        cfg: The resolved sweep configuration.
+        force: Rebuild the gold lexicons even if present. The eval
             sample is drawn only when missing; `sample --force` redraws it.
-        morph_form_sample (int): Size of the shared morph form sample.
+        morph_form_sample: Size of the shared morph form sample.
 
     Returns:
-        Tuple[List[List[str]], List[MorphemeSegmentation], List[MorphemeSegmentation]]:
-            The grouped eval documents, the shared inflectional morph form
+        The grouped eval documents, the shared inflectional morph form
             sample, and the derivational form sample (empty when no derivational
             gold is configured).
     """
+    # sample the held-out evaluation corpus
     eval_path = cfg.eval_sample_path
     if not eval_path.exists():
         logger.info("Sampling held-out evaluation corpus -> %s", eval_path)
@@ -873,6 +933,7 @@ def prepare_eval_inputs(
     eval_docs = [iter_words(line) for line in iter_sample(eval_path)]
     logger.info("Evaluation sample: %d documents, %d word tokens", len(eval_docs), sum(len(d) for d in eval_docs))
 
+    # build the inflectional gold and its sample
     infl_path = cfg.infl_lexicon_path
     if force or not infl_path.exists():
         logger.info("Deriving inflectional gold lexicon from %s", cfg.sloleks_path)
@@ -880,13 +941,14 @@ def prepare_eval_inputs(
     lexicon = load_lexicon(infl_path)
     heldout = None
     if cfg.heldout_lexeme_share is not None:
-        # Only held-out forms are scored: every other form is in the morph backends' table.
+        # only held-out forms are scored: every other form is in the morph backends' table
         heldout = split_lexemes(cfg.inflection_path, cfg.heldout_lexeme_share).heldout_forms
         lexicon = without_forms(lexicon, frozenset(lexicon.by_form.keys() - heldout))
     morph_sample = sample_segmentations(lexicon, morph_form_sample, cfg.stats_seed)
     logger.info("Inflectional gold: %d forms; morph sample: %d forms", len(lexicon.by_form), len(morph_sample))
 
-    deriv_sample: List[MorphemeSegmentation] = []
+    # build the derivational gold sample
+    deriv_sample: list[MorphemeSegmentation] = []
     if cfg.needs_derivational():
         deriv_path = cfg.deriv_lexicon_path
         if force or not deriv_path.exists():
@@ -905,10 +967,10 @@ def prepare_eval_inputs(
 
 def evaluate_sweep(
     cfg: SweepConfig,
-    keys: List[str],
+    keys: list[str],
     force: bool = False,
-    morph_form_sample: Optional[int] = None,
-    n_resamples: Optional[int] = None,
+    morph_form_sample: int | None = None,
+    n_resamples: int | None = None,
     max_workers: int = 0,
 ) -> EvaluateSummary:
     """Evaluate trained tokenizer artifacts and write the comparison report.
@@ -918,45 +980,45 @@ def evaluate_sweep(
     Markdown and JSON reports, and logs the sweep to MLflow.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        keys (List[str]): Run keys (`<name>-<vocab>`) with trained artifacts.
-        force (bool): Rebuild the gold lexicons; the evaluation sample is kept.
-        morph_form_sample (Optional[int]): Override for the config's morph
+        cfg: The resolved sweep configuration.
+        keys: Run keys (`<name>-<vocab>`) with trained artifacts.
+        force: Rebuild the gold lexicons; the evaluation sample is kept.
+        morph_form_sample: Override for the config's morph
             form-sample size, or None to use the configured value.
-        n_resamples (Optional[int]): Override for the config's bootstrap
+        n_resamples: Override for the config's bootstrap
             resample count, or None to use the configured value.
-        max_workers (int): Parallel evaluations. 0=auto, 1=serial, N=N workers.
+        max_workers: Parallel evaluations. 0=auto, 1=serial, N=N workers.
 
     Returns:
-        EvaluateSummary: The metric records, failed keys, and report paths.
+        The metric records, failed keys, and report paths.
     """
-    # CPU-bound metrics: cap the auto default conservatively so a many-core box
-    # is not saturated by default.
+    # cap the auto worker count for CPU-bound metrics so a many-core box is not saturated
     workers = resolve_workers(max_workers, len(keys), min(DEFAULT_MAX_WORKERS, cpu_default(len(keys))))
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
+    # resolve the overrides
     form_sample = morph_form_sample if morph_form_sample is not None else cfg.stats_morph_form_sample
     resamples = n_resamples if n_resamples is not None else cfg.stats_n_resamples
 
-    # Publish the heavy eval inputs to module globals BEFORE the process pool
-    # forks, so workers inherit them copy-on-write rather than via pickling.
+    # publish the eval inputs to globals before the pool forks, so workers inherit them copy-on-write
     global _EVAL_DOCS, _MORPH_SAMPLE, _DERIV_SAMPLE
     _EVAL_DOCS, _MORPH_SAMPLE, _DERIV_SAMPLE = prepare_eval_inputs(cfg, force=force, morph_form_sample=form_sample)
 
-    def kwargs_for(_key: str) -> Dict[str, Any]:
+    def kwargs_for(_key: str) -> dict[str, Any]:
         """Return per-run kwargs for `_evaluate_worker`.
 
         Only small, picklable values go here; the eval docs and morph sample are
         shared via module globals (see `_evaluate_worker`).
 
         Args:
-            _key (str): Run key (unused; kwargs are identical per run).
+            _key: Run key (unused; kwargs are identical per run).
 
         Returns:
-            Dict[str, Any]: Keyword arguments for `_evaluate_worker`.
+            Keyword arguments for `_evaluate_worker`.
         """
         return {"output_root": cfg.output_root, "alpha": cfg.renyi_alpha}
 
+    # evaluate every run in parallel
     results, failures = run_parallel(
         _evaluate_worker,
         keys,
@@ -967,6 +1029,7 @@ def evaluate_sweep(
         log_dir=stamped_log_dir("tokenizer-evaluate"),
     )
 
+    # attach statistics, write the report and log it
     records = [r for r in results.values() if r is not None]
     summary = EvaluateSummary(records=records, failed=[k for k, _ in failures])
     if records:

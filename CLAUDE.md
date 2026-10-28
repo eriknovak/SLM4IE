@@ -267,8 +267,10 @@ def extract(dataset: str, force: bool = False) -> Path:
     """
 ```
 
-Type hints required on all public signatures. Use `typing` collection generics
-(`List`, `Dict`, `Optional`, etc.) for consistency across the codebase.
+Type hints required on all public signatures. Use builtin generics (`list`,
+`dict`, `X | None`); import from `typing` only what has no builtin form (`Any`,
+`Callable`, etc.). Docstring `Args:` and `Returns:` omit types the signature
+already carries.
 
 ### Formatting is enforced
 

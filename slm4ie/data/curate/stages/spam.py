@@ -40,12 +40,11 @@ import importlib.metadata  # noqa: F401
 import importlib.util  # noqa: F401
 import logging
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any
 from urllib.parse import urlsplit
-
-from numpy.random import default_rng
 
 from datatrove.data import Document
 from datatrove.executor import LocalPipelineExecutor
@@ -53,13 +52,22 @@ from datatrove.io import cached_asset_path_or_download
 from datatrove.pipeline.filters.base_filter import BaseFilter
 from datatrove.pipeline.writers.disk_base import DiskWriter
 from datatrove.pipeline.writers.jsonl import JsonlWriter
+from numpy.random import default_rng
 
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 from slm4ie.utils.versioning import REMOVED_DIR
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Languages without inter-word spaces, where lexicon matching must not
 #: require non-word boundaries (mirrors datatrove's C4 badwords filter).
@@ -110,6 +118,17 @@ _LDNOOBW_LANGS = frozenset(
     }
 )
 
+#: Tokens shorter than this keep their final vowel: a four-letter stem
+#: such as `anal` would reach common words (`analiza`).
+_MIN_STEM_TOKEN = 5
+
+#: Word characters a stem key accepts after it, covering Slovene endings.
+_MAX_SUFFIX = 3
+
+# ===============================
+# Config and assets
+# ===============================
+
 
 @dataclass
 class SpamConfig:
@@ -139,11 +158,11 @@ class SpamConfig:
     default_language: str = "sl"
     url_blocklist: bool = True
     use_ldnoobw: bool = True
-    model: Optional[str] = None
+    model: str | None = None
     model_threshold: float = 0.5
 
 
-def _parse_terms(raw: bytes) -> Set[str]:
+def _parse_terms(raw: bytes) -> set[str]:
     """Parse a term-list payload into a lowercased token set.
 
     Blank lines and lines whose first non-whitespace character is `#`
@@ -155,7 +174,7 @@ def _parse_terms(raw: bytes) -> Set[str]:
     Returns:
         Set of lowercased terms.
     """
-    out: Set[str] = set()
+    out: set[str] = set()
     for line in raw.decode("utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -173,7 +192,7 @@ def _spam_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "resources" / "spam"
 
 
-def load_spam_lexicon(code: str) -> Tuple[Set[str], Set[str], bytes]:
+def load_spam_lexicon(code: str) -> tuple[set[str], set[str], bytes]:
     """Load the curated adult and SEO-spam term sets for a language.
 
     Resolves `<code>/adult.txt` and `<code>/spam.txt` under
@@ -190,18 +209,21 @@ def load_spam_lexicon(code: str) -> Tuple[Set[str], Set[str], bytes]:
         ValueError: If no `<code>/` folder with the two files exists. The
             message lists the available codes.
     """
+    # locate the lexicon files
     folder = _spam_dir() / code
     adult_path = folder / "adult.txt"
     spam_path = folder / "spam.txt"
     if not adult_path.exists() or not spam_path.exists():
         available = sorted(p.name for p in _spam_dir().iterdir() if p.is_dir() and not p.name.startswith("_"))
         raise ValueError(f"unknown spam lexicon language {code!r}; available: {available}")
+
+    # parse the term lists
     adult_raw = adult_path.read_bytes()
     spam_raw = spam_path.read_bytes()
     return _parse_terms(adult_raw), _parse_terms(spam_raw), adult_raw + b"\x00" + spam_raw
 
 
-def load_spam_domains() -> Tuple[Set[str], bytes]:
+def load_spam_domains() -> tuple[set[str], bytes]:
     """Load the bundled adult/spam domain blocklist.
 
     Resolves `domains.txt` under `slm4ie/data/curate/resources/spam/`.
@@ -229,9 +251,9 @@ class SpamAssets:
             folding into the spam stage's sentinel hash.
     """
 
-    adult_words: Dict[str, Set[str]]
-    spam_words: Dict[str, Set[str]]
-    domains: Set[str]
+    adult_words: dict[str, set[str]]
+    spam_words: dict[str, set[str]]
+    domains: set[str]
     raw_bytes: bytes
 
 
@@ -250,27 +272,27 @@ def load_spam_assets(languages: Sequence[str], *, url_blocklist: bool = True) ->
     Raises:
         ValueError: If any requested language has no curated list.
     """
-    adult_words: Dict[str, Set[str]] = {}
-    spam_words: Dict[str, Set[str]] = {}
+    # load the curated lexicons
+    adult_words: dict[str, set[str]] = {}
+    spam_words: dict[str, set[str]] = {}
     chunks = []
     for code in sorted(set(languages)):
         adult, spam, raw = load_spam_lexicon(code)
         adult_words[code] = adult
         spam_words[code] = spam
         chunks.append(code.encode("utf-8") + b":" + raw)
-    domains: Set[str] = set()
+
+    # load the domain blocklist
+    domains: set[str] = set()
     if url_blocklist:
         domains, domains_raw = load_spam_domains()
         chunks.append(b"domains:" + domains_raw)
     return SpamAssets(adult_words, spam_words, domains, b"\x00".join(chunks))
 
 
-#: Tokens shorter than this keep their final vowel: a four-letter stem
-#: such as `anal` would reach common words (`analiza`).
-_MIN_STEM_TOKEN = 5
-
-#: Word characters a stem key accepts after it, covering Slovene endings.
-_MAX_SUFFIX = 3
+# ===============================
+# Term matching
+# ===============================
 
 
 def stem_key(term: str) -> str:
@@ -293,7 +315,7 @@ def stem_key(term: str) -> str:
     return " ".join(tokens)
 
 
-def collapse_keys(terms: Set[str]) -> Dict[str, str]:
+def collapse_keys(terms: set[str]) -> dict[str, str]:
     """Stem a term set and map each stem key to the key it is counted as.
 
     A key is counted as the shortest other key with the same phrase head
@@ -307,9 +329,12 @@ def collapse_keys(terms: Set[str]) -> Dict[str, str]:
     Returns:
         Mapping of every stem key to its counting key.
     """
+    # stem the terms and split each into head and last token
     keys = {stem_key(t) for t in terms if t.strip()}
     split = {k: k.rpartition(" ") for k in keys}
-    counted: Dict[str, str] = {}
+
+    # count each key as the shortest key covering it
+    counted: dict[str, str] = {}
     for key, (head, _, last) in split.items():
         covering = [
             other
@@ -331,10 +356,10 @@ class TermMatcher:
     """
 
     pattern: re.Pattern
-    keys: Dict[str, str]
+    keys: dict[str, str]
     stemmed: bool
 
-    def matched_keys(self, text: str) -> Set[str]:
+    def matched_keys(self, text: str) -> set[str]:
         """Return the distinct counting keys whose forms occur in a lowercased text.
 
         Args:
@@ -343,7 +368,7 @@ class TermMatcher:
         Returns:
             The set of matched counting keys.
         """
-        found: Set[str] = set()
+        found: set[str] = set()
         for surface in self.pattern.findall(text):
             if not self.stemmed:
                 found.add(surface)
@@ -357,7 +382,7 @@ class TermMatcher:
         return found
 
 
-def _compile_terms(terms: Set[str], language: str) -> Optional[TermMatcher]:
+def _compile_terms(terms: set[str], language: str) -> TermMatcher | None:
     """Compile a term set into a distinct-term matcher.
 
     Args:
@@ -374,13 +399,21 @@ def _compile_terms(terms: Set[str], language: str) -> Optional[TermMatcher]:
         alternation = "|".join(re.escape(t) for t in sorted(terms, key=lambda t: (-len(t), t)))
         return TermMatcher(re.compile(f"({alternation})"), {t: t for t in terms}, stemmed=False)
     keys = collapse_keys(terms)
-    # Longest first, so a phrase wins over its own leading word.
+
+    # longest first, so a phrase wins over its own leading word
     branches = []
     for key in sorted(keys, key=lambda k: (-len(k), k)):
         tokens = key.split()
         branches.append(r"\s+".join(re.escape(t) for t in tokens) + r"\w{0,%d}" % _MAX_SUFFIX)
+
+    # compile the stem pattern
     pattern = re.compile(r"(?<!\w)({})(?!\w)".format("|".join(branches)))
     return TermMatcher(pattern, keys, stemmed=True)
+
+
+# ===============================
+# Spam filter
+# ===============================
 
 
 class SpamFilter(BaseFilter):
@@ -404,13 +437,13 @@ class SpamFilter(BaseFilter):
     def __init__(
         self,
         *,
-        adult_words: Dict[str, Set[str]],
-        spam_words: Dict[str, Set[str]],
-        domains: Set[str],
+        adult_words: dict[str, set[str]],
+        spam_words: dict[str, set[str]],
+        domains: set[str],
         config: SpamConfig,
-        seed: Optional[int] = None,
-        model_fn: Optional[Callable[[str], float]] = None,
-        exclusion_writer: Optional[DiskWriter] = None,
+        seed: int | None = None,
+        model_fn: Callable[[str], float] | None = None,
+        exclusion_writer: DiskWriter | None = None,
     ) -> None:
         """Initialize the filter from preloaded lexicons and config.
 
@@ -433,10 +466,67 @@ class SpamFilter(BaseFilter):
         self.domains = {d.lower() for d in domains}
         self.model_fn = model_fn
         self.uniform = default_rng(seed).uniform
-        self._adult_matchers: Dict[str, Optional[TermMatcher]] = {}
-        self._spam_matchers: Dict[str, Optional[TermMatcher]] = {}
+        self._adult_matchers: dict[str, TermMatcher | None] = {}
+        self._spam_matchers: dict[str, TermMatcher | None] = {}
 
-    def _adult_matcher(self, lang: str) -> Optional[TermMatcher]:
+    def filter(self, doc: Document) -> bool | tuple[bool, str]:
+        """Flag adult/SEO-spam documents; keep everything else.
+
+        Args:
+            doc: The document to evaluate.
+
+        Returns:
+            `True` to keep the document, or `(False, reason)` to drop it.
+            Any flagged document first gets `metadata.spam_reason` and
+            `metadata.spam_terms` (the sorted stem keys it matched in
+            either lexicon); one retained by `keep_fraction` returns
+            `True`.
+        """
+        # read the language and collect the reasons
+        lang = doc.metadata.get("language") or self.config.default_language
+        text = doc.text.lower()
+        reasons = []
+
+        # check the URL blocklist
+        if self.config.url_blocklist and self.domains:
+            url = doc.metadata.get("url")
+            if url and self._host_blocked(url):
+                reasons.append("spam_url")
+
+        # check the adult lexicon
+        adult_matcher = self._adult_matcher(lang)
+        adult = adult_matcher.matched_keys(text) if adult_matcher is not None else set()
+        if len(adult) >= self.config.min_adult_hits:
+            reasons.append("adult_lexicon")
+
+        # check the spam lexicon
+        spam_matcher = self._spam_matcher(lang)
+        spam = spam_matcher.matched_keys(text) if spam_matcher is not None else set()
+        if len(spam) >= self.config.min_spam_hits:
+            reasons.append("spam_lexicon")
+
+        # check the model scorer
+        if self.model_fn is not None and self.model_fn(doc.text) >= self.config.model_threshold:
+            reasons.append("spam_model")
+
+        if not reasons:
+            return True
+
+        # flag the document and keep a seeded fraction
+        reason = ",".join(reasons)
+        doc.metadata["spam_reason"] = reason
+        doc.metadata["spam_terms"] = sorted(adult | spam)
+        self.stat_update("flagged", f"flagged_{lang}")
+        if self.config.keep_fraction > 0.0 and self.uniform() < self.config.keep_fraction:
+            self.stat_update("kept_flagged")
+            return True
+        return False, reason
+
+    # =================================
+    # Private methods
+    # =================================
+
+    def _adult_matcher(self, lang: str) -> TermMatcher | None:
         """Return (and cache) the adult-term matcher for a language.
 
         Falls back to an LDNOOBW list for languages without a curated
@@ -455,7 +545,7 @@ class SpamFilter(BaseFilter):
             self._adult_matchers[lang] = _compile_terms(terms or set(), lang)
         return self._adult_matchers[lang]
 
-    def _spam_matcher(self, lang: str) -> Optional[TermMatcher]:
+    def _spam_matcher(self, lang: str) -> TermMatcher | None:
         """Return (and cache) the SEO/scam-term matcher for a language.
 
         Args:
@@ -468,7 +558,7 @@ class SpamFilter(BaseFilter):
             self._spam_matchers[lang] = _compile_terms(self._spam_words.get(lang) or set(), lang)
         return self._spam_matchers[lang]
 
-    def _load_ldnoobw(self, lang: str) -> Set[str]:
+    def _load_ldnoobw(self, lang: str) -> set[str]:
         """Fetch and cache the LDNOOBW adult list for a language.
 
         Args:
@@ -514,55 +604,13 @@ class SpamFilter(BaseFilter):
                 return True
         return False
 
-    def filter(self, doc: Document) -> Union[bool, Tuple[bool, str]]:
-        """Flag adult/SEO-spam documents; keep everything else.
 
-        Args:
-            doc: The document to evaluate.
-
-        Returns:
-            `True` to keep the document, or `(False, reason)` to drop it.
-            Any flagged document first gets `metadata.spam_reason` and
-            `metadata.spam_terms` (the sorted stem keys it matched in
-            either lexicon); one retained by `keep_fraction` returns
-            `True`.
-        """
-        lang = doc.metadata.get("language") or self.config.default_language
-        text = doc.text.lower()
-        reasons = []
-
-        if self.config.url_blocklist and self.domains:
-            url = doc.metadata.get("url")
-            if url and self._host_blocked(url):
-                reasons.append("spam_url")
-
-        adult_matcher = self._adult_matcher(lang)
-        adult = adult_matcher.matched_keys(text) if adult_matcher is not None else set()
-        if len(adult) >= self.config.min_adult_hits:
-            reasons.append("adult_lexicon")
-
-        spam_matcher = self._spam_matcher(lang)
-        spam = spam_matcher.matched_keys(text) if spam_matcher is not None else set()
-        if len(spam) >= self.config.min_spam_hits:
-            reasons.append("spam_lexicon")
-
-        if self.model_fn is not None and self.model_fn(doc.text) >= self.config.model_threshold:
-            reasons.append("spam_model")
-
-        if not reasons:
-            return True
-
-        reason = ",".join(reasons)
-        doc.metadata["spam_reason"] = reason
-        doc.metadata["spam_terms"] = sorted(adult | spam)
-        self.stat_update("flagged", f"flagged_{lang}")
-        if self.config.keep_fraction > 0.0 and self.uniform() < self.config.keep_fraction:
-            self.stat_update("kept_flagged")
-            return True
-        return False, reason
+# ===============================
+# Stage
+# ===============================
 
 
-def _build_spam_config(spcfg: Dict[str, Any]) -> SpamConfig:
+def _build_spam_config(spcfg: dict[str, Any]) -> SpamConfig:
     """Resolve a spam-stage config slice into a `SpamConfig`.
 
     Args:
@@ -595,15 +643,15 @@ def build_spam_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    spam_config: Optional[SpamConfig] = None,
-    adult_words: Optional[Dict[str, Set[str]]] = None,
-    spam_words: Optional[Dict[str, Set[str]]] = None,
-    domains: Optional[Set[str]] = None,
-    model_fn: Optional[Callable[[str], float]] = None,
-    seed: Optional[int] = None,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    spam_config: SpamConfig | None = None,
+    adult_words: dict[str, set[str]] | None = None,
+    spam_words: dict[str, set[str]] | None = None,
+    domains: set[str] | None = None,
+    model_fn: Callable[[str], float] | None = None,
+    seed: int | None = None,
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the spam stage: read 01_language/ → SpamFilter → write 02_spam/.
 
     Dropped documents go to `<output>/<dataset>/removed/<rank>.jsonl.gz`,
@@ -629,8 +677,11 @@ def build_spam_executors(
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
+    # resolve the input and output folders
     in_ = input_override if input_override is not None else paths.stage_dir("language")
     out = output_override if output_override is not None else paths.stage_dir("spam")
+
+    # build the read, filter, write pipeline
     executor = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -655,7 +706,7 @@ def build_spam_executors(
     return [executor]
 
 
-def run(job: StageRun) -> Tuple[int, int]:
+def run(job: StageRun) -> tuple[int, int]:
     """Run the spam stage over the job's input view.
 
     Args:

@@ -8,11 +8,16 @@ iterator. Pieces carry the SentencePiece `▁` word-boundary marker, which
 from __future__ import annotations
 
 import io
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List
+from typing import Any
 
 from slm4ie.tokenizers.base import BaseTokenizer, TrainContext, keep_alphabet
 from slm4ie.tokenizers.registry import register_tokenizer
+
+# ===============================
+# Defaults
+# ===============================
 
 #: SentencePiece reserves these control pieces itself; they are filtered out of
 #: user-defined symbols to avoid duplicate-symbol training errors.
@@ -23,6 +28,11 @@ _SP_RESERVED = {"<unk>", "<s>", "</s>"}
 MAX_SENTENCE_BYTES = 4192
 
 
+# ===============================
+# Helper functions
+# ===============================
+
+
 def chunk_line(line: str, max_bytes: int = MAX_SENTENCE_BYTES) -> Iterator[str]:
     """Cut a line at whitespace into pieces of at most `max_bytes` UTF-8 bytes.
 
@@ -30,13 +40,14 @@ def chunk_line(line: str, max_bytes: int = MAX_SENTENCE_BYTES) -> Iterator[str]:
     then drops.
 
     Args:
-        line (str): One input line, such as a whole document.
-        max_bytes (int): Largest piece, in UTF-8 bytes.
+        line: One input line, such as a whole document.
+        max_bytes: Largest piece, in UTF-8 bytes.
 
     Yields:
-        str: The line's words, rejoined by single spaces, piece by piece.
+        The line's words, rejoined by single spaces, piece by piece.
     """
-    words: List[str] = []
+    # cut the line at whitespace
+    words: list[str] = []
     size = 0
     for word in line.split():
         width = len(word.encode("utf-8"))
@@ -47,6 +58,11 @@ def chunk_line(line: str, max_bytes: int = MAX_SENTENCE_BYTES) -> Iterator[str]:
         words.append(word)
     if words:
         yield " ".join(words)
+
+
+# ===============================
+# Unigram class
+# ===============================
 
 
 @register_tokenizer("unigram")
@@ -63,7 +79,7 @@ class UnigramTokenizer(BaseTokenizer):
         """Wrap an optional serialized SentencePiece model.
 
         Args:
-            model_bytes (bytes): A serialized `.model` proto, or empty for an
+            model_bytes: A serialized `.model` proto, or empty for an
                 untrained instance.
         """
         super().__init__()
@@ -87,19 +103,22 @@ class UnigramTokenizer(BaseTokenizer):
         multi-gigabyte sample within the trainer's index range.
 
         Args:
-            corpus (Iterable[str]): Training sentences.
-            vocab_size (int): Target vocabulary size.
-            config (TrainContext): Shared training settings (special tokens,
+            corpus: Training sentences.
+            vocab_size: Target vocabulary size.
+            config: Shared training settings (special tokens,
                 base alphabet).
         """
         import sentencepiece as spm
 
+        # filter special tokens and prepare the pieces
         user_symbols = [t for t in config.special_tokens if t not in _SP_RESERVED]
         pieces = (piece for line in corpus for piece in chunk_line(line))
         if config.alphabet is not None:
             # SentencePiece's own coverage counts spaces and NFKC forms, so it
             # would pick a different alphabet from the other backends.
             pieces = (keep_alphabet(piece, config.alphabet) for piece in pieces)
+
+        # train the model
         model_writer = io.BytesIO()
         spm.SentencePieceTrainer.train(
             sentence_iterator=pieces,
@@ -113,27 +132,29 @@ class UnigramTokenizer(BaseTokenizer):
             max_sentence_length=MAX_SENTENCE_BYTES,
             train_extremely_large_corpus=True,
         )
+
+        # keep the trained model
         self._model_bytes = model_writer.getvalue()
         self._load_processor()
         self.vocab_size = vocab_size
 
-    def encode(self, text: str) -> List[str]:
+    def encode(self, text: str) -> list[str]:
         """Return the Unigram pieces for `text`.
 
         Args:
-            text (str): Input text.
+            text: Input text.
 
         Returns:
-            List[str]: Vocabulary pieces, word-initial pieces prefixed `▁`.
+            Vocabulary pieces, word-initial pieces prefixed `▁`.
         """
         return self._processor.encode(text, out_type=str)
 
     @property
-    def vocab(self) -> Dict[str, int]:
+    def vocab(self) -> dict[str, int]:
         """Return the token-to-id vocabulary.
 
         Returns:
-            Dict[str, int]: Token string to integer id.
+            Token string to integer id.
         """
         return {self._processor.id_to_piece(i): i for i in range(self._processor.get_piece_size())}
 
@@ -141,18 +162,18 @@ class UnigramTokenizer(BaseTokenizer):
         """Write the serialized model proto to `spm.model`.
 
         Args:
-            out_dir (Path): Destination directory.
+            out_dir: Destination directory.
         """
         (out_dir / "spm.model").write_bytes(self._model_bytes)
 
     @classmethod
-    def _load_model(cls, out_dir: Path) -> "UnigramTokenizer":
+    def _load_model(cls, out_dir: Path) -> UnigramTokenizer:
         """Load a model from `spm.model`.
 
         Args:
-            out_dir (Path): Directory holding the saved model.
+            out_dir: Directory holding the saved model.
 
         Returns:
-            UnigramTokenizer: The reconstructed tokenizer.
+            The reconstructed tokenizer.
         """
         return cls((out_dir / "spm.model").read_bytes())

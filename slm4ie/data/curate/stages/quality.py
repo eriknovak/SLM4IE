@@ -7,7 +7,7 @@ paper).
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import numpy as np
 from datatrove.data import Document
@@ -19,6 +19,10 @@ from datatrove.utils.typeshelper import Languages
 from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
+
+# ===============================
+# Quality filter
+# ===============================
 
 
 class LetterShareGopherQualityFilter(GopherQualityFilter):
@@ -43,7 +47,7 @@ class LetterShareGopherQualityFilter(GopherQualityFilter):
         super().__init__(*args, **kwargs)
         self.alpha_words_skip_punctuation = alpha_words_skip_punctuation
 
-    def filter(self, doc: Document) -> bool | Tuple[bool, str]:
+    def filter(self, doc: Document) -> bool | tuple[bool, str]:
         """Apply the Gopher quality rules to one document.
 
         Args:
@@ -54,13 +58,16 @@ class LetterShareGopherQualityFilter(GopherQualityFilter):
         """
         if not self.alpha_words_skip_punctuation:
             return super().filter(doc)
-        # Mirrors GopherQualityFilter.filter (datatrove 0.9) with one tokenization;
-        # only the letter-share rule reads `non_symbol_words` instead of `words`.
+
+        # tokenize once; mirrors GopherQualityFilter.filter (datatrove 0.9), but
+        # only the letter-share rule reads `non_symbol_words` instead of `words`
         text = doc.text
         words = split_into_words(text, self.language)
         n_words = len(words)
         non_symbol_words = [w for w in words if any(ch not in PUNCTUATION_SET for ch in w)]
         n_non_symbol = len(non_symbol_words)
+
+        # word-count and word-length rules
         if self.min_doc_words and n_non_symbol < self.min_doc_words:
             return False, "gopher_short_doc"
         if self.max_doc_words and n_non_symbol > self.max_doc_words:
@@ -70,6 +77,8 @@ class LetterShareGopherQualityFilter(GopherQualityFilter):
             return False, "gopher_below_avg_threshold"
         if self.max_avg_word_length and avg_word_length > self.max_avg_word_length:
             return False, "gopher_above_avg_threshold"
+
+        # symbol, ellipsis and bullet rules
         if self.max_symbol_word_ratio and text.count("#") / n_words > self.max_symbol_word_ratio:
             return False, "gopher_too_many_hashes"
         ellipses = text.count("...") + text.count("…")
@@ -82,12 +91,19 @@ class LetterShareGopherQualityFilter(GopherQualityFilter):
         end_ellipses = sum(s.rstrip().endswith("...") or s.rstrip().endswith("…") for s in lines)
         if self.max_ellipsis_lines_ratio and end_ellipses / len(lines) > self.max_ellipsis_lines_ratio:
             return False, "gopher_too_many_end_ellipsis"
+
+        # letter-share and stopword rules
         alpha_words = sum(any(c.isalpha() for c in w) for w in non_symbol_words)
         if self.max_non_alpha_words_ratio and alpha_words / max(n_non_symbol, 1) < self.max_non_alpha_words_ratio:
             return False, "gopher_below_alpha_threshold"
         if self.min_stop_words and len(self.stop_words.intersection(set(words))) < self.min_stop_words:
             return False, "gopher_enough_stop_words"
         return True
+
+
+# ===============================
+# Quality config
+# ===============================
 
 
 @dataclass
@@ -130,7 +146,12 @@ class QualityConfig:
     alpha_words_skip_punctuation: bool = False
 
 
-def _build_quality_config(qcfg: Dict[str, Any]) -> QualityConfig:
+# ===============================
+# Stage builders
+# ===============================
+
+
+def _build_quality_config(qcfg: dict[str, Any]) -> QualityConfig:
     """Resolve a quality-stage config slice into a `QualityConfig`.
 
     Args:
@@ -157,12 +178,12 @@ def build_quality_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    quality_config: Optional[QualityConfig] = None,
+    quality_config: QualityConfig | None = None,
     language: str = Languages.slovenian,
-    stopwords: Optional[Set[str]] = None,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    stopwords: set[str] | None = None,
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the quality stage: read 02_spam/ → Gopher quality → write 03_quality/.
 
     Args:
@@ -181,9 +202,12 @@ def build_quality_executors(
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
+    # resolve the config and folders
     cfg = quality_config or QualityConfig()
     in_ = input_override if input_override is not None else paths.stage_dir("language")
     out = output_override if output_override is not None else paths.stage_dir("quality")
+
+    # build the executor
     executor = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -211,7 +235,7 @@ def build_quality_executors(
     return [executor]
 
 
-def run(job: StageRun) -> Tuple[int, int]:
+def run(job: StageRun) -> tuple[int, int]:
     """Run the quality stage over the job's input view.
 
     Args:

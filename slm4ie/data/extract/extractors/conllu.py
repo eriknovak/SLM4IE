@@ -66,14 +66,23 @@ Example:
 """
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.metadata_table import MetadataTable
 from slm4ie.data.schema import Annotations, Document, Token, render_sentence
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: IOB tag outside any entity; assumed when a tagged sentence's token lacks `NER=`.
 _OUTSIDE = "O"
@@ -81,40 +90,44 @@ _OUTSIDE = "O"
 #: Joins sentence texts into the document text; entity offsets shift by it.
 _SENTENCE_SEP = "\n"
 
+# ===============================
+# Helper functions
+# ===============================
 
-def _blank_to_none(value: str) -> Optional[str]:
+
+def _blank_to_none(value: str) -> str | None:
     """Convert underscore placeholder to None.
 
     Args:
-        value (str): CoNLL-U field value.
+        value: CoNLL-U field value.
 
     Returns:
-        Optional[str]: None if value is "_", otherwise the value
-            itself.
+        None if value is "_", otherwise the value
+        itself.
     """
     return None if value == "_" else value
 
 
-def _parse_misc(misc: str) -> Dict[str, str]:
+def _parse_misc(misc: str) -> dict[str, str]:
     """Parse a MISC column into its `|`-separated `key=value` pairs.
 
     Args:
-        misc (str): The raw MISC field; `_` denotes no attributes.
+        misc: The raw MISC field; `_` denotes no attributes.
 
     Returns:
-        Dict[str, str]: Attribute values keyed by name. A bare flag
-            without `=` maps to the empty string.
+        Attribute values keyed by name. A bare flag
+        without `=` maps to the empty string.
     """
     if misc == "_":
         return {}
-    pairs: Dict[str, str] = {}
+    pairs: dict[str, str] = {}
     for item in misc.split("|"):
         key, sep, value = item.partition("=")
         pairs[key] = value if sep else ""
     return pairs
 
 
-def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token], Optional[List[str]]]]:
+def _parse_block(lines: list[str]) -> tuple[str, list[Token], list[str] | None] | None:
     """Parse a single CoNLL-U sentence block into (text, tokens, IOB tags).
 
     Skips multiword and empty-node lines (ID contains `-` or `.`).
@@ -128,17 +141,17 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token], Optional[
     a tagged sentence counts as outside any entity.
 
     Args:
-        lines (List[str]): Non-empty lines of the sentence block.
+        lines: Non-empty lines of the sentence block.
 
     Returns:
-        Optional[Tuple[str, List[Token], Optional[List[str]]]]:
-            `(text, tokens, tags)` for the sentence, where `tags` is
-            None when no token carried `NER=`; None when the block had
-            no token lines.
+        `(text, tokens, tags)` for the sentence, where `tags` is
+        None when no token carried `NER=`; None when the block had
+        no token lines.
     """
+    # parse the token lines
     text = ""
-    tokens: List[Token] = []
-    tags: List[str] = []
+    tokens: list[Token] = []
+    tags: list[str] = []
     tagged = False
 
     for line in lines:
@@ -152,7 +165,7 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token], Optional[
             continue
 
         token_id = parts[0]
-        # Skip multiword tokens (e.g. "1-2") and empty nodes (e.g. "1.1").
+        # skip multiword tokens ("1-2") and empty nodes ("1.1")
         if "-" in token_id or "." in token_id:
             continue
 
@@ -170,6 +183,7 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token], Optional[
         tagged = tagged or tag is not None
         tags.append(tag if tag else _OUTSIDE)
 
+    # build the sentence
     if not tokens:
         return None
 
@@ -179,7 +193,7 @@ def _parse_block(lines: List[str]) -> Optional[Tuple[str, List[Token], Optional[
     return text, tokens, (tags if tagged else None)
 
 
-def _decode_iob(tags: List[str]) -> List[Tuple[int, int, str]]:
+def _decode_iob(tags: list[str]) -> list[tuple[int, int, str]]:
     """Decode a sentence's IOB tag sequence into token-index entity spans.
 
     `B-<label>` opens a span and `I-<label>` with the same label extends
@@ -188,15 +202,16 @@ def _decode_iob(tags: List[str]) -> List[Tuple[int, int, str]]:
     dropping it. `O` and the end of the sequence close the open span.
 
     Args:
-        tags (List[str]): One IOB tag per token.
+        tags: One IOB tag per token.
 
     Returns:
-        List[Tuple[int, int, str]]: `(first, last, label)` token-index
-            triples, `last` inclusive, with upper-case labels.
+        `(first, last, label)` token-index
+        triples, `last` inclusive, with upper-case labels.
     """
-    spans: List[Tuple[int, int, str]] = []
-    open_start: Optional[int] = None
-    open_label: Optional[str] = None
+    # track the open span
+    spans: list[tuple[int, int, str]] = []
+    open_start: int | None = None
+    open_label: str | None = None
 
     def _close(last: int) -> None:
         nonlocal open_start, open_label
@@ -204,6 +219,7 @@ def _decode_iob(tags: List[str]) -> List[Tuple[int, int, str]]:
             spans.append((open_start, last, open_label))
         open_start = open_label = None
 
+    # walk the tags and close or open spans
     for index, tag in enumerate(tags):
         prefix, sep, label = tag.partition("-")
         label = label.upper()
@@ -216,7 +232,7 @@ def _decode_iob(tags: List[str]) -> List[Tuple[int, int, str]]:
     return spans
 
 
-def _align_tokens(text: str, tokens: List[Token]) -> Optional[List[Tuple[int, int]]]:
+def _align_tokens(text: str, tokens: list[Token]) -> list[tuple[int, int]] | None:
     """Locate each token's character range in its sentence text.
 
     Walks the text with a cursor that skips whitespace before every
@@ -225,15 +241,16 @@ def _align_tokens(text: str, tokens: List[Token]) -> Optional[List[Tuple[int, in
     than matched to a later occurrence.
 
     Args:
-        text (str): The sentence text the tokens were drawn from.
-        tokens (List[Token]): The sentence's tokens in reading order.
+        text: The sentence text the tokens were drawn from.
+        tokens: The sentence's tokens in reading order.
 
     Returns:
-        Optional[List[Tuple[int, int]]]: One `(start, end)` pair per
-            token, `end` exclusive, or None when any token cannot be
-            placed.
+        One `(start, end)` pair per
+        token, `end` exclusive, or None when any token cannot be
+        placed.
     """
-    offsets: List[Tuple[int, int]] = []
+    # place each token after the previous one
+    offsets: list[tuple[int, int]] = []
     cursor = 0
     for token in tokens:
         while cursor < len(text) and text[cursor].isspace():
@@ -246,10 +263,10 @@ def _align_tokens(text: str, tokens: List[Token]) -> Optional[List[Tuple[int, in
 
 
 def _entity_spans(
-    sentence_texts: List[str],
-    sentence_tokens: List[List[Token]],
-    sentence_tags: List[Optional[List[str]]],
-) -> Tuple[Optional[List[List[Any]]], int]:
+    sentence_texts: list[str],
+    sentence_tokens: list[list[Token]],
+    sentence_tags: list[list[str] | None],
+) -> tuple[list[list[Any]] | None, int]:
     """Turn per-sentence IOB tags into document-level character spans.
 
     Each sentence's token-index spans are mapped onto the sentence
@@ -258,20 +275,21 @@ def _entity_spans(
     contributes no spans and is counted instead of raising.
 
     Args:
-        sentence_texts (List[str]): Text for each sentence in order.
-        sentence_tokens (List[List[Token]]): Tokens per sentence.
-        sentence_tags (List[Optional[List[str]]]): IOB tags per
+        sentence_texts: Text for each sentence in order.
+        sentence_tokens: Tokens per sentence.
+        sentence_tags: IOB tags per
             sentence, None for a sentence without `NER=` tags.
 
     Returns:
-        Tuple[Optional[List[List[Any]]], int]: The document's
-            `[start, end, label]` spans, or None when no sentence was
-            tagged, and the number of sentences that failed alignment.
+        The document's
+        `[start, end, label]` spans, or None when no sentence was
+        tagged, and the number of sentences that failed alignment.
     """
     if all(tags is None for tags in sentence_tags):
         return None, 0
 
-    spans: List[List[Any]] = []
+    # shift each sentence's spans by its offset in the document
+    spans: list[list[Any]] = []
     misaligned = 0
     offset = 0
     for text, tokens, tags in zip(sentence_texts, sentence_tokens, sentence_tags):
@@ -286,26 +304,26 @@ def _entity_spans(
     return spans, misaligned
 
 
-def _newdoc_id(lines: List[str]) -> Optional[str]:
+def _newdoc_id(lines: list[str]) -> str | None:
     """Return the value of `# newdoc id = ...` in *lines*, if any.
 
     Args:
-        lines (List[str]): Non-empty lines of a sentence block.
+        lines: Non-empty lines of a sentence block.
 
     Returns:
-        Optional[str]: The newdoc id when the marker is present on
-            this block, else `None`.
+        The newdoc id when the marker is present on
+        this block, else `None`.
     """
     for line in lines:
         if line.startswith("# newdoc id = "):
             return line[len("# newdoc id = ") :]
-        # Comments precede tokens; bail as soon as we hit a token row.
+        # comments precede tokens: stop at the first token row
         if not line.startswith("#"):
             return None
     return None
 
 
-def _sent_id_prefix(lines: List[str]) -> Optional[str]:
+def _sent_id_prefix(lines: list[str]) -> str | None:
     """Return the leading component of `# sent_id = <prefix>.X.Y...`.
 
     Sources such as Solar pack thousands of essays into a single
@@ -316,13 +334,13 @@ def _sent_id_prefix(lines: List[str]) -> Optional[str]:
     document boundary.
 
     Args:
-        lines (List[str]): Non-empty lines of a sentence block.
+        lines: Non-empty lines of a sentence block.
 
     Returns:
-        Optional[str]: The portion of `# sent_id` before the first
-            `.`, or `None` when no `# sent_id` is present or the
-            value does not contain a `.` (in which case the prefix
-            cannot be distinguished from the full sentence id).
+        The portion of `# sent_id` before the first
+        `.`, or `None` when no `# sent_id` is present or the
+        value does not contain a `.` (in which case the prefix
+        cannot be distinguished from the full sentence id).
     """
     for line in lines:
         if line.startswith("# sent_id = "):
@@ -336,46 +354,47 @@ def _sent_id_prefix(lines: List[str]) -> Optional[str]:
 
 
 def _build_document(
-    sentence_texts: List[str],
-    sentence_tokens: List[List[Token]],
-    sentence_tags: List[Optional[List[str]]],
+    sentence_texts: list[str],
+    sentence_tokens: list[list[Token]],
+    sentence_tags: list[list[str] | None],
     doc_id: str,
     source: str,
     domain: str,
-    extra_metadata: Optional[Dict[str, Any]] = None,
-    native_id: Optional[str] = None,
-) -> Tuple[Document, int]:
+    extra_metadata: dict[str, Any] | None = None,
+    native_id: str | None = None,
+) -> tuple[Document, int]:
     """Combine per-sentence pieces into one document-level Document.
 
     Args:
-        sentence_texts (List[str]): Text for each sentence in order.
-        sentence_tokens (List[List[Token]]): Tokens for each sentence
+        sentence_texts: Text for each sentence in order.
+        sentence_tokens: Tokens for each sentence
             in the same order as *sentence_texts*.
-        sentence_tags (List[Optional[List[str]]]): IOB tags for each
+        sentence_tags: IOB tags for each
             sentence, None where the sentence carried no `NER=`.
-        doc_id (str): Identifier for the resulting Document.
-        source (str): Dataset key.
-        domain (str): Domain label.
-        extra_metadata (Optional[Dict[str, Any]]): Per-document
+        doc_id: Identifier for the resulting Document.
+        source: Dataset key.
+        domain: Domain label.
+        extra_metadata: Per-document
             fields copied verbatim into `Document.metadata` (e.g.
             from `MetadataTable`). Empty when no sidecar TSV is
             configured.
-        native_id (Optional[str]): The file's own document id
+        native_id: The file's own document id
             (`# newdoc id` or the `sent_id` prefix); None when the
             document is the whole file and `doc_id` is the filename.
 
     Returns:
-        Tuple[Document, int]: One Document whose `text` is the sentence
-            texts joined with newlines, whose `annotations.tokens` is
-            the flat concatenation of every sentence's tokens, whose
-            `annotations.sentences` carries one inclusive `[start, end]`
-            token-index span per sentence and whose `annotations.spans`
-            holds the entity spans when any sentence was tagged; and
-            the number of sentences whose entity spans were dropped
-            because their tokens did not align with their text.
+        One Document whose `text` is the sentence
+        texts joined with newlines, whose `annotations.tokens` is
+        the flat concatenation of every sentence's tokens, whose
+        `annotations.sentences` carries one inclusive `[start, end]`
+        token-index span per sentence and whose `annotations.spans`
+        holds the entity spans when any sentence was tagged; and
+        the number of sentences whose entity spans were dropped
+        because their tokens did not align with their text.
     """
-    flat_tokens: List[Token] = []
-    sentences: List[List[int]] = []
+    # flatten the tokens and record the sentence spans
+    flat_tokens: list[Token] = []
+    sentences: list[list[int]] = []
     cursor = 0
     for tokens in sentence_tokens:
         start = cursor
@@ -383,6 +402,7 @@ def _build_document(
         cursor += len(tokens)
         sentences.append([start, cursor - 1])
 
+    # build the document
     spans, misaligned = _entity_spans(sentence_texts, sentence_tokens, sentence_tags)
     annotations = Annotations(tokens=flat_tokens, sentences=sentences, spans=spans)
     document = Document(
@@ -397,6 +417,11 @@ def _build_document(
     return document, misaligned
 
 
+# ===============================
+# Extractor class
+# ===============================
+
+
 class ConlluExtractor(FileBasedExtractor):
     """Extracts Documents from CoNLL-U / CoNLL files.
 
@@ -408,16 +433,17 @@ class ConlluExtractor(FileBasedExtractor):
     files under the given directory (sorted).
     """
 
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return sorted .conllu and .conll files under input_dir.
 
         Args:
-            input_dir (Path): Directory searched recursively.
+            input_dir: Directory searched recursively.
 
         Returns:
-            List[Path]: Sorted CoNLL-U/CoNLL file paths.
+            Sorted CoNLL-U/CoNLL file paths.
         """
-        files: List[Path] = []
+        # collect the files
+        files: list[Path] = []
         for pattern in ("*.conllu", "*.conll"):
             files.extend(p for p in input_dir.rglob(pattern) if p.is_file())
         files.sort()
@@ -425,21 +451,21 @@ class ConlluExtractor(FileBasedExtractor):
 
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from the given CoNLL-U/CoNLL files.
 
         Args:
-            files (List[Path]): Files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root, used to locate an optional
+            files: Files to parse, in order.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            input_dir: Dataset root, used to locate an optional
                 `MetadataTable` TSV.
-            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
+            metadata: Optional `metadata:`
                 config block describing an external per-document TSV.
 
         Yields:
@@ -447,11 +473,16 @@ class ConlluExtractor(FileBasedExtractor):
                 markers are present; otherwise one per leading
                 `# sent_id` prefix; otherwise one per file.
         """
-        table: Optional[MetadataTable] = MetadataTable.from_config(input_dir, metadata) if metadata else None
+        # load the optional metadata table
+        table: MetadataTable | None = MetadataTable.from_config(input_dir, metadata) if metadata else None
         misaligned = [0]
+
+        # parse each file
         for filepath in files:
             extra = table.get_for_path(filepath) if table else {}
             yield from self._parse_file(filepath, source, domain, extra, misaligned)
+
+        # report the dropped entity spans
         if misaligned[0]:
             logger.warning(
                 "Dropped entity spans of %d sentence(s) in '%s' whose tokens did not align with their `# text`",
@@ -459,13 +490,17 @@ class ConlluExtractor(FileBasedExtractor):
                 source,
             )
 
+    # ===============================
+    # Private methods
+    # ===============================
+
     def _parse_file(
         self,
         filepath: Path,
         source: str,
         domain: str,
-        extra_metadata: Optional[Dict[str, Any]],
-        misaligned: List[int],
+        extra_metadata: dict[str, Any] | None,
+        misaligned: list[int],
     ) -> Iterator[Document]:
         """Parse a single CoNLL-U file and yield Documents.
 
@@ -476,14 +511,14 @@ class ConlluExtractor(FileBasedExtractor):
         file itself. The final document is flushed at EOF.
 
         Args:
-            filepath (Path): Path to the CoNLL-U file.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            extra_metadata (Optional[Dict[str, Any]]): Per-document
+            filepath: Path to the CoNLL-U file.
+            source: Dataset key.
+            domain: Domain label.
+            extra_metadata: Per-document
                 fields copied into every yielded `Document.metadata`.
                 The same dict applies to every Document produced from
                 this file (sidecar TSV rows are keyed by filename).
-            misaligned (List[int]): One-cell counter the caller shares
+            misaligned: One-cell counter the caller shares
                 across files; incremented by the number of sentences
                 whose entity spans were dropped.
 
@@ -491,17 +526,17 @@ class ConlluExtractor(FileBasedExtractor):
             Document: One Document per detected boundary, or one per
                 file when no boundary signal is present.
         """
-        current_block: List[str] = []
-        sentence_texts: List[str] = []
-        sentence_tokens: List[List[Token]] = []
-        sentence_tags: List[Optional[List[str]]] = []
-        current_doc_id: Optional[str] = None
-        # Once any `# newdoc id` appears the file is treated as
-        # marker-driven and the sent_id-prefix heuristic is off.
+        # track the current block and document
+        current_block: list[str] = []
+        sentence_texts: list[str] = []
+        sentence_tokens: list[list[Token]] = []
+        sentence_tags: list[list[str] | None] = []
+        current_doc_id: str | None = None
+        # after a `# newdoc id` the sent_id-prefix heuristic is off
         seen_newdoc_marker = False
-        current_prefix: Optional[str] = None
+        current_prefix: str | None = None
 
-        def _flush() -> Optional[Document]:
+        def _flush() -> Document | None:
             if not sentence_tokens:
                 return None
             doc_id = current_doc_id if current_doc_id is not None else filepath.stem
@@ -524,7 +559,7 @@ class ConlluExtractor(FileBasedExtractor):
             sentence_tokens = []
             sentence_tags = []
 
-        def _consume(block: List[str]) -> Iterator[Document]:
+        def _consume(block: list[str]) -> Iterator[Document]:
             nonlocal current_doc_id, seen_newdoc_marker, current_prefix
 
             newdoc = _newdoc_id(block)
@@ -559,6 +594,7 @@ class ConlluExtractor(FileBasedExtractor):
                 sentence_tokens.append(tokens)
                 sentence_tags.append(tags)
 
+        # read the sentence blocks
         with filepath.open(encoding="utf-8") as fh:
             for raw_line in fh:
                 line = raw_line.rstrip("\r\n")
@@ -569,10 +605,11 @@ class ConlluExtractor(FileBasedExtractor):
                 else:
                     current_block.append(line)
 
-        # Handle files that don't end with a blank line.
+        # handle files that do not end with a blank line
         if current_block:
             yield from _consume(current_block)
 
+        # flush the last document
         final = _flush()
         if final is not None:
             yield final

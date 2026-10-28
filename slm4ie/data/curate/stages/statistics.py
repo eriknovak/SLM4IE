@@ -31,8 +31,9 @@ import logging
 import pickle
 import re
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from datatrove.data import DocumentsPipeline
 from datatrove.executor import LocalPipelineExecutor
@@ -44,7 +45,15 @@ from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, stage_io_counts
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Words shorter than this are dropped from the word-frequency table.
 #: Keeps the table free of single-letter punctuation noise.
@@ -54,6 +63,10 @@ _MIN_WORD_LEN = 2
 #: contain at least one letter). datatrove's tokenizer returns
 #: punctuation as separate tokens; we filter those out before counting.
 _WORD_RE = re.compile(r"^(?=.*[^\W\d_])[\w'’-]+$", flags=re.UNICODE)
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _is_word(token: str) -> bool:
@@ -79,7 +92,7 @@ def _build_bundle(
     per_dataset_docs: Counter,
     per_dataset_words: Counter,
     word_freq: Counter,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Assemble the final stats dict in the canonical aggregate.json shape.
 
     Args:
@@ -96,8 +109,8 @@ def _build_bundle(
         Dict matching the on-disk `aggregate.json` schema.
     """
 
-    def _distribution(docs: Counter, words: Counter) -> Dict[str, Dict[str, float]]:
-        out: Dict[str, Dict[str, float]] = {}
+    def _distribution(docs: Counter, words: Counter) -> dict[str, dict[str, float]]:
+        out: dict[str, dict[str, float]] = {}
         for key in sorted(docs):
             d = docs[key]
             w = words[key]
@@ -119,11 +132,11 @@ def _build_bundle(
 
 
 def _write_bundle(
-    bundle: Dict[str, Any],
+    bundle: dict[str, Any],
     *,
     output_path: Path,
-    per_dataset_dir: Optional[Path],
-    dataset_to_domain: Dict[str, str],
+    per_dataset_dir: Path | None,
+    dataset_to_domain: dict[str, str],
     rank: int = 0,
     world_size: int = 1,
 ) -> None:
@@ -137,6 +150,7 @@ def _write_bundle(
         rank: Worker rank; appended to filename when `world_size > 1`.
         world_size: Total number of workers.
     """
+    # write the aggregate bundle
     path = output_path
     if world_size > 1:
         path = path.with_name(f"{path.stem}.{rank:05d}{path.suffix}")
@@ -145,6 +159,7 @@ def _write_bundle(
         json.dump(bundle, fh, ensure_ascii=False, indent=2)
     logger.info("Wrote aggregate stats bundle to %s", path)
 
+    # write the per-dataset breakdowns
     if per_dataset_dir is None or world_size > 1:
         return
     per_dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -165,6 +180,11 @@ def _write_bundle(
         len(by_dataset),
         per_dataset_dir,
     )
+
+
+# ===============================
+# Stats steps
+# ===============================
 
 
 class CorpusStats(PipelineStep):
@@ -196,12 +216,12 @@ class CorpusStats(PipelineStep):
 
     def __init__(
         self,
-        output_path: Optional[Path] = None,
-        per_dataset_dir: Optional[Path] = None,
+        output_path: Path | None = None,
+        per_dataset_dir: Path | None = None,
         language: str = Languages.slovenian,
-        stopwords: Optional[Set[str]] = None,
+        stopwords: set[str] | None = None,
         top_k_words: int = 5_000,
-        partials_dir: Optional[Path] = None,
+        partials_dir: Path | None = None,
     ) -> None:
         """Initialize the aggregator.
 
@@ -234,7 +254,7 @@ class CorpusStats(PipelineStep):
             self._tokenizer = load_word_tokenizer(self.language)
         return self._tokenizer
 
-    def _tokenize_words(self, text: str) -> List[str]:
+    def _tokenize_words(self, text: str) -> list[str]:
         """Tokenize and filter to lowercase content words.
 
         Args:
@@ -244,8 +264,9 @@ class CorpusStats(PipelineStep):
             List of lowercased word tokens, with stopwords and pure
             punctuation removed.
         """
+        # keep lowercase content words
         tokens = self._ensure_tokenizer().word_tokenize(text)
-        out: List[str] = []
+        out: list[str] = []
         for tok in tokens:
             if not _is_word(tok):
                 continue
@@ -267,6 +288,7 @@ class CorpusStats(PipelineStep):
             Documents are passed through unchanged so further pipeline
             steps can reuse the stream.
         """
+        # set up the counters
         total_docs = 0
         total_words = 0
         per_domain_docs: Counter[str] = Counter()
@@ -274,11 +296,11 @@ class CorpusStats(PipelineStep):
         per_dataset_docs: Counter[str] = Counter()
         per_dataset_words: Counter[str] = Counter()
         word_freq: Counter[str] = Counter()
-        # Captures the (dataset → domain) edge that aggregate counters
-        # lose. Used to label per-dataset bundles. Datasets that mix
-        # multiple domains in a single shard collapse to "_mixed".
-        dataset_to_domain: Dict[str, str] = {}
 
+        # keep the dataset -> domain edge the counters lose; mixed domains become "_mixed"
+        dataset_to_domain: dict[str, str] = {}
+
+        # count the words of each document
         for doc in data:
             with self.track_time():
                 domain = doc.metadata.get("domain", "_unknown")
@@ -302,6 +324,7 @@ class CorpusStats(PipelineStep):
 
             yield doc
 
+        # write a partial pickle for the reduce step
         if self.partials_dir is not None:
             self._write_partial(
                 rank=rank,
@@ -319,6 +342,7 @@ class CorpusStats(PipelineStep):
         if self.output_path is None:
             raise ValueError("CorpusStats requires either partials_dir or output_path.")
 
+        # write the aggregate bundle directly
         bundle = _build_bundle(
             top_k_words=self.top_k_words,
             total_docs=total_docs,
@@ -349,7 +373,7 @@ class CorpusStats(PipelineStep):
         per_dataset_docs: Counter,
         per_dataset_words: Counter,
         word_freq: Counter,
-        dataset_to_domain: Dict[str, str],
+        dataset_to_domain: dict[str, str],
     ) -> None:
         """Pickle this rank's raw counters into `partials_dir`.
 
@@ -364,9 +388,11 @@ class CorpusStats(PipelineStep):
             word_freq: Local word-frequency counter.
             dataset_to_domain: Local dataset→domain mapping.
         """
-        assert self.partials_dir is not None  # for type-checkers
+        assert self.partials_dir is not None
         self.partials_dir.mkdir(parents=True, exist_ok=True)
         path = self.partials_dir / f"partial.{rank:05d}.pkl"
+
+        # pickle the raw counters
         payload = {
             "total_docs": total_docs,
             "total_words": total_words,
@@ -408,7 +434,7 @@ class CorpusStatsReduce(PipelineStep):
         self,
         partials_dir: Path,
         output_path: Path,
-        per_dataset_dir: Optional[Path] = None,
+        per_dataset_dir: Path | None = None,
         top_k_words: int = 5_000,
         cleanup: bool = True,
     ) -> None:
@@ -444,6 +470,7 @@ class CorpusStatsReduce(PipelineStep):
             Forwarded upstream documents, if any. The step's effect is
             on disk — it writes the aggregate JSON.
         """
+        # forward upstream documents
         if data is not None:
             yield from data
 
@@ -451,6 +478,7 @@ class CorpusStatsReduce(PipelineStep):
         if not partials:
             raise FileNotFoundError(f"No partial.*.pkl files found under {self.partials_dir}; did the map step run?")
 
+        # merge the partials and write the bundle
         with self.track_time():
             merged = self._merge_partials(partials)
 
@@ -473,16 +501,16 @@ class CorpusStatsReduce(PipelineStep):
                 world_size=1,
             )
 
+        # delete the partials, then the folder if empty
         if self.cleanup:
             for p in partials:
                 p.unlink()
-            # Drop the partials dir if empty; harmless if not.
             try:
                 self.partials_dir.rmdir()
             except OSError:
                 pass
 
-    def _merge_partials(self, partials: Sequence[Path]) -> Dict[str, Any]:
+    def _merge_partials(self, partials: Sequence[Path]) -> dict[str, Any]:
         """Load and sum all partial pickles into one combined dict.
 
         Partials are loaded and merged one at a time so peak memory is
@@ -495,6 +523,7 @@ class CorpusStatsReduce(PipelineStep):
             Dict with the same keys as a single partial payload but
             with all counters summed and `dataset_to_domain` resolved.
         """
+        # set up the counters
         total_docs = 0
         total_words = 0
         per_domain_docs: Counter[str] = Counter()
@@ -502,8 +531,9 @@ class CorpusStatsReduce(PipelineStep):
         per_dataset_docs: Counter[str] = Counter()
         per_dataset_words: Counter[str] = Counter()
         word_freq: Counter[str] = Counter()
-        dataset_to_domain: Dict[str, str] = {}
+        dataset_to_domain: dict[str, str] = {}
 
+        # sum each partial into the counters
         for path in partials:
             with path.open("rb") as fh:
                 payload = pickle.load(fh)
@@ -532,17 +562,22 @@ class CorpusStatsReduce(PipelineStep):
         }
 
 
+# ===============================
+# Stage builders
+# ===============================
+
+
 def build_statistics_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    workers: Optional[int] = None,
+    workers: int | None = None,
     language: str = Languages.slovenian,
-    stopwords: Optional[Set[str]] = None,
+    stopwords: set[str] | None = None,
     top_k_words: int = 5_000,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the statistics stage: map → reduce → 07_statistics/.
 
     Two executors are returned. The map executor fans `CorpusStats`
@@ -570,12 +605,14 @@ def build_statistics_executors(
         depends on the map executor, so callers can run the stage by
         invoking `executors[-1].run()`.
     """
+    # resolve the input and output folders
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("sentence_dedup")
     out = output_override if output_override is not None else paths.stage_dir("statistics")
     out.mkdir(parents=True, exist_ok=True)
     partials_dir = out / "_partials"
 
+    # build the map and reduce executors
     map_exec = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -609,7 +646,7 @@ def build_statistics_executors(
     return [map_exec, reduce_exec]
 
 
-def run(job: StageRun) -> Tuple[int, int]:
+def run(job: StageRun) -> tuple[int, int]:
     """Compute corpus statistics over the job's input view.
 
     Args:
@@ -620,6 +657,7 @@ def run(job: StageRun) -> Tuple[int, int]:
         `(records_in, 0)`: the documents the map tasks read, and zero output
         records, since the stage writes a JSON bundle rather than shards.
     """
+    # build and run the executors
     execs = build_statistics_executors(
         job.paths,
         tasks=job.tasks or job.workers,
@@ -630,5 +668,7 @@ def run(job: StageRun) -> Tuple[int, int]:
         output_override=job.output_folder,
     )
     execs[-1].run()
+
+    # count the documents the map tasks read
     records_in, _ = stage_io_counts(job.paths.logs_dir("statistics") / "1_map")
     return records_in, 0

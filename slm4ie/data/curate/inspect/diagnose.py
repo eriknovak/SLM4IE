@@ -27,18 +27,26 @@ import logging
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
 from slm4ie.data.curate.inspect.sample import resolve_sample_dir
 from slm4ie.data.curate.stages import final_corpus_dir
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Candidate set used when the curation config cannot be read. Mirrors the
 #: `language` stage's European candidate list.
-FALLBACK_CANDIDATES: List[str] = [
+FALLBACK_CANDIDATES: list[str] = [
     "be",
     "bg",
     "bs",
@@ -85,8 +93,22 @@ LEAKAGE_TOKENS = frozenset({"the", "of", "and", "more", "de", "to", "in", "a", "
 #: In-language code: documents and paragraphs in this language are not foreign.
 TARGET = "sl"
 
+#: Documents between progress log lines.
+PROGRESS_EVERY = 200
 
-def load_language_config(config_path: Path) -> Tuple[List[str], bool]:
+#: Examples kept per leakage class, and characters shown per example.
+MAX_EXAMPLES = 8
+EXAMPLE_CHARS = 120
+
+#: Width of the report rule lines.
+REPORT_WIDTH = 72
+
+# ===============================
+# Corpus sampling
+# ===============================
+
+
+def load_language_config(config_path: Path) -> tuple[list[str], bool]:
     """Read the candidate language set and accuracy mode from a curation config.
 
     Args:
@@ -96,11 +118,14 @@ def load_language_config(config_path: Path) -> Tuple[List[str], bool]:
         Tuple `(candidates, low_accuracy)`. Falls back to `FALLBACK_CANDIDATES`
         and `True` when the file or its `language` keys are absent.
     """
+    # read the config
     try:
         with config_path.open() as fh:
             cfg = yaml.safe_load(fh) or {}
     except OSError:
         return list(FALLBACK_CANDIDATES), True
+
+    # resolve the candidates and accuracy mode
     lang_cfg = cfg.get("language") or {}
     candidates = lang_cfg.get("candidates") or list(FALLBACK_CANDIDATES)
     if TARGET not in candidates:
@@ -109,7 +134,7 @@ def load_language_config(config_path: Path) -> Tuple[List[str], bool]:
     return [str(code).lower() for code in candidates], low_accuracy
 
 
-def resolve_corpus_dir(config_path: Path, base_dir: Optional[Path] = None) -> Path:
+def resolve_corpus_dir(config_path: Path, base_dir: Path | None = None) -> Path:
     """Resolve the corpus folder to sample from.
 
     Args:
@@ -128,7 +153,7 @@ def resolve_corpus_dir(config_path: Path, base_dir: Optional[Path] = None) -> Pa
     return resolve_sample_dir(config_path) / final_corpus_dir()
 
 
-def build_detector(candidates: List[str], low_accuracy: bool) -> Any:
+def build_detector(candidates: list[str], low_accuracy: bool) -> Any:
     """Build a lingua detector over the given candidate languages.
 
     Args:
@@ -143,18 +168,21 @@ def build_detector(candidates: List[str], low_accuracy: bool) -> Any:
     """
     from lingua import Language, LanguageDetectorBuilder
 
+    # map the codes to lingua languages
     code_to_language = {lang.iso_code_639_1.name.lower(): lang for lang in Language.all()}
     try:
         languages = [code_to_language[code] for code in candidates]
     except KeyError as exc:
         raise ValueError(f"Unknown lingua language code: {exc.args[0]!r}") from exc
+
+    # build the detector
     builder = LanguageDetectorBuilder.from_languages(*languages).with_preloaded_language_models()
     if low_accuracy:
         builder = builder.with_low_accuracy_mode()
     return builder.build()
 
 
-def sample_documents(base_dir: Path, per_dataset: int, max_shards: int) -> Tuple[List[Tuple[str, dict]], List[str]]:
+def sample_documents(base_dir: Path, per_dataset: int, max_shards: int) -> tuple[list[tuple[str, dict]], list[str]]:
     """Sample documents across every dataset folder under `base_dir`.
 
     Args:
@@ -171,8 +199,10 @@ def sample_documents(base_dir: Path, per_dataset: int, max_shards: int) -> Tuple
     """
     if not base_dir.is_dir():
         raise FileNotFoundError(f"corpus dir not found: {base_dir}")
-    records: List[Tuple[str, dict]] = []
-    datasets: List[str] = []
+
+    # read documents from each dataset's first shards
+    records: list[tuple[str, dict]] = []
+    datasets: list[str] = []
     for dataset_dir in sorted(path for path in base_dir.iterdir() if path.is_dir()):
         shards = sorted(dataset_dir.glob("*.jsonl.gz"))[:max_shards]
         if not shards:
@@ -191,13 +221,18 @@ def sample_documents(base_dir: Path, per_dataset: int, max_shards: int) -> Tuple
     return records, datasets
 
 
+# ===============================
+# Leakage analysis
+# ===============================
+
+
 def analyze_leakage(
-    records: List[Tuple[str, dict]],
+    records: list[tuple[str, dict]],
     detector: Any,
     min_unit_chars: int = 50,
     whole_doc_chars: int = 4000,
     max_paragraphs: int = 40,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Classify sampled documents and accumulate leakage statistics.
 
     Args:
@@ -214,6 +249,7 @@ def analyze_leakage(
         A dict of aggregate counters and breakdowns, consumed by
         `format_report`.
     """
+    # initialize the counters
     doc_class: Counter = Counter()  # pure_target | embedded | whole_foreign
     foreign_lang_chars: Counter = Counter()
     target_chars = foreign_chars = undecided_chars = 0
@@ -221,11 +257,12 @@ def analyze_leakage(
     tokens_in_target: Counter = Counter()
     per_dataset_embedded: Counter = Counter()
     per_dataset_total: Counter = Counter()
-    whole_foreign_examples: List[Tuple[str, str, str]] = []
-    embedded_examples: List[Tuple[str, str, str]] = []
+    whole_foreign_examples: list[tuple[str, str, str]] = []
+    embedded_examples: list[tuple[str, str, str]] = []
 
+    # classify each document and its paragraphs
     for index, (dataset, record) in enumerate(records):
-        if index and index % 200 == 0:
+        if index and index % PROGRESS_EVERY == 0:
             logger.info("[diagnose] %s/%s docs", f"{index:,}", f"{len(records):,}")
         text = record.get("text", "") or ""
         per_dataset_total[dataset] += 1
@@ -248,18 +285,20 @@ def analyze_leakage(
                 tokens_in_foreign += _count_tokens(paragraph)
                 has_foreign_paragraph = True
 
+        # assign the document class
         if whole_lang is not None and whole_lang != TARGET:
             doc_class["whole_foreign"] += 1
-            if len(whole_foreign_examples) < 8:
-                whole_foreign_examples.append((dataset, whole_lang, text[:120].replace("\n", " ")))
+            if len(whole_foreign_examples) < MAX_EXAMPLES:
+                whole_foreign_examples.append((dataset, whole_lang, text[:EXAMPLE_CHARS].replace("\n", " ")))
         elif has_foreign_paragraph:
             doc_class["embedded"] += 1
             per_dataset_embedded[dataset] += 1
-            if len(embedded_examples) < 8:
-                embedded_examples.append((dataset, whole_lang or "?", text[:120].replace("\n", " ")))
+            if len(embedded_examples) < MAX_EXAMPLES:
+                embedded_examples.append((dataset, whole_lang or "?", text[:EXAMPLE_CHARS].replace("\n", " ")))
         else:
             doc_class["pure_target"] += 1
 
+    # collect the statistics
     return {
         "n_docs": len(records),
         "doc_class": doc_class,
@@ -276,7 +315,12 @@ def analyze_leakage(
     }
 
 
-def format_report(stats: Dict[str, Any]) -> str:
+# ===============================
+# Report
+# ===============================
+
+
+def format_report(stats: dict[str, Any]) -> str:
     """Render the aggregate statistics as a human-readable report.
 
     Args:
@@ -285,6 +329,7 @@ def format_report(stats: Dict[str, Any]) -> str:
     Returns:
         The report text, without a trailing newline.
     """
+    # read the statistics
     n_docs = int(stats["n_docs"])
     doc_class = stats["doc_class"]
     target_chars = int(stats["target_chars"])
@@ -292,16 +337,18 @@ def format_report(stats: Dict[str, Any]) -> str:
     undecided_chars = int(stats["undecided_chars"])
     classified = target_chars + foreign_chars
 
-    lines: List[str] = [
-        "=" * 72,
+    # document classification section
+    lines: list[str] = [
+        "=" * REPORT_WIDTH,
         f"LANGUAGE-LEAKAGE DIAGNOSTIC  —  {n_docs:,} docs sampled",
-        "=" * 72,
+        "=" * REPORT_WIDTH,
         "",
         "Document classification:",
     ]
     for key in ("pure_target", "embedded", "whole_foreign"):
         lines.append(f"  {key:14s} {doc_class.get(key, 0):>8,}  ({_pct(doc_class.get(key, 0), n_docs)})")
 
+    # character mass section
     lines += [
         "",
         "Character mass (classified paragraphs only):",
@@ -314,6 +361,7 @@ def format_report(stats: Dict[str, Any]) -> str:
     for lang, chars in stats["foreign_lang_chars"].most_common(10):
         lines.append(f"  {lang:6s} {chars:>12,}  ({_pct(chars, foreign_chars)} of foreign)")
 
+    # leakage-token location section
     in_foreign = sum(stats["tokens_in_foreign"].values())
     in_target = sum(stats["tokens_in_target"].values())
     lines += [
@@ -325,12 +373,14 @@ def format_report(stats: Dict[str, Any]) -> str:
         "",
         "Per-dataset embedded-leakage rate (top 12 by rate, min 50 docs):",
     ]
+    # per-dataset section
     totals = stats["per_dataset_total"]
     embedded = stats["per_dataset_embedded"]
     rates = [(name, embedded.get(name, 0), total) for name, total in totals.items() if total >= 50]
     for name, hits, total in sorted(rates, key=lambda row: -(row[1] / row[2]))[:12]:
         lines.append(f"  {name:18s} {hits:>6,}/{total:<6,}  ({_pct(hits, total)})")
 
+    # example sections
     lines += ["", "Example WHOLE-FOREIGN docs (slipped past the doc-level filter):"]
     if not stats["whole_foreign_examples"]:
         lines.append("  (none in sample)")
@@ -343,6 +393,7 @@ def format_report(stats: Dict[str, Any]) -> str:
     for dataset, lang, text in stats["embedded_examples"]:
         lines.append(f"  [{dataset}/{lang}] {text!r}")
 
+    # verdict
     n_embedded = doc_class.get("embedded", 0)
     n_whole_foreign = doc_class.get("whole_foreign", 0)
     if n_whole_foreign <= n_embedded * 0.1:
@@ -355,20 +406,25 @@ def format_report(stats: Dict[str, Any]) -> str:
             "A non-trivial share is WHOLE FOREIGN docs slipping past the filter. "
             "Consider config-only tightening (minimum_relative_distance / max_chars)."
         )
-    lines += ["", "-" * 72, f"VERDICT: {verdict}", "-" * 72]
+    lines += ["", "-" * REPORT_WIDTH, f"VERDICT: {verdict}", "-" * REPORT_WIDTH]
     return "\n".join(lines)
+
+
+# ===============================
+# Entry point
+# ===============================
 
 
 def diagnose_language_leakage(
     *,
     pretrain_config: Path,
-    base_dir: Optional[Path] = None,
+    base_dir: Path | None = None,
     per_dataset: int = 2000,
     max_shards: int = 2,
     min_unit_chars: int = 50,
     whole_doc_chars: int = 4000,
     max_paragraphs: int = 40,
-    candidates: Optional[List[str]] = None,
+    candidates: list[str] | None = None,
 ) -> str:
     """Sample the corpus, classify it, and return the leakage report.
 
@@ -391,6 +447,7 @@ def diagnose_language_leakage(
         FileNotFoundError: If the corpus root cannot be resolved or is missing.
         ValueError: If a candidate code is unknown to lingua.
     """
+    # resolve the detector candidates
     config_candidates, low_accuracy = load_language_config(pretrain_config)
     if candidates:
         config_candidates = [code.strip().lower() for code in candidates if code.strip()]
@@ -398,16 +455,23 @@ def diagnose_language_leakage(
             config_candidates.append(TARGET)
     logger.info("[diagnose] detector: %d candidates, low_accuracy=%s", len(config_candidates), low_accuracy)
 
+    # sample the corpus
     corpus_dir = resolve_corpus_dir(pretrain_config, base_dir)
     detector = build_detector(config_candidates, low_accuracy)
     records, datasets = sample_documents(corpus_dir, per_dataset, max_shards)
     logger.info("[diagnose] sampled %s docs from %d datasets under %s", f"{len(records):,}", len(datasets), corpus_dir)
 
+    # analyze and report
     stats = analyze_leakage(records, detector, min_unit_chars, whole_doc_chars, max_paragraphs)
     return format_report(stats)
 
 
-def _classify(detector: Any, text: str) -> Optional[str]:
+# ===============================
+# Private helpers
+# ===============================
+
+
+def _classify(detector: Any, text: str) -> str | None:
     """Return lingua's best-guess ISO 639-1 code for `text`, or None.
 
     Args:
@@ -421,7 +485,7 @@ def _classify(detector: Any, text: str) -> Optional[str]:
     return predicted.iso_code_639_1.name.lower() if predicted is not None else None
 
 
-def _paragraphs(text: str) -> List[str]:
+def _paragraphs(text: str) -> list[str]:
     """Split text into non-empty newline-delimited paragraphs.
 
     Args:

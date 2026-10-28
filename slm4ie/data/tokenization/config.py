@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
 
 import yaml
 
@@ -21,7 +20,7 @@ class TokenizationConfig:
 
     input_dir: Path
     output_dir: Path
-    datasets: List[str] = field(default_factory=list)
+    datasets: list[str] = field(default_factory=list)
 
 
 def load_tokenization_config(config_path: Path) -> TokenizationConfig:
@@ -40,13 +39,15 @@ def load_tokenization_config(config_path: Path) -> TokenizationConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Tokenization config not found: {config_path}")
 
+    # read the raw fields
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
     input_dir = raw.get("input_dir")
     output_dir = raw.get("output_dir")
     datasets = raw.get("datasets") or []
 
-    missing: List[str] = []
+    # validate the fields
+    missing: list[str] = []
     if not input_dir:
         missing.append("input_dir")
     if not output_dir:
@@ -58,6 +59,7 @@ def load_tokenization_config(config_path: Path) -> TokenizationConfig:
     if not isinstance(datasets, list) or not all(isinstance(k, str) for k in datasets):
         raise ValueError(f"Tokenization config {config_path}: `datasets` must be a list of strings.")
 
+    # resolve the directories
     return TokenizationConfig(
         input_dir=resolve_project_path(input_dir),
         output_dir=resolve_project_path(output_dir),

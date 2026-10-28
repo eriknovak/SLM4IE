@@ -19,7 +19,6 @@ stage; keep anything that changes what a stage writes in that stage's module.
 
 import json
 from pathlib import Path
-from typing import Optional, Tuple
 
 from datatrove.data import DocumentsPipeline
 from datatrove.pipeline.readers import JsonlReader
@@ -27,6 +26,10 @@ from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.stats import PipelineStats
 
 from slm4ie.data.curate.paths import executor_task_stats
+
+# ===============================
+# Writer and reader
+# ===============================
 
 
 def jsonl_writer(stage_folder: Path) -> JsonlWriter:
@@ -54,7 +57,7 @@ class _TaskZeroProgressReader(JsonlReader):
     console; task 0's share of the files stands in for the whole stage.
     """
 
-    def run(self, data: Optional[DocumentsPipeline] = None, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
+    def run(self, data: DocumentsPipeline | None = None, rank: int = 0, world_size: int = 1) -> DocumentsPipeline:
         """Read this task's shard, showing the file progress bar when `rank` is 0.
 
         Args:
@@ -82,7 +85,12 @@ def jsonl_reader(folder: Path) -> JsonlReader:
     )
 
 
-def pipeline_io_counts(stats: PipelineStats) -> Tuple[int, int]:
+# ===============================
+# Document counts
+# ===============================
+
+
+def pipeline_io_counts(stats: PipelineStats) -> tuple[int, int]:
     """Extract input/output document counts from a datatrove run's stats.
 
     `LocalPipelineExecutor.run()` returns a `PipelineStats` whose
@@ -111,7 +119,7 @@ def pipeline_io_counts(stats: PipelineStats) -> Tuple[int, int]:
     return records_in, records_out
 
 
-def stage_io_counts(logging_dir: Path) -> Tuple[int, int]:
+def stage_io_counts(logging_dir: Path) -> tuple[int, int]:
     """Sum input/output document counts over every task a stage has finished.
 
     datatrove writes each finished task's stats to
@@ -127,6 +135,7 @@ def stage_io_counts(logging_dir: Path) -> Tuple[int, int]:
         Tuple `(records_in, records_out)` as defined by `pipeline_io_counts`,
         over all finished tasks; `(0, 0)` when none has finished.
     """
+    # merge the stats of every finished task
     merged = PipelineStats()
     for stats_file in executor_task_stats(logging_dir):
         merged = merged + PipelineStats.from_json(json.loads(stats_file.read_text(encoding="utf-8")))

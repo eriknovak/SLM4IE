@@ -20,9 +20,10 @@ magnitude throughput win on web-scale corpora.
 # spurious ImportError. Keep these imports above the datatrove imports.
 import importlib.metadata  # noqa: F401
 import importlib.util  # noqa: F401
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from datatrove.data import Document, DocumentsPipeline
 from datatrove.executor import LocalPipelineExecutor
@@ -33,9 +34,13 @@ from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
+# ===============================
+# Defaults
+# ===============================
+
 #: Default ISO 639-1 codes for the candidate language set used by the
 #: detector. Covers Slovenian and its likely confounders.
-DEFAULT_CANDIDATE_LANGUAGES: List[str] = [
+DEFAULT_CANDIDATE_LANGUAGES: list[str] = [
     "sl",
     "hr",
     "sr",
@@ -48,7 +53,12 @@ DEFAULT_CANDIDATE_LANGUAGES: List[str] = [
 ]
 
 #: Default target language set used when no `targets` argument is given.
-DEFAULT_TARGET_LANGUAGES: List[str] = ["sl"]
+DEFAULT_TARGET_LANGUAGES: list[str] = ["sl"]
+
+
+# ===============================
+# Language filter
+# ===============================
 
 
 class LinguaLanguageFilter(PipelineStep):
@@ -94,13 +104,13 @@ class LinguaLanguageFilter(PipelineStep):
 
     def __init__(
         self,
-        targets: Optional[Sequence[str]] = None,
-        candidates: Optional[List[str]] = None,
+        targets: Sequence[str] | None = None,
+        candidates: list[str] | None = None,
         mode: str = "tag",
-        exclusion_writer: Optional[DiskWriter] = None,
+        exclusion_writer: DiskWriter | None = None,
         minimum_relative_distance: float = 0.0,
         low_accuracy: bool = False,
-        max_chars: Optional[int] = None,
+        max_chars: int | None = None,
     ) -> None:
         """Build a filter; the lingua detector itself is lazily constructed.
 
@@ -131,7 +141,6 @@ class LinguaLanguageFilter(PipelineStep):
                 outside `[0, 1)`, or if `max_chars` is not `None` and
                 not a positive int.
         """
-        super().__init__()
         if mode not in {"tag", "filter"}:
             raise ValueError(f"mode must be 'tag' or 'filter', got {mode!r}")
         if not 0.0 <= minimum_relative_distance < 1.0:
@@ -139,18 +148,21 @@ class LinguaLanguageFilter(PipelineStep):
         if max_chars is not None and (not isinstance(max_chars, int) or max_chars <= 0):
             raise ValueError(f"max_chars must be a positive int or None, got {max_chars!r}")
 
+        # resolve the targets and candidates
+        super().__init__()
         target_list = list(targets) if targets is not None else list(DEFAULT_TARGET_LANGUAGES)
         if not target_list:
             raise ValueError("targets must be a non-empty sequence of ISO 639-1 codes")
 
-        self.targets: List[str] = [code.lower() for code in target_list]
-        self._target_codes: Set[str] = set(self.targets)
+        self.targets: list[str] = [code.lower() for code in target_list]
+        self._target_codes: set[str] = set(self.targets)
 
         self.candidates = list(candidates) if candidates is not None else list(DEFAULT_CANDIDATE_LANGUAGES)
         for code in self.targets:
             if code not in self.candidates:
                 self.candidates.append(code)
 
+        # keep the filter settings
         self.minimum_relative_distance = minimum_relative_distance
         self.mode = mode
         self.exclusion_writer = exclusion_writer
@@ -165,12 +177,14 @@ class LinguaLanguageFilter(PipelineStep):
 
         from lingua import Language, LanguageDetectorBuilder
 
+        # resolve the candidate languages
         code_to_language = {lang.iso_code_639_1.name.lower(): lang for lang in Language.all()}
         try:
             languages = [code_to_language[code] for code in self.candidates]
         except KeyError as exc:
             raise ValueError(f"Unknown lingua language code: {exc.args[0]!r}") from exc
 
+        # build the detector
         builder = LanguageDetectorBuilder.from_languages(*languages).with_preloaded_language_models()
         if self.low_accuracy:
             builder = builder.with_low_accuracy_mode()
@@ -178,7 +192,7 @@ class LinguaLanguageFilter(PipelineStep):
             builder = builder.with_minimum_relative_distance(self.minimum_relative_distance)
         self._detector = builder.build()
 
-    def _classify(self, doc: Document) -> Optional[str]:
+    def _classify(self, doc: Document) -> str | None:
         """Return lingua's predicted ISO 639-1 code for `doc.text`, or None.
 
         The doc is truncated to `self.max_chars` (when set) before
@@ -194,6 +208,7 @@ class LinguaLanguageFilter(PipelineStep):
             ISO 639-1 code (lowercased) for the predicted language, or
             `None` if lingua did not commit to a prediction.
         """
+        # detect the language of the (truncated) text
         self._ensure_detector()
         text = doc.text if self.max_chars is None else doc.text[: self.max_chars]
         predicted = self._detector.detect_language_of(text)
@@ -245,6 +260,11 @@ class _NullContext:
         return False
 
 
+# ===============================
+# Stage parameters
+# ===============================
+
+
 @dataclass(frozen=True)
 class LanguageParams:
     """Resolved language-stage parameters for one config bucket.
@@ -258,15 +278,15 @@ class LanguageParams:
         max_chars: Truncate doc text to this many chars, or None.
     """
 
-    target_languages: List[str]
-    candidate_languages: Optional[List[str]]
+    target_languages: list[str]
+    candidate_languages: list[str] | None
     mode: str
     minimum_relative_distance: float
     low_accuracy: bool
-    max_chars: Optional[int]
+    max_chars: int | None
 
 
-def _build_language_params(lang_cfg: Dict[str, Any]) -> LanguageParams:
+def _build_language_params(lang_cfg: dict[str, Any]) -> LanguageParams:
     """Resolve a language-stage config slice into typed parameters.
 
     Args:
@@ -285,19 +305,24 @@ def _build_language_params(lang_cfg: Dict[str, Any]) -> LanguageParams:
     )
 
 
+# ===============================
+# Stage entry points
+# ===============================
+
+
 def build_language_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
     target_languages: Sequence[str] = ("sl",),
-    candidate_languages: Optional[List[str]] = None,
+    candidate_languages: list[str] | None = None,
     lang_mode: str = "filter",
     lang_minimum_relative_distance: float = 0.0,
     lang_low_accuracy: bool = False,
-    lang_max_chars: Optional[int] = None,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    lang_max_chars: int | None = None,
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the language stage: read 00_convert/ → lingua filter → write 01_language/.
 
     Args:
@@ -323,8 +348,11 @@ def build_language_executors(
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
+    # resolve the input and output folders
     out = output_override if output_override is not None else paths.stage_dir("language")
     in_ = input_override if input_override is not None else paths.stage_dir("convert")
+
+    # build the pipeline
     executor = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -346,7 +374,7 @@ def build_language_executors(
     return [executor]
 
 
-def run(job: StageRun) -> Tuple[int, int]:
+def run(job: StageRun) -> tuple[int, int]:
     """Run the language stage over the job's input view.
 
     Args:
@@ -355,6 +383,7 @@ def run(job: StageRun) -> Tuple[int, int]:
     Returns:
         `(records_in, records_out)` from the run's datatrove stats.
     """
+    # resolve the parameters and build the executors
     params = _build_language_params(job.config)
     execs = build_language_executors(
         job.paths,
@@ -368,4 +397,6 @@ def run(job: StageRun) -> Tuple[int, int]:
         input_override=job.input_view,
         output_override=job.output_folder,
     )
+
+    # run the pipeline and count the records
     return pipeline_io_counts(execs[-1].run())

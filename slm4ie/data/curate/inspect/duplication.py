@@ -30,13 +30,22 @@ import json
 import logging
 import re
 from collections import defaultdict
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 import xxhash
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Sentence boundary: terminal punctuation followed by space, or a line break.
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?…:;])\s+|\n+")
@@ -45,10 +54,10 @@ _SENTENCE_BREAK = re.compile(r"(?<=[.!?…:;])\s+|\n+")
 WINDOW_SENTENCES: int = 3
 
 #: The stages this module assesses, in pipeline order.
-DEDUP_STAGES: Tuple[str, ...] = ("exact_dedup", "sentence_dedup")
+DEDUP_STAGES: tuple[str, ...] = ("exact_dedup", "sentence_dedup")
 
 #: The stage folder each dedup stage reads, where its dropped documents still are.
-STAGE_INPUT: Dict[str, str] = {"exact_dedup": "04_repetition", "sentence_dedup": "05_exact_dedup"}
+STAGE_INPUT: dict[str, str] = {"exact_dedup": "04_repetition", "sentence_dedup": "05_exact_dedup"}
 
 #: Where twins are looked for: the last folder holding untrimmed document text.
 TWIN_SEARCH_DIR: str = "05_exact_dedup"
@@ -56,8 +65,12 @@ TWIN_SEARCH_DIR: str = "05_exact_dedup"
 #: The finished corpus, used to ask whether a twin itself survived to the end.
 FINAL_DIR: str = "06_sentence_dedup"
 
+# ===============================
+# Hashing and shard reading
+# ===============================
 
-def sentences(text: str) -> List[str]:
+
+def sentences(text: str) -> list[str]:
     """Split text into sentences.
 
     Args:
@@ -81,7 +94,7 @@ def text_hash(text: str) -> int:
     return xxhash.xxh64_intdigest(text)
 
 
-def window_hashes(text: str, window: int = WINDOW_SENTENCES) -> Set[int]:
+def window_hashes(text: str, window: int = WINDOW_SENTENCES) -> set[int]:
     """Hash every sliding window of sentences in a document.
 
     Args:
@@ -98,7 +111,7 @@ def window_hashes(text: str, window: int = WINDOW_SENTENCES) -> Set[int]:
     return {xxhash.xxh64_intdigest(" ".join(parts[i : i + window])) for i in range(len(parts) - window + 1)}
 
 
-def iter_shard(path: Path) -> Iterator[Dict[str, Any]]:
+def iter_shard(path: Path) -> Iterator[dict[str, Any]]:
     """Yield every document in a gzipped JSONL shard.
 
     Args:
@@ -113,7 +126,12 @@ def iter_shard(path: Path) -> Iterator[Dict[str, Any]]:
                 yield json.loads(line)
 
 
-def dropped_documents(sample_path: Path, stage: str, pretrain_dir: Path) -> List[Dict[str, Any]]:
+# ===============================
+# Twin search
+# ===============================
+
+
+def dropped_documents(sample_path: Path, stage: str, pretrain_dir: Path) -> list[dict[str, Any]]:
     """Read the full text of the sampled documents a dedup stage dropped.
 
     The sample keeps only the first 2,000 characters, which is not enough to
@@ -132,7 +150,8 @@ def dropped_documents(sample_path: Path, stage: str, pretrain_dir: Path) -> List
     Raises:
         KeyError: If *stage* is not a dedup stage.
     """
-    wanted: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
+    # collect the dropped ids per shard
+    wanted: dict[tuple[str, str], set[str]] = defaultdict(set)
     for line in sample_path.read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
@@ -141,10 +160,9 @@ def dropped_documents(sample_path: Path, stage: str, pretrain_dir: Path) -> List
             if cell["stage"] == stage and cell["decision"] == "dropped":
                 wanted[(row["dataset"], cell["shard"])].add(row["id"])
 
+    # fetch each document by id: coleslaw repeats ids with different text (issue #6)
     stage_dir = pretrain_dir / STAGE_INPUT[stage]
-    # By id, not a list: coleslaw repeats ids with different text (issue #6), and
-    # one id must contribute one document or it would be assessed twice.
-    found: Dict[str, Dict[str, Any]] = {}
+    found: dict[str, dict[str, Any]] = {}
     for (dataset, shard), ids in sorted(wanted.items()):
         path = stage_dir / dataset / shard
         if not path.is_file():
@@ -157,7 +175,7 @@ def dropped_documents(sample_path: Path, stage: str, pretrain_dir: Path) -> List
     return list(found.values())
 
 
-def _targets(documents: Sequence[Dict[str, Any]]) -> Tuple[Dict[int, List[str]], Dict[int, List[str]], Dict[str, int]]:
+def _targets(documents: Sequence[dict[str, Any]]) -> tuple[dict[int, list[str]], dict[int, list[str]], dict[str, int]]:
     """Index the dropped documents by the hashes a twin would share.
 
     Args:
@@ -167,9 +185,10 @@ def _targets(documents: Sequence[Dict[str, Any]]) -> Tuple[Dict[int, List[str]],
         Document ids by text hash, document ids by window hash, and the number
         of windows each document has.
     """
-    by_text: Dict[int, List[str]] = defaultdict(list)
-    by_window: Dict[int, List[str]] = defaultdict(list)
-    window_count: Dict[str, int] = {}
+    # index the documents by text and window hash
+    by_text: dict[int, list[str]] = defaultdict(list)
+    by_window: dict[int, list[str]] = defaultdict(list)
+    window_count: dict[str, int] = {}
     for document in documents:
         by_text[text_hash(document["text"])].append(document["id"])
         hashes = window_hashes(document["text"])
@@ -180,10 +199,10 @@ def _targets(documents: Sequence[Dict[str, Any]]) -> Tuple[Dict[int, List[str]],
 
 
 #: Set once per worker process, so the indexes are not pickled per shard.
-_WORKER_STATE: Dict[str, Any] = {}
+_WORKER_STATE: dict[str, Any] = {}
 
 
-def _init_worker(by_text: Dict[int, List[str]], by_window: Dict[int, List[str]], own_ids: Set[str]) -> None:
+def _init_worker(by_text: dict[int, list[str]], by_window: dict[int, list[str]], own_ids: set[str]) -> None:
     """Hand a worker process the indexes it matches shards against.
 
     Args:
@@ -194,7 +213,7 @@ def _init_worker(by_text: Dict[int, List[str]], by_window: Dict[int, List[str]],
     _WORKER_STATE.update(by_text=by_text, by_window=by_window, own_ids=own_ids)
 
 
-def _scan_shard(path: Path) -> Tuple[Dict[str, str], Dict[str, Set[str]], Dict[str, Tuple[int, str]], int]:
+def _scan_shard(path: Path) -> tuple[dict[str, str], dict[str, set[str]], dict[str, tuple[int, str]], int]:
     """Look for twins of the dropped documents in one shard.
 
     Args:
@@ -205,12 +224,15 @@ def _scan_shard(path: Path) -> Tuple[Dict[str, str], Dict[str, Set[str]], Dict[s
         dropped id, the best window match per dropped id as (windows, kept id),
         and how many documents the shard held.
     """
+    # read the worker's indexes
     by_text = _WORKER_STATE["by_text"]
     by_window = _WORKER_STATE["by_window"]
     own_ids = _WORKER_STATE["own_ids"]
-    exact: Dict[str, str] = {}
-    sharers: Dict[str, Set[str]] = defaultdict(set)
-    best: Dict[str, Tuple[int, str]] = {}
+
+    # match each kept document against the dropped ones
+    exact: dict[str, str] = {}
+    sharers: dict[str, set[str]] = defaultdict(set)
+    best: dict[str, tuple[int, str]] = {}
     seen = 0
     for document in iter_shard(path):
         seen += 1
@@ -221,7 +243,7 @@ def _scan_shard(path: Path) -> Tuple[Dict[str, str], Dict[str, Set[str]], Dict[s
             for dropped_id in candidates:
                 exact.setdefault(dropped_id, document["id"])
         if by_window:
-            hits: Dict[str, int] = defaultdict(int)
+            hits: dict[str, int] = defaultdict(int)
             for value in window_hashes(document["text"]):
                 for dropped_id in by_window.get(value, ()):
                     hits[dropped_id] += 1
@@ -232,7 +254,7 @@ def _scan_shard(path: Path) -> Tuple[Dict[str, str], Dict[str, Set[str]], Dict[s
     return exact, dict(sharers), best, seen
 
 
-def _shard_paths(root: Path, datasets: Optional[Sequence[str]] = None) -> List[Path]:
+def _shard_paths(root: Path, datasets: Sequence[str] | None = None) -> list[Path]:
     """List every shard under a stage folder.
 
     Args:
@@ -252,11 +274,11 @@ def _shard_paths(root: Path, datasets: Optional[Sequence[str]] = None) -> List[P
 
 
 def find_twins(
-    documents: Sequence[Dict[str, Any]],
+    documents: Sequence[dict[str, Any]],
     search_dir: Path,
     workers: int = 10,
-    datasets: Optional[Sequence[str]] = None,
-) -> Dict[str, Dict[str, Any]]:
+    datasets: Sequence[str] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Search the corpus for a twin of every dropped document.
 
     Args:
@@ -271,14 +293,16 @@ def find_twins(
         most of its windows), `window_coverage` (that document's share) and
         `windows`.
     """
+    # index the dropped documents
     by_text, by_window, window_count = _targets(documents)
     own_ids = {document["id"] for document in documents}
     paths = _shard_paths(search_dir, datasets)
     logger.info("searching %d shards for twins of %d documents", len(paths), len(documents))
 
-    exact: Dict[str, str] = {}
-    sharers: Dict[str, Set[str]] = defaultdict(set)
-    best: Dict[str, Tuple[int, str]] = {}
+    # scan the shards in parallel and merge the matches
+    exact: dict[str, str] = {}
+    sharers: dict[str, set[str]] = defaultdict(set)
+    best: dict[str, tuple[int, str]] = {}
     scanned = 0
     with ProcessPoolExecutor(
         max_workers=workers, initializer=_init_worker, initargs=(by_text, by_window, own_ids)
@@ -297,6 +321,7 @@ def find_twins(
             if index % 50 == 0 or index == len(paths):
                 logger.info("%d of %d shards, %d documents read", index, len(paths), scanned)
 
+    # assemble the findings per dropped document
     findings = {}
     for document in documents:
         doc_id = document["id"]
@@ -312,7 +337,12 @@ def find_twins(
     return findings
 
 
-def _is_matched(stage: str, row: Dict[str, Any], coverage_floor: float) -> bool:
+# ===============================
+# Summary
+# ===============================
+
+
+def _is_matched(stage: str, row: dict[str, Any], coverage_floor: float) -> bool:
     """Decide whether one dropped document's content is still in the corpus.
 
     Args:
@@ -330,7 +360,7 @@ def _is_matched(stage: str, row: Dict[str, Any], coverage_floor: float) -> bool:
     return row["window_coverage"] >= coverage_floor
 
 
-def summarise(stage: str, twins: Dict[str, Dict[str, Any]], coverage_floor: float = 0.5) -> Dict[str, Any]:
+def summarise(stage: str, twins: dict[str, dict[str, Any]], coverage_floor: float = 0.5) -> dict[str, Any]:
     """Reduce per-document twin findings to the record's numbers.
 
     Args:
@@ -342,6 +372,7 @@ def summarise(stage: str, twins: Dict[str, Dict[str, Any]], coverage_floor: floa
     Returns:
         Counts and rates keyed for a CSV row.
     """
+    # count the outcomes
     total = len(twins)
     exact = sum(1 for row in twins.values() if row["exact_twin"])
     any_window = sum(1 for row in twins.values() if row["sharers"])
@@ -350,6 +381,8 @@ def summarise(stage: str, twins: Dict[str, Dict[str, Any]], coverage_floor: floa
     survives = sum(1 for row in twins.values() if row.get("twin_survives"))
     coverages = sorted(row["window_coverage"] for row in twins.values())
     median = coverages[len(coverages) // 2] if coverages else 0.0
+
+    # build the summary row
     return {
         "stage": stage,
         "dropped_assessed": total,
@@ -364,7 +397,12 @@ def summarise(stage: str, twins: Dict[str, Dict[str, Any]], coverage_floor: floa
     }
 
 
-def _collect_ids(path: Path) -> Set[str]:
+# ===============================
+# Survivor check
+# ===============================
+
+
+def _collect_ids(path: Path) -> set[str]:
     """Return the wanted ids present in one shard.
 
     Args:
@@ -377,7 +415,7 @@ def _collect_ids(path: Path) -> Set[str]:
     return {document["id"] for document in iter_shard(path) if document["id"] in wanted}
 
 
-def _init_id_worker(wanted_ids: Set[str]) -> None:
+def _init_id_worker(wanted_ids: set[str]) -> None:
     """Hand a worker process the ids it looks for.
 
     Args:
@@ -386,7 +424,7 @@ def _init_id_worker(wanted_ids: Set[str]) -> None:
     _WORKER_STATE.update(wanted_ids=wanted_ids)
 
 
-def surviving_ids(ids: Set[str], final_dir: Path, workers: int = 10) -> Set[str]:
+def surviving_ids(ids: set[str], final_dir: Path, workers: int = 10) -> set[str]:
     """Report which of *ids* reached the finished corpus.
 
     A twin found one stage earlier may itself have been dropped by sentence
@@ -403,13 +441,19 @@ def surviving_ids(ids: Set[str], final_dir: Path, workers: int = 10) -> Set[str]
     """
     if not ids:
         return set()
+    # look for the ids in the finished corpus
     paths = _shard_paths(final_dir)
     logger.info("checking %d twins against %d shards of the finished corpus", len(ids), len(paths))
-    present: Set[str] = set()
+    present: set[str] = set()
     with ProcessPoolExecutor(max_workers=workers, initializer=_init_id_worker, initargs=(ids,)) as pool:
         for found in pool.map(_collect_ids, paths):
             present.update(found)
     return present
+
+
+# ===============================
+# Assessment
+# ===============================
 
 
 def assess_dedup(
@@ -418,8 +462,8 @@ def assess_dedup(
     stages: Sequence[str] = DEDUP_STAGES,
     workers: int = 10,
     coverage_floor: float = 0.5,
-    unmatched_path: Optional[Path] = None,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    unmatched_path: Path | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Measure both dedup stages' drops against the corpus that kept them.
 
     Both stages are assessed in one pass over the corpus: a document dropped by
@@ -440,19 +484,22 @@ def assess_dedup(
         One summary row per stage, and the per-document findings keyed by
         document id with the stage recorded on each.
     """
-    documents: Dict[str, List[Dict[str, Any]]] = {
+    # find the twins of the dropped documents
+    documents: dict[str, list[dict[str, Any]]] = {
         stage: dropped_documents(sample_path, stage, pretrain_dir) for stage in stages
     }
     every = [document for stage in stages for document in documents[stage]]
     twins = find_twins(every, pretrain_dir / TWIN_SEARCH_DIR, workers=workers)
 
+    # check that the twins reached the finished corpus
     candidates = {row["best_twin"] for row in twins.values() if row["best_twin"]}
     survivors = surviving_ids(candidates, pretrain_dir / FINAL_DIR, workers=workers)
     for row in twins.values():
         row["twin_survives"] = bool(row["best_twin"] and row["best_twin"] in survivors)
 
-    rows: List[Dict[str, Any]] = []
-    unmatched: List[Dict[str, Any]] = []
+    # summarise each stage
+    rows: list[dict[str, Any]] = []
+    unmatched: list[dict[str, Any]] = []
     for stage in stages:
         stage_twins = {document["id"]: twins[document["id"]] for document in documents[stage]}
         for row in stage_twins.values():
@@ -465,6 +512,7 @@ def assess_dedup(
             if not _is_matched(stage, row, coverage_floor)
         )
 
+    # write the unmatched drops
     if unmatched_path is not None:
         unmatched_path.parent.mkdir(parents=True, exist_ok=True)
         with unmatched_path.open("w", encoding="utf-8") as handle:

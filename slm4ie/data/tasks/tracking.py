@@ -22,21 +22,33 @@ import logging
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from slm4ie.utils.versioning import config_hash, corpus_digest
 from slm4ie.data.tasks.config import TaskEntry, TasksConfig, resolve_output_dir
 from slm4ie.data.tasks.splits import iter_jsonl, outputs_for_splits
 from slm4ie.utils import mlflow as ml
+from slm4ie.utils.versioning import config_hash, corpus_digest
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Experiment name for task-conversion builds, following the project's
 #: `slm4ie/<workstream>/<dataset>` convention.
 DEFAULT_EXPERIMENT = "slm4ie/data/tasks"
 
+# ===============================
+# Profiling
+# ===============================
 
-def _record_labels(record: Dict[str, Any]) -> List[str]:
+
+def _record_labels(record: dict[str, Any]) -> list[str]:
     """Extract label values from one task record across task families.
 
     Handles a top-level `label` (sentiment / NLI / QA / ...) and per-span
@@ -49,9 +61,12 @@ def _record_labels(record: Dict[str, Any]) -> List[str]:
     Returns:
         The label strings found in the record (possibly empty).
     """
-    labels: List[str] = []
+    # top-level label
+    labels: list[str] = []
     if "label" in record and not isinstance(record["label"], (dict, list)):
         labels.append(str(record["label"]))
+
+    # per-span labels
     for span in record.get("spans") or []:
         if isinstance(span, dict) and "label" in span:
             labels.append(str(span["label"]))
@@ -60,7 +75,7 @@ def _record_labels(record: Dict[str, Any]) -> List[str]:
     return labels
 
 
-def profile_task_dataset(output_dir: Path, splits: Dict[str, str]) -> Dict[str, Any]:
+def profile_task_dataset(output_dir: Path, splits: dict[str, str]) -> dict[str, Any]:
     """Profile a converted dataset's split files from disk.
 
     Args:
@@ -71,7 +86,8 @@ def profile_task_dataset(output_dir: Path, splits: Dict[str, str]) -> Dict[str, 
         A dict with `split_rows` (per-split row counts for splits present on
         disk), `total_rows`, and `label_distribution` (combined label counts).
     """
-    split_rows: Dict[str, int] = {}
+    # count the rows and labels of each split
+    split_rows: dict[str, int] = {}
     labels: Counter = Counter()
     for split, path in outputs_for_splits(output_dir, splits).items():
         if not path.exists():
@@ -81,11 +97,18 @@ def profile_task_dataset(output_dir: Path, splits: Dict[str, str]) -> Dict[str, 
             rows += 1
             labels.update(_record_labels(record))
         split_rows[split] = rows
+
+    # assemble the profile
     return {
         "split_rows": split_rows,
         "total_rows": sum(split_rows.values()),
         "label_distribution": dict(labels),
     }
+
+
+# ===============================
+# Run logging
+# ===============================
 
 
 def log_task_dataset(
@@ -95,10 +118,10 @@ def log_task_dataset(
     *,
     enabled: bool = True,
     experiment: str = DEFAULT_EXPERIMENT,
-    tracking_uri: Optional[str] = None,
+    tracking_uri: str | None = None,
     force: bool = False,
-    artifact_dir: Optional[Path] = None,
-) -> Optional[str]:
+    artifact_dir: Path | None = None,
+) -> str | None:
     """Upsert a single MLflow run describing one converted task dataset.
 
     Args:
@@ -128,6 +151,7 @@ def log_task_dataset(
         logger.warning("MLflow unavailable; skipping task tracking.")
         return None
 
+    # skip or replace an already tracked digest
     digest = corpus_digest(output_dir)
     existing = ml.find_run_by_tag(experiment, "corpus_digest", digest, tracking_uri=tracking_uri)
     if existing is not None and not force:
@@ -136,19 +160,21 @@ def log_task_dataset(
     if existing is not None:
         ml.delete_run(existing, tracking_uri=tracking_uri)
 
+    # profile the dataset and write the artifact
     profile = profile_task_dataset(output_dir, entry.splits)
-
     artifact_root = artifact_dir if artifact_dir is not None else Path(tempfile.mkdtemp(prefix="task-track-"))
     artifact_root.mkdir(parents=True, exist_ok=True)
     profile_path = artifact_root / "label_distribution.json"
     with profile_path.open("w", encoding="utf-8") as fh:
         json.dump(profile, fh, ensure_ascii=False, indent=2)
 
-    metrics: Dict[str, float] = {f"rows__{split}": rows for split, rows in profile["split_rows"].items()}
+    # build the metrics
+    metrics: dict[str, float] = {f"rows__{split}": rows for split, rows in profile["split_rows"].items()}
     metrics["rows_total"] = profile["total_rows"]
     for label, count in profile["label_distribution"].items():
         metrics[f"label__{label}"] = count
 
+    # build the tags
     tags = {
         "run_type": "data_pipeline",
         "pipeline": "tasks",
@@ -164,6 +190,7 @@ def log_task_dataset(
     if commit is not None:
         tags["git_commit"] = commit
 
+    # log the run
     with ml.mlflow_run(key, tags=tags):
         ml.log_params(
             {
@@ -189,10 +216,10 @@ def log_task_dataset(
 
 def log_tasks_runs(
     tasks_config: TasksConfig,
-    by_key: Dict[str, TaskEntry],
-    keys: List[str],
+    by_key: dict[str, TaskEntry],
+    keys: list[str],
     *,
-    mlflow_enabled: Optional[bool] = None,
+    mlflow_enabled: bool | None = None,
     force: bool = False,
 ) -> None:
     """Log one MLflow run per processed task dataset.
@@ -208,10 +235,13 @@ def log_tasks_runs(
             `tasks.yaml::mlflow.enabled`.
         force: Replace existing runs for the same digest instead of skipping.
     """
+    # resolve whether tracking is enabled
     cfg = tasks_config.mlflow or {}
     enabled = bool(cfg.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled
     if not enabled:
         return
+
+    # log each processed dataset
     experiment = cfg.get("experiment", DEFAULT_EXPERIMENT)
     tracking_uri = cfg.get("tracking_uri")
     for key in keys:

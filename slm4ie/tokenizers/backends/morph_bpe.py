@@ -13,12 +13,16 @@ from __future__ import annotations
 
 import unicodedata
 from collections import Counter
-from typing import Iterable
+from collections.abc import Iterable
 
 from slm4ie.tokenizers.backends._hf_base import HfBackend, build_char_bpe_from_merges
 from slm4ie.tokenizers.base import TrainContext, keep_alphabet, split_words
 from slm4ie.tokenizers.bpe_core import learn_bpe
 from slm4ie.tokenizers.registry import register_tokenizer
+
+# ===============================
+# Tokenizer class
+# ===============================
 
 
 @register_tokenizer("morphbpe")
@@ -42,9 +46,9 @@ class MorphBpeTokenizer(HfBackend):
         BPE model for ordinary inference.
 
         Args:
-            corpus (Iterable[str]): Training sentences.
-            vocab_size (int): Target vocabulary size.
-            config (TrainContext): Shared settings; `lexicon` is required.
+            corpus: Training sentences.
+            vocab_size: Target vocabulary size.
+            config: Shared settings; `lexicon` is required.
 
         Raises:
             ValueError: If no morpheme lexicon is provided.
@@ -53,11 +57,12 @@ class MorphBpeTokenizer(HfBackend):
             raise ValueError("MorphBPE requires a morpheme lexicon in TrainContext.")
         lexicon = config.lexicon
 
+        # count the words, NFC first like the inference normalizer
         word_freqs: Counter = Counter()
         for line in corpus:
-            # NFC first, as the inference normalizer and the alphabet count do.
             word_freqs.update(split_words(unicodedata.normalize("NFC", line)))
 
+        # count the morpheme chunks
         chunk_freqs: Counter = Counter()
         for word, freq in word_freqs.items():
             segmentation = lexicon.by_form.get(word)
@@ -68,6 +73,7 @@ class MorphBpeTokenizer(HfBackend):
                 if chunk:
                     chunk_freqs[chunk] += freq
 
+        # learn the merges and build the standard BPE
         budget = max(1, vocab_size - len(config.special_tokens))
         tokens, merges = learn_bpe(dict(chunk_freqs), budget)
         self._tokenizer = build_char_bpe_from_merges(

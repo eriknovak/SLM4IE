@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-
-from slm4ie.utils.config import load_yaml
 from slm4ie.tokenizers.corpus import SampleBudget
+from slm4ie.utils.config import load_yaml
+
+# ===============================
+# Sweep config
+# ===============================
 
 
 @dataclass
@@ -24,17 +27,17 @@ class SweepConfig:
 
     Attributes:
         corpus_root (Path): Root of the deduplicated pretraining corpus.
-        corpus_datasets (List[str]): Dataset subdirs to sample, empty for all.
+        corpus_datasets (list[str]): Dataset subdirs to sample, empty for all.
         train_budget (SampleBudget): Sampling budget for the training corpus.
-        tokenizers (List[str]): Registry keys of the tokenizers to train.
-        vocab_sizes (List[int]): Vocabulary sizes to sweep.
-        special_tokens (List[str]): Reserved tokens for every tokenizer.
+        tokenizers (list[str]): Registry keys of the tokenizers to train.
+        vocab_sizes (list[int]): Vocabulary sizes to sweep.
+        special_tokens (list[str]): Reserved tokens for every tokenizer.
         character_coverage (float): Share of the training sample's character
             occurrences the character-level backends' base alphabet covers;
             1.0 keeps every character.
         sloleks_path (Path): Path to the converted Sloleks JSONL(.gz).
         min_stem_len (int): Minimum stem length for morpheme derivation.
-        sloleks_relations_path (Optional[Path]): Path to the converted Sloleks
+        sloleks_relations_path (Path | None): Path to the converted Sloleks
             word-relations JSONL(.gz) for the derivational gold, or None to skip
             the derivational track.
         output_root (Path): Directory holding per-run artifact subdirs.
@@ -43,28 +46,28 @@ class SweepConfig:
         renyi_alpha (float): Alpha for Renyi efficiency.
         mlflow_experiment (str): MLflow experiment name.
         mlflow_enabled (bool): Whether to log to MLflow.
-        mlflow_tracking_uri (Optional[str]): MLflow tracking URI override.
-        mlflow_tags (Dict[str, str]): Tags set on every train and eval run,
+        mlflow_tracking_uri (str | None): MLflow tracking URI override.
+        mlflow_tags (dict[str, str]): Tags set on every train and eval run,
             such as the experiment's `branch`, `type` and `language`.
         stats_n_resamples (int): Bootstrap resamples (B) for CIs and tests.
         stats_ci_level (float): Confidence level for the bootstrap CIs.
         stats_seed (int): Seed for the shared bootstrap resample indices.
         stats_morph_form_sample (int): Forms drawn for the morph CIs and tests.
-        corpus_train_share (Optional[float]): Share of each source's documents on
+        corpus_train_share (float | None): Share of each source's documents on
             the training side of the corpus split, or None to sample the whole
             corpus for both training and evaluation.
-        inflection_path (Optional[Path]): Path to the converted Sloleks
+        inflection_path (Path | None): Path to the converted Sloleks
             stem-ending split, whose lexemes are split for held-out scoring.
-        heldout_lexeme_share (Optional[float]): Share of those lexemes held out
+        heldout_lexeme_share (float | None): Share of those lexemes held out
             of the morpheme table, or None to hold none out.
     """
 
     corpus_root: Path
-    corpus_datasets: List[str]
+    corpus_datasets: list[str]
     train_budget: SampleBudget
-    tokenizers: List[str]
-    vocab_sizes: List[int]
-    special_tokens: List[str]
+    tokenizers: list[str]
+    vocab_sizes: list[int]
+    special_tokens: list[str]
     sloleks_path: Path
     min_stem_len: int
     output_root: Path
@@ -73,16 +76,16 @@ class SweepConfig:
     renyi_alpha: float
     mlflow_experiment: str
     mlflow_enabled: bool
-    sloleks_relations_path: Optional[Path] = None
-    mlflow_tracking_uri: Optional[str] = None
+    sloleks_relations_path: Path | None = None
+    mlflow_tracking_uri: str | None = None
     stats_n_resamples: int = 2000
     stats_ci_level: float = 0.95
     stats_seed: int = 12345
     stats_morph_form_sample: int = 200000
-    corpus_train_share: Optional[float] = None
-    inflection_path: Optional[Path] = None
-    heldout_lexeme_share: Optional[float] = None
-    mlflow_tags: Dict[str, str] = field(default_factory=dict)
+    corpus_train_share: float | None = None
+    inflection_path: Path | None = None
+    heldout_lexeme_share: float | None = None
+    mlflow_tags: dict[str, str] = field(default_factory=dict)
     character_coverage: float = 1.0
 
     @property
@@ -90,7 +93,7 @@ class SweepConfig:
         """Path to the persisted corpus split.
 
         Returns:
-            Path: `<output_root>/corpus_split.json`.
+            `<output_root>/corpus_split.json`.
         """
         return self.output_root / "corpus_split.json"
 
@@ -99,7 +102,7 @@ class SweepConfig:
         """Path to the shared cached training sample.
 
         Returns:
-            Path: `<output_root>/corpus_sample.txt.gz`.
+            `<output_root>/corpus_sample.txt.gz`.
         """
         return self.output_root / "corpus_sample.txt.gz"
 
@@ -108,7 +111,7 @@ class SweepConfig:
         """Path to the shared cached held-out evaluation sample.
 
         Returns:
-            Path: `<output_root>/eval_sample.txt.gz`.
+            `<output_root>/eval_sample.txt.gz`.
         """
         return self.output_root / "eval_sample.txt.gz"
 
@@ -120,7 +123,7 @@ class SweepConfig:
         lexicon when the derivational track is configured.
 
         Returns:
-            Path: `<output_root>/morph_lexicon.jsonl.gz`.
+            `<output_root>/morph_lexicon.jsonl.gz`.
         """
         return self.output_root / "morph_lexicon.jsonl.gz"
 
@@ -129,7 +132,7 @@ class SweepConfig:
         """Path to the inflectional-only gold lexicon for the morph metrics.
 
         Returns:
-            Path: `<output_root>/morph_lexicon_infl.jsonl.gz`.
+            `<output_root>/morph_lexicon_infl.jsonl.gz`.
         """
         return self.output_root / "morph_lexicon_infl.jsonl.gz"
 
@@ -138,7 +141,7 @@ class SweepConfig:
         """Path to the derivational gold lexicon for the derivational metrics.
 
         Returns:
-            Path: `<output_root>/morph_lexicon_deriv.jsonl.gz`.
+            `<output_root>/morph_lexicon_deriv.jsonl.gz`.
         """
         return self.output_root / "morph_lexicon_deriv.jsonl.gz"
 
@@ -146,7 +149,7 @@ class SweepConfig:
         """Return True when any selected tokenizer needs the morpheme lexicon.
 
         Returns:
-            bool: True if a morphological backend is in the sweep.
+            True if a morphological backend is in the sweep.
         """
         return any(name.startswith("morph") for name in self.tokenizers)
 
@@ -157,19 +160,24 @@ class SweepConfig:
         independent of whether a morphological backend is in the sweep.
 
         Returns:
-            bool: True if `sloleks_relations_path` is set.
+            True if `sloleks_relations_path` is set.
         """
         return self.sloleks_relations_path is not None
 
 
-def _budget_from_dict(raw: Dict[str, Any]) -> SampleBudget:
+# ===============================
+# Loading
+# ===============================
+
+
+def _budget_from_dict(raw: dict[str, Any]) -> SampleBudget:
     """Build a SampleBudget from a config `budget` mapping.
 
     Args:
-        raw (Dict[str, Any]): The `budget` sub-mapping.
+        raw: The `budget` sub-mapping.
 
     Returns:
-        SampleBudget: Populated budget with defaults for missing keys.
+        Populated budget with defaults for missing keys.
     """
     return SampleBudget(
         max_bytes=raw.get("max_bytes"),
@@ -184,10 +192,10 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     """Load the tokenizer-sweep config, applying any local overlay.
 
     Args:
-        config_path (Path): Path to a sweep config YAML.
+        config_path: Path to a sweep config YAML.
 
     Returns:
-        SweepConfig: The resolved sweep configuration.
+        The resolved sweep configuration.
 
     Raises:
         FileNotFoundError: If `config_path` does not exist.
@@ -197,6 +205,7 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Tokenizer config not found: {config_path}")
 
+    # load the config sections
     raw = load_yaml(config_path)
 
     corpus = raw.get("corpus") or {}
@@ -208,7 +217,9 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
 
     tokenizers = raw.get("tokenizers") or []
     vocab_sizes = raw.get("vocab_sizes") or []
-    missing: List[str] = []
+
+    # validate the required fields
+    missing: list[str] = []
     if not corpus.get("root"):
         missing.append("corpus.root")
     if not tokenizers:
@@ -227,9 +238,11 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     if not isinstance(character_coverage, (int, float)) or not 0.0 < character_coverage <= 1.0:
         raise ValueError(f"Tokenizer config {config_path}: character_coverage {character_coverage!r} outside (0, 1]")
 
+    # resolve the output paths
     output_root = Path(output["root"])
     report_dir = Path(output.get("report_dir") or output_root / "_reports")
 
+    # build the sweep config
     return SweepConfig(
         corpus_root=Path(corpus["root"]),
         corpus_datasets=list(corpus.get("datasets") or []),
@@ -261,13 +274,13 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     )
 
 
-def _optional_float(value: Any) -> Optional[float]:
+def _optional_float(value: Any) -> float | None:
     """Return `value` as a float, or None when it is unset.
 
     Args:
-        value (Any): A config value, possibly None.
+        value: A config value, possibly None.
 
     Returns:
-        Optional[float]: The float value, or None.
+        The float value, or None.
     """
     return None if value is None else float(value)

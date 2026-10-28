@@ -15,22 +15,30 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from slm4ie.tokenizers.backends.morph_piece import MorphPieceTokenizer
 from slm4ie.tokenizers.hf_morph_piece import SPECIAL_TOKEN_ROLES, MorphPieceHFTokenizer
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _read_name(artifact_dir: Path) -> str:
     """Return the backend name recorded in the artifact metadata.
 
     Args:
-        artifact_dir (Path): Directory holding `metadata.json`.
+        artifact_dir: Directory holding `metadata.json`.
 
     Returns:
-        str: The registry name of the tokenizer.
+        The registry name of the tokenizer.
 
     Raises:
         FileNotFoundError: If no metadata sidecar is present.
@@ -41,14 +49,14 @@ def _read_name(artifact_dir: Path) -> str:
     return json.loads(meta_path.read_text(encoding="utf-8"))["name"]
 
 
-def _roles_present(tokenizer_obj: Any) -> Dict[str, str]:
+def _roles_present(tokenizer_obj: Any) -> dict[str, str]:
     """Map the project's special tokens that exist in `tokenizer_obj` to roles.
 
     Args:
-        tokenizer_obj (Any): A `tokenizers.Tokenizer`.
+        tokenizer_obj: A `tokenizers.Tokenizer`.
 
     Returns:
-        Dict[str, str]: HuggingFace role to token string.
+        HuggingFace role to token string.
     """
     vocab = tokenizer_obj.get_vocab()
     return {role: token for token, role in SPECIAL_TOKEN_ROLES.items() if token in vocab}
@@ -58,41 +66,51 @@ def _unigram_to_tokenizer(artifact_dir: Path) -> Any:
     """Rebuild a `tokenizers` Unigram tokenizer from a SentencePiece model.
 
     Args:
-        artifact_dir (Path): Directory holding `spm.model`.
+        artifact_dir: Directory holding `spm.model`.
 
     Returns:
-        Any: A configured `tokenizers.Tokenizer` (Unigram, Metaspace).
+        A configured `tokenizers.Tokenizer` (Unigram, Metaspace).
     """
     import sentencepiece as spm
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers
 
+    # rebuild the vocabulary and scores
     processor = spm.SentencePieceProcessor(model_file=str(artifact_dir / "spm.model"))
     vocab = [(processor.id_to_piece(i), processor.get_score(i)) for i in range(processor.get_piece_size())]
     unk_id = processor.unk_id()
+
+    # assemble the tokenizer
     tokenizer = Tokenizer(models.Unigram(vocab, unk_id=unk_id if unk_id >= 0 else None, byte_fallback=False))
     tokenizer.pre_tokenizer = pre_tokenizers.Metaspace()
     tokenizer.decoder = decoders.Metaspace()
     return tokenizer
 
 
+# ===============================
+# Export functions
+# ===============================
+
+
 def to_hf(artifact_dir: Path) -> Any:
     """Load a trained artifact as a HuggingFace tokenizer.
 
     Args:
-        artifact_dir (Path): Directory holding a trained tokenizer artifact.
+        artifact_dir: Directory holding a trained tokenizer artifact.
 
     Returns:
-        Any: A `PreTrainedTokenizerFast` for the fast backends, or a
-            `MorphPieceHFTokenizer` (slow) for `morphpiece`.
+        A `PreTrainedTokenizerFast` for the fast backends, or a
+        `MorphPieceHFTokenizer` (slow) for `morphpiece`.
     """
     from transformers import PreTrainedTokenizerFast
 
     artifact_dir = Path(artifact_dir)
     name = _read_name(artifact_dir)
 
+    # morphpiece has its own slow tokenizer
     if name == "morphpiece":
         return MorphPieceHFTokenizer(MorphPieceTokenizer.load(artifact_dir))
 
+    # load or convert the tokenizer object
     if name == "unigram":
         tokenizer_obj = _unigram_to_tokenizer(artifact_dir)
     else:
@@ -111,15 +129,15 @@ def load_pretrained(artifact_dir: Path) -> Any:
     `AutoTokenizer`).
 
     Args:
-        artifact_dir (Path): Directory holding a trained tokenizer artifact.
+        artifact_dir: Directory holding a trained tokenizer artifact.
 
     Returns:
-        Any: The HuggingFace tokenizer object.
+        The HuggingFace tokenizer object.
     """
     return to_hf(artifact_dir)
 
 
-def save_pretrained_dir(artifact_dir: Path, out_dir: Optional[Path] = None) -> Path:
+def save_pretrained_dir(artifact_dir: Path, out_dir: Path | None = None) -> Path:
     """Write a HuggingFace tokenizer directory next to (or into) the artifact.
 
     For the fast backends this enables `AutoTokenizer.from_pretrained(out_dir)`.
@@ -127,17 +145,22 @@ def save_pretrained_dir(artifact_dir: Path, out_dir: Optional[Path] = None) -> P
     custom class is not registered with `AutoTokenizer`).
 
     Args:
-        artifact_dir (Path): Directory holding a trained tokenizer artifact.
-        out_dir (Path): Destination; defaults to `artifact_dir`.
+        artifact_dir: Directory holding a trained tokenizer artifact.
+        out_dir: Destination; defaults to `artifact_dir`.
 
     Returns:
-        Path: The directory written.
+        The directory written.
     """
     artifact_dir = Path(artifact_dir)
     destination = Path(out_dir) if out_dir is not None else artifact_dir
     destination.mkdir(parents=True, exist_ok=True)
     to_hf(artifact_dir).save_pretrained(str(destination))
     return destination
+
+
+# ===============================
+# Sweep export
+# ===============================
 
 
 @dataclass
@@ -149,21 +172,23 @@ class ExportSummary:
         failed: Run keys whose export raised.
     """
 
-    exported: List[str] = field(default_factory=list)
-    failed: List[str] = field(default_factory=list)
+    exported: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
 
 
-def export_sweep_runs(output_root: Path, keys: List[str]) -> ExportSummary:
+def export_sweep_runs(output_root: Path, keys: list[str]) -> ExportSummary:
     """Export each selected trained run as a HuggingFace tokenizer directory.
 
     Args:
-        output_root (Path): Directory holding per-run artifact subdirs.
-        keys (List[str]): Run keys (`<name>-<vocab>`) to export.
+        output_root: Directory holding per-run artifact subdirs.
+        keys: Run keys (`<name>-<vocab>`) to export.
 
     Returns:
-        ExportSummary: The exported and failed run keys.
+        The exported and failed run keys.
     """
     summary = ExportSummary()
+
+    # export each run
     for key in keys:
         artifact_dir = output_root / key
         try:
@@ -175,5 +200,6 @@ def export_sweep_runs(output_root: Path, keys: List[str]) -> ExportSummary:
             logger.info("Exported %s -> %s", key, artifact_dir)
             summary.exported.append(key)
 
+    # report the outcome
     logger.info("Done. Exported %d, failed %s.", len(summary.exported), summary.failed or "none")
     return summary

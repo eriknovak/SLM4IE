@@ -39,17 +39,31 @@ Document ids:
 """
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import positional_doc_id, relative_unit
 from slm4ie.data.schema import Document
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 # Six digits: the shared corpus keys on CC100 ids minted at this width.
 _BLOCK_WIDTH = 6
+
+
+# ===============================
+# Text extractor
+# ===============================
 
 
 class TextExtractor(FileBasedExtractor):
@@ -62,39 +76,41 @@ class TextExtractor(FileBasedExtractor):
     No annotations are produced.
     """
 
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return sorted .txt files under input_dir.
 
         Args:
-            input_dir (Path): Directory searched recursively.
+            input_dir : Directory searched recursively.
 
         Returns:
-            List[Path]: Sorted .txt file paths.
+            Sorted .txt file paths.
         """
         return sorted(input_dir.rglob("*.txt"))
 
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from the given .txt files.
 
         Args:
-            files (List[Path]): .txt files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root; each document's `doc_id` is
+            files : .txt files to parse, in order.
+            source : Dataset key assigned to every Document.
+            domain : Domain label assigned to every Document.
+            input_dir : Dataset root; each document's `doc_id` is
                 keyed off its file's path relative to this directory.
-            metadata (Optional[Dict[str, Any]]): Ignored.
+            metadata : Ignored.
 
         Yields:
-            Document: One document per blank-line-separated block.
+            One document per blank-line-separated block.
         """
         del metadata
+
+        # parse each file in order
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, input_dir)
 
@@ -108,20 +124,21 @@ class TextExtractor(FileBasedExtractor):
         """Stream a file and yield one Document per blank-line block.
 
         Args:
-            filepath (Path): Path to the text file.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            input_dir (Path): Dataset root, used to derive the
+            filepath : Path to the text file.
+            source : Dataset key.
+            domain : Domain label.
+            input_dir : Dataset root, used to derive the
                 file-relative part of each `doc_id`.
 
         Yields:
-            Document: One document per blank-line-separated block, with
+            One document per blank-line-separated block, with
                 `doc_id` = `<rel>:<block index within this file>`.
         """
         rel = relative_unit(filepath, input_dir)
-        buffer: List[str] = []
+        buffer: list[str] = []
         block_idx = 0
 
+        # emit the buffered lines as one document
         def flush() -> Iterator[Document]:
             nonlocal block_idx
             if not buffer:
@@ -137,6 +154,7 @@ class TextExtractor(FileBasedExtractor):
                 )
                 block_idx += 1
 
+        # split the file on blank lines
         with filepath.open(encoding="utf-8") as fh:
             for raw_line in fh:
                 line = raw_line.rstrip("\n")
@@ -145,6 +163,7 @@ class TextExtractor(FileBasedExtractor):
                 else:
                     buffer.append(line)
 
+        # emit the last block
         yield from flush()
 
 

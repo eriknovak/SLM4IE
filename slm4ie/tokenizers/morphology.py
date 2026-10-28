@@ -25,12 +25,20 @@ import logging
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any
 
 from slm4ie.tokenizers.corpus import stable_rank
 from slm4ie.utils.io import open_output, open_text_stream
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Slovene vowels used by the fleeting-vowel (polglasnik) alignment rule.
 _VOWELS = set("aeiou")
@@ -45,7 +53,7 @@ _INDECLINABLE_CATEGORIES = set("DVLMO")
 #: written as `(base, alternant)` pairs. The matcher tries both directions so a
 #: lemma-side base (`k`) aligns with a form-side alternant (`č`) and vice versa.
 #: Multi-character pairs are listed before single ones so they match greedily.
-_STEM_ALTERNATIONS: List[Tuple[str, str]] = [
+_STEM_ALTERNATIONS: list[tuple[str, str]] = [
     ("sk", "šč"),
     ("st", "šč"),
     ("zg", "žj"),
@@ -65,52 +73,59 @@ _STEM_ALTERNATIONS: List[Tuple[str, str]] = [
 ]
 
 
+# ===============================
+# Segmentation types
+# ===============================
+
+
 @dataclass
 class MorphemeSegmentation:
     """One form's morpheme split derived from its lemma.
 
     Attributes:
         form (str): The surface inflected form.
-        morphemes (List[str]): Ordered morpheme pieces; concatenating them
+        morphemes (list[str]): Ordered morpheme pieces; concatenating them
             reproduces `form`.
-        labels (List[str]): Per-morpheme role, one of `prefix`, `stem`,
+        labels (list[str]): Per-morpheme role, one of `prefix`, `stem`,
             `suffix`, `whole` (the last marks an unreliable, unsegmented
             fallback), or `morph` (a role-agnostic derivational piece).
         lemma (str): The lemma the form was aligned against.
-        msd (Optional[str]): The form's morphosyntactic descriptor, if known.
-        verified (Optional[bool]): For derivational segmentations, whether the
+        msd (str | None): The form's morphosyntactic descriptor, if known.
+        verified (bool | None): For derivational segmentations, whether the
             split carries a manual linguist evaluation; None when not
             applicable (e.g. inflectional segmentations).
-        lexeme (Optional[str]): Id of the Sloleks lexeme the form is scored
+        lexeme (str | None): Id of the Sloleks lexeme the form is scored
             under, the unit a bootstrap resamples; None when not assigned.
     """
 
     form: str
-    morphemes: List[str]
-    labels: List[str]
+    morphemes: list[str]
+    labels: list[str]
     lemma: str
-    msd: Optional[str] = None
-    verified: Optional[bool] = None
-    lexeme: Optional[str] = None
+    msd: str | None = None
+    verified: bool | None = None
+    lexeme: str | None = None
 
     @property
     def is_reliable(self) -> bool:
         """Return True when the segmentation is trustworthy for metrics.
 
         Returns:
-            bool: False when the form could not be aligned (`whole` label).
+            False when the form could not be aligned (`whole` label).
         """
         return "whole" not in self.labels
 
-    def boundaries(self) -> List[int]:
+    def boundaries(self) -> list[int]:
         """Return internal morpheme boundary offsets within `form`.
 
         Returns:
-            List[int]: Cumulative character offsets of each internal boundary
+            Cumulative character offsets of each internal boundary
                 (excluding 0 and `len(form)`).
         """
-        offsets: List[int] = []
+        offsets: list[int] = []
         cursor = 0
+
+        # accumulate the morpheme lengths
         for morpheme in self.morphemes[:-1]:
             cursor += len(morpheme)
             offsets.append(cursor)
@@ -122,47 +137,52 @@ class MorphLexicon:
     """Form-keyed gold segmentations plus a derived morpheme inventory.
 
     Attributes:
-        by_form (Dict[str, MorphemeSegmentation]): Reliable segmentations keyed
+        by_form (dict[str, MorphemeSegmentation]): Reliable segmentations keyed
             by surface form; the gold reference for the morph metrics.
-        inventory (Dict[str, int]): Morpheme to occurrence count across all
+        inventory (dict[str, int]): Morpheme to occurrence count across all
             reliable segmentations; the morpheme table for the morph backends.
-        stems (Set[str]): Distinct stem morphemes.
-        suffixes (Set[str]): Distinct suffix morphemes.
+        stems (set[str]): Distinct stem morphemes.
+        suffixes (set[str]): Distinct suffix morphemes.
         collisions (int): Count of forms seen more than once with differing
             segmentations (the first is kept).
     """
 
-    by_form: Dict[str, MorphemeSegmentation] = field(default_factory=dict)
-    inventory: Dict[str, int] = field(default_factory=dict)
-    stems: Set[str] = field(default_factory=set)
-    suffixes: Set[str] = field(default_factory=set)
+    by_form: dict[str, MorphemeSegmentation] = field(default_factory=dict)
+    inventory: dict[str, int] = field(default_factory=dict)
+    stems: set[str] = field(default_factory=set)
+    suffixes: set[str] = field(default_factory=set)
     collisions: int = 0
 
-    def segment(self, word: str) -> List[str]:
+    def segment(self, word: str) -> list[str]:
         """Return the gold morphemes for `word`, or `[word]` if unknown.
 
         Args:
-            word (str): A surface word form.
+            word: A surface word form.
 
         Returns:
-            List[str]: The reliable morpheme pieces, or a single-element list
+            The reliable morpheme pieces, or a single-element list
                 with the word itself when it is not in the lexicon.
         """
         entry = self.by_form.get(word)
         return list(entry.morphemes) if entry is not None else [word]
 
 
-def _match_alternation(form: str, i: int, lemma: str, j: int) -> Optional[Tuple[int, int]]:
+# ===============================
+# Inflectional alignment
+# ===============================
+
+
+def _match_alternation(form: str, i: int, lemma: str, j: int) -> tuple[int, int] | None:
     """Match a stem alternation at the current alignment position.
 
     Args:
-        form (str): Lowercased surface form.
-        i (int): Current index into `form`.
-        lemma (str): Lowercased lemma.
-        j (int): Current index into `lemma`.
+        form: Lowercased surface form.
+        i: Current index into `form`.
+        lemma: Lowercased lemma.
+        j: Current index into `lemma`.
 
     Returns:
-        Optional[Tuple[int, int]]: `(form_consumed, lemma_consumed)` when an
+        `(form_consumed, lemma_consumed)` when an
             alternation pair matches at the position, else None.
     """
     for base, alternant in _STEM_ALTERNATIONS:
@@ -182,14 +202,16 @@ def _stem_cut(form: str, lemma: str) -> int:
     boundary.
 
     Args:
-        form (str): Lowercased surface form.
-        lemma (str): Lowercased lemma.
+        form: Lowercased surface form.
+        lemma: Lowercased lemma.
 
     Returns:
-        int: Number of leading `form` characters that belong to the stem.
+        Number of leading `form` characters that belong to the stem.
     """
     i = 0
     j = 0
+
+    # walk form and lemma together until the first unresolved mismatch
     while i < len(form) and j < len(lemma):
         if form[i] == lemma[j]:
             i += 1
@@ -200,11 +222,11 @@ def _stem_cut(form: str, lemma: str) -> int:
             i += alternation[0]
             j += alternation[1]
             continue
-        # Fleeting vowel present in the lemma but dropped in the form.
+        # fleeting vowel present in the lemma but dropped in the form
         if lemma[j] in _VOWELS and j + 1 < len(lemma) and form[i] == lemma[j + 1]:
             j += 1
             continue
-        # Epenthetic vowel present in the form but absent from the lemma.
+        # epenthetic vowel present in the form but absent from the lemma
         if form[i] in _VOWELS and i + 1 < len(form) and form[i + 1] == lemma[j]:
             i += 1
             continue
@@ -212,14 +234,14 @@ def _stem_cut(form: str, lemma: str) -> int:
     return i
 
 
-def _is_indeclinable(msd: Optional[str]) -> bool:
+def _is_indeclinable(msd: str | None) -> bool:
     """Return True when the MSD marks an invariant word class.
 
     Args:
-        msd (Optional[str]): A MULTEXT-East morphosyntactic descriptor.
+        msd: A MULTEXT-East morphosyntactic descriptor.
 
     Returns:
-        bool: True for adpositions, conjunctions, particles, interjections,
+        True for adpositions, conjunctions, particles, interjections,
             and abbreviations, which must not be split.
     """
     if not msd:
@@ -230,62 +252,66 @@ def _is_indeclinable(msd: Optional[str]) -> bool:
 def segment_form(
     form: str,
     lemma: str,
-    msd: Optional[str] = None,
+    msd: str | None = None,
     *,
     min_stem_len: int = 2,
-) -> Optional[MorphemeSegmentation]:
+) -> MorphemeSegmentation | None:
     """Segment one inflected form against its lemma.
 
     Args:
-        form (str): Surface inflected form.
-        lemma (str): Lemma (citation form).
-        msd (Optional[str]): The form's morphosyntactic descriptor.
-        min_stem_len (int): Minimum stem length; shorter alignments are
+        form: Surface inflected form.
+        lemma: Lemma (citation form).
+        msd: The form's morphosyntactic descriptor.
+        min_stem_len: Minimum stem length; shorter alignments are
             treated as unreliable and returned whole.
 
     Returns:
-        Optional[MorphemeSegmentation]: The segmentation, or None when `form`
+        The segmentation, or None when `form`
             is empty.
     """
     if not form:
         return None
 
-    # Indeclinables and multi-word forms are kept whole but still reliable.
+    # keep indeclinables and multi-word forms whole but reliable
     if _is_indeclinable(msd) or " " in form:
         return MorphemeSegmentation(form, [form], ["stem"], lemma, msd)
 
+    # align the form to the lemma
     cut = _stem_cut(form.lower(), lemma.lower())
 
     if cut >= len(form):
-        # The form is (a prefix of) the lemma: a single clean stem.
+        # the form is (a prefix of) the lemma: a single clean stem
         return MorphemeSegmentation(form, [form], ["stem"], lemma, msd)
     if cut < min_stem_len:
-        # Alignment failed (suppletion, irregular stem): untrusted fallback.
+        # alignment failed (suppletion, irregular stem): untrusted fallback
         return MorphemeSegmentation(form, [form], ["whole"], lemma, msd)
 
+    # split into stem and suffix
     stem = form[:cut]
     suffix = form[cut:]
     return MorphemeSegmentation(form, [stem, suffix], ["stem", "suffix"], lemma, msd)
 
 
 def derive_segmentation(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     *,
     min_stem_len: int = 2,
-) -> List[MorphemeSegmentation]:
+) -> list[MorphemeSegmentation]:
     """Segment every form in one Sloleks record.
 
     Args:
-        record (Dict[str, Any]): A Sloleks record with `lemma` and `forms`.
-        min_stem_len (int): Minimum stem length forwarded to `segment_form`.
+        record: A Sloleks record with `lemma` and `forms`.
+        min_stem_len: Minimum stem length forwarded to `segment_form`.
 
     Returns:
-        List[MorphemeSegmentation]: One segmentation per non-empty form.
+        One segmentation per non-empty form.
     """
     lemma = record.get("lemma")
     if not lemma:
         return []
-    segmentations: List[MorphemeSegmentation] = []
+
+    # segment each form of the record
+    segmentations: list[MorphemeSegmentation] = []
     for entry in record.get("forms", []):
         form = entry.get("form")
         if not form:
@@ -296,19 +322,26 @@ def derive_segmentation(
     return segmentations
 
 
+# ===============================
+# Lexicon builders
+# ===============================
+
+
 def _add_to_lexicon(lexicon: MorphLexicon, segmentation: MorphemeSegmentation) -> None:
     """Insert one reliable segmentation into the lexicon, updating indices.
 
     Args:
-        lexicon (MorphLexicon): The lexicon being built (mutated in place).
-        segmentation (MorphemeSegmentation): A reliable segmentation to add.
+        lexicon: The lexicon being built (mutated in place).
+        segmentation: A reliable segmentation to add.
     """
+    # keep the first segmentation of a form, counting conflicting repeats
     existing = lexicon.by_form.get(segmentation.form)
     if existing is not None:
         if existing.morphemes != segmentation.morphemes:
             lexicon.collisions += 1
         return
 
+    # index the new segmentation
     lexicon.by_form[segmentation.form] = segmentation
     for morpheme, label in zip(segmentation.morphemes, segmentation.labels):
         lexicon.inventory[morpheme] = lexicon.inventory.get(morpheme, 0) + 1
@@ -322,12 +355,12 @@ def build_morph_lexicon(sloleks_path: Path, *, min_stem_len: int = 2) -> MorphLe
     """Build a morpheme lexicon from a converted Sloleks JSONL(.gz) file.
 
     Args:
-        sloleks_path (Path): Path to `tokenization/sloleks.jsonl.gz` as
+        sloleks_path: Path to `tokenization/sloleks.jsonl.gz` as
             produced by `slm4ie/data/tokenization/run.py`.
-        min_stem_len (int): Minimum stem length for a reliable split.
+        min_stem_len: Minimum stem length for a reliable split.
 
     Returns:
-        MorphLexicon: The form lookup plus the derived morpheme inventory.
+        The form lookup plus the derived morpheme inventory.
 
     Raises:
         FileNotFoundError: If `sloleks_path` does not exist.
@@ -336,6 +369,7 @@ def build_morph_lexicon(sloleks_path: Path, *, min_stem_len: int = 2) -> MorphLe
     if not sloleks_path.exists():
         raise FileNotFoundError(f"Sloleks lexicon not found: {sloleks_path}")
 
+    # derive and add the reliable segmentations
     lexicon = MorphLexicon()
     with open_text_stream(sloleks_path) as handle:
         for line in handle:
@@ -370,10 +404,10 @@ def build_derivational_lexicon(path: Path) -> MorphLexicon:
     reporting.
 
     Args:
-        path (Path): Path to the `sloleks_relations` JSONL(.gz).
+        path: Path to the `sloleks_relations` JSONL(.gz).
 
     Returns:
-        MorphLexicon: Lemma-keyed derivational segmentations plus the derived
+        Lemma-keyed derivational segmentations plus the derived
             morpheme inventory.
 
     Raises:
@@ -383,6 +417,7 @@ def build_derivational_lexicon(path: Path) -> MorphLexicon:
     if not path.exists():
         raise FileNotFoundError(f"Derivational lexicon not found: {path}")
 
+    # take the boundaries as given
     lexicon = MorphLexicon()
     with open_text_stream(path) as handle:
         for line in handle:
@@ -423,10 +458,10 @@ def build_inflection_lexicon(path: Path) -> MorphLexicon:
     form is `verified` when every lexeme carrying it was checked by hand.
 
     Args:
-        path (Path): Path to the converted `sloleks_inflection` JSONL(.gz).
+        path: Path to the converted `sloleks_inflection` JSONL(.gz).
 
     Returns:
-        MorphLexicon: One segmentation per unambiguous form.
+        One segmentation per unambiguous form.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -435,9 +470,10 @@ def build_inflection_lexicon(path: Path) -> MorphLexicon:
     if not path.exists():
         raise FileNotFoundError(f"Sloleks inflection split not found: {path}")
 
-    splits: Dict[str, Set[Tuple[str, ...]]] = {}
-    first: Dict[str, MorphemeSegmentation] = {}
-    manual: Dict[str, bool] = {}
+    # collect each form's splits and manual status
+    splits: dict[str, set[tuple[str, ...]]] = {}
+    first: dict[str, MorphemeSegmentation] = {}
+    manual: dict[str, bool] = {}
     with open_text_stream(path) as handle:
         for line in handle:
             if not line.strip():
@@ -454,6 +490,7 @@ def build_inflection_lexicon(path: Path) -> MorphLexicon:
                     msd = form["msds"][0] if form["msds"] else None
                     first[surface] = MorphemeSegmentation(surface, morphemes, labels, record["lemma"], msd)
 
+    # drop forms split two ways
     lexicon = MorphLexicon()
     for surface, segmentation in first.items():
         if len(splits[surface]) > 1:
@@ -480,10 +517,10 @@ def build_morphscore_lexicon(path: Path) -> MorphLexicon:
     `collisions`. A form equal to its stem is kept whole.
 
     Args:
-        path (Path): Path to the converted `morphscore_slovenian` JSONL(.gz).
+        path: Path to the converted `morphscore_slovenian` JSONL(.gz).
 
     Returns:
-        MorphLexicon: One segmentation per form, with the UD part of speech
+        One segmentation per form, with the UD part of speech
             as its `msd`.
 
     Raises:
@@ -493,8 +530,9 @@ def build_morphscore_lexicon(path: Path) -> MorphLexicon:
     if not path.exists():
         raise FileNotFoundError(f"MorphScore items not found: {path}")
 
-    splits: Dict[str, Set[Tuple[str, ...]]] = {}
-    first: Dict[str, MorphemeSegmentation] = {}
+    # collect each scored form's splits
+    splits: dict[str, set[tuple[str, ...]]] = {}
+    first: dict[str, MorphemeSegmentation] = {}
     with open_text_stream(path) as handle:
         for line in handle:
             if not line.strip():
@@ -509,6 +547,7 @@ def build_morphscore_lexicon(path: Path) -> MorphLexicon:
                 labels = ["prefix"] * stem_at + ["stem"] + ["suffix"] * (len(morphemes) - stem_at - 1)
                 first[form] = MorphemeSegmentation(form, morphemes, labels, item["lemma"], item["pos"])
 
+    # drop forms cut two ways
     lexicon = MorphLexicon()
     for form, segmentation in first.items():
         if len(splits[form]) > 1:
@@ -521,17 +560,22 @@ def build_morphscore_lexicon(path: Path) -> MorphLexicon:
     return lexicon
 
 
-def is_morphscore_scored(item: Dict[str, Any]) -> bool:
+def is_morphscore_scored(item: dict[str, Any]) -> bool:
     """Return whether a MorphScore v2 item passes its default scoring filters.
 
     Args:
-        item (Dict[str, Any]): One converted `morphscore_slovenian` record.
+        item: One converted `morphscore_slovenian` record.
 
     Returns:
-        bool: True for a first occurrence whose stem equals its lemma and
+        True for a first occurrence whose stem equals its lemma and
             whose form has no digit.
     """
     return item["is_unique"] and item["stem"] == item["lemma"] and not any(ch.isdigit() for ch in item["form"])
+
+
+# ===============================
+# Lexeme split
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -539,20 +583,20 @@ class LexemeSplit:
     """Sloleks lexemes split into a table side and a held-out side.
 
     Attributes:
-        heldout_forms (FrozenSet[str]): Forms of held-out lexemes that no
+        heldout_forms (frozenset[str]): Forms of held-out lexemes that no
             table-side lexeme also carries; the only forms scored.
-        table_forms (FrozenSet[str]): Every form of a table-side lexeme.
-        lexeme_of (Dict[str, str]): Each held-out form to the id of the one
+        table_forms (frozenset[str]): Every form of a table-side lexeme.
+        lexeme_of (dict[str, str]): Each held-out form to the id of the one
             held-out lexeme it is scored under; a form two held-out lexemes
             carry goes to the lexeme `stable_rank` of the pair ranks lowest.
-        counts (List[Dict[str, Any]]): One row per side, word class and status
+        counts (list[dict[str, Any]]): One row per side, word class and status
             with its `lexemes` and `forms`.
     """
 
-    heldout_forms: FrozenSet[str]
-    table_forms: FrozenSet[str]
-    lexeme_of: Dict[str, str]
-    counts: List[Dict[str, Any]]
+    heldout_forms: frozenset[str]
+    table_forms: frozenset[str]
+    lexeme_of: dict[str, str]
+    counts: list[dict[str, Any]]
 
 
 def split_lexemes(path: Path, heldout_share: float) -> LexemeSplit:
@@ -566,11 +610,11 @@ def split_lexemes(path: Path, heldout_share: float) -> LexemeSplit:
     to one held-out lexeme, the unit the bootstrap resamples.
 
     Args:
-        path (Path): Path to the converted `sloleks_inflection` JSONL(.gz).
-        heldout_share (float): Share of each stratum's lexemes held out.
+        path: Path to the converted `sloleks_inflection` JSONL(.gz).
+        heldout_share: Share of each stratum's lexemes held out.
 
     Returns:
-        LexemeSplit: The held-out and table-side forms with per-stratum counts.
+        The held-out and table-side forms with per-stratum counts.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -582,7 +626,8 @@ def split_lexemes(path: Path, heldout_share: float) -> LexemeSplit:
     if not path.exists():
         raise FileNotFoundError(f"Sloleks inflection split not found: {path}")
 
-    strata: Dict[Tuple[str, str], List[Tuple[int, str, List[str]]]] = {}
+    # group the lexemes by word class and status
+    strata: dict[tuple[str, str], list[tuple[int, str, list[str]]]] = {}
     with open_text_stream(path) as handle:
         for line in handle:
             if not line.strip():
@@ -595,19 +640,22 @@ def split_lexemes(path: Path, heldout_share: float) -> LexemeSplit:
             entry_id = str(record["entry_id"])
             strata.setdefault(key, []).append((stable_rank(entry_id), entry_id, forms))
 
-    sides: Dict[str, Dict[Tuple[str, str], List[Tuple[str, List[str]]]]] = {"heldout": {}, "table": {}}
+    # hold out the lowest-ranked share of each stratum
+    sides: dict[str, dict[tuple[str, str], list[tuple[str, list[str]]]]] = {"heldout": {}, "table": {}}
     for key, lexemes in strata.items():
         lexemes.sort(key=lambda item: item[0])
         n_heldout = round(len(lexemes) * heldout_share)
         sides["heldout"][key] = [(entry_id, forms) for _rank, entry_id, forms in lexemes[:n_heldout]]
         sides["table"][key] = [(entry_id, forms) for _rank, entry_id, forms in lexemes[n_heldout:]]
 
+    # resolve the scored forms and their lexemes
     table_forms = frozenset(form for group in sides["table"].values() for _id, forms in group for form in forms)
     heldout_all = {form for group in sides["heldout"].values() for _id, forms in group for form in forms}
     heldout_forms = frozenset(heldout_all - table_forms)
     lexeme_of = _assign_lexemes(sides["heldout"], heldout_forms)
 
-    counts: List[Dict[str, Any]] = []
+    # count the lexemes and forms per side and stratum
+    counts: list[dict[str, Any]] = []
     for side, groups in sides.items():
         for (word_class, status), group in sorted(groups.items()):
             distinct = {form for _id, forms in group for form in forms}
@@ -631,8 +679,8 @@ def split_lexemes(path: Path, heldout_share: float) -> LexemeSplit:
 
 
 def _assign_lexemes(
-    heldout: Dict[Tuple[str, str], List[Tuple[str, List[str]]]], forms: FrozenSet[str]
-) -> Dict[str, str]:
+    heldout: dict[tuple[str, str], list[tuple[str, list[str]]]], forms: frozenset[str]
+) -> dict[str, str]:
     """Map each scored form to one held-out lexeme carrying it.
 
     Args:
@@ -640,10 +688,12 @@ def _assign_lexemes(
         forms: The scored held-out forms.
 
     Returns:
-        Dict[str, str]: Form to entry id; among several carriers the one whose
+        Form to entry id; among several carriers the one whose
             `stable_rank` of form and id is lowest.
     """
-    lexeme_of: Dict[str, str] = {}
+    lexeme_of: dict[str, str] = {}
+
+    # keep the lowest-ranked carrier of each form
     for group in heldout.values():
         for entry_id, lexeme_forms in group:
             for form in lexeme_forms:
@@ -655,16 +705,22 @@ def _assign_lexemes(
     return lexeme_of
 
 
-def without_forms(lexicon: MorphLexicon, forms: FrozenSet[str]) -> MorphLexicon:
+# ===============================
+# Lexicon utilities
+# ===============================
+
+
+def without_forms(lexicon: MorphLexicon, forms: frozenset[str]) -> MorphLexicon:
     """Return a copy of `lexicon` with the given forms left out.
 
     Args:
-        lexicon (MorphLexicon): The lexicon to filter.
-        forms (FrozenSet[str]): Surface forms to leave out.
+        lexicon: The lexicon to filter.
+        forms: Surface forms to leave out.
 
     Returns:
-        MorphLexicon: A new lexicon over the remaining forms, indices rebuilt.
+        A new lexicon over the remaining forms, indices rebuilt.
     """
+    # re-add the remaining forms to rebuild the indices
     kept = MorphLexicon()
     for form, segmentation in lexicon.by_form.items():
         if form not in forms:
@@ -683,12 +739,13 @@ def merge_lexicons(*lexicons: MorphLexicon) -> MorphLexicon:
     from the merged forms.
 
     Args:
-        lexicons (MorphLexicon): Lexicons to union, in precedence order for
+        lexicons: Lexicons to union, in precedence order for
             ties (earlier wins).
 
     Returns:
-        MorphLexicon: The merged lexicon.
+        The merged lexicon.
     """
+    # keep the richest segmentation of each form
     merged = MorphLexicon()
     for lexicon in lexicons:
         for segmentation in lexicon.by_form.values():
@@ -696,6 +753,7 @@ def merge_lexicons(*lexicons: MorphLexicon) -> MorphLexicon:
             if existing is None or len(segmentation.morphemes) > len(existing.morphemes):
                 merged.by_form[segmentation.form] = segmentation
 
+    # rebuild the inventory, stems and suffixes
     for segmentation in merged.by_form.values():
         for morpheme, label in zip(segmentation.morphemes, segmentation.labels):
             merged.inventory[morpheme] = merged.inventory.get(morpheme, 0) + 1
@@ -703,6 +761,7 @@ def merge_lexicons(*lexicons: MorphLexicon) -> MorphLexicon:
                 merged.suffixes.add(morpheme)
             else:
                 merged.stems.add(morpheme)
+
     return merged
 
 
@@ -713,12 +772,13 @@ def save_lexicon(lexicon: MorphLexicon, path: Path) -> Path:
     load, so only the per-form segmentations are written.
 
     Args:
-        lexicon (MorphLexicon): The lexicon to serialize.
-        path (Path): Destination `.jsonl`/`.jsonl.gz` path.
+        lexicon: The lexicon to serialize.
+        path: Destination `.jsonl`/`.jsonl.gz` path.
 
     Returns:
-        Path: `path`, for convenient chaining.
+        `path`, for convenient chaining.
     """
+    # write one JSON line per segmentation
     path = Path(path)
     with open_output(path) as out:
         for entry in lexicon.by_form.values():
@@ -733,6 +793,7 @@ def save_lexicon(lexicon: MorphLexicon, path: Path) -> Path:
             }
             out.write(json.dumps(payload, ensure_ascii=False))
             out.write("\n")
+
     return path
 
 
@@ -740,10 +801,10 @@ def load_lexicon(path: Path) -> MorphLexicon:
     """Load a lexicon previously written by `save_lexicon`.
 
     Args:
-        path (Path): Path to the `.jsonl`/`.jsonl.gz` lexicon file.
+        path: Path to the `.jsonl`/`.jsonl.gz` lexicon file.
 
     Returns:
-        MorphLexicon: Reconstructed lexicon with indices rebuilt.
+        Reconstructed lexicon with indices rebuilt.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -752,6 +813,7 @@ def load_lexicon(path: Path) -> MorphLexicon:
     if not path.exists():
         raise FileNotFoundError(f"Lexicon file not found: {path}")
 
+    # rebuild the lexicon from the saved segmentations
     lexicon = MorphLexicon()
     with open_text_stream(path) as handle:
         for line in handle:
@@ -769,10 +831,11 @@ def load_lexicon(path: Path) -> MorphLexicon:
                 lexeme=payload.get("lexeme"),
             )
             _add_to_lexicon(lexicon, segmentation)
+
     return lexicon
 
 
-def sample_segmentations(lexicon: MorphLexicon, n: Optional[int], seed: int) -> List[MorphemeSegmentation]:
+def sample_segmentations(lexicon: MorphLexicon, n: int | None, seed: int) -> list[MorphemeSegmentation]:
     """Draw a deterministic sample of gold segmentations for the morph metrics.
 
     The sample is fixed by `seed` and the lexicon's (stable) form order, so every
@@ -782,17 +845,19 @@ def sample_segmentations(lexicon: MorphLexicon, n: Optional[int], seed: int) -> 
     sorted), not in draw order.
 
     Args:
-        lexicon (MorphLexicon): The gold lexicon.
-        n (Optional[int]): Target sample size; the whole lexicon is returned
+        lexicon: The gold lexicon.
+        n: Target sample size; the whole lexicon is returned
             when `n` is None or not smaller than the lexicon.
-        seed (int): Seed for the deterministic draw.
+        seed: Seed for the deterministic draw.
 
     Returns:
-        List[MorphemeSegmentation]: The sampled segmentations in lexicon order.
+        The sampled segmentations in lexicon order.
     """
     forms = list(lexicon.by_form.values())
     if n is None or n >= len(forms):
         return forms
+
+    # draw the sample, kept in lexicon order
     rng = random.Random(seed)
     indices = sorted(rng.sample(range(len(forms)), n))
     return [forms[i] for i in indices]

@@ -7,14 +7,21 @@ import shutil
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import List
 
 import zstandard
 from tqdm import tqdm
 
 from slm4ie.utils.parallel import workers_quiet
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Format extractors
+# ===============================
 
 
 def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
@@ -24,12 +31,13 @@ def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
     Skips extraction if the output file already exists.
 
     Args:
-        archive_path (Path): Path to the .gz file.
-        output_dir (Path): Directory to write the extracted file.
+        archive_path: Path to the .gz file.
+        output_dir: Directory to write the extracted file.
 
     Returns:
-        Path: Path to the extracted file.
+        Path to the extracted file.
     """
+    # skip when the output already exists
     output_path = output_dir / archive_path.stem
     if output_path.exists():
         logger.info(
@@ -38,6 +46,7 @@ def _extract_gzip(archive_path: Path, output_dir: Path) -> Path:
         )
         return output_path
 
+    # decompress with a byte progress bar
     logger.info("Extracting %s -> %s", archive_path, output_path)
     total = archive_path.stat().st_size
     with open(archive_path, "rb") as raw_in:
@@ -64,12 +73,13 @@ def _extract_xz(archive_path: Path, output_dir: Path) -> Path:
     Skips extraction if the output file already exists.
 
     Args:
-        archive_path (Path): Path to the .xz file.
-        output_dir (Path): Directory to write the extracted file.
+        archive_path: Path to the .xz file.
+        output_dir: Directory to write the extracted file.
 
     Returns:
-        Path: Path to the extracted file.
+        Path to the extracted file.
     """
+    # skip when the output already exists
     output_path = output_dir / archive_path.stem
     if output_path.exists():
         logger.info(
@@ -78,6 +88,7 @@ def _extract_xz(archive_path: Path, output_dir: Path) -> Path:
         )
         return output_path
 
+    # decompress with a byte progress bar
     logger.info("Extracting %s -> %s", archive_path, output_path)
     total = archive_path.stat().st_size
     with open(archive_path, "rb") as raw_in:
@@ -101,11 +112,11 @@ def _extract_zip(archive_path: Path, output_dir: Path) -> Path:
     """Extract a .zip file to output_dir.
 
     Args:
-        archive_path (Path): Path to the .zip file.
-        output_dir (Path): Directory to extract contents into.
+        archive_path: Path to the .zip file.
+        output_dir: Directory to extract contents into.
 
     Returns:
-        Path: The output_dir path.
+        The output_dir path.
     """
     logger.info("Extracting %s -> %s", archive_path, output_dir)
     with zipfile.ZipFile(archive_path, "r") as zf:
@@ -126,11 +137,11 @@ def _extract_tar(archive_path: Path, output_dir: Path) -> Path:
     Uses filter="data" for safe extraction.
 
     Args:
-        archive_path (Path): Path to the tar archive.
-        output_dir (Path): Directory to extract contents into.
+        archive_path: Path to the tar archive.
+        output_dir: Directory to extract contents into.
 
     Returns:
-        Path: The output_dir path.
+        The output_dir path.
     """
     logger.info("Extracting %s -> %s", archive_path, output_dir)
     with tarfile.open(archive_path, "r:gz") as tf:
@@ -153,11 +164,11 @@ def _extract_tar_zst(archive_path: Path, output_dir: Path) -> Path:
     archive on disk. Uses filter="data" for safe extraction.
 
     Args:
-        archive_path (Path): Path to the zstd-compressed tar archive.
-        output_dir (Path): Directory to extract contents into.
+        archive_path: Path to the zstd-compressed tar archive.
+        output_dir: Directory to extract contents into.
 
     Returns:
-        Path: The output_dir path.
+        The output_dir path.
     """
     logger.info("Extracting %s -> %s", archive_path, output_dir)
     total = archive_path.stat().st_size
@@ -179,6 +190,11 @@ def _extract_tar_zst(archive_path: Path, output_dir: Path) -> Path:
     return output_dir
 
 
+# ===============================
+# Public API
+# ===============================
+
+
 def extract_archive(archive_path: Path, output_dir: Path) -> Path:
     """Extract an archive file to the specified output directory.
 
@@ -193,11 +209,11 @@ def extract_archive(archive_path: Path, output_dir: Path) -> Path:
       filter="data" to output_dir.
 
     Args:
-        archive_path (Path): Path to the archive file.
-        output_dir (Path): Directory to extract contents into.
+        archive_path: Path to the archive file.
+        output_dir: Directory to extract contents into.
 
     Returns:
-        Path: Path to the extracted file (for .gz / .xz) or
+        Path to the extracted file (for .gz / .xz) or
             output_dir (for .zip, .tar.gz, .tgz, .tar.zst, .tar.zstd).
 
     Raises:
@@ -205,6 +221,7 @@ def extract_archive(archive_path: Path, output_dir: Path) -> Path:
     """
     name = archive_path.name
 
+    # dispatch on the filename extension
     if name.endswith(".tar.gz") or name.endswith(".tgz"):
         return _extract_tar(archive_path, output_dir)
     elif name.endswith(".tar.zst") or name.endswith(".tar.zstd"):
@@ -226,7 +243,7 @@ def extract_archive(archive_path: Path, output_dir: Path) -> Path:
 _UNPACK_SUFFIXES = (".tar.gz", ".tgz", ".tar.zst", ".tar.zstd", ".zip")
 
 
-def unpack_archives(raw_dir: Path) -> List[Path]:
+def unpack_archives(raw_dir: Path) -> list[Path]:
     """Extract any container archives sitting directly in a raw directory.
 
     Convenience for readers whose raw downloads arrive as archives but which
@@ -237,12 +254,13 @@ def unpack_archives(raw_dir: Path) -> List[Path]:
     the expected files are missing) to avoid redundant re-extraction.
 
     Args:
-        raw_dir (Path): Directory holding the downloaded archive(s).
+        raw_dir: Directory holding the downloaded archive(s).
 
     Returns:
-        List[Path]: The archive paths that were extracted, in sorted order
+        The archive paths that were extracted, in sorted order
             (empty when `raw_dir` holds no recognized archive).
     """
+    # find the archives, then extract each in place
     archives = sorted(path for path in raw_dir.glob("*") if path.is_file() and path.name.endswith(_UNPACK_SUFFIXES))
     for archive in archives:
         extract_archive(archive, raw_dir)

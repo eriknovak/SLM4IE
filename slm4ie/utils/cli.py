@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from slm4ie.utils.io import find_project_root
 
@@ -73,7 +72,7 @@ def add_workers(parser: argparse.ArgumentParser, help_text: str) -> None:
     parser.add_argument("--max-workers", type=int, default=0, help=help_text)
 
 
-def resolve_config(explicit: Optional[Path], *relative_parts: str) -> Path:
+def resolve_config(explicit: Path | None, *relative_parts: str) -> Path:
     """Return `explicit` when given, else the project-relative default path.
 
     Args:

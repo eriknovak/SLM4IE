@@ -4,14 +4,21 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Tuple
 
 from datasets import load_dataset
 
 from slm4ie.data.download.config import DatasetConfig
 from slm4ie.data.download.run import DownloaderResult, _augment_with_note
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Downloader
+# ===============================
 
 
 def download(config: DatasetConfig, output_dir: Path, force: bool) -> DownloaderResult:
@@ -37,15 +44,15 @@ def download(config: DatasetConfig, output_dir: Path, force: bool) -> Downloader
             the prior data (or a `.ready` to finish on the next run).
 
     Returns:
-        DownloaderResult: Outcome record with one entry per declared
-            config in either `completed` or `failed`. A failure on one
-            config (e.g., gated repo without `HF_TOKEN`) does not abort
-            the remaining configs.
+        Outcome record with one entry per declared config in either
+        `completed` or `failed`. A failure on one config (e.g., gated repo
+        without `HF_TOKEN`) does not abort the remaining configs.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    completed: List[str] = []
-    failed: List[Tuple[str, BaseException]] = []
+    # download each declared config
+    completed: list[str] = []
+    failed: list[tuple[str, BaseException]] = []
     configs = config.configs or []
     for cfg_name in configs:
         try:
@@ -53,8 +60,7 @@ def download(config: DatasetConfig, output_dir: Path, force: bool) -> Downloader
             staging = save_path.parent / f"{save_path.name}.partial"
             ready = save_path.parent / f"{save_path.name}.ready"
 
-            # Recovery on entry: complete any half-swapped prior run,
-            # then discard orphan staging dirs.
+            # recover on entry: finish a half-swapped run, drop orphan staging
             if ready.exists():
                 logger.info(
                     "Recovering '%s': finishing swap from .ready marker",
@@ -83,6 +89,7 @@ def download(config: DatasetConfig, output_dir: Path, force: bool) -> Downloader
                 config.name,
                 cfg_name,
             )
+            # download into staging, then swap into place
             staging.parent.mkdir(parents=True, exist_ok=True)
             ds = load_dataset(config.repo_id, cfg_name)
             ds.save_to_disk(str(staging))

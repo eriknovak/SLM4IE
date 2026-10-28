@@ -12,32 +12,13 @@ hashes without having to re-read the file.
 """
 
 from pathlib import Path
-from typing import Set, Tuple
+
+# ===============================
+# Loader
+# ===============================
 
 
-def _parse_stopwords(raw: bytes) -> Set[str]:
-    """Parse a stopword-file payload into a lowercased token set.
-
-    Blank lines and lines whose first non-whitespace character is `#`
-    are skipped. Remaining lines are stripped and lowercased before
-    being added to the result set.
-
-    Args:
-        raw: UTF-8 encoded contents of a stopword file.
-
-    Returns:
-        Set of lowercased stopword tokens.
-    """
-    out: Set[str] = set()
-    for line in raw.decode("utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        out.add(line.lower())
-    return out
-
-
-def load_stopwords(code: str) -> Tuple[Set[str], bytes]:
+def load_stopwords(code: str) -> tuple[set[str], bytes]:
     """Load the bundled stopword list for a language code.
 
     Resolves `<code>.txt` next to this module, reads its bytes, and
@@ -58,10 +39,41 @@ def load_stopwords(code: str) -> Tuple[Set[str], bytes]:
         ValueError: If `<code>.txt` is not present. The message lists
             available codes discovered via `glob('*.txt')`.
     """
+    # resolve the bundled file
     folder = Path(__file__).parent
     path = folder / f"{code}.txt"
     if not path.exists():
         available = sorted(p.stem for p in folder.glob("*.txt"))
         raise ValueError(f"unknown stopwords language {code!r}; available: {available}")
+
+    # read and parse it
     raw = path.read_bytes()
     return _parse_stopwords(raw), raw
+
+
+# ===============================
+# Helper functions
+# ===============================
+
+
+def _parse_stopwords(raw: bytes) -> set[str]:
+    """Parse a stopword-file payload into a lowercased token set.
+
+    Blank lines and lines whose first non-whitespace character is `#`
+    are skipped. Remaining lines are stripped and lowercased before
+    being added to the result set.
+
+    Args:
+        raw: UTF-8 encoded contents of a stopword file.
+
+    Returns:
+        Set of lowercased stopword tokens.
+    """
+    # collect the lowercased tokens
+    out: set[str] = set()
+    for line in raw.decode("utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        out.add(line.lower())
+    return out

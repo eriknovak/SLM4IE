@@ -8,7 +8,7 @@ harness uses the fast tokenizer's offset mapping.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from slm4ie.tokenizers.backends._hf_base import HfBackend, alphabet_options
 from slm4ie.tokenizers.base import TrainContext
@@ -29,17 +29,20 @@ class WordPieceTokenizer(HfBackend):
         """Train a character-level WordPiece model over `corpus`.
 
         Args:
-            corpus (Iterable[str]): Training sentences.
-            vocab_size (int): Target vocabulary size.
-            config (TrainContext): Shared training settings (special tokens,
+            corpus: Training sentences.
+            vocab_size: Target vocabulary size.
+            config: Shared training settings (special tokens,
                 base alphabet).
         """
         from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers, trainers
 
+        # build the WordPiece pipeline
         tokenizer = Tokenizer(models.WordPiece(unk_token=self.unk_token))
         tokenizer.normalizer = normalizers.NFC()
         tokenizer.pre_tokenizer = pre_tokenizers.BertPreTokenizer()
         tokenizer.decoder = decoders.WordPiece(prefix="##")
+
+        # train the model
         trainer = trainers.WordPieceTrainer(
             vocab_size=vocab_size,
             special_tokens=list(config.special_tokens),

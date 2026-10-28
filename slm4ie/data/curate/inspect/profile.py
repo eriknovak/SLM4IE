@@ -31,27 +31,41 @@ import json
 import logging
 import re
 from collections import Counter
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.data.curate.paths import count_jsonl_rows
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: A token, for the lexical statistics: a run of word characters.
 _TOKEN = re.compile(r"\w+", re.UNICODE)
 
 #: Percentiles reported for every length distribution.
-PERCENTILES: Tuple[int, ...] = (5, 25, 50, 75, 95)
+PERCENTILES: tuple[int, ...] = (5, 25, 50, 75, 95)
 
 #: Tokens per source used for the type-token ratio, which shrinks as a sample
 #: grows and so is only comparable at one fixed budget.
 TTR_BUDGET: int = 100_000
 
 
-def tokens(text: str) -> List[str]:
+# ===============================
+# Lexical statistics
+# ===============================
+
+
+def tokens(text: str) -> list[str]:
     """Split text into lowercased word tokens.
 
     Args:
@@ -63,7 +77,7 @@ def tokens(text: str) -> List[str]:
     return [match.group(0).lower() for match in _TOKEN.finditer(text)]
 
 
-def percentiles(values: Sequence[float], points: Sequence[int] = PERCENTILES) -> Dict[str, float]:
+def percentiles(values: Sequence[float], points: Sequence[int] = PERCENTILES) -> dict[str, float]:
     """Return percentiles of a sample, by nearest rank.
 
     Args:
@@ -82,7 +96,7 @@ def percentiles(values: Sequence[float], points: Sequence[int] = PERCENTILES) ->
     }
 
 
-def type_token_ratio(token_list: Sequence[str], budget: int = TTR_BUDGET) -> Tuple[float, int]:
+def type_token_ratio(token_list: Sequence[str], budget: int = TTR_BUDGET) -> tuple[float, int]:
     """Return the type-token ratio over a fixed number of tokens.
 
     Args:
@@ -96,7 +110,7 @@ def type_token_ratio(token_list: Sequence[str], budget: int = TTR_BUDGET) -> Tup
     return (len(set(window)) / len(window) if window else 0.0), len(window)
 
 
-def sloleks_forms(path: Path) -> Set[str]:
+def sloleks_forms(path: Path) -> set[str]:
     """Load every word form Sloleks lists.
 
     Args:
@@ -106,7 +120,8 @@ def sloleks_forms(path: Path) -> Set[str]:
     Returns:
         Lowercased lemmas and inflected forms.
     """
-    forms: Set[str] = set()
+    # collect the lemmas and inflected forms
+    forms: set[str] = set()
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -117,11 +132,12 @@ def sloleks_forms(path: Path) -> Set[str]:
             for form in entry.get("forms", ()):
                 if form.get("form"):
                     forms.add(form["form"].lower())
+
     logger.info("Sloleks: %d forms from %s", len(forms), path)
     return forms
 
 
-def oov_rate(token_list: Sequence[str], forms: Set[str]) -> Tuple[float, int]:
+def oov_rate(token_list: Sequence[str], forms: set[str]) -> tuple[float, int]:
     """Return the share of alphabetic tokens Sloleks does not list.
 
     Numbers and mixed alphanumeric tokens are left out rather than counted as
@@ -136,11 +152,19 @@ def oov_rate(token_list: Sequence[str], forms: Set[str]) -> Tuple[float, int]:
     Returns:
         The out-of-vocabulary share and the number of tokens it was taken over.
     """
+    # keep alphabetic tokens only
     alphabetic = [token for token in token_list if token.isalpha()]
     if not alphabetic:
         return 0.0, 0
+
+    # count the tokens the lexicon lacks
     unknown = sum(1 for token in alphabetic if token not in forms)
     return unknown / len(alphabetic), len(alphabetic)
+
+
+# ===============================
+# Language identification
+# ===============================
 
 
 def _detector(candidates: Sequence[str], low_accuracy: bool = True) -> Any:
@@ -158,11 +182,14 @@ def _detector(candidates: Sequence[str], low_accuracy: bool = True) -> Any:
     """
     from lingua import Language, LanguageDetectorBuilder
 
+    # resolve the candidate codes to lingua languages
     by_code = {language.iso_code_639_1.name.lower(): language for language in Language.all()}
     try:
         languages = [by_code[code] for code in candidates]
     except KeyError as exc:
         raise ValueError(f"unknown lingua language code: {exc.args[0]!r}") from exc
+
+    # build the detector
     builder = LanguageDetectorBuilder.from_languages(*languages).with_preloaded_language_models()
     if low_accuracy:
         builder = builder.with_low_accuracy_mode()
@@ -171,7 +198,7 @@ def _detector(candidates: Sequence[str], low_accuracy: bool = True) -> Any:
 
 def language_confidence(
     texts: Sequence[str], detector: Any, target: str = "sl", max_chars: int = 2000
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Score how confidently a sample reads as the target language.
 
     Args:
@@ -184,8 +211,10 @@ def language_confidence(
         The share of documents predicted as *target*, percentiles of the
         confidence given to *target*, and the languages predicted instead.
     """
-    scores: List[float] = []
+    scores: list[float] = []
     predicted: Counter = Counter()
+
+    # score each document's head
     for text in texts:
         head = text[:max_chars]
         values = detector.compute_language_confidence_values(head)
@@ -195,6 +224,8 @@ def language_confidence(
             if value.language.iso_code_639_1.name.lower() == target:
                 scores.append(float(value.value))
                 break
+
+    # summarise the predictions
     return {
         "in_language_share": predicted.get(target, 0) / len(texts) if texts else 0.0,
         "confidence": percentiles(scores),
@@ -202,7 +233,12 @@ def language_confidence(
     }
 
 
-def sample_documents(source_dir: Path, per_source: int, stride: int = 10, max_shards: int = 3) -> List[Dict[str, Any]]:
+# ===============================
+# Corpus profile
+# ===============================
+
+
+def sample_documents(source_dir: Path, per_source: int, stride: int = 10, max_shards: int = 3) -> list[dict[str, Any]]:
     """Read a sample of one source's documents from the finished corpus.
 
     Args:
@@ -215,9 +251,10 @@ def sample_documents(source_dir: Path, per_source: int, stride: int = 10, max_sh
     Returns:
         The sampled documents.
     """
+    # read every step-th document, falling back to every document
     shards = sorted(source_dir.glob("*.jsonl.gz"))[:max_shards]
     for step in (stride, 1) if stride > 1 else (1,):
-        collected: List[Dict[str, Any]] = []
+        collected: list[dict[str, Any]] = []
         for shard in shards:
             with gzip.open(shard, "rt", encoding="utf-8") as handle:
                 for index, line in enumerate(handle):
@@ -226,16 +263,13 @@ def sample_documents(source_dir: Path, per_source: int, stride: int = 10, max_sh
                     collected.append(json.loads(line))
                     if len(collected) >= per_source:
                         return collected
-        # A small source cannot fill the sample at this stride, so it is read
-        # again taking every document rather than being under-sampled.
+        # a small source cannot fill the sample at this stride; read every document instead
         if len(collected) >= per_source // 2:
             return collected
     return collected
 
 
-def profile_source(
-    documents: Sequence[Dict[str, Any]], forms: Optional[Set[str]], detector: Optional[Any]
-) -> Dict[str, Any]:
+def profile_source(documents: Sequence[dict[str, Any]], forms: set[str] | None, detector: Any | None) -> dict[str, Any]:
     """Compute every statistic for one source's sample.
 
     Args:
@@ -249,7 +283,9 @@ def profile_source(
     texts = [document["text"] for document in documents]
     token_list = [token for text in texts for token in tokens(text)]
     ratio, budget = type_token_ratio(token_list)
-    profile: Dict[str, Any] = {
+
+    # length, vocabulary and duplication statistics
+    profile: dict[str, Any] = {
         "documents_sampled": len(documents),
         "chars": percentiles([len(text) for text in texts]),
         "words": percentiles([len(tokens(text)) for text in texts]),
@@ -261,6 +297,8 @@ def profile_source(
             else 0.0
         ),
     }
+
+    # optional vocabulary and language statistics
     if forms is not None:
         rate, checked = oov_rate(token_list, forms)
         profile["oov_rate"] = round(rate, 4)
@@ -272,12 +310,12 @@ def profile_source(
 
 def profile_corpus(
     final_dir: Path,
-    sloleks_path: Optional[Path] = None,
+    sloleks_path: Path | None = None,
     candidates: Sequence[str] = ("sl", "hr", "sr", "bs", "en", "de", "it", "hu"),
     per_source: int = 2000,
     stride: int = 10,
-    sources: Optional[Sequence[str]] = None,
-) -> Dict[str, Dict[str, Any]]:
+    sources: Sequence[str] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Profile every source in the finished corpus.
 
     Args:
@@ -291,14 +329,19 @@ def profile_corpus(
     Returns:
         One profile per source, keyed by source name.
     """
+    # load the lexicon and the language detector
     forms = sloleks_forms(sloleks_path) if sloleks_path else None
     detector = _detector(candidates)
+
+    # select the source folders
     folders = [
         folder
         for folder in sorted(final_dir.iterdir())
         if folder.is_dir() and (sources is None or folder.name in sources)
     ]
-    profiles: Dict[str, Dict[str, Any]] = {}
+
+    # profile each source
+    profiles: dict[str, dict[str, Any]] = {}
     for folder in folders:
         documents = sample_documents(folder, per_source=per_source, stride=stride)
         if not documents:
@@ -318,7 +361,12 @@ def profile_corpus(
     return profiles
 
 
-def iter_stage_sentinels(pretrain_dir: Path, stages: Sequence[str]) -> Iterator[Tuple[str, str, int, int]]:
+# ===============================
+# Stage counts
+# ===============================
+
+
+def iter_stage_sentinels(pretrain_dir: Path, stages: Sequence[str]) -> Iterator[tuple[str, str, int, int]]:
     """Yield the per-source document counts each scoped stage recorded.
 
     The stages stamp `records_in` and `records_out` into a `.complete` sentinel
@@ -337,7 +385,7 @@ def iter_stage_sentinels(pretrain_dir: Path, stages: Sequence[str]) -> Iterator[
             yield stage, path.parent.name, sentinel["records_in"], sentinel["records_out"]
 
 
-def count_source_documents(stage_dir: Path, workers: int = 10) -> Dict[str, int]:
+def count_source_documents(stage_dir: Path, workers: int = 10) -> dict[str, int]:
     """Count the documents each source holds in a stage's output.
 
     The corpus-wide dedup stages keep no per-source sentinel, so the funnel
@@ -350,16 +398,19 @@ def count_source_documents(stage_dir: Path, workers: int = 10) -> Dict[str, int]
     Returns:
         Documents per source.
     """
+    # list the shards of every source
     folders = [folder for folder in sorted(stage_dir.iterdir()) if folder.is_dir()]
     shards = [(folder.name, shard) for folder in folders for shard in sorted(folder.glob("*.jsonl.gz"))]
-    counts: Dict[str, int] = {folder.name: 0 for folder in folders}
+
+    # count the rows of the shards in parallel
+    counts: dict[str, int] = {folder.name: 0 for folder in folders}
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for (source, _), rows in zip(shards, pool.map(count_jsonl_rows, [shard for _, shard in shards])):
             counts[source] += rows
     return counts
 
 
-def cached_source_counts(stage_dir: Path, cache: Path, workers: int = 10) -> Dict[str, int]:
+def cached_source_counts(stage_dir: Path, cache: Path, workers: int = 10) -> dict[str, int]:
     """Count the documents each source holds in a stage's output, once per state of the stage.
 
     The count reads every shard, so it is written to `cache` with the stage's
@@ -379,10 +430,14 @@ def cached_source_counts(stage_dir: Path, cache: Path, workers: int = 10) -> Dic
     sentinel = read_sentinel(stage_dir)
     if sentinel is None or sentinel.document_digest is None:
         raise FileNotFoundError(f"no completed sentinel with a document digest at {stage_dir}")
+
+    # reuse the cache while the digest is unchanged
     if cache.is_file():
         cached = json.loads(cache.read_text(encoding="utf-8"))
         if cached.get("document_digest") == sentinel.document_digest:
             return cached["counts"]
+
+    # recount and rewrite the cache
     logger.info("counting %s per source; this reads every shard", stage_dir)
     counts = count_source_documents(stage_dir, workers=workers)
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -393,10 +448,10 @@ def cached_source_counts(stage_dir: Path, cache: Path, workers: int = 10) -> Dic
 def describe_corpus(
     pretrain_dir: Path,
     destination_dir: Path,
-    sloleks_path: Optional[Path],
+    sloleks_path: Path | None,
     per_source: int = 2000,
     workers: int = 10,
-) -> Tuple[Path, Path]:
+) -> tuple[Path, Path]:
     """Write the no-judge description of the finished corpus.
 
     Two files, both read by the experiment's analysis: the document count of
@@ -413,12 +468,16 @@ def describe_corpus(
     Returns:
         The paths of the stage counts and of the profile.
     """
+    # write the stage counts
     destination_dir.mkdir(parents=True, exist_ok=True)
     counts_path = destination_dir / "stage-counts.json"
     stage = "05_exact_dedup"
     counts = {stage: count_source_documents(pretrain_dir / stage, workers=workers)}
     counts_path.write_text(json.dumps(counts, indent=1), encoding="utf-8")
+
+    # write the corpus profile
     profile_path = destination_dir / "corpus-profile.json"
     profiles = profile_corpus(pretrain_dir / "06_sentence_dedup", sloleks_path=sloleks_path, per_source=per_source)
     profile_path.write_text(json.dumps(profiles, ensure_ascii=False, indent=1), encoding="utf-8")
+
     return counts_path, profile_path

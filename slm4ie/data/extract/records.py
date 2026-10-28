@@ -8,39 +8,52 @@ it on the fly so no consumer materializes a merged file.
 
 import itertools
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any
 
 from slm4ie.utils.io import open_text_stream
+
+# ===============================
+# Dataset file lookup
+# ===============================
 
 
 def find_dataset_files(
     processed_dir: Path,
     key: str,
-) -> Optional[Tuple[Path, Optional[Path]]]:
+) -> tuple[Path, Path | None] | None:
     """Locate the text JSONL and optional annotations sidecar for a dataset.
 
     Args:
-        processed_dir (Path): Directory containing processed files.
-        key (str): Dataset key.
+        processed_dir: Directory containing processed files.
+        key: Dataset key.
 
     Returns:
-        Optional[Tuple[Path, Optional[Path]]]: A tuple of
+        A tuple of
             `(text_path, annotations_path)` where `annotations_path`
             is None when the dataset has no annotations sidecar.
             Returns None when no `<key>.jsonl` exists.
     """
+    # locate the text file
     text_path = processed_dir / f"{key}.jsonl"
     if not text_path.exists():
         return None
+
+    # locate the annotations sidecar
     ann_path = processed_dir / f"{key}.annotations.jsonl.gz"
     return (text_path, ann_path if ann_path.exists() else None)
 
 
+# ===============================
+# Joined records
+# ===============================
+
+
 def iter_joined_records(
     text_path: Path,
-    annotations_path: Optional[Path] = None,
-) -> Iterator[Dict[str, Any]]:
+    annotations_path: Path | None = None,
+) -> Iterator[dict[str, Any]]:
     """Iterate records from *text_path*, attaching annotations when present.
 
     Both files are assumed to share document order. When the text and
@@ -49,12 +62,12 @@ def iter_joined_records(
     the files were produced by different runs.
 
     Args:
-        text_path (Path): Path to `<key>.jsonl`.
-        annotations_path (Optional[Path]): Path to the annotations
-            file, or None if the dataset has no annotations.
+        text_path: Path to `<key>.jsonl`.
+        annotations_path: Path to the annotations file, or None if the
+            dataset has no annotations.
 
     Yields:
-        Dict[str, Any]: A text record with, when available, an
+        A text record with, when available, an
             `annotations` field carrying the parallel-array payload
             (`forms`, `lemmas`, `upos`, `feats`, `space_after`,
             `sentences`). Sidecars written before the `space_after`
@@ -66,6 +79,7 @@ def iter_joined_records(
         ValueError: If a `doc_id`/`uid` mismatch is detected or
             the two streams differ in length.
     """
+    # stream the text alone when there are no annotations
     if annotations_path is None:
         with text_path.open(encoding="utf-8") as fh:
             for line in fh:
@@ -75,15 +89,18 @@ def iter_joined_records(
                 yield json.loads(line)
         return
 
+    # stream both files in lockstep
     with text_path.open(encoding="utf-8") as text_fh, open_text_stream(annotations_path) as ann_fh:
         for lineno, (text_line, ann_line) in enumerate(itertools.zip_longest(text_fh, ann_fh), start=1):
             if text_line is None or ann_line is None:
                 missing = "text" if text_line is None else "annotations"
                 raise ValueError(f"Line counts differ at line {lineno}: {missing} stream exhausted first")
 
+            # parse both records
             text_record = json.loads(text_line)
             ann_record = json.loads(ann_line)
 
+            # check the ids agree
             text_id = text_record.get("doc_id")
             ann_id = ann_record.get("doc_id")
             if text_id is not None and ann_id is not None and text_id != ann_id:
@@ -94,6 +111,7 @@ def iter_joined_records(
             if text_uid is not None and ann_uid is not None and text_uid != ann_uid:
                 raise ValueError(f"uid mismatch at line {lineno}: text={text_uid!r} annotations={ann_uid!r}")
 
+            # attach the annotations payload
             ann_record.pop("doc_id", None)
             ann_record.pop("uid", None)
             if ann_record:

@@ -14,17 +14,26 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections.abc import Callable, Iterable
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
     as_completed,
 )
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from tqdm import tqdm
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Env var set by `run_parallel` while a parallel pool is active. Worker
 #: code can call `workers_quiet()` to detect it and silence per-task
@@ -34,6 +43,22 @@ _PARALLEL_ENV_VAR = "SLM4IE_DATA_PARALLEL"
 #: Shared formatter for per-dataset log files. Matches the console
 #: format used by `configure_script_logging` so log files look familiar.
 _FILE_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+#: Third-party loggers whose INFO output is pure chatter for our scripts.
+#: Bumped to WARNING so neither the console nor the per-dataset log files
+#: are flooded by shard progress, "Generating split…" lines, retry warnings,
+#: etc. Per-dataset detail we care about comes from `slm4ie.*` loggers.
+_NOISY_THIRD_PARTY_LOGGERS = (
+    "datasets",
+    "huggingface_hub",
+    "urllib3",
+    "filelock",
+    "fsspec",
+)
+
+# ===============================
+# Worker counts
+# ===============================
 
 
 def resolve_workers(requested: int, n_items: int, default: int) -> int:
@@ -90,22 +115,14 @@ def workers_quiet() -> bool:
     return os.environ.get(_PARALLEL_ENV_VAR) == "1"
 
 
-#: Third-party loggers whose INFO output is pure chatter for our scripts.
-#: Bumped to WARNING so neither the console nor the per-dataset log files
-#: are flooded by shard progress, "Generating split…" lines, retry warnings,
-#: etc. Per-dataset detail we care about comes from `slm4ie.*` loggers.
-_NOISY_THIRD_PARTY_LOGGERS = (
-    "datasets",
-    "huggingface_hub",
-    "urllib3",
-    "filelock",
-    "fsspec",
-)
+# ===============================
+# Logging setup
+# ===============================
 
 
 def configure_script_logging(
     parallel: bool,
-    console_level: Optional[int] = None,
+    console_level: int | None = None,
 ) -> None:
     """Configure root logging for a data script.
 
@@ -129,6 +146,7 @@ def configure_script_logging(
             StreamHandler. When None, defaults to WARNING in parallel
             mode and INFO in serial mode.
     """
+    # install the console format and quiet third-party loggers
     logging.basicConfig(
         level=logging.INFO,
         format=_FILE_LOG_FORMAT,
@@ -136,6 +154,7 @@ def configure_script_logging(
     for name in _NOISY_THIRD_PARTY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
 
+    # disable the HuggingFace progress bars
     try:
         from datasets.utils.logging import disable_progress_bar
 
@@ -149,11 +168,17 @@ def configure_script_logging(
     except ImportError:
         pass
 
+    # set the console handler level
     if parallel or console_level is not None:
         effective_level = console_level if console_level is not None else logging.WARNING
         for handler in logging.getLogger().handlers:
             if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
                 handler.setLevel(effective_level)
+
+
+# ===============================
+# Pool dispatch
+# ===============================
 
 
 class _ThreadFilter(logging.Filter):
@@ -180,8 +205,8 @@ class _ThreadFilter(logging.Filter):
 def _worker_with_log(
     func: Callable[..., Any],
     key: str,
-    kwargs: Dict[str, Any],
-    log_path: Optional[Path],
+    kwargs: dict[str, Any],
+    log_path: Path | None,
     use_thread_filter: bool,
 ) -> Any:
     """Run `func(key, **kwargs)` with an optional per-key file handler.
@@ -202,7 +227,8 @@ def _worker_with_log(
     Returns:
         Whatever `func` returns.
     """
-    handler: Optional[logging.FileHandler] = None
+    # attach the per-key file handler
+    handler: logging.FileHandler | None = None
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = logging.FileHandler(str(log_path), encoding="utf-8")
@@ -212,10 +238,11 @@ def _worker_with_log(
             handler.addFilter(_ThreadFilter(threading.get_ident()))
         root = logging.getLogger()
         root.addHandler(handler)
-        # Ensure the root threshold lets INFO records through to handlers.
+        # let INFO records through to the handlers
         if root.level > logging.INFO or root.level == logging.NOTSET:
             root.setLevel(logging.INFO)
 
+    # run the worker and detach the handler
     try:
         return func(key, **kwargs)
     finally:
@@ -231,9 +258,9 @@ def run_parallel(
     max_workers: int,
     desc: str,
     pool: str = "process",
-    kwargs_for: Callable[[str], Dict[str, Any]] = lambda _k: {},
-    log_dir: Optional[Path] = None,
-) -> Tuple[Dict[str, Any], List[Tuple[str, BaseException]]]:
+    kwargs_for: Callable[[str], dict[str, Any]] = lambda _k: {},
+    log_dir: Path | None = None,
+) -> tuple[dict[str, Any], list[tuple[str, BaseException]]]:
     """Run `func(key, **kwargs_for(key))` over `keys` with bounded concurrency.
 
     When `max_workers <= 1` or there is at most one key, runs serially
@@ -267,16 +294,18 @@ def run_parallel(
     Raises:
         ValueError: If `pool` is not `"process"` or `"thread"`.
     """
+    # prepare the results and the log folder
     keys_list = list(keys)
-    results: Dict[str, Any] = {}
-    failures: List[Tuple[str, BaseException]] = []
+    results: dict[str, Any] = {}
+    failures: list[tuple[str, BaseException]] = []
 
     if log_dir is not None:
         log_dir.mkdir(parents=True, exist_ok=True)
 
-    def _log_path_for(key: str) -> Optional[Path]:
+    def _log_path_for(key: str) -> Path | None:
         return None if log_dir is None else log_dir / f"{key}.log"
 
+    # run serially so tracebacks stay unwrapped
     serial = max_workers <= 1 or len(keys_list) <= 1
 
     if serial:
@@ -294,6 +323,7 @@ def run_parallel(
                 failures.append((key, exc))
         return results, failures
 
+    # pick the pool kind
     if pool == "process":
         executor_cls = ProcessPoolExecutor
         use_thread_filter = False
@@ -303,6 +333,7 @@ def run_parallel(
     else:
         raise ValueError(f"Unknown pool kind: {pool!r}")
 
+    # run the pool with a single progress bar
     total = len(keys_list)
     done = 0
     skipped = 0
@@ -311,7 +342,7 @@ def run_parallel(
     prev_env = os.environ.get(_PARALLEL_ENV_VAR)
     os.environ[_PARALLEL_ENV_VAR] = "1"
     ticker_stop = threading.Event()
-    ticker_thread: Optional[threading.Thread] = None
+    ticker_thread: threading.Thread | None = None
     try:
         with (
             executor_cls(max_workers=max_workers) as executor,
@@ -380,6 +411,7 @@ def run_parallel(
         else:
             os.environ[_PARALLEL_ENV_VAR] = prev_env
 
+    # log the totals
     completed = done + skipped + failed
     logger.info(
         "%s: finished %d/%d (done=%d skipped=%d failed=%d)",

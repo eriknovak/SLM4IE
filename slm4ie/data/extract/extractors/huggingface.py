@@ -56,8 +56,9 @@ Document ids:
 
 import datetime
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from datasets import load_from_disk
 
@@ -65,13 +66,21 @@ from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Row columns probed, in priority order, for a natural document id
 #: before falling back to a positional one. `url` is last: it is a
 #: usable key for web corpora that ship no explicit id, but it is the
 #: weakest guarantee of uniqueness.
-NATURAL_ID_KEYS: Tuple[str, ...] = (
+NATURAL_ID_KEYS: tuple[str, ...] = (
     "id",
     "_id",
     "docid",
@@ -79,6 +88,11 @@ NATURAL_ID_KEYS: Tuple[str, ...] = (
     "uid",
     "url",
 )
+
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -89,14 +103,19 @@ def _to_jsonable(value: Any) -> Any:
     unchanged.
 
     Args:
-        value (Any): Arbitrary value from a HuggingFace dataset row.
+        value: Arbitrary value from a HuggingFace dataset row.
 
     Returns:
-        Any: A JSON-serializable representation of the value.
+        A JSON-serializable representation of the value.
     """
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.isoformat()
     return value
+
+
+# ===============================
+# HuggingFace extractor
+# ===============================
 
 
 class HuggingFaceExtractor(BaseExtractor):
@@ -115,7 +134,7 @@ class HuggingFaceExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from all Arrow config dirs in input_dir.
 
@@ -125,18 +144,20 @@ class HuggingFaceExtractor(BaseExtractor):
         skipped.
 
         Args:
-            input_dir (Path): Directory whose subdirectories are
+            input_dir: Directory whose subdirectories are
                 Arrow datasets saved with save_to_disk().
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            metadata (Optional[Dict[str, Any]]): Ignored; this
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            metadata: Ignored; this
                 extractor sources metadata from each row's columns.
 
         Yields:
-            Document: One document per non-empty row.
+            One document per non-empty row.
         """
         del metadata
-        config_dirs: List[Path] = sorted(p for p in input_dir.iterdir() if p.is_dir())
+
+        # load and extract each config directory
+        config_dirs: list[Path] = sorted(p for p in input_dir.iterdir() if p.is_dir())
 
         for config_dir in config_dirs:
             try:
@@ -157,17 +178,17 @@ class HuggingFaceExtractor(BaseExtractor):
         """Yield Documents from a Dataset or DatasetDict.
 
         Args:
-            ds (Any): A Dataset or DatasetDict instance.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            config (str): Config subdirectory name, used to namespace
+            ds: A Dataset or DatasetDict instance.
+            source: Dataset key.
+            domain: Domain label.
+            config: Config subdirectory name, used to namespace
                 positional doc_ids.
 
         Yields:
-            Document: One document per non-empty row.
+            One document per non-empty row.
         """
+        # a DatasetDict yields per split, a bare Dataset has none
         if isinstance(ds.column_names, dict):
-            # DatasetDict: column_names is {split: [col, ...]}
             for split in ds.keys():
                 yield from self._yield_from_split(ds[split], source, domain, config, split)
         else:
@@ -179,34 +200,33 @@ class HuggingFaceExtractor(BaseExtractor):
         source: str,
         domain: str,
         config: str,
-        split_name: Optional[str],
+        split_name: str | None,
     ) -> Iterator[Document]:
         """Yield Documents from a single Dataset split.
 
         Args:
-            split (Any): A Dataset instance (single split).
-            source (str): Dataset key.
-            domain (str): Domain label.
-            config (str): Config subdirectory name, used to namespace
+            split: A Dataset instance (single split).
+            source: Dataset key.
+            domain: Domain label.
+            config: Config subdirectory name, used to namespace
                 positional doc_ids.
-            split_name (Optional[str]): Split name for a DatasetDict;
+            split_name: Split name for a DatasetDict;
                 None for a bare Dataset, which omits the split segment
                 from positional doc_ids.
 
         Yields:
-            Document: One document per non-empty row.
+            One document per non-empty row.
         """
         prefix = config if split_name is None else f"{config}:{split_name}"
 
-        # Enumerate every row, including skipped ones, so a positional
-        # id stays pinned to its row offset in the source split.
+        # enumerate skipped rows too, so a positional id stays pinned to its row offset
         for row_idx, row in enumerate(split):
             text = row.get("text") or ""
             if not text:
                 continue
 
+            # project the metadata and pick the document id
             metadata = project_metadata(row, exclude={"text"}, value_transform=_to_jsonable)
-
             native_id = probe_doc_id(row, NATURAL_ID_KEYS)
             doc_id = native_id if native_id is not None else positional_doc_id(prefix, row_idx)
 

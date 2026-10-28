@@ -24,16 +24,25 @@ import csv
 import logging
 import re
 from array import array
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import numpy as np
 import orjson
 import xxhash
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Metadata keys a document's URL is stored under (`u` is HPLT's).
 URL_KEYS = ("url", "u")
@@ -54,10 +63,10 @@ MIN_UNIT_CHARS = 40
 CHUNK_BYTES = 1 << 30
 
 #: The hash arrays kept per corpus: distinct URLs, all units, sampled units.
-ARRAYS: Tuple[str, ...] = ("urls", "units", "sample")
+ARRAYS: tuple[str, ...] = ("urls", "units", "sample")
 
 #: Columns of the table `measure_overlap` returns and writes.
-COLUMNS: Tuple[str, ...] = (
+COLUMNS: tuple[str, ...] = (
     "a",
     "b",
     "docs_a",
@@ -68,6 +77,10 @@ COLUMNS: Tuple[str, ...] = (
     "shared_urls",
     "url_share",
 )
+
+# ===============================
+# URL and sentence helpers
+# ===============================
 
 
 def normalize_url(url: str) -> str:
@@ -82,6 +95,7 @@ def normalize_url(url: str) -> str:
     Returns:
         `host/path?query`.
     """
+    # split the url and drop tracking parameters
     parts = urlsplit(url.strip())
     host = parts.netloc.lower().removeprefix("www.")
     query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _TRACKING.match(k))
@@ -89,7 +103,7 @@ def normalize_url(url: str) -> str:
     return f"{host}{path}" + (f"?{urlencode(query)}" if query else "")
 
 
-def sentence_units(text: str) -> List[str]:
+def sentence_units(text: str) -> list[str]:
     """Split *text* into normalised sentence units.
 
     Args:
@@ -101,6 +115,11 @@ def sentence_units(text: str) -> List[str]:
     """
     units = (" ".join(_WORD.findall(s.lower())) for s in _SENTENCE_BREAK.split(text))
     return [unit for unit in units if len(unit) >= MIN_UNIT_CHARS]
+
+
+# ===============================
+# Scanning helpers
+# ===============================
 
 
 def _count_lines(path: Path, start: int, end: int) -> int:
@@ -115,13 +134,13 @@ def _count_lines(path: Path, start: int, end: int) -> int:
     return count
 
 
-def _chunks(path: Path) -> List[Tuple[int, int]]:
+def _chunks(path: Path) -> list[tuple[int, int]]:
     """Split *path* into `CHUNK_BYTES` byte ranges covering the whole file."""
     size = path.stat().st_size
     return [(start, min(start + CHUNK_BYTES, size)) for start in range(0, max(size, 1), CHUNK_BYTES)]
 
 
-def _scan(path: Path, start: int, end: int, threshold: float, seed: int, keep_one_in: int) -> Dict[str, Any]:
+def _scan(path: Path, start: int, end: int, threshold: float, seed: int, keep_one_in: int) -> dict[str, Any]:
     """Hash the URLs and sentence units of the lines starting in bytes `[start, end)` of *path*.
 
     Args:
@@ -136,11 +155,12 @@ def _scan(path: Path, start: int, end: int, threshold: float, seed: int, keep_on
         Sorted unique `urls`, `units` and `sample` hash arrays and the
         `sampled` document count.
     """
+    # scan the lines of the byte range
     urls, units, sample = array("Q"), array("Q"), array("Q")
     sampled = 0
     with path.open("rb") as handle:
         if start:
-            # Finish the line the previous range owns: the one holding byte start - 1.
+            # finish the line the previous range owns: the one holding byte start - 1
             handle.seek(start - 1)
             handle.readline()
         while handle.tell() < end:
@@ -162,6 +182,8 @@ def _scan(path: Path, start: int, end: int, threshold: float, seed: int, keep_on
                     units.append(digest)
                     if in_sample:
                         sample.append(digest)
+
+    # deduplicate the hashes
     arrays = {
         name: np.unique(np.frombuffer(v, dtype=np.uint64))
         for name, v in (("urls", urls), ("units", units), ("sample", sample))
@@ -169,21 +191,26 @@ def _scan(path: Path, start: int, end: int, threshold: float, seed: int, keep_on
     return {**arrays, "sampled": sampled}
 
 
-def _share(part: int, whole: int) -> Optional[float]:
+def _share(part: int, whole: int) -> float | None:
     """Return `part / whole` rounded to four places, or None for an empty whole."""
     return round(part / whole, 4) if whole else None
+
+
+# ===============================
+# Measurement
+# ===============================
 
 
 def measure_overlap(
     extracted_dir: Path,
     *,
     out_dir: Path,
-    keys: Optional[Sequence[str]] = None,
+    keys: Sequence[str] | None = None,
     seed: int = 0,
     sample_docs: int = 1_000_000,
     keep_one_in: int = 16,
     workers: int = 1,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Measure URL and text overlap between every ordered pair of extracted corpora.
 
     Args:
@@ -203,9 +230,13 @@ def measure_overlap(
         either side records no URL).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # resolve the corpora and their byte ranges
     keys = list(keys) if keys else sorted(p.stem for p in extracted_dir.glob("*.jsonl"))
     paths = {key: extracted_dir / f"{key}.jsonl" for key in keys}
     ranges = {key: _chunks(path) for key, path in paths.items()}
+
+    # count the documents, then hash the urls and units in parallel
     with ProcessPoolExecutor(max_workers=max(1, workers)) as pool:
         line_counts = {
             key: [pool.submit(_count_lines, paths[key], a, b) for a, b in spans] for key, spans in ranges.items()
@@ -226,7 +257,7 @@ def measure_overlap(
             ]
             for key, spans in ranges.items()
         }
-        arrays: Dict[str, Dict[str, Any]] = {}
+        arrays: dict[str, dict[str, Any]] = {}
         for key, futures in scans.items():
             parts = [f.result() for f in futures]
             arrays[key] = {name: np.unique(np.concatenate([part[name] for part in parts])) for name in ARRAYS}
@@ -241,7 +272,9 @@ def measure_overlap(
                 len(arrays[key]["urls"]),
                 len(arrays[key]["units"]),
             )
-    rows: List[Dict[str, Any]] = []
+
+    # compare every ordered pair
+    rows: list[dict[str, Any]] = []
     for a in keys:
         for b in keys:
             if a == b:
@@ -263,6 +296,8 @@ def measure_overlap(
                     "url_share": _share(shared_urls, len(mine["urls"])) if shared_urls is not None else None,
                 }
             )
+
+    # write the table
     with (out_dir / "overlap.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(COLUMNS), lineterminator="\n")
         writer.writeheader()

@@ -17,14 +17,22 @@ components to the scalar metric (vectorized over the bootstrap axis).
 
 from __future__ import annotations
 
-from typing import Callable, List, Sequence, Tuple
+from collections.abc import Callable, Sequence
 
 import numpy as np
+
+# ===============================
+# Types
+# ===============================
 
 #: Type of a metric `combine` callable: it receives one summed component per
 #: per-unit array (scalars for the point estimate, 1-D arrays over the bootstrap
 #: axis for a distribution) and returns the metric, broadcasting elementwise.
 CombineFn = Callable[..., np.ndarray]
+
+# ===============================
+# Resampling
+# ===============================
 
 
 def make_resample_indices(n_units: int, n_resamples: int, seed: int) -> np.ndarray:
@@ -35,14 +43,14 @@ def make_resample_indices(n_units: int, n_resamples: int, seed: int) -> np.ndarr
     the same resamples. The matrix is fully determined by `seed`.
 
     Args:
-        n_units (int): Number of per-unit observations (documents or forms).
-        n_resamples (int): Number of bootstrap resamples, B.
-        seed (int): Seed for the deterministic generator.
+        n_units: Number of per-unit observations (documents or forms).
+        n_resamples: Number of bootstrap resamples, B.
+        seed: Seed for the deterministic generator.
 
     Returns:
-        np.ndarray: An `(n_resamples, n_units)` int array of indices in
-            `[0, n_units)`; empty with shape `(n_resamples, 0)` when there are
-            no units.
+        An `(n_resamples, n_units)` int array of indices in
+        `[0, n_units)`; empty with shape `(n_resamples, 0)` when there are
+        no units.
     """
     rng = np.random.default_rng(seed)
     if n_units <= 0:
@@ -54,11 +62,11 @@ def point_estimate(components: Sequence[np.ndarray], combine: CombineFn) -> floa
     """Return the metric computed on the full (unresampled) per-unit arrays.
 
     Args:
-        components (Sequence[np.ndarray]): Per-unit sufficient-statistic arrays.
-        combine (CombineFn): Maps the summed components to the scalar metric.
+        components: Per-unit sufficient-statistic arrays.
+        combine: Maps the summed components to the scalar metric.
 
     Returns:
-        float: The point estimate; 0.0 when the arrays are empty.
+        The point estimate; 0.0 when the arrays are empty.
     """
     if not len(components[0]):
         return 0.0
@@ -81,16 +89,16 @@ def bootstrap_distribution(
     bounded for large corpora.
 
     Args:
-        indices (np.ndarray): `(B, n_units)` resample indices from
+        indices: `(B, n_units)` resample indices from
             `make_resample_indices`.
-        components (Sequence[np.ndarray]): Per-unit arrays of length `n_units`.
-        combine (CombineFn): Maps summed components to the metric, vectorized
+        components: Per-unit arrays of length `n_units`.
+        combine: Maps summed components to the metric, vectorized
             over the bootstrap axis.
-        chunk (int): Number of resamples summed per pass.
+        chunk: Number of resamples summed per pass.
 
     Returns:
-        np.ndarray: A length-`B` array of resampled metric values; all-zero when
-            there are no units.
+        A length-`B` array of resampled metric values; all-zero when
+        there are no units.
     """
     n_resamples = indices.shape[0]
     out = np.zeros(n_resamples, dtype=np.float64)
@@ -104,15 +112,20 @@ def bootstrap_distribution(
     return out
 
 
-def percentile_ci(distribution: np.ndarray, ci_level: float) -> Tuple[float, float]:
+# ===============================
+# Significance
+# ===============================
+
+
+def percentile_ci(distribution: np.ndarray, ci_level: float) -> tuple[float, float]:
     """Return the percentile confidence interval of a bootstrap distribution.
 
     Args:
-        distribution (np.ndarray): Bootstrap values.
-        ci_level (float): Central mass to cover, e.g. 0.95.
+        distribution: Bootstrap values.
+        ci_level: Central mass to cover, e.g. 0.95.
 
     Returns:
-        Tuple[float, float]: The `(low, high)` percentile bounds.
+        The `(low, high)` percentile bounds.
     """
     tail = (1.0 - ci_level) / 2.0 * 100.0
     low, high = np.percentile(distribution, [tail, 100.0 - tail])
@@ -127,11 +140,11 @@ def bootstrap_p_value(diff: np.ndarray) -> float:
     return 1.0 rather than 0.0.
 
     Args:
-        diff (np.ndarray): Bootstrap distribution of the paired difference
+        diff: Bootstrap distribution of the paired difference
             `metric_A - metric_B`.
 
     Returns:
-        float: The two-sided p-value in `[0, 1]`.
+        The two-sided p-value in `[0, 1]`.
     """
     if not diff.size:
         return 1.0
@@ -140,7 +153,7 @@ def bootstrap_p_value(diff: np.ndarray) -> float:
     return min(1.0, 2.0 * min(p_le, p_ge))
 
 
-def holm_correction(pvalues: Sequence[float]) -> List[float]:
+def holm_correction(pvalues: Sequence[float]) -> list[float]:
     """Return Holm-Bonferroni adjusted p-values.
 
     Sorts the raw p-values ascending, scales the k-th smallest by `m - k`, and
@@ -148,10 +161,10 @@ def holm_correction(pvalues: Sequence[float]) -> List[float]:
     Each adjusted value is clamped to `[0, 1]`.
 
     Args:
-        pvalues (Sequence[float]): Raw p-values for a family of comparisons.
+        pvalues: Raw p-values for a family of comparisons.
 
     Returns:
-        List[float]: Adjusted p-values aligned with the input order.
+        Adjusted p-values aligned with the input order.
     """
     raw = np.asarray(pvalues, dtype=np.float64)
     m = raw.size
@@ -166,7 +179,7 @@ def holm_correction(pvalues: Sequence[float]) -> List[float]:
     return [float(v) for v in adjusted]
 
 
-def compact_letters(n_items: int, not_different: Sequence[Sequence[bool]]) -> List[str]:
+def compact_letters(n_items: int, not_different: Sequence[Sequence[bool]]) -> list[str]:
     """Return compact-letter-display groups for ranked items.
 
     Items are assumed pre-sorted best to worst. Two items sharing a letter are
@@ -175,19 +188,21 @@ def compact_letters(n_items: int, not_different: Sequence[Sequence[bool]]) -> Li
     comparisons.
 
     Args:
-        n_items (int): Number of ranked items.
-        not_different (Sequence[Sequence[bool]]): Symmetric matrix where
+        n_items: Number of ranked items.
+        not_different: Symmetric matrix where
             `not_different[i][j]` is True when items `i` and `j` are NOT
             significantly different.
 
     Returns:
-        List[str]: One letter group per item, in the input order; an item may
-            carry several letters (e.g. `"ab"`).
+        One letter group per item, in the input order; an item may
+        carry several letters (e.g. `"ab"`).
     """
     if n_items <= 0:
         return []
+    # normalize the matrix to bools
     nd = [[bool(not_different[i][j]) for j in range(n_items)] for i in range(n_items)]
 
+    # extend each start to its longest non-significant run
     intervals = []
     for start in range(n_items):
         end = start
@@ -195,6 +210,7 @@ def compact_letters(n_items: int, not_different: Sequence[Sequence[bool]]) -> Li
             end += 1
         intervals.append((start, end))
 
+    # keep only the maximal runs
     maximal = sorted(
         {
             (s, e)
@@ -203,6 +219,7 @@ def compact_letters(n_items: int, not_different: Sequence[Sequence[bool]]) -> Li
         }
     )
 
+    # assign one letter per maximal run
     letters = [""] * n_items
     for group_idx, (start, end) in enumerate(maximal):
         letter = chr(ord("a") + group_idx)

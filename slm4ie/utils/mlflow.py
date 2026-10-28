@@ -20,11 +20,20 @@ import logging
 import os
 import subprocess
 import warnings
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Last-resort tracking URI when neither config nor `MLFLOW_TRACKING_URI`
 #: specifies one. A local SQLite store so tracking never assumes a running
@@ -40,12 +49,16 @@ DEFAULT_ARTIFACT_LOCATION = "./mlruns/artifacts"
 #: (`sha256:` + 64 hex) exceed this, so `log_dataset_input` truncates to it.
 MAX_DATASET_DIGEST_LEN = 36
 
+# ===============================
+# Helper functions
+# ===============================
 
-def _import_mlflow() -> Optional[Any]:
+
+def _import_mlflow() -> Any | None:
     """Import `mlflow` lazily, returning None when unavailable.
 
     Returns:
-        Optional[Any]: The `mlflow` module, or None if it is not installed.
+        The `mlflow` module, or None if it is not installed.
     """
     try:
         import mlflow
@@ -56,26 +69,26 @@ def _import_mlflow() -> Optional[Any]:
         return None
 
 
-def resolve_tracking_uri(configured: Optional[str]) -> str:
+def resolve_tracking_uri(configured: str | None) -> str:
     """Resolve the tracking URI from config, environment, or the default.
 
     Args:
-        configured (Optional[str]): URI from the YAML config, if any.
+        configured: URI from the YAML config, if any.
 
     Returns:
-        str: The configured URI, else `MLFLOW_TRACKING_URI`, else the local
-            SQLite fallback (`DEFAULT_TRACKING_URI`).
+        The configured URI, else `MLFLOW_TRACKING_URI`, else the local
+        SQLite fallback (`DEFAULT_TRACKING_URI`).
     """
     if configured:
         return configured
     return os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI)
 
 
-def git_commit() -> Optional[str]:
+def git_commit() -> str | None:
     """Return the current git commit hash for reproducibility tagging.
 
     Returns:
-        Optional[str]: The HEAD commit hash, or None when unavailable.
+        The HEAD commit hash, or None when unavailable.
     """
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
@@ -87,11 +100,11 @@ def _is_remote_store(uri: str) -> bool:
     """Return whether a tracking URI points at a remote HTTP(S) server.
 
     Args:
-        uri (str): A resolved MLflow tracking URI.
+        uri: A resolved MLflow tracking URI.
 
     Returns:
-        bool: True for `http://` / `https://` servers, else False (local file
-            or database stores).
+        True for `http://` / `https://` servers, else False (local file
+        or database stores).
     """
     return uri.startswith(("http://", "https://"))
 
@@ -99,7 +112,7 @@ def _is_remote_store(uri: str) -> bool:
 def ensure_experiment(
     name: str,
     *,
-    tracking_uri: Optional[str] = None,
+    tracking_uri: str | None = None,
     artifact_location: str = DEFAULT_ARTIFACT_LOCATION,
 ) -> bool:
     """Set the active experiment, creating it when absent.
@@ -111,25 +124,30 @@ def ensure_experiment(
     the server and may be unwritable.
 
     Args:
-        name (str): Experiment name (e.g. `slm4ie/tokenizers/sweep`).
-        tracking_uri (Optional[str]): URI override; resolved when None.
-        artifact_location (str): Local artifact root for a new experiment on a
+        name: Experiment name (e.g. `slm4ie/tokenizers/sweep`).
+        tracking_uri: URI override; resolved when None.
+        artifact_location: Local artifact root for a new experiment on a
             local store; ignored for remote servers.
 
     Returns:
-        bool: True when MLflow is available and the experiment is set, else
-            False (tracking effectively disabled).
+        True when MLflow is available and the experiment is set, else
+        False (tracking effectively disabled).
     """
     mlflow = _import_mlflow()
     if mlflow is None:
         return False
 
+    # point mlflow at the store
     uri = resolve_tracking_uri(tracking_uri)
     mlflow.set_tracking_uri(uri)
+
+    # create the experiment when absent
     client = mlflow.MlflowClient()
     if client.get_experiment_by_name(name) is None:
         location = None if _is_remote_store(uri) else artifact_location
         client.create_experiment(name, artifact_location=location)
+
+    # activate the experiment
     mlflow.set_experiment(name)
     return True
 
@@ -140,18 +158,18 @@ def mlflow_run(
     *,
     enabled: bool = True,
     nested: bool = False,
-    tags: Optional[Dict[str, Any]] = None,
-) -> Iterator[Optional[Any]]:
+    tags: dict[str, Any] | None = None,
+) -> Iterator[Any | None]:
     """Open an MLflow run, or a no-op context when tracking is off.
 
     Args:
-        run_name (str): Display name for the run.
-        enabled (bool): When False, yields None without touching MLflow.
-        nested (bool): True for a child run within an active parent.
-        tags (Optional[Dict[str, Any]]): Tags applied at run start.
+        run_name: Display name for the run.
+        enabled: When False, yields None without touching MLflow.
+        nested: True for a child run within an active parent.
+        tags: Tags applied at run start.
 
     Yields:
-        Optional[Any]: The active run object, or None when disabled.
+        The active run object, or None when disabled.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is None:
@@ -164,27 +182,27 @@ def mlflow_run(
         yield run
 
 
-def log_params(params: Dict[str, Any], *, enabled: bool = True) -> None:
+def log_params(params: dict[str, Any], *, enabled: bool = True) -> None:
     """Log run parameters when an MLflow run is active.
 
     Args:
-        params (Dict[str, Any]): Parameter key/value pairs.
-        enabled (bool): When False, does nothing.
+        params: Parameter key/value pairs.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is not None and mlflow.active_run() is not None:
         mlflow.log_params(params)
 
 
-def log_metrics(metrics: Dict[str, float], *, step: Optional[int] = None, enabled: bool = True) -> None:
+def log_metrics(metrics: dict[str, float], *, step: int | None = None, enabled: bool = True) -> None:
     """Log run metrics when an MLflow run is active.
 
     Args:
-        metrics (Dict[str, float]): Metric key/value pairs.
-        step (Optional[int]): Step index for the values. Logging the same
+        metrics: Metric key/value pairs.
+        step: Step index for the values. Logging the same
             metric name at successive steps produces a series MLflow charts
             over the step axis, used for per-stage pipeline funnels.
-        enabled (bool): When False, does nothing.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is not None and mlflow.active_run() is not None:
@@ -197,34 +215,34 @@ def log_artifact(path: Path, *, enabled: bool = True) -> None:
     """Log a local file as a run artifact when a run is active.
 
     Args:
-        path (Path): File to upload.
-        enabled (bool): When False, does nothing.
+        path: File to upload.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is not None and mlflow.active_run() is not None:
         mlflow.log_artifact(str(path))
 
 
-def log_artifacts(directory: Path, *, artifact_path: Optional[str] = None, enabled: bool = True) -> None:
+def log_artifacts(directory: Path, *, artifact_path: str | None = None, enabled: bool = True) -> None:
     """Log a local directory tree as run artifacts when a run is active.
 
     Args:
-        directory (Path): Directory whose contents are uploaded.
-        artifact_path (Optional[str]): Destination subpath within the run's
+        directory: Directory whose contents are uploaded.
+        artifact_path: Destination subpath within the run's
             artifact root; the artifact root itself when None.
-        enabled (bool): When False, does nothing.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is not None and mlflow.active_run() is not None and directory.exists():
         mlflow.log_artifacts(str(directory), artifact_path=artifact_path)
 
 
-def set_tags(tags: Dict[str, Any], *, enabled: bool = True) -> None:
+def set_tags(tags: dict[str, Any], *, enabled: bool = True) -> None:
     """Set tags on the active run when one exists.
 
     Args:
-        tags (Dict[str, Any]): Tag key/value pairs.
-        enabled (bool): When False, does nothing.
+        tags: Tag key/value pairs.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is not None and mlflow.active_run() is not None:
@@ -236,9 +254,9 @@ def find_run_by_tag(
     tag_key: str,
     tag_value: str,
     *,
-    tracking_uri: Optional[str] = None,
+    tracking_uri: str | None = None,
     enabled: bool = True,
-) -> Optional[str]:
+) -> str | None:
     """Return the most recent active run in an experiment matching a tag.
 
     Used to make logging idempotent: a data build is keyed by its corpus
@@ -246,26 +264,28 @@ def find_run_by_tag(
     skip (or, with force, replace) it rather than create a duplicate.
 
     Args:
-        experiment (str): Experiment name to search within.
-        tag_key (str): Tag key to match (e.g. `corpus_digest`).
-        tag_value (str): Tag value to match.
-        tracking_uri (Optional[str]): URI override; resolved when None.
-        enabled (bool): When False, returns None without touching MLflow.
+        experiment: Experiment name to search within.
+        tag_key: Tag key to match (e.g. `corpus_digest`).
+        tag_value: Tag value to match.
+        tracking_uri: URI override; resolved when None.
+        enabled: When False, returns None without touching MLflow.
 
     Returns:
-        Optional[str]: The run id of the latest matching active run, or None
-            when none matches, the experiment is absent, or tracking is off.
+        The run id of the latest matching active run, or None
+        when none matches, the experiment is absent, or tracking is off.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is None:
         return None
 
+    # look up the experiment
     mlflow.set_tracking_uri(resolve_tracking_uri(tracking_uri))
     client = mlflow.MlflowClient()
     experiment_obj = client.get_experiment_by_name(experiment)
     if experiment_obj is None:
         return None
 
+    # find the latest run with the tag
     runs = client.search_runs(
         [experiment_obj.experiment_id],
         filter_string=f"tags.`{tag_key}` = '{tag_value}'",
@@ -275,13 +295,13 @@ def find_run_by_tag(
     return runs[0].info.run_id if runs else None
 
 
-def delete_run(run_id: str, *, tracking_uri: Optional[str] = None, enabled: bool = True) -> None:
+def delete_run(run_id: str, *, tracking_uri: str | None = None, enabled: bool = True) -> None:
     """Delete a run by id, so a digest-keyed upsert can replace it.
 
     Args:
-        run_id (str): Identifier of the run to delete.
-        tracking_uri (Optional[str]): URI override; resolved when None.
-        enabled (bool): When False, does nothing.
+        run_id: Identifier of the run to delete.
+        tracking_uri: URI override; resolved when None.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is None:
@@ -308,13 +328,13 @@ def log_dataset_input(
     consumer back to the build that produced the corpus.
 
     Args:
-        name (str): Logical dataset name (e.g. `pretrain/06_sentence_dedup`).
-        digest (str): Content digest identifying this build (see
+        name: Logical dataset name (e.g. `pretrain/06_sentence_dedup`).
+        digest: Content digest identifying this build (see
             `slm4ie.utils.versioning.corpus_digest`).
-        source (str): Filesystem path or URI the dataset lives at.
-        context (str): Lineage context label (e.g. `produced`, `training`,
+        source: Filesystem path or URI the dataset lives at.
+        context: Lineage context label (e.g. `produced`, `training`,
             `eval`).
-        enabled (bool): When False, does nothing.
+        enabled: When False, does nothing.
     """
     mlflow = _import_mlflow() if enabled else None
     if mlflow is None or mlflow.active_run() is None:
@@ -323,15 +343,11 @@ def log_dataset_input(
     from mlflow.data.dataset_source_registry import resolve_dataset_source
     from mlflow.data.meta_dataset import MetaDataset
 
-    # resolve_dataset_source warns when a path is interpretable as more than one
-    # local source kind; the resolved LocalArtifactDatasetSource is correct, so
-    # silence the otherwise-noisy warning.
+    # resolve the source; silence the warning for paths readable as several local kinds
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         dataset_source = resolve_dataset_source(source)
-    # MLflow caps the dataset digest field at MAX_DATASET_DIGEST_LEN chars; our
-    # corpus digests are longer (`sha256:` + 64 hex). Truncate deterministically
-    # so a producer and a consumer logging the same digest still resolve to the
-    # same dataset entity.
+
+    # truncate the digest to MLflow's cap so producer and consumer share one dataset entity
     dataset = MetaDataset(dataset_source, name=name, digest=digest[:MAX_DATASET_DIGEST_LEN])
     mlflow.log_input(dataset, context=context)

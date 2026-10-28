@@ -9,9 +9,13 @@ vocab / save / load behavior so each backend implements just `train`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from slm4ie.tokenizers.base import BaseTokenizer, TrainContext
+
+# ===============================
+# Backend class
+# ===============================
 
 
 class HfBackend(BaseTokenizer):
@@ -25,68 +29,77 @@ class HfBackend(BaseTokenizer):
         """Wrap an optional pre-built `tokenizers.Tokenizer`.
 
         Args:
-            tokenizer (Any): A trained `tokenizers.Tokenizer`, or None.
+            tokenizer: A trained `tokenizers.Tokenizer`, or None.
         """
         super().__init__()
         self._tokenizer = tokenizer
 
-    def encode(self, text: str) -> List[str]:
+    def encode(self, text: str) -> list[str]:
         """Return the pieces for `text`.
 
         Args:
-            text (str): Input text.
+            text: Input text.
 
         Returns:
-            List[str]: Vocabulary pieces.
+            Vocabulary pieces.
         """
         return self._tokenizer.encode(text).tokens
 
-    def encode_offsets(self, text: str) -> List[Tuple[str, int, int]]:
+    def encode_offsets(self, text: str) -> list[tuple[str, int, int]]:
         """Return each piece with its character span via the fast tokenizer.
 
         Args:
-            text (str): Input text.
+            text: Input text.
 
         Returns:
-            List[Tuple[str, int, int]]: `(piece, char_start, char_end)` spans
-                into `text`, accurate for byte-level and character-level alike.
+            `(piece, char_start, char_end)` spans
+            into `text`, accurate for byte-level and character-level alike.
         """
         encoding = self._tokenizer.encode(text)
         return [(token, start, end) for token, (start, end) in zip(encoding.tokens, encoding.offsets)]
 
     @property
-    def vocab(self) -> Dict[str, int]:
+    def vocab(self) -> dict[str, int]:
         """Return the token-to-id vocabulary.
 
         Returns:
-            Dict[str, int]: Token string to integer id.
+            Token string to integer id.
         """
         return self._tokenizer.get_vocab()
+
+    # ===============================
+    # Private methods
+    # ===============================
 
     def _save_model(self, out_dir: Path) -> None:
         """Write the tokenizer to `tokenizer.json`.
 
         Args:
-            out_dir (Path): Destination directory.
+            out_dir: Destination directory.
         """
         self._tokenizer.save(str(out_dir / "tokenizer.json"))
 
     @classmethod
-    def _load_model(cls, out_dir: Path) -> "HfBackend":
+    def _load_model(cls, out_dir: Path) -> HfBackend:
         """Load a tokenizer from `tokenizer.json`.
 
         Args:
-            out_dir (Path): Directory holding the saved model.
+            out_dir: Directory holding the saved model.
 
         Returns:
-            HfBackend: The reconstructed tokenizer.
+            The reconstructed tokenizer.
         """
         from tokenizers import Tokenizer
 
         return cls(Tokenizer.from_file(str(out_dir / "tokenizer.json")))
 
 
-def alphabet_options(config: TrainContext) -> Dict[str, Any]:
+# ===============================
+# Helper functions
+# ===============================
+
+
+def alphabet_options(config: TrainContext) -> dict[str, Any]:
     """Return the `tokenizers` trainer options that fix the base alphabet.
 
     The trainer gives `initial_alphabet` characters top priority and then keeps
@@ -94,11 +107,11 @@ def alphabet_options(config: TrainContext) -> Dict[str, Any]:
     `config.alphabet`; any other character encodes as the unknown token.
 
     Args:
-        config (TrainContext): Shared training settings.
+        config: Shared training settings.
 
     Returns:
-        Dict[str, Any]: Keyword arguments for a `BpeTrainer` or
-            `WordPieceTrainer`; empty when `config.alphabet` is None.
+        Keyword arguments for a `BpeTrainer` or
+        `WordPieceTrainer`; empty when `config.alphabet` is None.
     """
     if config.alphabet is None:
         return {}
@@ -106,10 +119,10 @@ def alphabet_options(config: TrainContext) -> Dict[str, Any]:
 
 
 def build_char_bpe_from_merges(
-    tokens: List[str],
-    merges: List[Tuple[str, str]],
+    tokens: list[str],
+    merges: list[tuple[str, str]],
     *,
-    special_tokens: List[str],
+    special_tokens: list[str],
     unk_token: str,
 ) -> Any:
     """Assemble a character-level HuggingFace BPE tokenizer from learned merges.
@@ -119,17 +132,17 @@ def build_char_bpe_from_merges(
     inference is ordinary character-level BPE with a real `tokenizer.json`.
 
     Args:
-        tokens (List[str]): Ordered vocabulary tokens (characters then merges).
-        merges (List[Tuple[str, str]]): Ordered learned merge pairs.
-        special_tokens (List[str]): Reserved tokens to add to the vocabulary.
-        unk_token (str): Unknown-token string.
+        tokens: Ordered vocabulary tokens (characters then merges).
+        merges: Ordered learned merge pairs.
+        special_tokens: Reserved tokens to add to the vocabulary.
+        unk_token: Unknown-token string.
 
     Returns:
-        Any: A configured `tokenizers.Tokenizer`.
+        A configured `tokenizers.Tokenizer`.
     """
     from tokenizers import Tokenizer, models, normalizers, pre_tokenizers
 
-    vocab: Dict[str, int] = {}
+    vocab: dict[str, int] = {}
     for token in [*special_tokens, *tokens]:
         if token not in vocab:
             vocab[token] = len(vocab)

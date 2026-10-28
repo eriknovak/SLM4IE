@@ -16,14 +16,18 @@ from __future__ import annotations
 import math
 import random
 from collections import Counter
-from typing import Counter as CounterType
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from collections import Counter as CounterType
+from collections.abc import Iterable, Sequence
 
 from slm4ie.tokenizers.base import TokenizerSpec, split_words
 from slm4ie.tokenizers.morphology import MorphemeSegmentation, MorphLexicon
 
+# ===============================
+# Defaults
+# ===============================
+
 #: Whether a higher value is better for each reported metric.
-METRIC_DIRECTIONS: Dict[str, str] = {
+METRIC_DIRECTIONS: dict[str, str] = {
     "fertility": "lower",
     "tokens_per_byte": "lower",
     "chars_per_token": "higher",
@@ -37,27 +41,32 @@ METRIC_DIRECTIONS: Dict[str, str] = {
 }
 
 
-def iter_words(text: str) -> List[str]:
+# ===============================
+# Corpus metrics
+# ===============================
+
+
+def iter_words(text: str) -> list[str]:
     """Return the word tokens (alphabetic, no bare punctuation) of `text`.
 
     Args:
-        text (str): Input text.
+        text: Input text.
 
     Returns:
-        List[str]: Tokens containing at least one alphabetic character.
+        Tokens containing at least one alphabetic character.
     """
     return [token for token in split_words(text) if any(ch.isalpha() for ch in token)]
 
 
-def corpus_token_stats(tokenizer: TokenizerSpec, words: Iterable[str]) -> Dict[str, object]:
+def corpus_token_stats(tokenizer: TokenizerSpec, words: Iterable[str]) -> dict[str, object]:
     """Encode word tokens once, accumulating the stats every corpus metric needs.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        words (Iterable[str]): Word tokens from the evaluation sample.
+        tokenizer: The tokenizer under evaluation.
+        words: Word tokens from the evaluation sample.
 
     Returns:
-        Dict[str, object]: Keys `freqs` (Counter of pieces), `n_tokens`,
+        Keys `freqs` (Counter of pieces), `n_tokens`,
             `n_words`, `n_chars`, and `n_bytes`.
     """
     freqs: CounterType[str] = Counter()
@@ -65,6 +74,8 @@ def corpus_token_stats(tokenizer: TokenizerSpec, words: Iterable[str]) -> Dict[s
     n_words = 0
     n_chars = 0
     n_bytes = 0
+
+    # encode each word and accumulate the counts
     for word in words:
         pieces = tokenizer.encode(word)
         freqs.update(pieces)
@@ -72,6 +83,7 @@ def corpus_token_stats(tokenizer: TokenizerSpec, words: Iterable[str]) -> Dict[s
         n_words += 1
         n_chars += len(word)
         n_bytes += len(word.encode("utf-8"))
+
     return {
         "freqs": freqs,
         "n_tokens": n_tokens,
@@ -81,7 +93,7 @@ def corpus_token_stats(tokenizer: TokenizerSpec, words: Iterable[str]) -> Dict[s
     }
 
 
-def corpus_doc_stats(tokenizer: TokenizerSpec, docs: Iterable[Sequence[str]]) -> Dict[str, object]:
+def corpus_doc_stats(tokenizer: TokenizerSpec, docs: Iterable[Sequence[str]]) -> dict[str, object]:
     """Encode each document once, emitting per-document sufficient statistics.
 
     Keeps documents grouped (rather than flattening to one word list) so the
@@ -90,19 +102,21 @@ def corpus_doc_stats(tokenizer: TokenizerSpec, docs: Iterable[Sequence[str]]) ->
     piece counts across the whole corpus for the Renyi point estimate.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        docs (Iterable[List[str]]): One word-token list per document.
+        tokenizer: The tokenizer under evaluation.
+        docs: One word-token list per document.
 
     Returns:
-        Dict[str, object]: Keys `tokens`, `words`, `chars`, `bytes` (each a list
+        Keys `tokens`, `words`, `chars`, `bytes` (each a list
             of per-document totals) and `freqs` (a Counter of pieces over all
             documents).
     """
     freqs: CounterType[str] = Counter()
-    tokens: List[int] = []
-    words: List[int] = []
-    chars: List[int] = []
-    nbytes: List[int] = []
+    tokens: list[int] = []
+    words: list[int] = []
+    chars: list[int] = []
+    nbytes: list[int] = []
+
+    # encode each document and record its totals
     for doc in docs:
         doc_tokens = 0
         doc_words = 0
@@ -119,6 +133,7 @@ def corpus_doc_stats(tokenizer: TokenizerSpec, docs: Iterable[Sequence[str]]) ->
         words.append(doc_words)
         chars.append(doc_chars)
         nbytes.append(doc_bytes)
+
     return {"tokens": tokens, "words": words, "chars": chars, "bytes": nbytes, "freqs": freqs}
 
 
@@ -126,25 +141,25 @@ def fertility(n_tokens: int, n_words: int) -> float:
     """Return mean subword tokens per word.
 
     Args:
-        n_tokens (int): Total pieces emitted over the corpus.
-        n_words (int): Total word tokens.
+        n_tokens: Total pieces emitted over the corpus.
+        n_words: Total word tokens.
 
     Returns:
-        float: Tokens per word; 0.0 when there are no words. Lower is better.
+        Tokens per word; 0.0 when there are no words. Lower is better.
     """
     return n_tokens / n_words if n_words else 0.0
 
 
-def compression_stats(n_tokens: int, n_chars: int, n_bytes: int) -> Dict[str, float]:
+def compression_stats(n_tokens: int, n_chars: int, n_bytes: int) -> dict[str, float]:
     """Return Corpus-Token-Count compression statistics.
 
     Args:
-        n_tokens (int): Total pieces emitted over the corpus.
-        n_chars (int): Total characters in the corpus words.
-        n_bytes (int): Total UTF-8 bytes in the corpus words.
+        n_tokens: Total pieces emitted over the corpus.
+        n_chars: Total characters in the corpus words.
+        n_bytes: Total UTF-8 bytes in the corpus words.
 
     Returns:
-        Dict[str, float]: `ctc_total` (raw token count, lower is better),
+        `ctc_total` (raw token count, lower is better),
             `tokens_per_byte` (lower is better), and `chars_per_token`
             (higher is better).
     """
@@ -155,14 +170,14 @@ def compression_stats(n_tokens: int, n_chars: int, n_bytes: int) -> Dict[str, fl
     }
 
 
-def _logsumexp(values: List[float]) -> float:
+def _logsumexp(values: list[float]) -> float:
     """Return log(sum(exp(values))) computed stably.
 
     Args:
-        values (List[float]): Log-domain values.
+        values: Log-domain values.
 
     Returns:
-        float: The log-sum-exp, or -inf for an empty input.
+        The log-sum-exp, or -inf for an empty input.
     """
     if not values:
         return float("-inf")
@@ -172,19 +187,21 @@ def _logsumexp(values: List[float]) -> float:
     return peak + math.log(sum(math.exp(v - peak) for v in values))
 
 
-def renyi_entropy(freqs: Dict[str, int], alpha: float = 2.5) -> float:
+def renyi_entropy(freqs: dict[str, int], alpha: float = 2.5) -> float:
     """Return the Renyi entropy of a token-frequency distribution (nats).
 
     Args:
-        freqs (Dict[str, int]): Token to count.
-        alpha (float): Renyi order; `alpha == 1` falls back to Shannon entropy.
+        freqs: Token to count.
+        alpha: Renyi order; `alpha == 1` falls back to Shannon entropy.
 
     Returns:
-        float: The Renyi entropy in nats, 0.0 for an empty distribution.
+        The Renyi entropy in nats, 0.0 for an empty distribution.
     """
     total = sum(freqs.values())
     if total <= 0:
         return 0.0
+
+    # entropy of the probability distribution
     probs = [count / total for count in freqs.values() if count > 0]
     if alpha == 1.0:
         return -sum(p * math.log(p) for p in probs)
@@ -192,7 +209,7 @@ def renyi_entropy(freqs: Dict[str, int], alpha: float = 2.5) -> float:
     return log_sum / (1.0 - alpha)
 
 
-def renyi_efficiency(freqs: Dict[str, int], alpha: float = 2.5) -> float:
+def renyi_efficiency(freqs: dict[str, int], alpha: float = 2.5) -> float:
     """Return the Renyi efficiency of a token-frequency distribution.
 
     Efficiency normalizes Renyi entropy by `log(V_used)`, the log of the number
@@ -200,33 +217,40 @@ def renyi_efficiency(freqs: Dict[str, int], alpha: float = 2.5) -> float:
     higher is better and a uniform distribution scores 1.
 
     Args:
-        freqs (Dict[str, int]): Token to count.
-        alpha (float): Renyi order.
+        freqs: Token to count.
+        alpha: Renyi order.
 
     Returns:
-        float: Efficiency in `[0, 1]`; 0.0 when fewer than two types occur.
+        Efficiency in `[0, 1]`; 0.0 when fewer than two types occur.
     """
     vocab_used = sum(1 for count in freqs.values() if count > 0)
     if vocab_used <= 1:
         return 0.0
+
+    # clamp floating-point overshoot; efficiency is defined on [0, 1]
     efficiency = renyi_entropy(freqs, alpha) / math.log(vocab_used)
-    # Clamp tiny floating-point overshoot; efficiency is defined on [0, 1].
     return min(1.0, max(0.0, efficiency))
 
 
-def _boundary_positions(spans: List[Tuple[str, int, int]], form_len: int) -> List[int]:
+# ===============================
+# Boundary helpers
+# ===============================
+
+
+def _boundary_positions(spans: list[tuple[str, int, int]], form_len: int) -> list[int]:
     """Return the sorted character boundary positions implied by token spans.
 
     Works for any scheme: byte-level tokens that share a character span simply
     contribute the same positions. Includes the endpoints 0 and `form_len`.
 
     Args:
-        spans (List[Tuple[str, int, int]]): `(piece, start, end)` token spans.
-        form_len (int): Character length of the form.
+        spans: `(piece, start, end)` token spans.
+        form_len: Character length of the form.
 
     Returns:
-        List[int]: Sorted distinct boundary offsets within `[0, form_len]`.
+        Sorted distinct boundary offsets within `[0, form_len]`.
     """
+    # collect the span endpoints inside the form
     positions = {0, form_len}
     for _piece, start, end in spans:
         if 0 <= start <= form_len:
@@ -236,20 +260,22 @@ def _boundary_positions(spans: List[Tuple[str, int, int]], form_len: int) -> Lis
     return sorted(positions)
 
 
-def _token_spans(tokenizer: TokenizerSpec, form: str) -> Optional[List[Tuple[str, int, int]]]:
+def _token_spans(tokenizer: TokenizerSpec, form: str) -> list[tuple[str, int, int]] | None:
     """Return the token spans for `form`, or None when they do not tile it.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        form (str): A surface word form.
+        tokenizer: The tokenizer under evaluation.
+        form: A surface word form.
 
     Returns:
-        Optional[List[Tuple[str, int, int]]]: `(piece, start, end)` spans whose
+        `(piece, start, end)` spans whose
             union covers every character of `form`, or None otherwise.
     """
     spans = tokenizer.encode_offsets(form)
     if not spans:
         return None
+
+    # the spans must cover every character
     covered = set()
     for _piece, start, end in spans:
         covered.update(range(start, end))
@@ -258,29 +284,29 @@ def _token_spans(tokenizer: TokenizerSpec, form: str) -> Optional[List[Tuple[str
     return spans
 
 
-def _segments(spans: List[Tuple[str, int, int]], form: str) -> List[str]:
+def _segments(spans: list[tuple[str, int, int]], form: str) -> list[str]:
     """Return the surface segments between consecutive token boundaries.
 
     Args:
-        spans (List[Tuple[str, int, int]]): `(piece, start, end)` token spans.
-        form (str): The form the spans cover.
+        spans: `(piece, start, end)` token spans.
+        form: The form the spans cover.
 
     Returns:
-        List[str]: Surface substrings delimited by the token boundaries.
+        Surface substrings delimited by the token boundaries.
     """
     positions = _boundary_positions(spans, len(form))
     return [form[positions[i] : positions[i + 1]] for i in range(len(positions) - 1)]
 
 
-def _reliable_forms(lexicon: MorphLexicon, max_forms: Optional[int]):
+def _reliable_forms(lexicon: MorphLexicon, max_forms: int | None):
     """Yield reliable segmentations, optionally truncated for speed.
 
     Args:
-        lexicon (MorphLexicon): The gold lexicon.
-        max_forms (Optional[int]): Cap on the number of forms, or None.
+        lexicon: The gold lexicon.
+        max_forms: Cap on the number of forms, or None.
 
     Yields:
-        MorphemeSegmentation: Each (optionally truncated) gold segmentation.
+        Each (optionally truncated) gold segmentation.
     """
     for index, segmentation in enumerate(lexicon.by_form.values()):
         if max_forms is not None and index >= max_forms:
@@ -288,12 +314,17 @@ def _reliable_forms(lexicon: MorphLexicon, max_forms: Optional[int]):
         yield segmentation
 
 
+# ===============================
+# Morphological metrics
+# ===============================
+
+
 def morph_score(
     tokenizer: TokenizerSpec,
     lexicon: MorphLexicon,
     *,
-    max_forms: Optional[int] = None,
-) -> Dict[str, float]:
+    max_forms: int | None = None,
+) -> dict[str, float]:
     """Return micro-averaged morpheme-boundary precision, recall, and F1.
 
     A predicted boundary is correct when it coincides with a gold morpheme
@@ -301,12 +332,12 @@ def morph_score(
     over-segmenting monomorphemic words lowers precision.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        lexicon (MorphLexicon): The gold lexicon.
-        max_forms (Optional[int]): Cap on forms evaluated, or None for all.
+        tokenizer: The tokenizer under evaluation.
+        lexicon: The gold lexicon.
+        max_forms: Cap on forms evaluated, or None for all.
 
     Returns:
-        Dict[str, float]: `precision`, `recall`, `f1` in `[0, 1]`, plus
+        `precision`, `recall`, `f1` in `[0, 1]`, plus
             `coverage` (fraction of forms whose pieces aligned).
     """
     true_positive = 0
@@ -314,6 +345,8 @@ def morph_score(
     gold = 0
     evaluated = 0
     total = 0
+
+    # count the boundary matches per form
     for segmentation in _reliable_forms(lexicon, max_forms):
         total += 1
         spans = _token_spans(tokenizer, segmentation.form)
@@ -327,6 +360,7 @@ def morph_score(
         predicted += len(pred_boundaries)
         gold += len(gold_boundaries)
 
+    # micro-averaged precision, recall and F1
     precision = true_positive / predicted if predicted else 0.0
     recall = true_positive / gold if gold else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
@@ -338,15 +372,15 @@ def morph_score(
     }
 
 
-def _levenshtein(left: List[str], right: List[str]) -> int:
+def _levenshtein(left: list[str], right: list[str]) -> int:
     """Return the segment-level Levenshtein distance between two sequences.
 
     Args:
-        left (List[str]): First sequence of segments.
-        right (List[str]): Second sequence of segments.
+        left: First sequence of segments.
+        right: Second sequence of segments.
 
     Returns:
-        int: Minimum single-segment insertions, deletions, and substitutions.
+        Minimum single-segment insertions, deletions, and substitutions.
     """
     previous = list(range(len(right) + 1))
     for i, left_item in enumerate(left, start=1):
@@ -362,7 +396,7 @@ def morph_edit_distance(
     tokenizer: TokenizerSpec,
     lexicon: MorphLexicon,
     *,
-    max_forms: Optional[int] = None,
+    max_forms: int | None = None,
 ) -> float:
     """Return the mean raw segment-edit distance to gold morphemes.
 
@@ -374,15 +408,17 @@ def morph_edit_distance(
     means the tokenizer's segments equal the gold morphemes for every form.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        lexicon (MorphLexicon): The gold lexicon.
-        max_forms (Optional[int]): Cap on forms evaluated, or None for all.
+        tokenizer: The tokenizer under evaluation.
+        lexicon: The gold lexicon.
+        max_forms: Cap on forms evaluated, or None for all.
 
     Returns:
-        float: Mean raw segment-edit distance (>= 0); lower is better.
+        Mean raw segment-edit distance (>= 0); lower is better.
     """
     total = 0.0
     count = 0
+
+    # sum the segment edit distances over the forms
     for segmentation in _reliable_forms(lexicon, max_forms):
         spans = _token_spans(tokenizer, segmentation.form)
         if spans is None:
@@ -396,7 +432,7 @@ def morph_edit_distance(
 def morph_form_stats(
     tokenizer: TokenizerSpec,
     segmentations: Sequence[MorphemeSegmentation],
-) -> Dict[str, List[int]]:
+) -> dict[str, list[int]]:
     """Emit per-form sufficient statistics for the boundary morph metrics.
 
     Encodes each gold form once and records, in form order, the counts that
@@ -407,20 +443,22 @@ def morph_form_stats(
     bootstrapping over forms.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        segmentations (Sequence[MorphemeSegmentation]): The shared, deterministic
+        tokenizer: The tokenizer under evaluation.
+        segmentations: The shared, deterministic
             sample of gold segmentations.
 
     Returns:
-        Dict[str, List[int]]: Keys `tp`, `predicted`, `gold` (boundary counts for
+        Keys `tp`, `predicted`, `gold` (boundary counts for
             F1), `edit` (segment-edit distance to gold morphemes), and `valid`
             (1 when the form tiled, else 0), each a list aligned by form index.
     """
-    tp: List[int] = []
-    predicted: List[int] = []
-    gold: List[int] = []
-    edit: List[int] = []
-    valid: List[int] = []
+    tp: list[int] = []
+    predicted: list[int] = []
+    gold: list[int] = []
+    edit: list[int] = []
+    valid: list[int] = []
+
+    # record the counts per form, zeroed when the spans do not tile
     for segmentation in segmentations:
         spans = _token_spans(tokenizer, segmentation.form)
         if spans is None:
@@ -438,6 +476,7 @@ def morph_form_stats(
         gold.append(len(gold_boundaries))
         edit.append(_levenshtein(_segments(spans, segmentation.form), segmentation.morphemes))
         valid.append(1)
+
     return {"tp": tp, "predicted": predicted, "gold": gold, "edit": edit, "valid": valid}
 
 
@@ -445,17 +484,17 @@ def morph_form_stats(
 _DEFAULT_MAX_PAIRS_PER_GROUP = 200
 
 
-def _build_index(keys_per_form: Dict[str, Set[str]]) -> Dict[str, List[str]]:
+def _build_index(keys_per_form: dict[str, set[str]]) -> dict[str, list[str]]:
     """Invert a form-to-keys mapping into a key-to-forms index.
 
     Args:
-        keys_per_form (Dict[str, Set[str]]): Form to its key set (tokens or
+        keys_per_form: Form to its key set (tokens or
             morphemes).
 
     Returns:
-        Dict[str, List[str]]: Key to the forms that contain it.
+        Key to the forms that contain it.
     """
-    index: Dict[str, List[str]] = {}
+    index: dict[str, list[str]] = {}
     for form, keys in keys_per_form.items():
         for key in keys:
             index.setdefault(key, []).append(form)
@@ -463,21 +502,23 @@ def _build_index(keys_per_form: Dict[str, Set[str]]) -> Dict[str, List[str]]:
 
 
 def _grouped_pairs(
-    index: Dict[str, List[str]],
+    index: dict[str, list[str]],
     max_pairs_per_group: int,
     rng: random.Random,
-) -> Set[Tuple[str, str]]:
+) -> set[tuple[str, str]]:
     """Sample distinct form pairs that co-occur in each index group.
 
     Args:
-        index (Dict[str, List[str]]): Key to forms (e.g. morpheme to forms).
-        max_pairs_per_group (int): Cap on pairs drawn per group.
-        rng (random.Random): Seeded RNG for reproducible sampling.
+        index: Key to forms (e.g. morpheme to forms).
+        max_pairs_per_group: Cap on pairs drawn per group.
+        rng: Seeded RNG for reproducible sampling.
 
     Returns:
-        Set[Tuple[str, str]]: Ordered `(form_a, form_b)` pairs.
+        Ordered `(form_a, form_b)` pairs.
     """
-    pairs: Set[Tuple[str, str]] = set()
+    pairs: set[tuple[str, str]] = set()
+
+    # take all pairs of a small group, a sample of a large one
     for members in index.values():
         unique = sorted(set(members))
         if len(unique) < 2:
@@ -488,12 +529,9 @@ def _grouped_pairs(
                 for j in range(i + 1, len(unique)):
                     pairs.add((unique[i], unique[j]))
         else:
-            # Sample distinct pairs deduped against THIS group only. Bounding the
-            # loop by the group's own draws (not the cross-group accumulator)
-            # guarantees termination: `total > max_pairs_per_group` here, so
-            # `max_pairs_per_group` distinct pairs always exist within the group.
-            # Dedup across groups still happens via the final set union.
-            local: Set[Tuple[str, str]] = set()
+            # dedup against this group only: bounding the loop by its own draws
+            # guarantees termination, as `total > max_pairs_per_group` distinct pairs exist
+            local: set[tuple[str, str]] = set()
             while len(local) < max_pairs_per_group:
                 first, second = rng.sample(unique, 2)
                 local.add((first, second) if first < second else (second, first))
@@ -505,7 +543,7 @@ def morph_consistency_score(
     tokenizer: TokenizerSpec,
     lexicon: MorphLexicon,
     *,
-    max_forms: Optional[int] = None,
+    max_forms: int | None = None,
     max_pairs_per_group: int = _DEFAULT_MAX_PAIRS_PER_GROUP,
     seed: int = 0,
 ) -> float:
@@ -521,14 +559,14 @@ def morph_consistency_score(
     tractable and reproducible.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        lexicon (MorphLexicon): The gold lexicon.
-        max_forms (Optional[int]): Cap on forms evaluated, or None for all.
-        max_pairs_per_group (int): Cap on sampled pairs per index group.
-        seed (int): Seed for reproducible pair sampling.
+        tokenizer: The tokenizer under evaluation.
+        lexicon: The gold lexicon.
+        max_forms: Cap on forms evaluated, or None for all.
+        max_pairs_per_group: Cap on sampled pairs per index group.
+        seed: Seed for reproducible pair sampling.
 
     Returns:
-        float: Consistency F1 in `[0, 1]`; higher is better.
+        Consistency F1 in `[0, 1]`; higher is better.
     """
     return morph_consistency_over(
         tokenizer,
@@ -554,29 +592,32 @@ def morph_consistency_over(
     attached to it.
 
     Args:
-        tokenizer (TokenizerSpec): The tokenizer under evaluation.
-        segmentations (Iterable[MorphemeSegmentation]): The forms to score.
-        max_pairs_per_group (int): Cap on sampled pairs per index group.
-        seed (int): Seed for reproducible pair sampling.
+        tokenizer: The tokenizer under evaluation.
+        segmentations: The forms to score.
+        max_pairs_per_group: Cap on sampled pairs per index group.
+        seed: Seed for reproducible pair sampling.
 
     Returns:
-        float: Consistency F1 in `[0, 1]`; higher is better.
+        Consistency F1 in `[0, 1]`; higher is better.
     """
-    token_sets: Dict[str, Set[str]] = {}
-    morph_sets: Dict[str, Set[str]] = {}
+    # collect the token and morpheme sets per form
+    token_sets: dict[str, set[str]] = {}
+    morph_sets: dict[str, set[str]] = {}
     for segmentation in segmentations:
         form = segmentation.form
         token_sets[form] = set(tokenizer.encode(form))
         morph_sets[form] = set(segmentation.morphemes)
 
+    # sample the pairs sharing a morpheme and sharing a token
     morph_pairs = _grouped_pairs(_build_index(morph_sets), max_pairs_per_group, random.Random(seed))
     token_pairs = _grouped_pairs(_build_index(token_sets), max_pairs_per_group, random.Random(seed))
     if not morph_pairs or not token_pairs:
         return 0.0
 
-    # Recall: of morpheme-sharing pairs, the share that also share a token.
+    # recall: of morpheme-sharing pairs, the share that also share a token
     recall = sum(bool(token_sets[a] & token_sets[b]) for a, b in morph_pairs) / len(morph_pairs)
-    # Precision: of token-sharing pairs, the share that also share a morpheme.
+
+    # precision: of token-sharing pairs, the share that also share a morpheme
     precision = sum(bool(morph_sets[a] & morph_sets[b]) for a, b in token_pairs) / len(token_pairs)
     if precision + recall == 0:
         return 0.0

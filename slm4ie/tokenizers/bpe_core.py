@@ -13,27 +13,33 @@ so any boundary the caller encodes as a separate chunk is preserved.
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+# ===============================
+# Constants
+# ===============================
 
 #: A symbol pair considered for merging.
-Pair = Tuple[str, str]
+Pair = tuple[str, str]
+
+# ===============================
+# Pair-count helpers
+# ===============================
 
 
 def _remove_chunk_pairs(
-    symbols: List[str],
+    symbols: list[str],
     freq: int,
     cid: int,
-    pair_freq: Dict[Pair, int],
-    where: Dict[Pair, set],
+    pair_freq: dict[Pair, int],
+    where: dict[Pair, set],
 ) -> None:
     """Subtract a chunk's adjacent-pair contributions from the indices.
 
     Args:
-        symbols (List[str]): The chunk's current symbol sequence.
-        freq (int): The chunk's corpus frequency.
-        cid (int): The chunk's index.
-        pair_freq (Dict[Pair, int]): Pair-frequency table (mutated).
-        where (Dict[Pair, set]): Pair-to-chunk index (mutated).
+        symbols: The chunk's current symbol sequence.
+        freq: The chunk's corpus frequency.
+        cid: The chunk's index.
+        pair_freq: Pair-frequency table (mutated).
+        where: Pair-to-chunk index (mutated).
     """
     for pair in zip(symbols, symbols[1:]):
         remaining = pair_freq.get(pair, 0) - freq
@@ -49,38 +55,38 @@ def _remove_chunk_pairs(
 
 
 def _add_chunk_pairs(
-    symbols: List[str],
+    symbols: list[str],
     freq: int,
     cid: int,
-    pair_freq: Dict[Pair, int],
-    where: Dict[Pair, set],
+    pair_freq: dict[Pair, int],
+    where: dict[Pair, set],
 ) -> None:
     """Add a chunk's adjacent-pair contributions to the indices.
 
     Args:
-        symbols (List[str]): The chunk's new symbol sequence.
-        freq (int): The chunk's corpus frequency.
-        cid (int): The chunk's index.
-        pair_freq (Dict[Pair, int]): Pair-frequency table (mutated).
-        where (Dict[Pair, set]): Pair-to-chunk index (mutated).
+        symbols: The chunk's new symbol sequence.
+        freq: The chunk's corpus frequency.
+        cid: The chunk's index.
+        pair_freq: Pair-frequency table (mutated).
+        where: Pair-to-chunk index (mutated).
     """
     for pair in zip(symbols, symbols[1:]):
         pair_freq[pair] = pair_freq.get(pair, 0) + freq
         where.setdefault(pair, set()).add(cid)
 
 
-def _merge_symbols(symbols: List[str], pair: Pair) -> List[str]:
+def _merge_symbols(symbols: list[str], pair: Pair) -> list[str]:
     """Merge all non-overlapping occurrences of `pair` in `symbols`.
 
     Args:
-        symbols (List[str]): Symbol sequence.
-        pair (Pair): Adjacent symbol pair to merge.
+        symbols: Symbol sequence.
+        pair: Adjacent symbol pair to merge.
 
     Returns:
-        List[str]: A new sequence with the pair merged.
+        A new sequence with the pair merged.
     """
     merged_symbol = pair[0] + pair[1]
-    result: List[str] = []
+    result: list[str] = []
     i = 0
     while i < len(symbols):
         if i < len(symbols) - 1 and symbols[i] == pair[0] and symbols[i + 1] == pair[1]:
@@ -92,7 +98,12 @@ def _merge_symbols(symbols: List[str], pair: Pair) -> List[str]:
     return result
 
 
-def learn_bpe(chunk_freqs: Dict[str, int], target_size: int) -> Tuple[List[str], List[Pair]]:
+# ===============================
+# Learning and encoding
+# ===============================
+
+
+def learn_bpe(chunk_freqs: dict[str, int], target_size: int) -> tuple[list[str], list[Pair]]:
     """Learn a BPE merge table over pre-segmented chunks.
 
     Each chunk is exploded into characters and merges are learned only within
@@ -101,28 +112,32 @@ def learn_bpe(chunk_freqs: Dict[str, int], target_size: int) -> Tuple[List[str],
     frequency pair, ties broken by pair string.
 
     Args:
-        chunk_freqs (Dict[str, int]): Chunk string to corpus frequency.
-        target_size (int): Desired number of tokens (initial characters plus
+        chunk_freqs: Chunk string to corpus frequency.
+        target_size: Desired number of tokens (initial characters plus
             learned merges). No merges are produced once this is reached.
 
     Returns:
-        Tuple[List[str], List[Pair]]: The ordered token list (sorted base
-            characters followed by merged tokens in merge order, de-duplicated)
-            and the ordered list of learned merges.
+        The ordered token list (sorted base characters followed by merged
+        tokens in merge order, de-duplicated) and the ordered list of learned
+        merges.
     """
-    chunk_symbols: List[List[str]] = [list(chunk) for chunk in chunk_freqs]
-    freqs: List[int] = list(chunk_freqs.values())
+    # explode the chunks into characters
+    chunk_symbols: list[list[str]] = [list(chunk) for chunk in chunk_freqs]
+    freqs: list[int] = list(chunk_freqs.values())
 
+    # start from the base characters
     base_chars = sorted({ch for chunk in chunk_freqs for ch in chunk})
-    tokens: List[str] = list(base_chars)
+    tokens: list[str] = list(base_chars)
     seen = set(tokens)
 
-    pair_freq: Dict[Pair, int] = {}
-    where: Dict[Pair, set] = {}
+    # count the adjacent pairs
+    pair_freq: dict[Pair, int] = {}
+    where: dict[Pair, set] = {}
     for cid, symbols in enumerate(chunk_symbols):
         _add_chunk_pairs(symbols, freqs[cid], cid, pair_freq, where)
 
-    merges: List[Pair] = []
+    # merge the best pair until the target size is reached
+    merges: list[Pair] = []
     while len(tokens) < target_size and pair_freq:
         best = max(pair_freq, key=lambda p: (pair_freq[p], p))
         merged_symbol = best[0] + best[1]
@@ -143,30 +158,32 @@ def learn_bpe(chunk_freqs: Dict[str, int], target_size: int) -> Tuple[List[str],
     return tokens, merges
 
 
-def merge_ranks(merges: List[Pair]) -> Dict[Pair, int]:
+def merge_ranks(merges: list[Pair]) -> dict[Pair, int]:
     """Map each merge to its priority rank (lower applies first).
 
     Args:
-        merges (List[Pair]): Ordered learned merges.
+        merges: Ordered learned merges.
 
     Returns:
-        Dict[Pair, int]: Pair to rank.
+        Pair to rank.
     """
     return {pair: rank for rank, pair in enumerate(merges)}
 
 
-def encode_bpe(chunk: str, ranks: Dict[Pair, int]) -> List[str]:
+def encode_bpe(chunk: str, ranks: dict[Pair, int]) -> list[str]:
     """Apply a learned merge table to a single chunk.
 
     Args:
-        chunk (str): The text to encode (a morpheme or whole word).
-        ranks (Dict[Pair, int]): Merge ranks from `merge_ranks`.
+        chunk: The text to encode (a morpheme or whole word).
+        ranks: Merge ranks from `merge_ranks`.
 
     Returns:
-        List[str]: The BPE pieces of `chunk`.
+        The BPE pieces of `chunk`.
     """
     if not chunk:
         return []
+
+    # merge the lowest-rank pair until none applies
     symbols = list(chunk)
     while len(symbols) > 1:
         best_rank = None

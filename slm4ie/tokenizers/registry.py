@@ -1,15 +1,17 @@
 """Tokenizer registry for config-driven selection."""
 
-from typing import Dict, Type
+# ===============================
+# Registry
+# ===============================
 
-_TOKENIZER_REGISTRY: Dict[str, Type] = {}
+_TOKENIZER_REGISTRY: dict[str, type] = {}
 
 
 def register_tokenizer(name: str):
     """Decorator to register a tokenizer class by name.
 
     Args:
-        name (str): Registry key for the tokenizer.
+        name: Registry key for the tokenizer.
     """
 
     def decorator(cls):
@@ -23,7 +25,7 @@ def get_tokenizer(name: str):
     """Retrieve a registered tokenizer class by name.
 
     Args:
-        name (str): Registry key.
+        name: Registry key.
 
     Returns:
         The tokenizer class.

@@ -21,10 +21,19 @@ corpus.
 
 import csv
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Separator between the stem and the ending in the `split_encoding` column.
 SPLIT_SEPARATOR = "__"
@@ -39,20 +48,24 @@ _REQUIRED_COLUMNS = (
     "split_encoding",
 )
 
+# ===============================
+# Parser functions
+# ===============================
 
-def split_form(split_encoding: str) -> List[str]:
+
+def split_form(split_encoding: str) -> list[str]:
     """Split a `split_encoding` value into its stem and ending.
 
     Args:
         split_encoding: A form such as `mačk__ah`, or `mačk` for a zero ending.
 
     Returns:
-        List[str]: `[stem, ending]`, or `[form]` when the ending is zero.
+        `[stem, ending]`, or `[form]` when the ending is zero.
     """
     return [piece for piece in split_encoding.split(SPLIT_SEPARATOR) if piece]
 
 
-def _add_row(lexeme: Dict[str, Any], row: Dict[str, str]) -> None:
+def _add_row(lexeme: dict[str, Any], row: dict[str, str]) -> None:
     """Add one TSV row to its lexeme's record, keeping each (form, split) once.
 
     Args:
@@ -71,7 +84,7 @@ def _add_row(lexeme: Dict[str, Any], row: Dict[str, str]) -> None:
         entry["msds"].append(row["orth_form_enc_msd"])
 
 
-def iter_inflection_segmentations(tsv_path: Path) -> Iterator[Dict[str, Any]]:
+def iter_inflection_segmentations(tsv_path: Path) -> Iterator[dict[str, Any]]:
     """Stream per-lexeme stem-ending splits from the release TSV.
 
     A lexeme's rows are scattered through the file, so all lexemes are
@@ -82,7 +95,7 @@ def iter_inflection_segmentations(tsv_path: Path) -> Iterator[Dict[str, Any]]:
         tsv_path: Path to the `DSBS__inflect_morph_seg` TSV file.
 
     Yields:
-        Dict[str, Any]: One record per lexeme with `entry_id`, `lemma`,
+        One record per lexeme with `entry_id`, `lemma`,
             `status` and `forms`, where each form carries `form`, `morphemes`
             and `msds`.
 
@@ -90,7 +103,9 @@ def iter_inflection_segmentations(tsv_path: Path) -> Iterator[Dict[str, Any]]:
         ValueError: If the header lacks a column the parser reads.
     """
     skipped = 0
-    lexemes: Dict[str, Dict[str, Any]] = {}
+    lexemes: dict[str, dict[str, Any]] = {}
+
+    # read the rows into lexemes
     with open(tsv_path, encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t", quoting=csv.QUOTE_NONE)
         missing = [column for column in _REQUIRED_COLUMNS if column not in (reader.fieldnames or [])]
@@ -111,21 +126,24 @@ def iter_inflection_segmentations(tsv_path: Path) -> Iterator[Dict[str, Any]]:
                 }
                 lexemes[row["lexeme_id"]] = lexeme
             _add_row(lexeme, row)
+
     if skipped:
         logger.warning("Skipped %d rows whose split_encoding does not reproduce the form in %s", skipped, tsv_path)
+
+    # emit the lexemes in first-seen order
     for lexeme in lexemes.values():
         del lexeme["_index"]
         yield lexeme
 
 
-def find_inflection_tsv(raw_dir: Path) -> Optional[Path]:
+def find_inflection_tsv(raw_dir: Path) -> Path | None:
     """Return the inflection split TSV under a raw directory.
 
     Args:
         raw_dir: Directory holding the release TSV, possibly in a subfolder.
 
     Returns:
-        Optional[Path]: The lexicographically first `*inflect_morph_seg*.tsv`,
+        The lexicographically first `*inflect_morph_seg*.tsv`,
             or None when none is found.
     """
     candidates = sorted(raw_dir.rglob("*inflect_morph_seg*.tsv"))

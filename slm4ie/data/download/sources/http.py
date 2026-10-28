@@ -3,7 +3,6 @@
 import logging
 import time
 from pathlib import Path
-from typing import List, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -13,11 +12,23 @@ from slm4ie.data.download.config import DatasetConfig
 from slm4ie.data.download.run import DownloaderResult, _augment_with_note
 from slm4ie.utils.parallel import workers_quiet
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 MAX_RETRIES = 3
 CHUNK_SIZE = 8192
 REQUEST_TIMEOUT = 30
+
+# ===============================
+# Download entry point
+# ===============================
 
 
 def download(config: DatasetConfig, output_dir: Path, force: bool) -> DownloaderResult:
@@ -43,8 +54,9 @@ def download(config: DatasetConfig, output_dir: Path, force: bool) -> Downloader
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    completed: List[str] = []
-    failed: List[Tuple[str, BaseException]] = []
+    # download each url, collecting failures
+    completed: list[str] = []
+    failed: list[tuple[str, BaseException]] = []
     for url in config.urls:
         filename = _extract_filename(url)
         dest = output_dir / filename
@@ -58,6 +70,11 @@ def download(config: DatasetConfig, output_dir: Path, force: bool) -> Downloader
     return DownloaderResult(completed=completed, failed=failed)
 
 
+# ===============================
+# Helper functions
+# ===============================
+
+
 def _extract_filename(url: str) -> str:
     """Extract filename from a URL, stripping query params.
 
@@ -65,7 +82,7 @@ def _extract_filename(url: str) -> str:
         url: The download URL.
 
     Returns:
-        str: The filename portion of the URL path.
+        The filename portion of the URL path.
     """
     parsed = urlparse(url)
     return Path(parsed.path).name
@@ -87,12 +104,14 @@ def _download_file(url: str, dest: Path, part: Path, force: bool) -> None:
         requests.RequestException: If the download fails after
             `MAX_RETRIES` attempts.
     """
+    # skip or reset depending on force
     if force:
         part.unlink(missing_ok=True)
     elif dest.exists():
         logger.info("File exists, skipping: %s", dest.name)
         return
 
+    # retry with exponential backoff
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             _stream_download(url, dest, part)
@@ -126,10 +145,10 @@ def _stream_download(url: str, dest: Path, part: Path) -> None:
         dest: Final destination path.
         part: Temporary .part file path.
     """
+    # resume from a partial file when present
     headers = {}
     initial_size = 0
     mode = "wb"
-
     if part.exists():
         initial_size = part.stat().st_size
         headers["Range"] = f"bytes={initial_size}-"
@@ -140,6 +159,7 @@ def _stream_download(url: str, dest: Path, part: Path) -> None:
             initial_size,
         )
 
+    # stream the response to the part file
     with requests.get(url, stream=True, headers=headers, timeout=REQUEST_TIMEOUT) as resp:
         resp.raise_for_status()
 
@@ -169,5 +189,6 @@ def _stream_download(url: str, dest: Path, part: Path) -> None:
                 f.write(chunk)
                 pbar.update(len(chunk))
 
+    # publish the finished file
     part.rename(dest)
     logger.info("Downloaded: %s", dest.name)

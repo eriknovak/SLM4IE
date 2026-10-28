@@ -19,8 +19,9 @@ means its `train.jsonl` source file is never read.
 """
 
 import logging
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.data.schema import (
     CommonsenseCopaExample,
@@ -29,6 +30,7 @@ from slm4ie.data.schema import (
     QaBooleanExample,
     WsdExample,
 )
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
@@ -37,10 +39,17 @@ from slm4ie.data.tasks.run import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 from slm4ie.data.tasks.splits import find_first_existing, iter_jsonl
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Variant used when the caller passes no `variant` option.
 DEFAULT_VARIANT = "humant"
@@ -51,8 +60,36 @@ _TRUE_TOKENS = frozenset({"true", "1", "yes", "y", "t"})
 #: Falsy string spellings recognized by `coerce_bool`.
 _FALSE_TOKENS = frozenset({"false", "0", "no", "n", "f"})
 
+#: Map each `<task>/<dataset>` to its SuperGLUE subtask directory.
+SUBTASK_DIRS: dict[str, str] = {
+    "nli/cb": "CB",
+    "nli/rte": "RTE",
+    "qa/boolq": "BoolQ",
+    "qa/multirc": "MultiRC",
+    "coref/wsc": "WSC",
+    "wsd/wic": "WiC",
+    "commonsense/copa": "COPA",
+}
 
-def coerce_bool(value: Any) -> Optional[bool]:
+#: Variant subdirectory candidates for each `--variant` value.
+VARIANT_DIRS: dict[str, tuple[str, ...]] = {
+    "humant": ("SuperGLUE-HumanT", "HumanT"),
+    "googlemt": ("SuperGLUE-GoogleMT", "GoogleMT"),
+}
+
+#: Source filenames to try (per split) inside each subtask directory.
+_SPLIT_FILENAMES: dict[str, tuple[str, ...]] = {
+    "train": ("train.jsonl", "train.json"),
+    "val": ("val.jsonl", "val.json"),
+    "test": ("test.jsonl", "test.json"),
+}
+
+# ===============================
+# Helper functions
+# ===============================
+
+
+def coerce_bool(value: Any) -> bool | None:
     """Coerce common boolean spellings to `bool`.
 
     The SuperGLUE-SL bundles spell the boolean labels of BoolQ, MultiRC, WSC and
@@ -66,12 +103,15 @@ def coerce_bool(value: Any) -> Optional[bool]:
     Returns:
         `True` or `False` for recognized inputs, None otherwise.
     """
+    # native and numeric values
     if value is None:
         return None
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
         return bool(int(value))
+
+    # string spellings
     if isinstance(value, str):
         lowered = value.strip().lower()
         if lowered in _TRUE_TOKENS:
@@ -79,31 +119,6 @@ def coerce_bool(value: Any) -> Optional[bool]:
         if lowered in _FALSE_TOKENS:
             return False
     return None
-
-
-#: Map each `<task>/<dataset>` to its SuperGLUE subtask directory.
-SUBTASK_DIRS: Dict[str, str] = {
-    "nli/cb": "CB",
-    "nli/rte": "RTE",
-    "qa/boolq": "BoolQ",
-    "qa/multirc": "MultiRC",
-    "coref/wsc": "WSC",
-    "wsd/wic": "WiC",
-    "commonsense/copa": "COPA",
-}
-
-#: Variant subdirectory candidates for each `--variant` value.
-VARIANT_DIRS: Dict[str, Tuple[str, ...]] = {
-    "humant": ("SuperGLUE-HumanT", "HumanT"),
-    "googlemt": ("SuperGLUE-GoogleMT", "GoogleMT"),
-}
-
-#: Source filenames to try (per split) inside each subtask directory.
-_SPLIT_FILENAMES: Dict[str, Tuple[str, ...]] = {
-    "train": ("train.jsonl", "train.json"),
-    "val": ("val.jsonl", "val.json"),
-    "test": ("test.jsonl", "test.json"),
-}
 
 
 def _find_variant_root(raw_dir: Path, variant: str) -> Path:
@@ -119,6 +134,7 @@ def _find_variant_root(raw_dir: Path, variant: str) -> Path:
     Raises:
         FileNotFoundError: If no candidate matches on disk.
     """
+    # look for a variant folder, else the bundle root
     candidates = VARIANT_DIRS.get(variant, ())
     for name in candidates:
         path = raw_dir / name
@@ -131,7 +147,7 @@ def _find_variant_root(raw_dir: Path, variant: str) -> Path:
     )
 
 
-def _find_subtask_dir(variant_root: Path, subtask: str) -> Optional[Path]:
+def _find_subtask_dir(variant_root: Path, subtask: str) -> Path | None:
     """Return the subtask subdirectory matching *subtask* case-insensitively.
 
     Args:
@@ -149,7 +165,7 @@ def _find_subtask_dir(variant_root: Path, subtask: str) -> Optional[Path]:
     return None
 
 
-def _source_path_for_split(subtask_dir: Path, split: str) -> Optional[Path]:
+def _source_path_for_split(subtask_dir: Path, split: str) -> Path | None:
     """Return the source JSONL path for *split* inside *subtask_dir*.
 
     Args:
@@ -163,12 +179,17 @@ def _source_path_for_split(subtask_dir: Path, split: str) -> Optional[Path]:
     return find_first_existing([subtask_dir / name for name in names])
 
 
+# ===============================
+# Record converters
+# ===============================
+
+
 def _convert_nli(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     index: int,
-    allow: Optional[set],
-) -> Optional[NliExample]:
+    allow: set | None,
+) -> NliExample | None:
     """Convert one CB/RTE record to an `NliExample`.
 
     Args:
@@ -198,11 +219,11 @@ def _convert_nli(
 
 
 def _convert_boolq(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     index: int,
-    allow: Optional[set],
-) -> Optional[QaBooleanExample]:
+    allow: set | None,
+) -> QaBooleanExample | None:
     """Convert one BoolQ record to a `QaBooleanExample`.
 
     Args:
@@ -230,11 +251,11 @@ def _convert_boolq(
 
 
 def _convert_wsc(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     index: int,
-    allow: Optional[set],
-) -> Optional[CorefExample]:
+    allow: set | None,
+) -> CorefExample | None:
     """Convert one WSC record to a `CorefExample`.
 
     Args:
@@ -246,6 +267,7 @@ def _convert_wsc(
     Returns:
         The `CorefExample`, or None when required fields are missing.
     """
+    # read the fields, preferring the nested target
     text = record.get("text")
     target = record.get("target") or {}
     span1_text = target.get("span1_text") or record.get("span1_text")
@@ -255,8 +277,9 @@ def _convert_wsc(
     if text is None or span1_text is None or span2_text is None:
         return None
 
-    span1: Dict[str, Any] = {"text": str(span1_text)}
-    span2: Dict[str, Any] = {"text": str(span2_text)}
+    # build the span dicts
+    span1: dict[str, Any] = {"text": str(span1_text)}
+    span2: dict[str, Any] = {"text": str(span2_text)}
     if span1_index is not None:
         span1["start"] = int(span1_index)
         span1["end"] = int(span1_index) + len(str(span1_text).split())
@@ -277,11 +300,11 @@ def _convert_wsc(
 
 
 def _convert_wic(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     index: int,
-    allow: Optional[set],
-) -> Optional[WsdExample]:
+    allow: set | None,
+) -> WsdExample | None:
     """Convert one WiC record to a `WsdExample`.
 
     Args:
@@ -311,11 +334,11 @@ def _convert_wic(
 
 
 def _convert_copa(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     index: int,
-    allow: Optional[set],
-) -> Optional[CommonsenseCopaExample]:
+    allow: set | None,
+) -> CommonsenseCopaExample | None:
     """Convert one COPA record to a `CommonsenseCopaExample`.
 
     Args:
@@ -333,6 +356,8 @@ def _convert_copa(
     question = record.get("question", "cause")
     if premise is None or choice1 is None or choice2 is None:
         return None
+
+    # default to 0 for a missing or bad label
     raw_label = record.get("label")
     try:
         label_int = int(raw_label) if raw_label is not None else 0
@@ -349,7 +374,7 @@ def _convert_copa(
 
 
 def _iter_multirc(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     base_index: int,
 ) -> Iterator[QaBooleanExample]:
@@ -365,6 +390,7 @@ def _iter_multirc(
     Yields:
         One `QaBooleanExample` per `(passage, question, answer)` triple.
     """
+    # read the passage fields
     passage = record.get("passage") or {}
     paragraph_text = passage.get("text", "")
     passage_idx = record.get("idx", base_index)
@@ -373,12 +399,15 @@ def _iter_multirc(
         q_idx = question.get("idx")
         for answer in question.get("answers") or []:
             ans_idx = answer.get("idx")
+            # build a stable id
             parts = [str(passage_idx)]
             if q_idx is not None:
                 parts.append(f"q{q_idx}")
             if ans_idx is not None:
                 parts.append(f"a{ans_idx}")
             example_id = f"{dataset}:{'-'.join(parts)}"
+
+            # yield one row per answer
             label = coerce_bool(answer.get("label"))
             if label is None:
                 label = False
@@ -391,11 +420,15 @@ def _iter_multirc(
             )
 
 
+# ===============================
+# Converter class
+# ===============================
+
 #: Per-task-family record converter callable, keyed by `<task>/<dataset>`.
 #: Each returns the example dict, or None when required fields are missing.
-_RECORD_CONVERTERS: Dict[
+_RECORD_CONVERTERS: dict[
     str,
-    Callable[[Dict[str, Any], str, int, Optional[set]], Optional[Any]],
+    Callable[[dict[str, Any], str, int, set | None], Any | None],
 ] = {
     "nli/cb": _convert_nli,
     "nli/rte": _convert_nli,
@@ -421,8 +454,8 @@ class SuperglueConverter(TaskConverter):
         entry: TaskEntry,
         roots: TasksRoots,
         ctx: ConvertContext,
-        splits: List[str],
-    ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        splits: list[str],
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
         """Yield `(source_split, example)` pairs for one SuperGLUE entry.
 
         Only the source files for the splits in `splits` are read, so a
@@ -443,6 +476,7 @@ class SuperglueConverter(TaskConverter):
             ValueError: If the entry has no registered subtask mapping or a
                 non-`raw` source kind.
         """
+        # guards: subtask mapping and source kind
         variant = ctx.options.get("variant", DEFAULT_VARIANT)
         key = f"{entry.task}/{entry.dataset}"
         subtask = SUBTASK_DIRS.get(key)
@@ -452,17 +486,19 @@ class SuperglueConverter(TaskConverter):
         if entry.source.kind != "raw":
             raise ValueError(f"superglue only supports source.kind='raw'; got {entry.source.kind!r} for {key}.")
 
+        # locate the subtask directory
         bundle = roots.raw / entry.source.keys[0]
         variant_root = _find_variant_root(bundle, variant)
         subtask_dir = _find_subtask_dir(variant_root, subtask)
         if subtask_dir is None:
             raise FileNotFoundError(f"Subtask directory {subtask!r} not found under {variant_root}.")
 
+        # pick the converter
         allow = label_allow_set(entry)
-
         is_multirc = key == "qa/multirc"
         converter = None if is_multirc else _RECORD_CONVERTERS.get(key)
 
+        # convert each split's records
         for split in splits:
             src_path = _source_path_for_split(subtask_dir, split)
             if src_path is None:

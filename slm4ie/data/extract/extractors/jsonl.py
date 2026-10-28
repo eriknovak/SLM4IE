@@ -70,14 +70,23 @@ Example:
 
 import json
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
 from slm4ie.data.schema import Annotations, Document, Token
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 DEFAULT_TEXT_FIELD = "text"
 DEFAULT_ID_FIELD = "doc_id"
@@ -86,10 +95,14 @@ DEFAULT_ID_FIELD = "doc_id"
 # (configurable) text and id fields.
 _STRUCTURAL_FIELDS = {"paragraphs", "conll"}
 
+# ===============================
+# Helper functions
+# ===============================
+
 
 def _parse_tokens_from_paragraphs(
-    paragraphs: List[Dict],
-) -> Optional[Annotations]:
+    paragraphs: list[dict],
+) -> Annotations | None:
     """Parse nested paragraphs/sentences/tokens into Annotations.
 
     Flattens all paragraphs, sentences, and tokens into a single
@@ -99,17 +112,16 @@ def _parse_tokens_from_paragraphs(
     True).
 
     Args:
-        paragraphs (List[Dict]): List of paragraph dicts, each
-            containing a sentences key with sentence dicts, each
-            containing a tokens key with token dicts.
+        paragraphs: List of paragraph dicts, each containing a sentences
+            key with sentence dicts, each containing a tokens key with
+            token dicts.
 
     Returns:
-        Optional[Annotations]: Parsed annotations, or None if no
-            tokens were found.
+        Parsed annotations, or None if no tokens were found.
     """
-    tokens: List[Token] = []
-    sentences: List[List[int]] = []
-
+    # flatten paragraphs, sentences and tokens
+    tokens: list[Token] = []
+    sentences: list[list[int]] = []
     for paragraph in paragraphs:
         for sentence in paragraph.get("sentences", []):
             raw_tokens = sentence.get("tokens", [])
@@ -131,8 +143,12 @@ def _parse_tokens_from_paragraphs(
 
     if not tokens:
         return None
-
     return Annotations(tokens=tokens, sentences=sentences)
+
+
+# ===============================
+# Extractor class
+# ===============================
 
 
 class JsonlExtractor(BaseExtractor):
@@ -150,17 +166,16 @@ class JsonlExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from all JSONL files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing .jsonl files
-                (searched recursively).
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
-                config block. Recognized keys: `text_field` (record
+            input_dir: Directory containing .jsonl files (searched
+                recursively).
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            metadata: Optional `metadata:` config block. Recognized keys: `text_field` (record
                 field copied into `text`, default `text`), `id_field`
                 (record field kept as `doc_id`, default `doc_id`), and
                 `metadata_fields` (explicit whitelist of record fields
@@ -170,17 +185,23 @@ class JsonlExtractor(BaseExtractor):
         Yields:
             Document: One document per valid JSONL line.
         """
+        # read the field settings
         cfg = metadata or {}
         text_field = str(cfg.get("text_field", DEFAULT_TEXT_FIELD))
         id_field = str(cfg.get("id_field", DEFAULT_ID_FIELD))
         metadata_fields_raw = cfg.get("metadata_fields")
-        metadata_fields: Optional[List[str]] = (
+        metadata_fields: list[str] | None = (
             [str(f) for f in metadata_fields_raw] if metadata_fields_raw is not None else None
         )
-        files: List[Path] = sorted(input_dir.rglob("*.jsonl"))
 
+        # parse every file in sorted order
+        files: list[Path] = sorted(input_dir.rglob("*.jsonl"))
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, text_field, id_field, metadata_fields)
+
+    # =================================
+    # Private methods
+    # =================================
 
     def _parse_file(
         self,
@@ -189,24 +210,24 @@ class JsonlExtractor(BaseExtractor):
         domain: str,
         text_field: str,
         id_field: str,
-        metadata_fields: Optional[List[str]],
+        metadata_fields: list[str] | None,
     ) -> Iterator[Document]:
         """Parse a single JSONL file and yield Documents.
 
         Args:
-            filepath (Path): Path to the JSONL file.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            text_field (str): Record field copied into `text`.
-            id_field (str): Record field kept as `doc_id`.
-            metadata_fields (Optional[List[str]]): Explicit whitelist of
-                record fields to keep as metadata, or None to keep every
-                field except the text field, the id field, and the
-                structural fields.
+            filepath: Path to the JSONL file.
+            source: Dataset key.
+            domain: Domain label.
+            text_field: Record field copied into `text`.
+            id_field: Record field kept as `doc_id`.
+            metadata_fields: Explicit whitelist of record fields to keep as
+                metadata, or None to keep every field except the text
+                field, the id field, and the structural fields.
 
         Yields:
             Document: One document per valid line.
         """
+        # parse the file line by line
         excluded = {text_field, id_field} | _STRUCTURAL_FIELDS
         with filepath.open(encoding="utf-8") as fh:
             for lineno, raw_line in enumerate(fh, start=1):
@@ -225,14 +246,16 @@ class JsonlExtractor(BaseExtractor):
                     )
                     continue
 
+                # skip records without text
                 text = record.get(text_field, "")
                 if not text:
                     continue
 
+                # build the document parts
                 doc_id = probe_doc_id(record, [id_field])
 
                 paragraphs = record.get("paragraphs")
-                annotations: Optional[Annotations] = None
+                annotations: Annotations | None = None
                 if paragraphs is not None:
                     annotations = _parse_tokens_from_paragraphs(paragraphs)
 
@@ -241,6 +264,7 @@ class JsonlExtractor(BaseExtractor):
                 else:
                     doc_metadata = project_metadata(record, exclude=excluded)
 
+                # emit the document
                 yield Document(
                     text=text,
                     source=source,

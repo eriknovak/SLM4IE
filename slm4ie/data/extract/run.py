@@ -7,15 +7,16 @@ import logging
 import os
 import shutil
 from array import array
+from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from tqdm import tqdm
 
-# Import extractors to trigger registration
+# import the extractors to register them
 import slm4ie.data.extract.extractors.coleslaw  # noqa: F401
 import slm4ie.data.extract.extractors.conllu  # noqa: F401
 import slm4ie.data.extract.extractors.huggingface  # noqa: F401
@@ -34,7 +35,15 @@ from slm4ie.utils.parallel import (
     workers_quiet,
 )
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Minimum number of input files before intra-dataset sharding kicks in.
 #: Below this, the per-file overhead of a process pool is not worth it.
@@ -44,8 +53,12 @@ _SHARD_MIN_FILES = 8
 #: worker count keeps all workers busy when shards finish unevenly.
 _SHARD_OVERPROVISION = 4
 
+# ===============================
+# Helper functions
+# ===============================
 
-def _stub_line(doc_id: Optional[str], uid: Optional[str]) -> str:
+
+def _stub_line(doc_id: str | None, uid: str | None) -> str:
     """Build an annotations stub line carrying only identifiers.
 
     Stubs keep the annotations sidecar aligned with the text JSONL
@@ -58,9 +71,10 @@ def _stub_line(doc_id: Optional[str], uid: Optional[str]) -> str:
         uid: Globally unique identifier of the unannotated record.
 
     Returns:
-        str: A JSON line with `doc_id` and `uid` only.
+        A JSON line with `doc_id` and `uid` only.
     """
-    data: Dict[str, Optional[str]] = {}
+    # keep only the identifiers that are set
+    data: dict[str, str | None] = {}
     if doc_id is not None:
         data["doc_id"] = doc_id
     if uid is not None:
@@ -78,9 +92,14 @@ def _hash64(value: str) -> int:
         value: The string to hash.
 
     Returns:
-        int: The hash as an unsigned 64-bit integer.
+        The hash as an unsigned 64-bit integer.
     """
     return int.from_bytes(hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest(), "little")
+
+
+# ===============================
+# Id contract
+# ===============================
 
 
 class DuplicateDocumentIdError(ValueError):
@@ -92,7 +111,7 @@ class DuplicateDocumentIdError(ValueError):
     as under-counted drops or mismatched annotations.
     """
 
-    def __init__(self, key: str, conflicts: int, examples: List[str]) -> None:
+    def __init__(self, key: str, conflicts: int, examples: list[str]) -> None:
         """Format the error for one dataset.
 
         Args:
@@ -101,12 +120,15 @@ class DuplicateDocumentIdError(ValueError):
                 document's id with different text.
             examples: Up to a few of the offending ids.
         """
+        # format the message
         shown = ", ".join(repr(e) for e in examples)
         super().__init__(
             f"{conflicts} documents in '{key}' repeat an earlier doc_id with different text (e.g. {shown}). "
             "doc_id must be unique within a dataset: give the extractor a positional id or "
             "narrow the input with `include:` in extract.yaml."
         )
+
+        # store the details
         self.key = key
         self.conflicts = conflicts
         self.examples = examples
@@ -152,7 +174,7 @@ class _IdLedger:
         self.ids.extend(other.ids)
         self.texts.extend(other.texts)
 
-    def resolve(self) -> Tuple[bytearray, List[int]]:
+    def resolve(self) -> tuple[bytearray, list[int]]:
         """Decide what to do with every repeated id.
 
         The first document carrying an id is always kept. A later
@@ -161,17 +183,20 @@ class _IdLedger:
         a conflict when it differs.
 
         Returns:
-            Tuple[bytearray, List[int]]: One keep flag (1/0) per
-                document in write order, and the write-order indices
-                of the conflicting documents. Flags are a bytearray,
-                one byte per document, since the keep set is as large
-                as the dataset.
+            One keep flag (1/0) per
+            document in write order, and the write-order indices
+            of the conflicting documents. Flags are a bytearray,
+            one byte per document, since the keep set is as large
+            as the dataset.
         """
+        # group the documents by id
         n = len(self.ids)
         keep = bytearray(b"\x01") * n
-        conflicts: List[int] = []
-        # Stable sort keeps write order within an id: a group's head is its earliest.
+        conflicts: list[int] = []
+        # a stable sort keeps write order within an id: a group's head is its earliest
         order = sorted(range(n), key=self.ids.__getitem__)
+
+        # keep the first of each group, drop identical repeats, report conflicts
         group_start = 0
         for pos in range(1, n + 1):
             if pos < n and self.ids[order[pos]] == self.ids[order[group_start]]:
@@ -183,6 +208,7 @@ class _IdLedger:
                 else:
                     conflicts.append(later)
             group_start = pos
+
         conflicts.sort()
         return keep, conflicts
 
@@ -199,6 +225,7 @@ def _drop_lines(path: Path, keep: Iterable[int], gz: bool) -> None:
         ValueError: If the file has a different number of lines than
             `keep` has flags.
     """
+    # write the kept lines to a temp file, then swap it in
     opener = gzip.open if gz else open
     filtered = path.with_name(path.name + ".dedup")
     with opener(path, "rb") as fin, opener(filtered, "wb") as fout:
@@ -208,7 +235,7 @@ def _drop_lines(path: Path, keep: Iterable[int], gz: bool) -> None:
     os.replace(filtered, path)
 
 
-def _doc_ids_at(text_files: List[Tuple[Path, int]], indices: List[int]) -> List[str]:
+def _doc_ids_at(text_files: list[tuple[Path, int]], indices: list[int]) -> list[str]:
     """Read the `doc_id` of the documents at the given write-order indices.
 
     Args:
@@ -217,9 +244,10 @@ def _doc_ids_at(text_files: List[Tuple[Path, int]], indices: List[int]) -> List[
         indices: Sorted write-order indices to look up.
 
     Returns:
-        List[str]: The ids found, in index order.
+        The ids found, in index order.
     """
-    found: List[str] = []
+    # read the ids of the wanted lines, file by file
+    found: list[str] = []
     offset = 0
     for path, count in text_files:
         local = {i - offset for i in indices if offset <= i < offset + count}
@@ -235,7 +263,7 @@ def _doc_ids_at(text_files: List[Tuple[Path, int]], indices: List[int]) -> List[
     return found
 
 
-def _enforce_unique_ids(key: str, ledger: _IdLedger, parts: List[Tuple[Path, Optional[Path], int]]) -> int:
+def _enforce_unique_ids(key: str, ledger: _IdLedger, parts: list[tuple[Path, Path | None, int]]) -> int:
     """Apply the id contract to a dataset's written files before promotion.
 
     Repeats of an id with identical text are removed from the text file
@@ -251,15 +279,18 @@ def _enforce_unique_ids(key: str, ledger: _IdLedger, parts: List[Tuple[Path, Opt
             document count.
 
     Returns:
-        int: Documents dropped as identical repeats.
+        Documents dropped as identical repeats.
 
     Raises:
         DuplicateDocumentIdError: If a `doc_id` repeats with different text.
     """
+    # abort on conflicting repeats
     keep, conflicts = ledger.resolve()
     if conflicts:
         examples = _doc_ids_at([(text_path, count) for text_path, _, count in parts], conflicts[:3])
         raise DuplicateDocumentIdError(key, len(conflicts), examples)
+
+    # drop identical repeats from the text and annotation files
     dropped = len(keep) - sum(keep)
     if dropped:
         offset = 0
@@ -274,7 +305,7 @@ def _enforce_unique_ids(key: str, ledger: _IdLedger, parts: List[Tuple[Path, Opt
     return dropped
 
 
-def _select_files(files: List[Path], input_dir: Path, include: Optional[List[str]]) -> List[Path]:
+def _select_files(files: list[Path], input_dir: Path, include: list[str] | None) -> list[Path]:
     """Keep the input files matching the dataset's `include:` globs.
 
     Args:
@@ -285,11 +316,12 @@ def _select_files(files: List[Path], input_dir: Path, include: Optional[List[str
             keeps every file.
 
     Returns:
-        List[Path]: The matching files, in their original order.
+        The matching files, in their original order.
 
     Raises:
         ValueError: If the patterns match no file at all.
     """
+    # filter by the include globs
     if not include:
         return files
     kept = [f for f in files if any(fnmatch(f.relative_to(input_dir).as_posix(), pattern) for pattern in include)]
@@ -298,7 +330,7 @@ def _select_files(files: List[Path], input_dir: Path, include: Optional[List[str
     return kept
 
 
-def _chunk_files(files: List[Path], n_chunks: int) -> List[List[Path]]:
+def _chunk_files(files: list[Path], n_chunks: int) -> list[list[Path]]:
     """Split files into contiguous, order-preserving slices.
 
     The first `len(files) % n_chunks` slices get one extra item so the
@@ -306,25 +338,31 @@ def _chunk_files(files: List[Path], n_chunks: int) -> List[List[Path]]:
     result has at most `min(n_chunks, len(files))` chunks.
 
     Args:
-        files (List[Path]): Files to split, in their final order.
-        n_chunks (int): Desired number of chunks (clamped to
+        files: Files to split, in their final order.
+        n_chunks: Desired number of chunks (clamped to
             `[1, len(files)]`).
 
     Returns:
-        List[List[Path]]: Non-empty chunks whose concatenation equals
-            `files`.
+        Non-empty chunks whose concatenation equals
+        `files`.
     """
+    # split into near-equal slices
     if not files:
         return []
     n = max(1, min(n_chunks, len(files)))
     size, remainder = divmod(len(files), n)
-    chunks: List[List[Path]] = []
+    chunks: list[list[Path]] = []
     start = 0
     for i in range(n):
         end = start + size + (1 if i < remainder else 0)
         chunks.append(files[start:end])
         start = end
     return [c for c in chunks if c]
+
+
+# ===============================
+# Sharded extraction
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -353,11 +391,11 @@ class ShardResult:
 
 def _extract_shard(
     index: int,
-    files: List[Path],
+    files: list[Path],
     key: str,
     extractor_name: str,
     domain: str,
-    metadata_cfg: Optional[Dict[str, Any]],
+    metadata_cfg: dict[str, Any] | None,
     input_dir: Path,
     tmp_dir: Path,
 ) -> ShardResult:
@@ -369,19 +407,20 @@ def _extract_shard(
     without a `doc_id` get a shard-namespaced fallback id.
 
     Args:
-        index (int): Shard ordinal.
-        files (List[Path]): Files assigned to this shard, in order.
-        key (str): Dataset key (used as the `source` field).
-        extractor_name (str): Registry name of a `FileBasedExtractor`.
-        domain (str): Domain label assigned to every Document.
-        metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
+        index: Shard ordinal.
+        files: Files assigned to this shard, in order.
+        key: Dataset key (used as the `source` field).
+        extractor_name: Registry name of a `FileBasedExtractor`.
+        domain: Domain label assigned to every Document.
+        metadata_cfg: Optional `metadata:`
             config block forwarded to the extractor.
-        input_dir (Path): Dataset root, for metadata table resolution.
-        tmp_dir (Path): Directory to write this shard's temp files into.
+        input_dir: Dataset root, for metadata table resolution.
+        tmp_dir: Directory to write this shard's temp files into.
 
     Returns:
-        ShardResult: Paths, document count, and annotation flag.
+        Paths, document count, and annotation flag.
     """
+    # set up the shard files
     extractor = get_extractor(extractor_name)
     text_path = tmp_dir / f"{index:05d}.jsonl"
     ann_path = tmp_dir / f"{index:05d}.annotations.jsonl.gz"
@@ -389,13 +428,11 @@ def _extract_shard(
     had_real_ann = False
     ledger = _IdLedger()
 
+    # write each document and its annotation line
     with open(text_path, "w", encoding="utf-8") as tf, gzip.open(ann_path, "wt", encoding="utf-8") as af:
         for local, doc in enumerate(extractor.extract_files(files, key, domain, input_dir, metadata_cfg)):
             if doc.doc_id is None:
-                # Shard-namespaced fallback id (vs. the serial writer's
-                # global `idx-{index:014d}`), so the two schemes disagree
-                # for any extractor that yields null doc_ids. No shipped
-                # extractor does: this only guards a future one.
+                # shard-namespaced fallback id; no shipped extractor yields null doc_ids
                 doc.doc_id = f"idx-{index:05d}-{local:010d}"
             tf.write(doc.to_jsonl_line())
             tf.write("\n")
@@ -413,15 +450,20 @@ def _extract_shard(
     return ShardResult(index, text_path, ann_path, count, had_real_ann, ledger)
 
 
+# ===============================
+# Serial extraction
+# ===============================
+
+
 def _extract_serial(
     key: str,
     extractor: BaseExtractor,
     domain: str,
-    metadata_cfg: Optional[Dict[str, Any]],
+    metadata_cfg: dict[str, Any] | None,
     input_dir: Path,
     text_file: Path,
     ann_file: Path,
-    files: Optional[List[Path]] = None,
+    files: list[Path] | None = None,
 ) -> int:
     """Stream a dataset to JSONL in a single pass (no sharding).
 
@@ -434,45 +476,45 @@ def _extract_serial(
     abort the dataset (see `DuplicateDocumentIdError`).
 
     Args:
-        key (str): Dataset key (used as `source` and in messages).
-        extractor (BaseExtractor): Instantiated extractor.
-        domain (str): Domain label assigned to every Document.
-        metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
+        key: Dataset key (used as `source` and in messages).
+        extractor: Instantiated extractor.
+        domain: Domain label assigned to every Document.
+        metadata_cfg: Optional `metadata:`
             config block forwarded to the extractor.
-        input_dir (Path): Directory containing the raw source data.
-        text_file (Path): Final destination for the text JSONL.
-        ann_file (Path): Final destination for the gzipped annotations.
-        files (Optional[List[Path]]): The selected input files of a
+        input_dir: Directory containing the raw source data.
+        text_file: Final destination for the text JSONL.
+        ann_file: Final destination for the gzipped annotations.
+        files: The selected input files of a
             `FileBasedExtractor`; None lets the extractor discover them.
 
     Returns:
-        int: Number of documents written.
+        Number of documents written.
 
     Raises:
         DuplicateDocumentIdError: If a `doc_id` repeats with different text.
     """
+    # set up the partial files
     text_partial = text_file.parent / f"{text_file.name}.partial"
     ann_partial = ann_file.parent / f"{ann_file.name}.partial"
 
     count = 0
     has_annotations = False
-    pending_stubs: List[Tuple[Optional[str], Optional[str]]] = []
+    pending_stubs: list[tuple[str | None, str | None]] = []
     ledger = _IdLedger()
 
+    # open the document stream
     if files is not None and isinstance(extractor, FileBasedExtractor):
         documents = extractor.extract_files(files, key, domain, input_dir, metadata_cfg)
     else:
         documents = extractor.extract(input_dir, key, domain, metadata=metadata_cfg)
 
+    # write the documents, creating the annotations file on the first real line
     with open(text_partial, "w", encoding="utf-8") as tf:
         ann_fh = None
         try:
             for index, doc in enumerate(tqdm(documents, desc=key, unit="doc", disable=workers_quiet())):
                 if doc.doc_id is None:
-                    # Global fallback id. The sharded path uses a
-                    # shard-namespaced scheme; see _extract_shard. Every
-                    # shipped extractor assigns its own doc_id, so this
-                    # is unreachable today and kept only as a guard.
+                    # global fallback id (see _extract_shard); every shipped extractor sets its own
                     doc.doc_id = f"idx-{index:014d}"
 
                 tf.write(doc.to_jsonl_line())
@@ -501,6 +543,7 @@ def _extract_serial(
             if ann_fh is not None:
                 ann_fh.close()
 
+    # enforce unique ids, discarding the partial files on conflict
     try:
         count -= _enforce_unique_ids(key, ledger, [(text_partial, ann_partial if has_annotations else None, count)])
     except DuplicateDocumentIdError:
@@ -509,6 +552,7 @@ def _extract_serial(
             ann_partial.unlink()
         raise
 
+    # promote the partial files
     os.replace(text_partial, text_file)
     if has_annotations:
         os.replace(ann_partial, ann_file)
@@ -523,13 +567,18 @@ def _extract_serial(
     return count
 
 
+# ===============================
+# Sharded driver
+# ===============================
+
+
 def _extract_sharded(
     key: str,
     extractor_name: str,
     domain: str,
-    metadata_cfg: Optional[Dict[str, Any]],
+    metadata_cfg: dict[str, Any] | None,
     input_dir: Path,
-    files: List[Path],
+    files: list[Path],
     text_file: Path,
     ann_file: Path,
     shard_workers: int,
@@ -544,33 +593,33 @@ def _extract_sharded(
     decompressed content matches the serial writer's.
 
     Args:
-        key (str): Dataset key.
-        extractor_name (str): Registry name of a `FileBasedExtractor`.
-        domain (str): Domain label assigned to every Document.
-        metadata_cfg (Optional[Dict[str, Any]]): Optional `metadata:`
+        key: Dataset key.
+        extractor_name: Registry name of a `FileBasedExtractor`.
+        domain: Domain label assigned to every Document.
+        metadata_cfg: Optional `metadata:`
             config block forwarded to the extractor.
-        input_dir (Path): Dataset root, for metadata table resolution.
-        files (List[Path]): All input files for this dataset, sorted.
-        text_file (Path): Final destination for the text JSONL.
-        ann_file (Path): Final destination for the gzipped annotations.
-        shard_workers (int): Number of worker processes.
+        input_dir: Dataset root, for metadata table resolution.
+        files: All input files for this dataset, sorted.
+        text_file: Final destination for the text JSONL.
+        ann_file: Final destination for the gzipped annotations.
+        shard_workers: Number of worker processes.
 
     Returns:
-        int: Total number of documents written.
+        Total number of documents written.
     """
+    # create a fresh shard temp dir
     tmp_dir = text_file.parent / f".{key}.shards"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
     tmp_dir.mkdir(parents=True)
 
+    # split the files into chunks
     n_chunks = min(len(files), max(1, shard_workers) * _SHARD_OVERPROVISION)
     chunks = _chunk_files(files, n_chunks)
-    results: List[Optional[ShardResult]] = [None] * len(chunks)
+    results: list[ShardResult | None] = [None] * len(chunks)
 
     try:
-        # The dataset loop runs serially (run_parallel max_workers=1),
-        # so the parent process is single-threaded here and forking the
-        # pool is safe. Keep the dataset axis serial if revisiting.
+        # parse the shards; the dataset loop is serial, so forking the pool is safe
         with ProcessPoolExecutor(max_workers=shard_workers) as executor:
             future_to_index = {
                 executor.submit(
@@ -596,18 +645,18 @@ def _extract_sharded(
                 idx = future_to_index[future]
                 results[idx] = future.result()
 
+        # keep the annotations file only if a shard had a real annotation, as the serial path does
         ordered = [r for r in results if r is not None]
-        # Keep the merged annotations file only if at least one shard
-        # produced a real annotation; otherwise every line would be a
-        # stub and the serial path would have written no file at all.
         has_annotations = any(r.had_real_ann for r in ordered)
 
+        # enforce unique ids across the shards
         ledger = _IdLedger()
         for r in ordered:
             ledger.extend(r.ledger)
         dropped = _enforce_unique_ids(key, ledger, [(r.text_path, r.ann_path, r.count) for r in ordered])
         total = len(ledger) - dropped
 
+        # merge the text shards in order
         text_partial = text_file.parent / f"{text_file.name}.partial"
         with open(text_partial, "wb") as out:
             for r in ordered:
@@ -615,6 +664,7 @@ def _extract_sharded(
                     shutil.copyfileobj(src, out)
         os.replace(text_partial, text_file)
 
+        # merge the annotation shards in order
         if has_annotations:
             ann_partial = ann_file.parent / f"{ann_file.name}.partial"
             with open(ann_partial, "wb") as out:
@@ -636,14 +686,19 @@ def _extract_sharded(
     return total
 
 
+# ===============================
+# Main functions
+# ===============================
+
+
 def _extract_one(
     key: str,
-    ds_cfg: Dict[str, Any],
+    ds_cfg: dict[str, Any],
     input_base: Path,
     output_base: Path,
     force: bool,
     requested_workers: int = 0,
-) -> Optional[int]:
+) -> int | None:
     """Extract one dataset to unified JSONL (and optional annotations).
 
     Args:
@@ -659,22 +714,24 @@ def _extract_one(
             `_SHARD_MIN_FILES` input files and more than one worker.
 
     Returns:
-        Optional[int]: Document count written, or None when the input
-            directory is missing (caller treats as a skip, not an error).
-            Returns 0 when the output already exists and *force* is False.
+        Document count written, or None when the input
+        directory is missing (caller treats as a skip, not an error).
+        Returns 0 when the output already exists and *force* is False.
     """
+    # read the dataset settings
     extractor_name = ds_cfg["extractor"]
     domain = ds_cfg["domain"]
     metadata_cfg = ds_cfg.get("metadata")
     input_dir = input_base / key
 
+    # guard missing input
     if not input_dir.exists():
         logger.warning("Input dir not found for '%s': %s", key, input_dir)
         return None
 
+    # skip existing output
     text_file = output_base / f"{key}.jsonl"
     ann_file = output_base / f"{key}.annotations.jsonl.gz"
-
     if text_file.exists() and not force:
         logger.info(
             "Skipping '%s', output already exists: %s (use --force to re-extract)",
@@ -683,9 +740,7 @@ def _extract_one(
         )
         return 0
 
-    # Recovery on entry: discard partial files left by a prior
-    # crashed run. The final outputs are written atomically below
-    # via os.replace, so any `.partial` files imply incomplete work.
+    # discard partial files from a crashed run: final outputs are written atomically
     text_partial = output_base / f"{key}.jsonl.partial"
     ann_partial = output_base / f"{key}.annotations.jsonl.gz.partial"
     if text_partial.exists():
@@ -701,25 +756,26 @@ def _extract_one(
         )
         ann_partial.unlink()
 
-    # A prior sharded run that was hard-killed (no finally) can leave
-    # its shard temp dir behind; remove it so it cannot accumulate.
+    # remove the shard temp dir a hard-killed run leaves behind
     stale_shards = output_base / f".{key}.shards"
     if stale_shards.exists():
         logger.info("Removing orphan shard temp dir for '%s'", key)
         shutil.rmtree(stale_shards, ignore_errors=True)
 
-    # Decompress any archives before extraction
+    # decompress any archives
     for archive in sorted(input_dir.iterdir()):
         if archive.name.endswith((".gz", ".xz", ".zip", ".tgz", ".tar.gz", ".tar.zst", ".tar.zstd")):
             extract_archive(archive, input_dir)
 
     logger.info("Extracting '%s' with %s extractor", key, extractor_name)
 
+    # pick the extractor and worker count
     extractor = get_extractor(extractor_name)
 
     cores = os.cpu_count() or 1
     shard_workers = resolve_workers(requested_workers, cores, cores)
 
+    # select the input files
     include = ds_cfg.get("include")
     if isinstance(extractor, FileBasedExtractor):
         files = _select_files(extractor.iter_input_files(input_dir), input_dir, include)
@@ -728,6 +784,7 @@ def _extract_one(
     else:
         files = None
 
+    # extract sharded or serial
     if files is not None and shard_workers > 1 and len(files) >= _SHARD_MIN_FILES:
         return _extract_sharded(
             key,
@@ -755,13 +812,13 @@ def _extract_one(
 
 def extract_datasets(
     config_path: Path,
-    dataset_keys: Optional[List[str]] = None,
+    dataset_keys: list[str] | None = None,
     force: bool = False,
     max_workers: int = 0,
-    log_dir: Optional[Path] = None,
-    input_dir_override: Optional[str] = None,
-    output_dir_override: Optional[str] = None,
-    mlflow_enabled: Optional[bool] = None,
+    log_dir: Path | None = None,
+    input_dir_override: str | None = None,
+    output_dir_override: str | None = None,
+    mlflow_enabled: bool | None = None,
 ) -> None:
     """Extract and convert datasets to unified JSONL.
 
@@ -796,6 +853,7 @@ def extract_datasets(
         ValueError: If any requested key is unknown.
         RuntimeError: If one or more dataset extractions failed.
     """
+    # load the config and select the datasets
     cfg = load_extract_config(config_path)
 
     if dataset_keys:
@@ -806,13 +864,15 @@ def extract_datasets(
     else:
         selected = cfg.datasets
 
+    # resolve the directories
     input_base = Path(input_dir_override) if input_dir_override else resolve_project_path(cfg.input_dir)
     output_base = Path(output_dir_override) if output_dir_override else resolve_project_path(cfg.output_dir)
     output_base.mkdir(parents=True, exist_ok=True)
 
+    # extract the datasets
     keys = list(selected.keys())
 
-    def kwargs_for(key: str) -> Dict[str, Any]:
+    def kwargs_for(key: str) -> dict[str, Any]:
         return {
             "ds_cfg": selected[key],
             "input_base": input_base,
@@ -821,10 +881,7 @@ def extract_datasets(
             "requested_workers": max_workers,
         }
 
-    # Datasets are processed strictly sequentially (max_workers=1 on
-    # the dataset axis); parallelism happens *inside* each dataset via
-    # shard workers in `_extract_one`. This keeps exactly one process
-    # pool alive at a time.
+    # datasets run sequentially and shard inside `_extract_one`: one process pool at a time
     _, failures = run_parallel(
         _extract_one,
         keys,
@@ -835,6 +892,7 @@ def extract_datasets(
         log_dir=log_dir,
     )
 
+    # report the failures
     if failures:
         if log_dir is not None:
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -846,6 +904,7 @@ def extract_datasets(
         failed_keys = ", ".join(k for k, _ in failures)
         raise RuntimeError(f"Extraction failed for {len(failures)} dataset(s): {failed_keys}")
 
+    # log the extraction build to MLflow
     enabled = bool(cfg.mlflow.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled
     if enabled:
         from slm4ie.data.extract.tracking import DEFAULT_EXPERIMENT, log_extract_run

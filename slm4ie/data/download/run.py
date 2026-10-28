@@ -1,15 +1,24 @@
 """Dataset download orchestration and per-source dispatch."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.data.download.config import ConfigError, DatasetConfig, load_download_config
 from slm4ie.utils.io import resolve_project_path
 from slm4ie.utils.parallel import io_default, resolve_workers, run_parallel
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Result and error types
+# ===============================
 
 
 @dataclass
@@ -22,8 +31,8 @@ class DownloaderResult:
             ended their attempt.
     """
 
-    completed: List[str] = field(default_factory=list)
-    failed: List[Tuple[str, BaseException]] = field(default_factory=list)
+    completed: list[str] = field(default_factory=list)
+    failed: list[tuple[str, BaseException]] = field(default_factory=list)
 
 
 class DatasetDownloadError(Exception):
@@ -39,7 +48,7 @@ class DatasetDownloadError(Exception):
     def __init__(
         self,
         dataset_key: str,
-        failed: List[Tuple[str, BaseException]],
+        failed: list[tuple[str, BaseException]],
         n_completed: int,
         n_total: int,
     ):
@@ -61,7 +70,7 @@ class DatasetDownloadError(Exception):
         super().__init__(f"{dataset_key}: {len(self.failed)}/{n_total} sub-units failed ({unit_summary})")
 
 
-def _augment_with_note(exc: BaseException, note: Optional[str]) -> BaseException:
+def _augment_with_note(exc: BaseException, note: str | None) -> BaseException:
     """Return an exception whose message embeds the dataset note.
 
     Args:
@@ -69,7 +78,7 @@ def _augment_with_note(exc: BaseException, note: Optional[str]) -> BaseException
         note: Optional informational note from the dataset config.
 
     Returns:
-        BaseException: The original exception when `note` is empty,
+        The original exception when `note` is empty,
             otherwise a `RuntimeError` whose message wraps the original
             class name, message, and the note.
     """
@@ -78,9 +87,11 @@ def _augment_with_note(exc: BaseException, note: Optional[str]) -> BaseException
     return RuntimeError(f"{exc.__class__.__name__}: {exc} — {note.strip()}")
 
 
-# Source modules are imported AFTER DownloaderResult / _augment_with_note
-# are defined so they can import them from this module without triggering
-# a circular import.
+# ===============================
+# Source dispatch
+# ===============================
+
+# imported after DownloaderResult and _augment_with_note: the sources import them from here
 from slm4ie.data.download.sources import http as http_source  # noqa: E402
 from slm4ie.data.download.sources import huggingface as hf_source  # noqa: E402
 
@@ -95,7 +106,7 @@ def _hf_download(config: DatasetConfig, output_path: Path, force: bool) -> Downl
     return hf_source.download(config, output_path, force)
 
 
-_SOURCES: Dict[str, Callable[[DatasetConfig, Path, bool], DownloaderResult]] = {
+_SOURCES: dict[str, Callable[[DatasetConfig, Path, bool], DownloaderResult]] = {
     "http": _http_download,
     "huggingface": _hf_download,
 }
@@ -103,6 +114,10 @@ _SOURCES: Dict[str, Callable[[DatasetConfig, Path, bool], DownloaderResult]] = {
 #: Frozen set of known source names. Used for fail-fast validation
 #: without depending on the patchable dispatch-time wrappers.
 _SOURCE_NAMES = frozenset(_SOURCES.keys())
+
+# ===============================
+# Public API
+# ===============================
 
 __all__ = [
     "ConfigError",
@@ -113,15 +128,19 @@ __all__ = [
     "load_download_config",
 ]
 
+# ===============================
+# Helper functions
+# ===============================
 
-def _note_suffix(note: Optional[str]) -> str:
+
+def _note_suffix(note: str | None) -> str:
     """Render a dataset note as a human-readable trailing suffix.
 
     Args:
         note: Optional informational note from the dataset config.
 
     Returns:
-        str: An empty string when `note` is falsy, otherwise the note
+        An empty string when `note` is falsy, otherwise the note
         prefixed with ` — ` for inline embedding in error messages.
     """
     if not note:
@@ -130,7 +149,7 @@ def _note_suffix(note: Optional[str]) -> str:
 
 
 def _validate_selection(
-    selected: Dict[str, DatasetConfig],
+    selected: dict[str, DatasetConfig],
     base_output_dir: str,
     explicit: bool,
 ) -> None:
@@ -153,7 +172,8 @@ def _validate_selection(
             preconditions above. All problems are aggregated into one
             error so the user sees them in a single round.
     """
-    problems: List[str] = []
+    # collect the problems
+    problems: list[str] = []
     for key, config in selected.items():
         if explicit and not config.enabled:
             problems.append(f"{key}: explicitly selected but disabled in config" + _note_suffix(config.note))
@@ -173,7 +193,7 @@ def _download_one(
     config: "DatasetConfig",
     base_output_dir: str,
     force: bool,
-) -> Optional[str]:
+) -> str | None:
     """Download a single dataset and return the output path string.
 
     Args:
@@ -184,11 +204,12 @@ def _download_one(
         force: Re-download even if the destination already has files.
 
     Returns:
-        Optional[str]: String form of the output path on success, or
+        String form of the output path on success, or
             None for skipped/disabled/manual datasets.
     """
     output_path = Path(base_output_dir) / config.output_dir
 
+    # report manual datasets
     if config.manual:
         if _dir_has_files(output_path):
             logger.info(
@@ -205,6 +226,7 @@ def _download_one(
             )
         return None
 
+    # download from the source
     logger.info(
         "Downloading '%s' (%s) from %s",
         config.name,
@@ -224,15 +246,20 @@ def _download_one(
     return str(output_path)
 
 
+# ===============================
+# Download function
+# ===============================
+
+
 def download_datasets(
     config_path: Path,
-    dataset_keys: Optional[List[str]] = None,
+    dataset_keys: list[str] | None = None,
     force: bool = False,
-    output_dir_override: Optional[str] = None,
+    output_dir_override: str | None = None,
     only_benchmarks: bool = False,
     exclude_benchmarks: bool = False,
     max_workers: int = 0,
-    log_dir: Optional[Path] = None,
+    log_dir: Path | None = None,
 ) -> None:
     """Download datasets according to configuration.
 
@@ -268,6 +295,7 @@ def download_datasets(
     if only_benchmarks and exclude_benchmarks:
         raise ValueError("only_benchmarks and exclude_benchmarks are mutually exclusive")
 
+    # load the catalog and resolve the output directory
     catalog = load_download_config(config_path)
     base_output_dir, datasets = catalog.output_dir, catalog.datasets
     if output_dir_override:
@@ -275,6 +303,7 @@ def download_datasets(
     else:
         base_output_dir = str(resolve_project_path(base_output_dir))
 
+    # select the datasets
     if dataset_keys:
         unknown = set(dataset_keys) - set(datasets.keys())
         if unknown:
@@ -289,10 +318,11 @@ def download_datasets(
 
     _validate_selection(selected, base_output_dir, explicit=bool(dataset_keys))
 
+    # download in parallel
     keys = list(selected.keys())
     workers = resolve_workers(max_workers, len(keys), io_default(len(keys)))
 
-    def kwargs_for(key: str) -> Dict[str, Any]:
+    def kwargs_for(key: str) -> dict[str, Any]:
         return {
             "config": selected[key],
             "base_output_dir": base_output_dir,
@@ -309,6 +339,7 @@ def download_datasets(
         log_dir=log_dir,
     )
 
+    # report the failures
     if failures:
         lines = [f"Download failed for {len(failures)} dataset(s):"]
         for key, exc in failures:
@@ -328,7 +359,7 @@ def _dir_has_files(path: Path) -> bool:
         path: Directory path to check.
 
     Returns:
-        bool: True if directory exists and is non-empty.
+        True if directory exists and is non-empty.
     """
     if not path.exists():
         return False

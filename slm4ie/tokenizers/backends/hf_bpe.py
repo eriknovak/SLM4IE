@@ -9,11 +9,15 @@ strings, so non-ASCII characters are handled correctly.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from slm4ie.tokenizers.backends._hf_base import HfBackend
 from slm4ie.tokenizers.base import TrainContext
 from slm4ie.tokenizers.registry import register_tokenizer
+
+# ===============================
+# Tokenizer class
+# ===============================
 
 
 @register_tokenizer("bpe")
@@ -30,15 +34,18 @@ class BpeTokenizer(HfBackend):
         """Train a byte-level BPE model over `corpus`.
 
         Args:
-            corpus (Iterable[str]): Training sentences.
-            vocab_size (int): Target vocabulary size.
-            config (TrainContext): Shared training settings (special tokens).
+            corpus: Training sentences.
+            vocab_size: Target vocabulary size.
+            config: Shared training settings (special tokens).
         """
         from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
+        # build the tokenizer
         tokenizer = Tokenizer(models.BPE())
         tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=True, trim_offsets=True)
         tokenizer.decoder = decoders.ByteLevel()
+
+        # train on the corpus
         trainer = trainers.BpeTrainer(
             vocab_size=vocab_size,
             special_tokens=list(config.special_tokens),

@@ -14,19 +14,24 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from slm4ie.data.curate.paths import CuratePaths
     from slm4ie.data.curate.stages.spam import SpamAssets
 
 
+# ===============================
+# Stage registry
+# ===============================
+
 #: Stage names in pipeline execution order. `convert` is stage 0: it
 #: turns extracted `<key>.jsonl` files into datatrove-shaped shards that
 #: the remaining stages consume.
-STAGE_NAMES: Tuple[str, ...] = (
+STAGE_NAMES: tuple[str, ...] = (
     "convert",
     "language",
     "spam",
@@ -41,21 +46,21 @@ STAGE_NAMES: Tuple[str, ...] = (
 #: Stages that process one dataset at a time. They honor a dataset
 #: subset, write to canonical `<stage_dir>/<dataset>/`, and are tracked
 #: by per-dataset sentinels.
-SCOPED_STAGES: Tuple[str, ...] = ("convert", "language", "spam", "quality", "repetition")
+SCOPED_STAGES: tuple[str, ...] = ("convert", "language", "spam", "quality", "repetition")
 
 #: Stages that operate over the whole corpus at once. They read every
 #: dataset under their input folder, are tracked by a corpus-level
 #: sentinel whose hash includes the dataset roster, and run only under
 #: `--all`.
-CORPUS_STAGES: Tuple[str, ...] = ("exact_dedup", "sentence_dedup", "statistics")
+CORPUS_STAGES: tuple[str, ...] = ("exact_dedup", "sentence_dedup", "statistics")
 
 #: Stage names plus the `"all"` sentinel that the CLI uses for the default
 #: "run everything that needs running" mode.
-ALL_STAGE_NAMES: Tuple[str, ...] = STAGE_NAMES + ("all",)
+ALL_STAGE_NAMES: tuple[str, ...] = STAGE_NAMES + ("all",)
 
 
 #: Mapping from stage name to the folder under `<output_dir>/` it writes.
-STAGE_DIRS: Dict[str, str] = {
+STAGE_DIRS: dict[str, str] = {
     "convert": "00_convert",
     "language": "01_language",
     "spam": "02_spam",
@@ -69,7 +74,7 @@ STAGE_DIRS: Dict[str, str] = {
 
 #: The module and function that run each stage. A stage's version is the hash
 #: of its module's source; imports are not followed.
-STAGE_RUNNERS: Dict[str, Tuple[str, str]] = {
+STAGE_RUNNERS: dict[str, tuple[str, str]] = {
     "convert": ("convert", "run"),
     "language": ("language", "run"),
     "spam": ("spam", "run"),
@@ -79,6 +84,10 @@ STAGE_RUNNERS: Dict[str, Tuple[str, str]] = {
     "sentence_dedup": ("dedup", "run_sentence_dedup"),
     "statistics": ("statistics", "run"),
 }
+
+# ===============================
+# Stage versions
+# ===============================
 
 #: Folder holding the stage modules.
 _PACKAGE_DIR = Path(__file__).parent
@@ -103,7 +112,12 @@ def code_version(stage: str, package_dir: Path = _PACKAGE_DIR) -> str:
 
 
 #: Current version of every stage, computed from its code when imported.
-STAGE_VERSIONS: Dict[str, str] = {name: code_version(name) for name in STAGE_NAMES}
+STAGE_VERSIONS: dict[str, str] = {name: code_version(name) for name in STAGE_NAMES}
+
+
+# ===============================
+# Stage run
+# ===============================
 
 
 @dataclass
@@ -125,18 +139,18 @@ class StageRun:
     """
 
     paths: CuratePaths
-    config: Dict[str, Any]
+    config: dict[str, Any]
     workers: int
-    dataset_keys: List[str]
+    dataset_keys: list[str]
     output_folder: Path
-    input_view: Optional[Path] = None
-    tasks: Optional[int] = None
-    log_dir: Optional[Path] = None
-    stopwords: Set[str] = field(default_factory=set)
-    spam_assets: Optional[SpamAssets] = None
+    input_view: Path | None = None
+    tasks: int | None = None
+    log_dir: Path | None = None
+    stopwords: set[str] = field(default_factory=set)
+    spam_assets: SpamAssets | None = None
 
 
-def run_stage(stage: str, job: StageRun) -> Tuple[int, int]:
+def run_stage(stage: str, job: StageRun) -> tuple[int, int]:
     """Run *stage* on *job*, importing its module only now.
 
     Args:
@@ -147,14 +161,18 @@ def run_stage(stage: str, job: StageRun) -> Tuple[int, int]:
         The stage's `(records_in, records_out)` document counts.
     """
     module, function = STAGE_RUNNERS[stage]
-    runner: Callable[[StageRun], Tuple[int, int]] = getattr(
+    runner: Callable[[StageRun], tuple[int, int]] = getattr(
         importlib.import_module(f"slm4ie.data.curate.stages.{module}"), function
     )
     return runner(job)
 
 
+# ===============================
+# Stage lookups
+# ===============================
+
 #: Per-stage top-level YAML keys that go into the sentinel config hash.
-_CONFIG_SLICE_KEYS: Dict[str, Tuple[str, ...]] = {
+_CONFIG_SLICE_KEYS: dict[str, tuple[str, ...]] = {
     "convert": ("convert",),
     "language": ("language",),
     "spam": ("spam",),
@@ -185,7 +203,7 @@ def statistics_dir() -> str:
     return STAGE_DIRS["statistics"]
 
 
-def config_slice_keys(stage: str) -> Tuple[str, ...]:
+def config_slice_keys(stage: str) -> tuple[str, ...]:
     """Return the top-level YAML keys whose contents drive *stage*'s sentinel hash.
 
     Args:
@@ -203,7 +221,7 @@ def config_slice_keys(stage: str) -> Tuple[str, ...]:
     return _CONFIG_SLICE_KEYS[stage]
 
 
-def cascade_from(stage: str) -> Tuple[str, ...]:
+def cascade_from(stage: str) -> tuple[str, ...]:
     """Return *stage* followed by every downstream stage, in execution order.
 
     Used by `--force` to reset a stage and every stage downstream of it.
@@ -242,7 +260,7 @@ def is_scoped(stage: str) -> bool:
     return stage in SCOPED_STAGES
 
 
-def upstream_stage(stage: str) -> Optional[str]:
+def upstream_stage(stage: str) -> str | None:
     """Return the stage that produces *stage*'s input, or None for the first stage.
 
     Args:

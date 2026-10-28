@@ -31,14 +31,14 @@ to opt in; the parallel-array payload is then emitted as a nested
 """
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 from tqdm import tqdm
 
 from slm4ie.data.curate.stages import StageRun
-
 from slm4ie.data.extract.records import find_dataset_files, iter_joined_records
 from slm4ie.utils.io import (
     DEFAULT_MAX_SHARD_BYTES,
@@ -52,10 +52,18 @@ from slm4ie.utils.parallel import (
 )
 from slm4ie.utils.versioning import combine_named_digests, file_sha256
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
 
+# ===============================
+# Defaults
+# ===============================
+
 #: Output keys that must not be shadowed by flattened metadata fields.
-RESERVED_OUT_KEYS: Set[str] = {
+RESERVED_OUT_KEYS: set[str] = {
     "text",
     "id",
     "dataset",
@@ -69,17 +77,22 @@ DEFAULT_TEXT_FIELD: str = "text"
 DEFAULT_ID_FIELD: str = "doc_id"
 #: `source` is never listed here: it is always renamed to `dataset`
 #: (see `convert_record`), independent of `metadata_fields`.
-DEFAULT_METADATA_FIELDS: List[str] = ["domain", "doc_id"]
+DEFAULT_METADATA_FIELDS: list[str] = ["domain", "doc_id"]
+
+
+# ===============================
+# Record conversion
+# ===============================
 
 
 def convert_record(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     *,
     text_field: str = DEFAULT_TEXT_FIELD,
     id_field: str = DEFAULT_ID_FIELD,
-    metadata_fields: Optional[List[str]] = None,
-    collisions: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
+    metadata_fields: list[str] | None = None,
+    collisions: set[str] | None = None,
+) -> dict[str, Any]:
     """Convert one joined extraction record to the datatrove output shape.
 
     Args:
@@ -113,6 +126,8 @@ def convert_record(
     """
     if metadata_fields is None:
         metadata_fields = DEFAULT_METADATA_FIELDS
+
+    # guard the required fields
     source = record.get("source", "<unknown>")
     uid = record.get("uid")
     if not uid:
@@ -124,37 +139,31 @@ def convert_record(
     if text_field not in record:
         raise KeyError(f"Record from source {source!r} is missing the configured text field {text_field!r}.")
 
-    out: Dict[str, Any] = {
+    # build the core output fields
+    out: dict[str, Any] = {
         "text": record[text_field],
         "id": uid,
-        # The extraction schema calls the dataset key `source`; the
-        # datatrove world calls it `dataset`. Every downstream stage
-        # writer routes shards by `${dataset}` and source-weighted
-        # sampling keys on it, so the rename happens here, once.
+        # `source` is renamed to `dataset`: stage writers route shards by it
         "dataset": source,
     }
-    # Preserve provenance fields verbatim under their original keys so
-    # downstream pipeline stages (and source-weighted sampling) can read
-    # them off `Document.metadata` after datatrove's reader runs. The
-    # configured `id_field` is always kept (even if absent from
-    # `metadata_fields`) so the source-document identifier survives.
+
+    # keep provenance fields verbatim, and always the id field
     kept_fields = list(metadata_fields)
     if id_field not in kept_fields:
         kept_fields.append(id_field)
     for field in kept_fields:
         if field == "id":
-            # `id` is reserved by datatrove; skip silently — uid already
-            # carries the globally-unique identifier.
+            # `id` is reserved by datatrove; uid carries the identifier
             continue
         if field == "source":
-            # `source` is special-cased into `dataset` above; never kept
-            # verbatim, even if a stale config still lists it.
+            # `source` is renamed to `dataset` above, even if a stale config lists it
             continue
         if field == text_field:
             continue
         if field in record:
             out[field] = record[field]
 
+    # flatten the free-form metadata, renaming reserved keys
     metadata = record.get("metadata") or {}
     for k, v in metadata.items():
         if k in RESERVED_OUT_KEYS:
@@ -170,6 +179,7 @@ def convert_record(
         else:
             out[k] = v
 
+    # attach the annotations when present
     if "annotations" in record and record["annotations"] is not None:
         out["annotations"] = record["annotations"]
 
@@ -177,12 +187,12 @@ def convert_record(
 
 
 def _convert_stream(
-    records: Iterable[Dict[str, Any]],
+    records: Iterable[dict[str, Any]],
     writer: ShardedJsonlWriter,
     *,
     text_field: str,
     id_field: str,
-    metadata_fields: List[str],
+    metadata_fields: list[str],
 ) -> int:
     """Convert each input record and write it through *writer*.
 
@@ -198,8 +208,10 @@ def _convert_stream(
     Returns:
         Number of records written.
     """
-    collisions: Set[str] = set()
+    collisions: set[str] = set()
     count = 0
+
+    # convert and write each record
     for record in records:
         converted = convert_record(
             record,
@@ -213,6 +225,11 @@ def _convert_stream(
     return count
 
 
+# ===============================
+# Dataset conversion
+# ===============================
+
+
 def lift_dataset(
     key: str,
     *,
@@ -220,10 +237,10 @@ def lift_dataset(
     output_dir: Path,
     text_field: str = DEFAULT_TEXT_FIELD,
     id_field: str = DEFAULT_ID_FIELD,
-    metadata_fields: Optional[List[str]] = None,
+    metadata_fields: list[str] | None = None,
     include_annotations: bool = False,
     max_shard_bytes: int = DEFAULT_MAX_SHARD_BYTES,
-) -> Optional[int]:
+) -> int | None:
     """Convert a single dataset's `<key>.jsonl` into datatrove shards.
 
     Args:
@@ -250,6 +267,7 @@ def lift_dataset(
     if metadata_fields is None:
         metadata_fields = DEFAULT_METADATA_FIELDS
 
+    # locate the extraction output
     pair = find_dataset_files(input_dir, key)
     if pair is None:
         logger.warning(
@@ -262,14 +280,13 @@ def lift_dataset(
     if not include_annotations:
         ann_path = None
 
+    # clear stale shards left by a crash; the sentinel layer owns caching
     shard_folder = output_dir / key
     shard_folder.mkdir(parents=True, exist_ok=True)
-    # Caching is owned by the curate sentinel layer; rebuilds drop the
-    # whole stage folder upstream, so just clear any stale shards left
-    # behind by a crash from a previous run.
     for stale in shard_folder.glob("*.jsonl.gz"):
         stale.unlink()
 
+    # convert the records into shards
     logger.info(
         "[convert] %s%s -> %s/ (max_shard_bytes=%d, annotations=%s)",
         text_path,
@@ -291,6 +308,8 @@ def lift_dataset(
             )
         finally:
             progress.close()
+
+    # report the outcome
     if count == 0:
         logger.warning(
             "Dataset %r produced 0 records; input %s appears empty.",
@@ -312,15 +331,15 @@ def run_convert_stage(
     *,
     input_dir: Path,
     output_dir: Path,
-    dataset_keys: List[str],
+    dataset_keys: list[str],
     text_field: str = DEFAULT_TEXT_FIELD,
     id_field: str = DEFAULT_ID_FIELD,
-    metadata_fields: Optional[List[str]] = None,
+    metadata_fields: list[str] | None = None,
     include_annotations: bool = False,
     max_shard_bytes: int = DEFAULT_MAX_SHARD_BYTES,
     workers: int = 1,
-    log_dir: Optional[Path] = None,
-) -> Dict[str, Optional[int]]:
+    log_dir: Path | None = None,
+) -> dict[str, int | None]:
     """Run the convert stage over *dataset_keys* with bounded parallelism.
 
     Args:
@@ -344,10 +363,11 @@ def run_convert_stage(
     Raises:
         RuntimeError: If any per-dataset conversion failed.
     """
+    # resolve the worker count
     output_dir.mkdir(parents=True, exist_ok=True)
     effective_workers = resolve_workers(workers, len(dataset_keys), cpu_default(len(dataset_keys)))
 
-    def kwargs_for(_key: str) -> Dict[str, Any]:
+    def kwargs_for(_key: str) -> dict[str, Any]:
         return {
             "input_dir": input_dir,
             "output_dir": output_dir,
@@ -358,6 +378,7 @@ def run_convert_stage(
             "max_shard_bytes": max_shard_bytes,
         }
 
+    # convert the datasets in parallel
     results, failures = run_parallel(
         lift_dataset,
         dataset_keys,
@@ -374,6 +395,11 @@ def run_convert_stage(
     return results
 
 
+# ===============================
+# Stage parameters
+# ===============================
+
+
 @dataclass(frozen=True)
 class ConvertParams:
     """Resolved convert-stage parameters for one config bucket.
@@ -388,12 +414,12 @@ class ConvertParams:
 
     text_field: str
     id_field: str
-    metadata_fields: List[str]
+    metadata_fields: list[str]
     include_annotations: bool
     max_shard_bytes: int
 
 
-def _build_convert_params(ccfg: Dict[str, Any]) -> ConvertParams:
+def _build_convert_params(ccfg: dict[str, Any]) -> ConvertParams:
     """Resolve a convert-stage config slice into typed parameters.
 
     Args:
@@ -414,7 +440,12 @@ def _build_convert_params(ccfg: Dict[str, Any]) -> ConvertParams:
     )
 
 
-def _convert_input_paths(input_dir: Path, key: str, include_annotations: bool) -> List[Path]:
+# ===============================
+# Input lineage
+# ===============================
+
+
+def _convert_input_paths(input_dir: Path, key: str, include_annotations: bool) -> list[Path]:
     """Return the source files the convert stage reads for *key*.
 
     Args:
@@ -435,8 +466,8 @@ def _convert_input_paths(input_dir: Path, key: str, include_annotations: bool) -
 
 
 def convert_input_files(
-    input_dir: Path, key: str, include_annotations: bool, previous: Optional[Dict[str, Any]] = None
-) -> Dict[str, Optional[Dict[str, Any]]]:
+    input_dir: Path, key: str, include_annotations: bool, previous: dict[str, Any] | None = None
+) -> dict[str, dict[str, Any] | None]:
     """Describe *key*'s convert inputs by size and content hash.
 
     A file whose size and mtime match *previous* keeps its recorded hash
@@ -453,7 +484,9 @@ def convert_input_files(
         Per file name `{size, sha256, mtime_ns}`, or `None` for an absent file.
     """
     previous = previous or {}
-    files: Dict[str, Optional[Dict[str, Any]]] = {}
+
+    # rehash a file only when its size or mtime changed
+    files: dict[str, dict[str, Any] | None] = {}
     for path in _convert_input_paths(input_dir, key, include_annotations):
         if not path.is_file():
             files[path.name] = None
@@ -468,7 +501,7 @@ def convert_input_files(
     return files
 
 
-def input_files_digest(files: Dict[str, Optional[Dict[str, Any]]]) -> str:
+def input_files_digest(files: dict[str, dict[str, Any] | None]) -> str:
     """Return the convert input digest: each file's size and content hash, no mtime.
 
     Args:
@@ -480,7 +513,12 @@ def input_files_digest(files: Dict[str, Optional[Dict[str, Any]]]) -> str:
     return combine_named_digests({name: f"{f['size']}:{f['sha256']}" if f else None for name, f in files.items()})
 
 
-def run(job: StageRun) -> Tuple[int, int]:
+# ===============================
+# Stage entry point
+# ===============================
+
+
+def run(job: StageRun) -> tuple[int, int]:
     """Convert the job's datasets into the job's output folder.
 
     Args:

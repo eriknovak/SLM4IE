@@ -2,9 +2,12 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 from slm4ie.utils.config import load_yaml
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Allowed `role` values in the download catalog. Unrelated to the `role`
 #: field in configs/data/tasks.yaml (`finetune_and_eval` | `held_out`).
@@ -12,6 +15,13 @@ DATASET_ROLES = frozenset({"pretrain", "benchmark", "lexicon"})
 
 #: Entry fields that name other registry keys: full and partial inclusion.
 RELATIONS = ("contains", "overlaps")
+
+#: Status of a catalog entry the pretraining selection keeps.
+SELECTED = "selected"
+
+# ===============================
+# Config classes
+# ===============================
 
 
 class ConfigError(Exception):
@@ -25,7 +35,7 @@ class ConfigError(Exception):
         problems: One short description per problem.
     """
 
-    def __init__(self, problems: List[str]):
+    def __init__(self, problems: list[str]):
         """Build a ConfigError listing all problems.
 
         Args:
@@ -75,20 +85,20 @@ class DatasetConfig:
     name: str
     enabled: bool = True
     source: str = ""
-    urls: List[str] = field(default_factory=list)
+    urls: list[str] = field(default_factory=list)
     output_dir: str = ""
     manual: bool = False
-    repo_id: Optional[str] = None
-    configs: Optional[List[str]] = None
-    note: Optional[str] = None
+    repo_id: str | None = None
+    configs: list[str] | None = None
+    note: str | None = None
     role: str = "pretrain"
-    tasks: List[str] = field(default_factory=list)
-    publisher: Optional[str] = None
-    contains: List[str] = field(default_factory=list)
-    overlaps: List[str] = field(default_factory=list)
+    tasks: list[str] = field(default_factory=list)
+    publisher: str | None = None
+    contains: list[str] = field(default_factory=list)
+    overlaps: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, key: str, data: Dict) -> "DatasetConfig":
+    def from_dict(cls, key: str, data: dict) -> "DatasetConfig":
         """Create a DatasetConfig from a config dictionary.
 
         Args:
@@ -96,7 +106,7 @@ class DatasetConfig:
             data: Dictionary of config values.
 
         Returns:
-            DatasetConfig: Populated config instance.
+            Populated config instance.
 
         Raises:
             ConfigError: If the entry is enabled and not manual but is
@@ -104,21 +114,25 @@ class DatasetConfig:
                 of the allowed values, or if `contains` / `overlaps` is not
                 a list of keys.
         """
+        # guard the output directory
         enabled = data.get("enabled", True)
         manual = data.get("manual", False)
         output_dir = data.get("output_dir", "")
         if enabled and not manual and not output_dir:
             raise ConfigError([f"{key}: missing or empty 'output_dir'"])
 
+        # validate the role
         role = data.get("role", "pretrain")
         if role not in DATASET_ROLES:
             raise ConfigError([f"{key}: unknown role '{role}' (expected one of: {', '.join(sorted(DATASET_ROLES))})"])
 
+        # validate the relations
         relations = {name: data.get(name) or [] for name in RELATIONS}
         for name, keys in relations.items():
             if not isinstance(keys, list) or not all(isinstance(k, str) and k for k in keys):
                 raise ConfigError([f"{key}: '{name}' must be a list of dataset keys"])
 
+        # build the entry
         return cls(
             key=key,
             name=data.get("name", key),
@@ -148,7 +162,12 @@ class DownloadConfig:
     """
 
     output_dir: str
-    datasets: Dict[str, DatasetConfig] = field(default_factory=dict)
+    datasets: dict[str, DatasetConfig] = field(default_factory=dict)
+
+
+# ===============================
+# Loading
+# ===============================
 
 
 def load_download_config(config_path: Path) -> DownloadConfig:
@@ -171,11 +190,13 @@ def load_download_config(config_path: Path) -> DownloadConfig:
             relation names an unknown key, the entry itself, or closes a
             `contains` cycle.
     """
+    # load the catalog
     raw = load_yaml(config_path)
 
     output_dir = raw.get("output_dir", "data/raw")
-    datasets: Dict[str, DatasetConfig] = {}
+    datasets: dict[str, DatasetConfig] = {}
 
+    # parse and validate the entries
     for key, data in raw.get("datasets", {}).items():
         datasets[key] = DatasetConfig.from_dict(key, data)
     validate_relations(datasets)
@@ -183,7 +204,12 @@ def load_download_config(config_path: Path) -> DownloadConfig:
     return DownloadConfig(output_dir=output_dir, datasets=datasets)
 
 
-def validate_relations(datasets: Dict[str, DatasetConfig]) -> None:
+# ===============================
+# Relation checks
+# ===============================
+
+
+def validate_relations(datasets: dict[str, DatasetConfig]) -> None:
     """Check every `contains` / `overlaps` relation against the registry.
 
     Args:
@@ -193,7 +219,8 @@ def validate_relations(datasets: Dict[str, DatasetConfig]) -> None:
         ConfigError: Listing every relation that names an unknown key or the
             entry itself, and every `contains` cycle.
     """
-    problems: List[str] = []
+    # check the relations name known entries
+    problems: list[str] = []
     for key, spec in datasets.items():
         for name in RELATIONS:
             for other in getattr(spec, name):
@@ -203,6 +230,8 @@ def validate_relations(datasets: Dict[str, DatasetConfig]) -> None:
                     problems.append(f"{key}: '{name}' names unknown dataset '{other}'")
     if problems:
         raise ConfigError(problems)
+
+    # check the containment relation for cycles
     for key in datasets:
         if key in contained_in(datasets, key):
             problems.append(f"{key}: 'contains' cycle through {key}")
@@ -210,7 +239,7 @@ def validate_relations(datasets: Dict[str, DatasetConfig]) -> None:
         raise ConfigError(problems)
 
 
-def contained_in(datasets: Dict[str, DatasetConfig], key: str) -> Set[str]:
+def contained_in(datasets: dict[str, DatasetConfig], key: str) -> set[str]:
     """Return every key *key* contains, directly or through another entry.
 
     Args:
@@ -221,7 +250,7 @@ def contained_in(datasets: Dict[str, DatasetConfig], key: str) -> Set[str]:
         The transitive closure of `key`'s `contains` relation; holds `key`
         itself only when a cycle runs back to it.
     """
-    seen: Set[str] = set()
+    seen: set[str] = set()
     stack = list(datasets[key].contains)
     while stack:
         other = stack.pop()
@@ -232,8 +261,9 @@ def contained_in(datasets: Dict[str, DatasetConfig], key: str) -> Set[str]:
     return seen
 
 
-#: Status of a catalog entry the pretraining selection keeps.
-SELECTED = "selected"
+# ===============================
+# Selection
+# ===============================
 
 
 @dataclass
@@ -248,20 +278,21 @@ class Selection:
             declaration order; dedup is expected to remove what they share.
     """
 
-    status: Dict[str, str] = field(default_factory=dict)
-    overlaps: List[Tuple[str, str]] = field(default_factory=list)
+    status: dict[str, str] = field(default_factory=dict)
+    overlaps: list[tuple[str, str]] = field(default_factory=list)
 
     @property
-    def selected(self) -> List[str]:
+    def selected(self) -> list[str]:
         """Keys the selection keeps, in declaration order."""
         return [key for key, state in self.status.items() if state == SELECTED]
 
-    def report(self) -> List[str]:
+    def report(self) -> list[str]:
         """Render the selection as the lines `status` and `run` print.
 
         Returns:
             One line per catalog entry, then one warning line per overlap.
         """
+        # align the keys
         width = max((len(key) for key in self.status), default=0)
         lines = [f"{key:<{width}}  {state}" for key, state in self.status.items()]
         lines += [
@@ -271,7 +302,7 @@ class Selection:
         return lines
 
 
-def resolve_selection(datasets: Dict[str, DatasetConfig]) -> Selection:
+def resolve_selection(datasets: dict[str, DatasetConfig]) -> Selection:
     """Pick one representative per containment group among the enabled pretraining entries.
 
     An enabled `role: pretrain` entry is selected unless another such entry
@@ -285,10 +316,13 @@ def resolve_selection(datasets: Dict[str, DatasetConfig]) -> Selection:
     Returns:
         The status of every entry and the selected overlapping pairs.
     """
+    # find the outermost enabled pretraining entries
     eligible = [key for key, spec in datasets.items() if spec.enabled and spec.role == "pretrain"]
     closure = {key: contained_in(datasets, key) for key in eligible}
     outermost = [key for key in eligible if not any(key in closure[other] for other in eligible)]
     container = {member: key for key in reversed(outermost) for member in closure[key]}
+
+    # mark each entry selected or skipped
     selection = Selection()
     for key, spec in datasets.items():
         if spec.role != "pretrain":
@@ -299,9 +333,11 @@ def resolve_selection(datasets: Dict[str, DatasetConfig]) -> Selection:
             selection.status[key] = f"skipped: contained in {container[key]}"
         else:
             selection.status[key] = SELECTED
+
+    # collect the selected overlapping pairs
     order = {key: index for index, key in enumerate(datasets)}
     chosen = set(selection.selected)
-    pairs: Set[Tuple[str, str]] = {
+    pairs: set[tuple[str, str]] = {
         (key, other) if order[key] < order[other] else (other, key)
         for key in chosen
         for other in datasets[key].overlaps

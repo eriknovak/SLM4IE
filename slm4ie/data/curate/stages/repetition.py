@@ -4,9 +4,10 @@ Drops documents dominated by duplicate paragraphs or lines, or saturated with
 repeated n-grams, with the thresholds configured from `repetition:`.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.filters import GopherRepetitionFilter
@@ -16,8 +17,16 @@ from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, pipeline_io_counts
 
+# ===============================
+# Defaults
+# ===============================
+
 #: An n-gram threshold: n-gram size and the fraction of characters it may cover.
-NGramThreshold = Tuple[int, float]
+NGramThreshold = tuple[int, float]
+
+# ===============================
+# Repetition config
+# ===============================
 
 
 @dataclass
@@ -43,11 +52,16 @@ class RepetitionConfig:
     dup_para_frac: float = 0.3
     dup_line_char_frac: float = 0.2
     dup_para_char_frac: float = 0.2
-    top_n_grams: Tuple[NGramThreshold, ...] = ((2, 0.2), (3, 0.18), (4, 0.16))
-    dup_n_grams: Tuple[NGramThreshold, ...] = ((5, 0.15), (6, 0.14), (7, 0.13), (8, 0.12), (9, 0.11), (10, 0.1))
+    top_n_grams: tuple[NGramThreshold, ...] = ((2, 0.2), (3, 0.18), (4, 0.16))
+    dup_n_grams: tuple[NGramThreshold, ...] = ((5, 0.15), (6, 0.14), (7, 0.13), (8, 0.12), (9, 0.11), (10, 0.1))
 
 
-def _ngram_thresholds(pairs: Sequence[Sequence[Any]]) -> Tuple[NGramThreshold, ...]:
+# ===============================
+# Config helpers
+# ===============================
+
+
+def _ngram_thresholds(pairs: Sequence[Sequence[Any]]) -> tuple[NGramThreshold, ...]:
     """Convert YAML `[n, fraction]` pairs into the tuples datatrove expects.
 
     Args:
@@ -59,7 +73,7 @@ def _ngram_thresholds(pairs: Sequence[Sequence[Any]]) -> Tuple[NGramThreshold, .
     return tuple((int(n), float(frac)) for n, frac in pairs)
 
 
-def _build_repetition_config(rcfg: Dict[str, Any]) -> RepetitionConfig:
+def _build_repetition_config(rcfg: dict[str, Any]) -> RepetitionConfig:
     """Resolve a repetition-stage config slice into a `RepetitionConfig`.
 
     Args:
@@ -79,15 +93,20 @@ def _build_repetition_config(rcfg: Dict[str, Any]) -> RepetitionConfig:
     )
 
 
+# ===============================
+# Stage
+# ===============================
+
+
 def build_repetition_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    repetition_config: Optional[RepetitionConfig] = None,
+    repetition_config: RepetitionConfig | None = None,
     language: str = Languages.slovenian,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the repetition stage: read 03_quality/ → Gopher repetition → write 04_repetition/.
 
     Args:
@@ -106,9 +125,12 @@ def build_repetition_executors(
     Returns:
         A list with one `LocalPipelineExecutor`.
     """
+    # resolve the input and output folders
     cfg = repetition_config or RepetitionConfig()
     in_ = input_override if input_override is not None else paths.stage_dir("quality")
     out = output_override if output_override is not None else paths.stage_dir("repetition")
+
+    # build the read, filter, write pipeline
     executor = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -131,7 +153,7 @@ def build_repetition_executors(
     return [executor]
 
 
-def run(job: StageRun) -> Tuple[int, int]:
+def run(job: StageRun) -> tuple[int, int]:
     """Run the repetition stage over the job's input view.
 
     Args:

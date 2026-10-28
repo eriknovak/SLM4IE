@@ -8,11 +8,15 @@ next to the step that writes it (for example `slm4ie.data.extract.records`).
 import gzip
 import json
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Any, Dict, Iterator, Optional, Type, Union
+from typing import IO, Any
 
+# ===============================
+# Defaults
+# ===============================
 
 #: Default ceiling on the compressed size of one shard produced by
 #: `ShardedJsonlWriter` (in bytes). 200 MB is sized for the curate
@@ -27,6 +31,11 @@ from typing import IO, Any, Dict, Iterator, Optional, Type, Union
 DEFAULT_MAX_SHARD_BYTES: int = 200_000_000
 
 
+# ===============================
+# Path helpers
+# ===============================
+
+
 def find_project_root() -> Path:
     """Find the project root by locating `pyproject.toml`.
 
@@ -34,12 +43,13 @@ def find_project_root() -> Path:
     directory containing `pyproject.toml` is found.
 
     Returns:
-        Path: The project root directory.
+        The project root directory.
 
     Raises:
         FileNotFoundError: If no `pyproject.toml` is found in any
             parent directory.
     """
+    # walk up to the directory holding pyproject.toml
     current = Path(__file__).resolve().parent
     for parent in [current, *current.parents]:
         if (parent / "pyproject.toml").exists():
@@ -48,8 +58,8 @@ def find_project_root() -> Path:
 
 
 def resolve_project_path(
-    value: Union[str, Path],
-    root: Optional[Path] = None,
+    value: str | Path,
+    root: Path | None = None,
 ) -> Path:
     """Anchor a config path against the project root.
 
@@ -72,8 +82,13 @@ def resolve_project_path(
     return (root or find_project_root()) / path
 
 
+# ===============================
+# Streams
+# ===============================
+
+
 @contextmanager
-def open_output(path: Optional[Path]) -> Iterator[IO[str]]:
+def open_output(path: Path | None) -> Iterator[IO[str]]:
     """Yield a writable text stream for *path*.
 
     Selects gzip vs. plain text based on the file suffix. `None`
@@ -81,10 +96,10 @@ def open_output(path: Optional[Path]) -> Iterator[IO[str]]:
     is **not** closed when the context exits.
 
     Args:
-        path (Optional[Path]): Output path, or None for stdout.
+        path: Output path, or None for stdout.
 
     Yields:
-        IO[str]: A writable text stream.
+        A writable text stream.
     """
     if path is None:
         yield sys.stdout
@@ -96,6 +111,11 @@ def open_output(path: Optional[Path]) -> Iterator[IO[str]]:
     else:
         with path.open("w", encoding="utf-8") as fh:
             yield fh
+
+
+# ===============================
+# Sharded writer class
+# ===============================
 
 
 class ShardedJsonlWriter:
@@ -142,11 +162,12 @@ class ShardedJsonlWriter:
         """
         if max_shard_bytes <= 0:
             raise ValueError(f"max_shard_bytes must be positive, got {max_shard_bytes}")
+
         self.folder = folder
         self.max_shard_bytes = max_shard_bytes
         self.shard_index = 0
-        self._gz: Optional[gzip.GzipFile] = None
-        self._raw: Optional[IO[bytes]] = None
+        self._gz: gzip.GzipFile | None = None
+        self._raw: IO[bytes] | None = None
 
     def __enter__(self) -> "ShardedJsonlWriter":
         """Create the folder and open the first shard.
@@ -160,9 +181,9 @@ class ShardedJsonlWriter:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         """Close the active shard, flushing the gzip footer.
 
@@ -173,7 +194,7 @@ class ShardedJsonlWriter:
         """
         self._close_current()
 
-    def write_record(self, record: Dict[str, Any]) -> None:
+    def write_record(self, record: dict[str, Any]) -> None:
         """Write *record* as a JSON line and roll over if needed.
 
         Args:
@@ -190,17 +211,23 @@ class ShardedJsonlWriter:
                 The newline is appended by this method.
         """
         assert self._gz is not None and self._raw is not None
+
+        # write the line
         self._gz.write(line.encode("utf-8"))
         self._gz.write(b"\n")
-        # `flush()` emits zlib's buffered output so the underlying file
-        # position reflects current compressed size. Without it, the
-        # zlib buffer (~32 KB) would mask the true size and rollover
-        # would overshoot by a buffer's worth.
+
+        # flush so the file position shows the true compressed size (else the ~32 KB zlib buffer overshoots)
         self._gz.flush()
+
+        # roll over to the next shard when full
         if self._raw.tell() >= self.max_shard_bytes:
             self._close_current()
             self.shard_index += 1
             self._open_current()
+
+    # =================================
+    # Private methods
+    # =================================
 
     def _open_current(self) -> None:
         """Open the shard at `self.shard_index` for binary gzip writing."""
@@ -224,10 +251,10 @@ def open_text_stream(path: Path) -> IO[str]:
     The caller is responsible for closing the returned stream.
 
     Args:
-        path (Path): Path to a `.jsonl` or `.jsonl.gz` file.
+        path: Path to a `.jsonl` or `.jsonl.gz` file.
 
     Returns:
-        IO[str]: A readable text stream.
+        A readable text stream.
     """
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8")

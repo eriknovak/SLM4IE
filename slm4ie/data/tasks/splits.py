@@ -13,16 +13,29 @@ import gzip
 import hashlib
 import json
 import logging
+from collections.abc import Iterable, Iterator
 from contextlib import ExitStack
 from pathlib import Path
-from typing import IO, Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import IO, Any
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Constants
+# ===============================
 
 #: Standard split names recognized by the task pipeline.
 SPLIT_TRAIN: str = "train"
 SPLIT_VAL: str = "val"
 SPLIT_TEST: str = "test"
+
+# ===============================
+# Split assignment
+# ===============================
 
 
 def hash_split(
@@ -65,9 +78,11 @@ def hash_split(
     if train_pct + val_pct > 100:
         raise ValueError("train_pct + val_pct must not exceed 100.")
 
+    # hash the key into a bucket
     digest = hashlib.blake2s(key.encode("utf-8")).hexdigest()
     bucket = int(digest[:8], 16) % 100
 
+    # pick the split of the bucket, falling back to a declared one
     if bucket < train_pct:
         target = SPLIT_TRAIN
     elif bucket < train_pct + val_pct:
@@ -82,10 +97,15 @@ def hash_split(
     return splits_list[0]
 
 
+# ===============================
+# Output files
+# ===============================
+
+
 def outputs_for_splits(
     output_dir: Path,
-    splits: Dict[str, str],
-) -> Dict[str, Path]:
+    splits: dict[str, str],
+) -> dict[str, Path]:
     """Resolve absolute paths for every declared split.
 
     Args:
@@ -98,7 +118,7 @@ def outputs_for_splits(
     return {split: output_dir / filename for split, filename in splits.items()}
 
 
-def all_outputs_exist(outputs: Dict[str, Path]) -> bool:
+def all_outputs_exist(outputs: dict[str, Path]) -> bool:
     """Return True when every output path already exists on disk.
 
     Args:
@@ -111,9 +131,9 @@ def all_outputs_exist(outputs: Dict[str, Path]) -> bool:
 
 
 def _open_split_streams(
-    outputs: Dict[str, Path],
+    outputs: dict[str, Path],
     stack: ExitStack,
-) -> Dict[str, IO[str]]:
+) -> dict[str, IO[str]]:
     """Open writable gzip text streams for every split path.
 
     Args:
@@ -123,7 +143,7 @@ def _open_split_streams(
     Returns:
         Mapping from split name to a writable text stream.
     """
-    streams: Dict[str, IO[str]] = {}
+    streams: dict[str, IO[str]] = {}
     for split, path in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         streams[split] = stack.enter_context(gzip.open(path, "wt", encoding="utf-8"))
@@ -131,9 +151,9 @@ def _open_split_streams(
 
 
 def write_jsonl_splits(
-    examples: Iterable[Tuple[str, Dict[str, Any]]],
-    outputs: Dict[str, Path],
-) -> Dict[str, int]:
+    examples: Iterable[tuple[str, dict[str, Any]]],
+    outputs: dict[str, Path],
+) -> dict[str, int]:
     """Stream `(split, example)` pairs to per-split gzipped JSONL files.
 
     Args:
@@ -147,7 +167,8 @@ def write_jsonl_splits(
         in *outputs*; values default to `0` when no example landed
         there.
     """
-    counts: Dict[str, int] = {split: 0 for split in outputs}
+    # write each example to its split stream
+    counts: dict[str, int] = {split: 0 for split in outputs}
     warned: set = set()
     with ExitStack() as stack:
         streams = _open_split_streams(outputs, stack)
@@ -168,7 +189,12 @@ def write_jsonl_splits(
     return counts
 
 
-def iter_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
+# ===============================
+# Readers
+# ===============================
+
+
+def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     """Yield parsed JSON objects from a JSONL file (plain or gzipped).
 
     Args:
@@ -192,8 +218,8 @@ def iter_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
 
 
 def find_first_existing(
-    candidates: List[Path],
-) -> Optional[Path]:
+    candidates: list[Path],
+) -> Path | None:
     """Return the first path in *candidates* that exists on disk.
 
     Args:

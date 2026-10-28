@@ -37,22 +37,31 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Placeholder in the rubric file that the batch's documents replace.
 DOCUMENTS_PLACEHOLDER: str = "{{DOCUMENTS}}"
 
 #: What a document is, as a shape of text.
-TEXT_TYPES: Tuple[str, ...] = ("prose", "boilerplate", "list", "code", "garbage")
+TEXT_TYPES: tuple[str, ...] = ("prose", "boilerplate", "list", "code", "garbage")
 
 #: Domain vocabulary, matching the dataset catalog's `domain` tags so a judged
 #: label can be compared against the source's declared domain.
-DOMAINS: Tuple[str, ...] = (
+DOMAINS: tuple[str, ...] = (
     "medical",
     "scientific",
     "legal",
@@ -70,18 +79,18 @@ DOMAINS: Tuple[str, ...] = (
 
 #: Backends a judge run can use: a local CLI subprocess, or the Batch API,
 #: which costs half as much and answers within hours rather than seconds.
-BACKENDS: Tuple[str, str] = ("cli", "api")
+BACKENDS: tuple[str, str] = ("cli", "api")
 
 #: The stages a pairwise comparison is drawn for: the four content filters,
 #: where a kept and a dropped document differ in quality rather than in how
 #: often the corpus repeats them.
-PAIRWISE_STAGES: Tuple[str, ...] = ("language", "spam", "quality", "repetition")
+PAIRWISE_STAGES: tuple[str, ...] = ("language", "spam", "quality", "repetition")
 
 #: What a pairwise verdict may answer.
-PAIRWISE_CHOICES: Tuple[str, ...] = ("a", "b", "tie")
+PAIRWISE_CHOICES: tuple[str, ...] = ("a", "b", "tie")
 
 
-def _reply_schema(fields: Dict[str, Any]) -> Dict[str, Any]:
+def _reply_schema(fields: dict[str, Any]) -> dict[str, Any]:
     """Wrap a task's verdict fields in the reply shape the API enforces.
 
     Args:
@@ -113,7 +122,7 @@ def _reply_schema(fields: Dict[str, Any]) -> Dict[str, Any]:
 #: Schema handed to the API as a structured output, so the reply is guaranteed
 #: to parse and to carry only the rubric's values. The CLI backend cannot
 #: enforce it and is checked by `validate_batch` alone.
-VERDICT_SCHEMA: Dict[str, Any] = _reply_schema(
+VERDICT_SCHEMA: dict[str, Any] = _reply_schema(
     {
         "language": {"type": "string"},
         "text_type": {"type": "string", "enum": list(TEXT_TYPES)},
@@ -126,11 +135,11 @@ VERDICT_SCHEMA: Dict[str, Any] = _reply_schema(
 )
 
 #: Schema for a pairwise comparison's reply.
-PAIRWISE_SCHEMA: Dict[str, Any] = _reply_schema({"better": {"type": "string", "enum": list(PAIRWISE_CHOICES)}})
+PAIRWISE_SCHEMA: dict[str, Any] = _reply_schema({"better": {"type": "string", "enum": list(PAIRWISE_CHOICES)}})
 
 #: Fields a rubric verdict must carry, with the check each one has to pass.
-_REQUIRED_FIELDS: Dict[str, Any] = {
-    # Three letters too: a language without a two-letter code (Romani, `rom`) would fail its whole group.
+_REQUIRED_FIELDS: dict[str, Any] = {
+    # three letters too: a language without a two-letter code (Romani, `rom`) would fail its whole group
     "language": lambda value: isinstance(value, str) and bool(re.fullmatch(r"[a-z]{2,3}|mixed", value)),
     "text_type": lambda value: value in TEXT_TYPES,
     "adult_or_spam": lambda value: isinstance(value, bool),
@@ -141,7 +150,11 @@ _REQUIRED_FIELDS: Dict[str, Any] = {
 }
 
 #: Fields a pairwise verdict must carry.
-_PAIRWISE_FIELDS: Dict[str, Any] = {"better": lambda value: value in PAIRWISE_CHOICES}
+_PAIRWISE_FIELDS: dict[str, Any] = {"better": lambda value: value in PAIRWISE_CHOICES}
+
+# ===============================
+# Judge tasks
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -158,9 +171,9 @@ class JudgeTask:
     """
 
     name: str
-    text_keys: Tuple[str, ...]
-    checks: Dict[str, Any]
-    schema: Dict[str, Any]
+    text_keys: tuple[str, ...]
+    checks: dict[str, Any]
+    schema: dict[str, Any]
     tokens_per_verdict: int
     batch_size: int
 
@@ -172,10 +185,14 @@ RUBRIC_TASK = JudgeTask("rubric", ("text",), _REQUIRED_FIELDS, VERDICT_SCHEMA, 1
 PAIRWISE_TASK = JudgeTask("pairwise", ("a", "b"), _PAIRWISE_FIELDS, PAIRWISE_SCHEMA, 60, 5)
 
 #: The tasks, by the name the command line uses.
-TASKS: Dict[str, JudgeTask] = {task.name: task for task in (RUBRIC_TASK, PAIRWISE_TASK)}
+TASKS: dict[str, JudgeTask] = {task.name: task for task in (RUBRIC_TASK, PAIRWISE_TASK)}
+
+# ===============================
+# Documents and sampling
+# ===============================
 
 
-def read_documents(source: Path, text_keys: Sequence[str] = ("text",)) -> List[Dict[str, Any]]:
+def read_documents(source: Path, text_keys: Sequence[str] = ("text",)) -> list[dict[str, Any]]:
     """Read the sampled documents to judge.
 
     Args:
@@ -189,8 +206,8 @@ def read_documents(source: Path, text_keys: Sequence[str] = ("text",)) -> List[D
         ValueError: If a line carries no `id` or no text.
     """
     documents = []
-    # split("\n"), not splitlines(): document text carries \u2028 and friends,
-    # which splitlines() would treat as line breaks and tear a JSON row in half.
+
+    # split("\n"), not splitlines(): \u2028 in document text would tear a JSON row in half
     for number, line in enumerate(source.read_text(encoding="utf-8").split("\n"), start=1):
         if not line.strip():
             continue
@@ -201,7 +218,7 @@ def read_documents(source: Path, text_keys: Sequence[str] = ("text",)) -> List[D
     return documents
 
 
-def judged_ids(destination: Path) -> Set[str]:
+def judged_ids(destination: Path) -> set[str]:
     """Read the ids already judged in an earlier run.
 
     Args:
@@ -219,7 +236,7 @@ def judged_ids(destination: Path) -> Set[str]:
     return ids
 
 
-def interleave(strata: Dict[Any, List[Dict[str, Any]]], size: int, seed: int) -> List[Dict[str, Any]]:
+def interleave(strata: dict[Any, list[dict[str, Any]]], size: int, seed: int) -> list[dict[str, Any]]:
     """Take documents round-robin across strata, in a seeded order.
 
     A labeller may stop before the end, so the order matters as much as the
@@ -234,13 +251,15 @@ def interleave(strata: Dict[Any, List[Dict[str, Any]]], size: int, seed: int) ->
     Returns:
         The chosen documents, in the order they were taken.
     """
+    # shuffle the strata and the documents within each
     rng = random.Random(seed)
     order = sorted(strata)
     rng.shuffle(order)
     for key in order:
         rng.shuffle(strata[key])
 
-    chosen: List[Dict[str, Any]] = []
+    # take one document per stratum in turn
+    chosen: list[dict[str, Any]] = []
     while len(chosen) < size and any(strata[key] for key in order):
         for key in order:
             if not strata[key]:
@@ -251,7 +270,7 @@ def interleave(strata: Dict[Any, List[Dict[str, Any]]], size: int, seed: int) ->
     return chosen
 
 
-def draw_calibration_set(documents: Sequence[Dict[str, Any]], size: int, seed: int = 20260916) -> List[Dict[str, Any]]:
+def draw_calibration_set(documents: Sequence[dict[str, Any]], size: int, seed: int = 20260916) -> list[dict[str, Any]]:
     """Choose the documents a person labels by hand, spread across the strata.
 
     The judge's labels only become evidence once their agreement with a human
@@ -268,14 +287,20 @@ def draw_calibration_set(documents: Sequence[Dict[str, Any]], size: int, seed: i
     Returns:
         The chosen rows, ordered by id.
     """
-    strata: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+    # group the documents by source, stage and decision
+    strata: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for document in documents:
         cell = sorted(document["cells"], key=lambda c: (c["stage"], c["decision"]))[0]
         strata.setdefault((document["dataset"], cell["stage"], cell["decision"]), []).append(document)
     return sorted(interleave(strata, size, seed), key=lambda document: document["id"])
 
 
-def _batches(documents: Sequence[Dict[str, Any]], size: int) -> List[List[Dict[str, Any]]]:
+# ===============================
+# Prompts and verdicts
+# ===============================
+
+
+def _batches(documents: Sequence[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
     """Split documents into fixed-size batches.
 
     Args:
@@ -289,7 +314,7 @@ def _batches(documents: Sequence[Dict[str, Any]], size: int) -> List[List[Dict[s
 
 
 def render_prompt(
-    rubric: str, batch: Sequence[Dict[str, Any]], max_chars: int, text_keys: Sequence[str] = ("text",)
+    rubric: str, batch: Sequence[dict[str, Any]], max_chars: int, text_keys: Sequence[str] = ("text",)
 ) -> str:
     """Fill the rubric's placeholder with one batch of units.
 
@@ -312,7 +337,7 @@ def render_prompt(
     return rubric.replace(DOCUMENTS_PLACEHOLDER, json.dumps(payload, ensure_ascii=False, indent=2))
 
 
-def parse_verdicts(response: str) -> List[Dict[str, Any]]:
+def parse_verdicts(response: str) -> list[dict[str, Any]]:
     """Pull the JSON array of verdicts out of a judge's reply.
 
     Args:
@@ -325,12 +350,12 @@ def parse_verdicts(response: str) -> List[Dict[str, Any]]:
         ValueError: If the reply holds no JSON array, or it is not a list of
             objects.
     """
+    # strip the code fence
     text = response.strip()
     fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if fence:
         text = fence.group(1).strip()
-    # Structured outputs return `{"verdicts": [...]}`; a prompted reply returns
-    # the bare array, sometimes wrapped in prose.
+    # structured outputs return `{"verdicts": [...]}`; a prompted reply is a bare array, maybe in prose
     if text.startswith("{"):
         decoded = json.loads(text)
         verdicts = decoded.get("verdicts") if isinstance(decoded, dict) else None
@@ -341,16 +366,17 @@ def parse_verdicts(response: str) -> List[Dict[str, Any]]:
         if start == -1 or end <= start:
             raise ValueError(f"no JSON array in the judge's reply: {response[:200]!r}")
         verdicts = json.loads(text[start : end + 1])
+
     if not isinstance(verdicts, list) or not all(isinstance(item, dict) for item in verdicts):
         raise ValueError("the judge's reply is not a list of objects")
     return verdicts
 
 
 def validate_batch(
-    verdicts: Sequence[Dict[str, Any]],
-    batch: Sequence[Dict[str, Any]],
-    checks: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+    verdicts: Sequence[dict[str, Any]],
+    batch: Sequence[dict[str, Any]],
+    checks: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Check a batch's verdicts against the rubric's vocabulary.
 
     Args:
@@ -367,6 +393,7 @@ def validate_batch(
         ValueError: If the judge returned an id that was never sent or the
             same id twice, or a field is missing or outside the rubric's values.
     """
+    # check the returned ids
     expected = {document["id"] for document in batch}
     returned = [str(verdict.get("id")) for verdict in verdicts]
     unknown = sorted(set(returned) - expected)
@@ -374,12 +401,12 @@ def validate_batch(
         raise ValueError(f"the judge returned ids that were not sent: {unknown}")
     if len(set(returned)) != len(returned):
         raise ValueError("the judge returned the same id twice")
-    # A short reply is kept, not discarded: the verdicts that came back are
-    # sound, and the documents left out are simply judged again on the next run.
+    # a short reply is kept: the skipped documents are judged again on the next run
     missing = sorted(expected - set(returned))
     if missing:
         logger.warning("the judge skipped %d of %d documents: %s", len(missing), len(expected), missing[:3])
 
+    # check each verdict's fields
     checks = checks if checks is not None else _REQUIRED_FIELDS
     checked = []
     for verdict in verdicts:
@@ -393,6 +420,11 @@ def validate_batch(
         row["note"] = str(note) if note else ""
         checked.append(row)
     return checked
+
+
+# ===============================
+# Judge backends
+# ===============================
 
 
 def ask_judge(prompt: str, command: str, model: str, timeout: int) -> str:
@@ -423,7 +455,7 @@ def ask_judge(prompt: str, command: str, model: str, timeout: int) -> str:
     return completed.stdout
 
 
-def _write_verdicts(destination: Path, verdicts: Sequence[Dict[str, Any]]) -> None:
+def _write_verdicts(destination: Path, verdicts: Sequence[dict[str, Any]]) -> None:
     """Append verdicts to the output file.
 
     Args:
@@ -436,8 +468,8 @@ def _write_verdicts(destination: Path, verdicts: Sequence[Dict[str, Any]]) -> No
 
 
 def _request_params(
-    model: str, batch: Sequence[Dict[str, Any]], prompt: str, task: JudgeTask = RUBRIC_TASK
-) -> Dict[str, Any]:
+    model: str, batch: Sequence[dict[str, Any]], prompt: str, task: JudgeTask = RUBRIC_TASK
+) -> dict[str, Any]:
     """Build the Messages API parameters for one group of units.
 
     Args:
@@ -449,15 +481,14 @@ def _request_params(
     Returns:
         Keyword arguments for a Messages API request.
     """
-    params: Dict[str, Any] = {
+    params: dict[str, Any] = {
         "model": model,
-        # The floor carries the shortest group; the rate covers one verdict.
+        # the floor carries the shortest group; the rate covers one verdict
         "max_tokens": max(1024, task.tokens_per_verdict * len(batch)),
         "messages": [{"role": "user", "content": prompt}],
         "output_config": {"format": {"type": "json_schema", "schema": task.schema}},
     }
-    # Labelling against a fixed rubric needs no reasoning, and thinking bills as
-    # output. Haiku does not think unless asked, so it takes no `thinking` key.
+    # labelling needs no reasoning and thinking bills as output; haiku takes no `thinking` key
     if not model.startswith("claude-haiku"):
         params["thinking"] = {"type": "disabled"}
     return params
@@ -466,7 +497,7 @@ def _request_params(
 def submit_batch(
     client: Any,
     model: str,
-    groups: Sequence[Sequence[Dict[str, Any]]],
+    groups: Sequence[Sequence[dict[str, Any]]],
     rubric: str,
     max_chars: int,
     task: JudgeTask = RUBRIC_TASK,
@@ -487,6 +518,7 @@ def submit_batch(
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
+    # build one request per group
     requests = [
         Request(
             custom_id=f"group-{index:05d}",
@@ -496,6 +528,8 @@ def submit_batch(
         )
         for index, group in enumerate(groups)
     ]
+
+    # submit the batch
     batch = client.messages.batches.create(requests=requests)
     logger.info("submitted batch %s with %d request(s)", batch.id, len(requests))
     return str(batch.id)
@@ -504,11 +538,11 @@ def submit_batch(
 def collect_batch(
     client: Any,
     batch_id: str,
-    groups: Dict[str, List[Dict[str, Any]]],
+    groups: dict[str, list[dict[str, Any]]],
     destination: Path,
     poll_seconds: int,
     task: JudgeTask = RUBRIC_TASK,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Wait for a batch to end, then write every verdict it returned.
 
     Args:
@@ -522,6 +556,7 @@ def collect_batch(
     Returns:
         Counts keyed `judged` and `failed`.
     """
+    # wait for the batch to end
     while True:
         batch = client.messages.batches.retrieve(batch_id)
         if batch.processing_status == "ended":
@@ -531,8 +566,8 @@ def collect_batch(
         )
         time.sleep(poll_seconds)
 
+    # write the verdicts; results arrive in any order, so groups are found by custom_id
     counts = {"judged": 0, "failed": 0}
-    # Results arrive in any order, so every group is found by its custom_id.
     for result in client.messages.batches.results(batch_id):
         group = groups.get(result.custom_id, [])
         if result.result.type != "succeeded":
@@ -553,7 +588,7 @@ def collect_batch(
 
 
 def _judge_with_cli(
-    groups: Sequence[Sequence[Dict[str, Any]]],
+    groups: Sequence[Sequence[dict[str, Any]]],
     rubric: str,
     destination: Path,
     model: str,
@@ -562,7 +597,7 @@ def _judge_with_cli(
     command: str,
     timeout: int,
     task: JudgeTask = RUBRIC_TASK,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Judge every group through the command-line tool.
 
     Args:
@@ -582,7 +617,7 @@ def _judge_with_cli(
     lock = threading.Lock()
     counts = {"judged": 0, "failed": 0}
 
-    def run_group(index_and_group: Tuple[int, Sequence[Dict[str, Any]]]) -> None:
+    def run_group(index_and_group: tuple[int, Sequence[dict[str, Any]]]) -> None:
         """Judge one group and append its verdicts.
 
         Args:
@@ -603,7 +638,8 @@ def _judge_with_cli(
             counts["failed"] += len(group) - len(verdicts)
             logger.info("group %d of %d: %d verdicts", index + 1, len(groups), len(verdicts))
 
-    work: Iterable[Tuple[int, Sequence[Dict[str, Any]]]] = enumerate(groups)
+    # run the groups, in a thread pool when concurrent
+    work: Iterable[tuple[int, Sequence[dict[str, Any]]]] = enumerate(groups)
     if concurrency > 1:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             list(pool.map(run_group, work))
@@ -613,22 +649,27 @@ def _judge_with_cli(
     return counts
 
 
+# ===============================
+# Run orchestration
+# ===============================
+
+
 def _run(
-    units: Sequence[Dict[str, Any]],
+    units: Sequence[dict[str, Any]],
     task: JudgeTask,
     destination: Path,
     rubric_path: Path,
     backend: str,
     model: str,
-    batch_size: Optional[int],
+    batch_size: int | None,
     concurrency: int,
-    max_batches: Optional[int],
+    max_batches: int | None,
     max_chars: int,
     command: str,
     timeout: int,
     poll_seconds: int,
-    client: Optional[Any],
-) -> Dict[str, int]:
+    client: Any | None,
+) -> dict[str, int]:
     """Judge whatever units are not judged yet, and append their verdicts.
 
     Args:
@@ -657,6 +698,7 @@ def _run(
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {', '.join(BACKENDS)}")
 
+    # select the pending groups
     rubric = rubric_path.read_text(encoding="utf-8")
     done = judged_ids(destination)
     pending = [unit for unit in units if unit["id"] not in done]
@@ -675,6 +717,8 @@ def _run(
         backend,
         model,
     )
+
+    # judge the groups
     destination.parent.mkdir(parents=True, exist_ok=True)
     counts = {"documents": len(units), "skipped": len(done), "batches": len(groups), "judged": 0, "failed": 0}
 
@@ -693,6 +737,7 @@ def _run(
             outcome = collect_batch(client, batch_id, keyed, destination, poll_seconds, task)
         counts.update(outcome)
 
+    # report the outcome
     logger.info(
         "judged %d, failed %d, already done %d, of %d units in %s",
         counts["judged"],
@@ -704,21 +749,26 @@ def _run(
     return counts
 
 
+# ===============================
+# Public entry points
+# ===============================
+
+
 def judge_documents(
     source: Path,
     destination: Path,
     rubric_path: Path,
     backend: str = "api",
     model: str = "claude-sonnet-5",
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     concurrency: int = 4,
-    max_batches: Optional[int] = None,
+    max_batches: int | None = None,
     max_chars: int = 2000,
     command: str = "claude",
     timeout: int = 600,
     poll_seconds: int = 60,
-    client: Optional[Any] = None,
-) -> Dict[str, int]:
+    client: Any | None = None,
+) -> dict[str, int]:
     """Label a sample of documents against the rubric, one verdict per line.
 
     Documents already present in *destination* are skipped, so an interrupted
@@ -766,11 +816,11 @@ def judge_documents(
 
 
 def draw_pairs(
-    documents: Sequence[Dict[str, Any]],
+    documents: Sequence[dict[str, Any]],
     stages: Sequence[str] = PAIRWISE_STAGES,
     pairs_per_cell: int = 20,
     seed: int = 20260916,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Pair each stage's kept documents against the ones it dropped.
 
     A stage earns its place only if what it drops is worse than what it keeps,
@@ -796,16 +846,18 @@ def draw_pairs(
         from, the two document ids as `a_id` and `b_id`, and `kept`, the slot
         the kept document sits in.
     """
+    # group the document ids by source, stage and decision
     wanted = set(stages)
-    by_decision: Dict[Tuple[str, str, str], List[str]] = {}
+    by_decision: dict[tuple[str, str, str], list[str]] = {}
     for document in documents:
         for cell in document["cells"]:
             if cell["stage"] in wanted:
                 key = (document["dataset"], cell["stage"], cell["decision"])
                 by_decision.setdefault(key, []).append(document["id"])
 
+    # pair kept against dropped, in both orders
     rng = random.Random(seed)
-    pairs: List[Dict[str, Any]] = []
+    pairs: list[dict[str, Any]] = []
     for dataset in sorted({key[0] for key in by_decision}):
         for stage in stages:
             kept = sorted(by_decision.get((dataset, stage, "kept"), []))
@@ -833,21 +885,21 @@ def judge_pairs(
     source: Path,
     destination: Path,
     rubric_path: Path,
-    pairs_path: Optional[Path] = None,
+    pairs_path: Path | None = None,
     stages: Sequence[str] = PAIRWISE_STAGES,
     pairs_per_cell: int = 20,
     seed: int = 20260916,
     backend: str = "api",
     model: str = "claude-sonnet-5",
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     concurrency: int = 4,
-    max_batches: Optional[int] = None,
+    max_batches: int | None = None,
     max_chars: int = 2000,
     command: str = "claude",
     timeout: int = 600,
     poll_seconds: int = 60,
-    client: Optional[Any] = None,
-) -> Dict[str, int]:
+    client: Any | None = None,
+) -> dict[str, int]:
     """Ask the judge which of a kept and a dropped document is the better text.
 
     The comparisons are drawn from the same sample the rubric pass judged, and
@@ -879,6 +931,7 @@ def judge_pairs(
     Returns:
         Counts keyed `documents`, `skipped`, `batches`, `judged` and `failed`.
     """
+    # draw the comparisons, or reuse the drawing on disk
     documents = read_documents(source)
     if pairs_path is None:
         pairs_path = destination.with_suffix(".pairs.jsonl")
@@ -893,6 +946,7 @@ def judge_pairs(
             "drew %d comparisons over %d sources into %s", len(pairs), len({p["dataset"] for p in pairs}), pairs_path
         )
 
+    # judge the comparisons
     texts = {document["id"]: document["text"] for document in documents}
     units = [{"id": pair["id"], "a": texts[pair["a_id"]], "b": texts[pair["b_id"]]} for pair in pairs]
     return _run(

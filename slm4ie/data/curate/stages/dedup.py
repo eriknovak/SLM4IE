@@ -16,7 +16,7 @@ import contextlib
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, cast
+from typing import Literal, cast
 
 import numpy as np
 from datatrove.data import Document, DocumentsPipeline
@@ -43,11 +43,30 @@ from slm4ie.data.curate.paths import CuratePaths
 from slm4ie.data.curate.stages import StageRun
 from slm4ie.data.curate.stages.common import jsonl_reader, jsonl_writer, stage_io_counts
 
+# ===============================
+# Defaults
+# ===============================
+
 #: Signatures buffered as Python tuples before packing into a numpy chunk.
 SIGNATURE_FLUSH_EVERY: int = 1_000_000
 
 #: Last sentence index datatrove's 16-bit `sent` field can hold.
 MAX_SENTENCE_INDEX: int = np.iinfo(np.uint16).max
+
+#: Kept-fraction floor when `sentence_dedup.min_kept_fraction` is unset: a
+#: document that lost over half its words to windows seen elsewhere is a later
+#: copy of a duplicated page (issue #40).
+DEFAULT_MIN_KEPT_FRACTION: float = 0.5
+
+#: Stat names of the filter step, one per reason a changed document is dropped.
+DROP_BELOW_KEPT_FRACTION: str = "dropped_below_kept_fraction"
+DROP_BELOW_MIN_DOC_WORDS: str = "dropped_below_min_doc_words"
+DROP_BELOW_MIN_NUM_SENTENCES: str = "dropped_below_min_num_sentences"
+DROP_EMPTY: str = "dropped_empty"
+
+# ===============================
+# Exact dedup config
+# ===============================
 
 
 def doc_text(doc: Document) -> str:
@@ -102,10 +121,8 @@ def make_exact_config(
 def default_exact_config() -> ExactDedupConfig:
     """Build the default `ExactDedupConfig` used by the curation pipeline.
 
-    Thin alias for `make_exact_config()` — kept for back-compat with
-    test fixtures and the existing pipeline call sites. New code should
-    call `make_exact_config(...)` directly so any non-default knob is
-    explicit at the call site.
+    Thin alias for `make_exact_config()`. Call `make_exact_config(...)`
+    directly so any non-default knob is explicit at the call site.
 
     Returns:
         An `ExactDedupConfig` whose `content_getter` is `doc_text` and
@@ -113,6 +130,11 @@ def default_exact_config() -> ExactDedupConfig:
         xxhash, `only_dedup_in_index=True`).
     """
     return make_exact_config()
+
+
+# ===============================
+# Sentence dedup steps
+# ===============================
 
 
 class CompactSentenceDedupSignature(SentenceDedupSignature):
@@ -139,6 +161,7 @@ class CompactSentenceDedupSignature(SentenceDedupSignature):
             rank: Task rank; names the signature files.
             world_size: Total number of tasks (unused, part of the step API).
         """
+        # hash the sentence windows into packed chunks
         dtype = np.dtype([("hash", self.config.hash_config.np_descr), ("doc", "<u4"), ("sent", "<u2")])
         chunks = []
         buffer = []
@@ -153,22 +176,12 @@ class CompactSentenceDedupSignature(SentenceDedupSignature):
                 if len(buffer) >= SIGNATURE_FLUSH_EVERY:
                     chunks.append(np.array(buffer, dtype=dtype))
                     buffer = []
+
+        # save the signatures
         chunks.append(np.array(buffer, dtype=dtype))
         signatures = np.concatenate(chunks)
         del chunks, buffer
         self.save_hashes(rank, signatures)
-
-
-#: Kept-fraction floor when `sentence_dedup.min_kept_fraction` is unset: a
-#: document that lost over half its words to windows seen elsewhere is a later
-#: copy of a duplicated page (issue #40).
-DEFAULT_MIN_KEPT_FRACTION: float = 0.5
-
-#: Stat names of the filter step, one per reason a changed document is dropped.
-DROP_BELOW_KEPT_FRACTION: str = "dropped_below_kept_fraction"
-DROP_BELOW_MIN_DOC_WORDS: str = "dropped_below_min_doc_words"
-DROP_BELOW_MIN_NUM_SENTENCES: str = "dropped_below_min_num_sentences"
-DROP_EMPTY: str = "dropped_empty"
 
 
 class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
@@ -197,8 +210,8 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
     def __init__(
         self,
         data_folder: DataFolderLike,
-        config: Optional[SentDedupConfig] = None,
-        exclusion_writer: Optional[DiskWriter] = None,
+        config: SentDedupConfig | None = None,
+        exclusion_writer: DiskWriter | None = None,
         language: str = Languages.english,
         min_kept_fraction: float = DEFAULT_MIN_KEPT_FRACTION,
     ) -> None:
@@ -220,7 +233,7 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
             raise ValueError(f"min_kept_fraction must be in [0, 1], got {min_kept_fraction!r}")
         self.min_kept_fraction = min_kept_fraction
 
-    def drop_reason(self, original: str, filtered: str) -> Optional[str]:
+    def drop_reason(self, original: str, filtered: str) -> str | None:
         """Name the first floor a changed document fails, or None when it is kept.
 
         Args:
@@ -244,7 +257,7 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
                 return DROP_BELOW_MIN_NUM_SENTENCES
         return None
 
-    def _load_duplicates(self, rank: int) -> Tuple[np.ndarray, np.ndarray]:
+    def _load_duplicates(self, rank: int) -> tuple[np.ndarray, np.ndarray]:
         """Read this rank's duplicate windows from every find-step folder.
 
         Args:
@@ -253,6 +266,7 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
         Returns:
             The sorted `(doc, sent)` pairs and the index where each document's pairs start.
         """
+        # list the duplicate files of this rank
         folders = self.data_folder.list_files(include_directories=True, recursive=False)
         files = [
             f
@@ -260,6 +274,8 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
             if self.data_folder.exists(f)
         ]
         logger.info(f"Loading duplicate indexes from {len(files)} results files.")
+
+        # load and sort the duplicate windows
         all_dups = np.array([], dtype=[("doc", "<u4"), ("sent", "<u2")])
         if files:
             with ThreadPoolExecutor() as pool:
@@ -268,6 +284,8 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
                     axis=0,
                 )
             all_dups.sort()
+
+        # index where each document's windows start
         _, doc_starts = np.unique(all_dups["doc"], return_index=True)
         logger.info("Loaded duplicate indexes.")
         return all_dups, doc_starts
@@ -283,8 +301,11 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
         Yields:
             The kept documents, trimmed where a window was removed.
         """
+        # load the duplicate windows
         all_dups, doc_starts = self._load_duplicates(rank)
         dups_doc_i = 0
+
+        # trim each document and apply the floors
         with self.exclusion_writer if self.exclusion_writer else contextlib.nullcontext() as writer:
             for doc_idx, doc in enumerate(data):
                 self.stat_update(StatHints.total)
@@ -311,16 +332,21 @@ class KeptFractionSentenceDedupFilter(SentenceDedupFilter):
                         writer.write(doc, rank=rank)
 
 
+# ===============================
+# Exact dedup stage
+# ===============================
+
+
 def build_exact_dedup_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    workers: Optional[int] = None,
+    workers: int | None = None,
     finder_workers: int = 1,
-    exact_config: Optional[ExactDedupConfig] = None,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    exact_config: ExactDedupConfig | None = None,
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the exact-dedup stage: sig → find → filter+write 05_exact_dedup/.
 
     Three executors chained via `depends`:
@@ -347,6 +373,7 @@ def build_exact_dedup_executors(
     Returns:
         Three chained `LocalPipelineExecutor`s.
     """
+    # resolve the folders and workers
     cfg = exact_config or default_exact_config()
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("repetition")
@@ -354,6 +381,7 @@ def build_exact_dedup_executors(
     sigs = paths.scratch_dir("exact_dedup") / "sigs"
     dups = paths.scratch_dir("exact_dedup") / "dups"
 
+    # chain the signature, find and filter executors
     sig = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -387,18 +415,23 @@ def build_exact_dedup_executors(
     return [sig, find, filt]
 
 
+# ===============================
+# Sentence dedup stage
+# ===============================
+
+
 def build_sentence_dedup_executors(
     paths: CuratePaths,
     *,
     tasks: int = 1,
-    workers: Optional[int] = None,
+    workers: int | None = None,
     finder_workers: int = 1,
-    sentence_config: Optional[SentDedupConfig] = None,
+    sentence_config: SentDedupConfig | None = None,
     min_kept_fraction: float = DEFAULT_MIN_KEPT_FRACTION,
     language: str = Languages.slovenian,
-    input_override: Optional[Path] = None,
-    output_override: Optional[Path] = None,
-) -> List[LocalPipelineExecutor]:
+    input_override: Path | None = None,
+    output_override: Path | None = None,
+) -> list[LocalPipelineExecutor]:
     """Build the sentence-dedup stage: sig → find → filter+write 06_sentence_dedup/.
 
     Three executors chained via `depends`, mirroring the exact stage:
@@ -425,6 +458,7 @@ def build_sentence_dedup_executors(
     Returns:
         Three chained `LocalPipelineExecutor`s.
     """
+    # resolve the folders and workers
     cfg = sentence_config or SentDedupConfig()
     workers = workers or tasks
     in_ = input_override if input_override is not None else paths.stage_dir("exact_dedup")
@@ -432,6 +466,7 @@ def build_sentence_dedup_executors(
     sigs = paths.scratch_dir("sentence_dedup") / "sigs"
     dups = paths.scratch_dir("sentence_dedup") / "dups"
 
+    # chain the signature, find and filter executors
     sig = LocalPipelineExecutor(
         pipeline=[
             jsonl_reader(in_),
@@ -475,7 +510,12 @@ def build_sentence_dedup_executors(
     return [sig, find, filt]
 
 
-def run_exact_dedup(job: StageRun) -> Tuple[int, int]:
+# ===============================
+# Stage runners
+# ===============================
+
+
+def run_exact_dedup(job: StageRun) -> tuple[int, int]:
     """Run whole-document exact dedup over the job's input view.
 
     Args:
@@ -493,11 +533,15 @@ def run_exact_dedup(job: StageRun) -> Tuple[int, int]:
     raw_hash_fc = str(job.config.get("hash_fc", "xxhash"))
     if raw_hash_fc not in ("sha1", "xxhash"):
         raise ValueError(f"the pretrain config's exact_dedup.hash_fc must be 'sha1' or 'xxhash', got {raw_hash_fc!r}")
+
+    # build the exact dedup config
     exact_config = make_exact_config(
         precision=cast(Literal[32, 64], raw_precision),
         hash_fc=cast(Literal["sha1", "xxhash"], raw_hash_fc),
         only_dedup_in_index=bool(job.config.get("only_dedup_in_index", True)),
     )
+
+    # run the executors and count the records
     execs = build_exact_dedup_executors(
         job.paths,
         tasks=job.tasks or job.workers,
@@ -510,7 +554,7 @@ def run_exact_dedup(job: StageRun) -> Tuple[int, int]:
     return stage_io_counts(job.paths.logs_dir("exact_dedup") / "3_filter")
 
 
-def run_sentence_dedup(job: StageRun) -> Tuple[int, int]:
+def run_sentence_dedup(job: StageRun) -> tuple[int, int]:
     """Run N-sentence window dedup over the job's input view.
 
     Args:
@@ -519,12 +563,15 @@ def run_sentence_dedup(job: StageRun) -> Tuple[int, int]:
     Returns:
         `(records_in, records_out)` summed over every finished filter task.
     """
+    # build the sentence dedup config
     sentence_config = SentDedupConfig(
         n_sentences=int(job.config.get("n_sentences", 3)),
         min_doc_words=int(job.config.get("min_doc_words", 50)),
         min_num_sentences=int(job.config.get("min_num_sentences", 2)),
         split_sentences=bool(job.config.get("split_sentences", True)),
     )
+
+    # run the executors and count the records
     execs = build_sentence_dedup_executors(
         job.paths,
         tasks=job.tasks or job.workers,

@@ -36,14 +36,22 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from slm4ie.utils.versioning import config_hash, corpus_digest
 from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.data.curate.stages import SCOPED_STAGES, STAGE_DIRS, STAGE_NAMES
 from slm4ie.utils import mlflow as ml
+from slm4ie.utils.versioning import config_hash, corpus_digest
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Experiment name for pretraining-corpus builds, following the project's
 #: `slm4ie/data/<stage>` lineage convention for shared pipeline stages.
@@ -58,7 +66,12 @@ FINAL_CORPUS_DIR = STAGE_DIRS["sentence_dedup"]
 _MAX_PARAM_LEN = 500
 
 
-def build_curate_funnel(output_dir: Path, dataset_keys: List[str]) -> List[Dict[str, Any]]:
+# ===============================
+# Helper functions
+# ===============================
+
+
+def build_curate_funnel(output_dir: Path, dataset_keys: list[str]) -> list[dict[str, Any]]:
     """Read the per-stage survival funnel from the pipeline sentinels.
 
     For each stage in `STAGE_NAMES`, reads `records_in` / `records_out` from its
@@ -76,10 +89,11 @@ def build_curate_funnel(output_dir: Path, dataset_keys: List[str]) -> List[Dict[
         `stage`, `index`, `scoped`, `records_in`, `records_out`, and (scoped
         only) `by_dataset` mapping each dataset to its in/out counts.
     """
-    funnel: List[Dict[str, Any]] = []
+    # read the sentinels of each stage
+    funnel: list[dict[str, Any]] = []
     for index, stage in enumerate(STAGE_NAMES):
         stage_folder = output_dir / STAGE_DIRS[stage]
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "stage": stage,
             "index": index,
             "scoped": stage in SCOPED_STAGES,
@@ -113,7 +127,7 @@ def build_curate_funnel(output_dir: Path, dataset_keys: List[str]) -> List[Dict[
     return funnel
 
 
-def read_aggregate_stats(output_dir: Path) -> Optional[Dict[str, Any]]:
+def read_aggregate_stats(output_dir: Path) -> dict[str, Any] | None:
     """Load the final-corpus aggregate stats, if present.
 
     Args:
@@ -129,7 +143,7 @@ def read_aggregate_stats(output_dir: Path) -> Optional[Dict[str, Any]]:
         return json.load(fh)
 
 
-def flatten_config(config: Any, prefix: str = "") -> Dict[str, str]:
+def flatten_config(config: Any, prefix: str = "") -> dict[str, str]:
     """Flatten a nested config into dotted string params for MLflow.
 
     Nested dicts are flattened with dotted keys; lists and other leaves are
@@ -143,7 +157,7 @@ def flatten_config(config: Any, prefix: str = "") -> Dict[str, str]:
     Returns:
         A flat mapping of dotted key to stringified value.
     """
-    flat: Dict[str, str] = {}
+    flat: dict[str, str] = {}
     if isinstance(config, dict):
         for key, value in config.items():
             child = f"{prefix}.{key}" if prefix else str(key)
@@ -154,7 +168,7 @@ def flatten_config(config: Any, prefix: str = "") -> Dict[str, str]:
     return flat
 
 
-def _funnel_metrics(funnel: List[Dict[str, Any]]) -> List[tuple]:
+def _funnel_metrics(funnel: list[dict[str, Any]]) -> list[tuple]:
     """Build (metric_name, value, step) tuples from the stage funnel.
 
     Args:
@@ -163,7 +177,7 @@ def _funnel_metrics(funnel: List[Dict[str, Any]]) -> List[tuple]:
     Returns:
         A list of `(name, value, step)` tuples for step-indexed logging.
     """
-    points: List[tuple] = []
+    points: list[tuple] = []
     for entry in funnel:
         step = entry["index"]
         out = entry["records_out"]
@@ -178,7 +192,7 @@ def _funnel_metrics(funnel: List[Dict[str, Any]]) -> List[tuple]:
     return points
 
 
-def _aggregate_metrics(aggregate: Dict[str, Any]) -> Dict[str, float]:
+def _aggregate_metrics(aggregate: dict[str, Any]) -> dict[str, float]:
     """Build final-corpus scalar metrics from the aggregate stats.
 
     Args:
@@ -188,7 +202,7 @@ def _aggregate_metrics(aggregate: Dict[str, Any]) -> Dict[str, float]:
         A flat mapping of metric name to value (corpus totals plus per-dataset
         word counts and word shares).
     """
-    metrics: Dict[str, float] = {
+    metrics: dict[str, float] = {
         "final_docs": float(aggregate.get("total_docs", 0)),
         "final_words": float(aggregate.get("total_words", 0)),
     }
@@ -198,17 +212,22 @@ def _aggregate_metrics(aggregate: Dict[str, Any]) -> Dict[str, float]:
     return metrics
 
 
+# ===============================
+# Tracking function
+# ===============================
+
+
 def log_curate_run(
     output_dir: Path,
-    config: Dict[str, Any],
-    dataset_keys: List[str],
+    config: dict[str, Any],
+    dataset_keys: list[str],
     *,
     enabled: bool = True,
     experiment: str = DEFAULT_EXPERIMENT,
-    tracking_uri: Optional[str] = None,
+    tracking_uri: str | None = None,
     force: bool = False,
-    artifact_dir: Optional[Path] = None,
-) -> Optional[str]:
+    artifact_dir: Path | None = None,
+) -> str | None:
     """Upsert a single MLflow run describing the current pretrain build.
 
     Computes the digest of the final corpus and -- unless `force` is set --
@@ -243,6 +262,7 @@ def log_curate_run(
         logger.warning("MLflow unavailable; skipping pretrain tracking.")
         return None
 
+    # skip or replace an existing run for the same digest
     digest = corpus_digest(final_corpus)
     existing = ml.find_run_by_tag(experiment, "corpus_digest", digest, tracking_uri=tracking_uri)
     if existing is not None and not force:
@@ -251,6 +271,7 @@ def log_curate_run(
     if existing is not None:
         ml.delete_run(existing, tracking_uri=tracking_uri)
 
+    # read the funnel and write it as an artifact
     funnel = build_curate_funnel(output_dir, dataset_keys)
     aggregate = read_aggregate_stats(output_dir)
 
@@ -260,6 +281,7 @@ def log_curate_run(
     with funnel_path.open("w", encoding="utf-8") as fh:
         json.dump(funnel, fh, ensure_ascii=False, indent=2)
 
+    # tag the run
     tags = {
         "run_type": "data_pipeline",
         "pipeline": "pretrain",
@@ -270,9 +292,9 @@ def log_curate_run(
     if commit is not None:
         tags["git_commit"] = commit
 
+    # log params, metrics, artifacts and lineage
     with ml.mlflow_run("pretrain-build", tags=tags):
-        # One call, resolved path last: MLflow rejects a second value for a
-        # param, and the config's `output_dir` is the unresolved form.
+        # one call, resolved path last: MLflow rejects a second param value
         ml.log_params({**flatten_config(config), "output_dir": str(output_dir)})
         for name, value, step in _funnel_metrics(funnel):
             ml.log_metrics({name: value}, step=step)

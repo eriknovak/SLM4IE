@@ -62,14 +62,23 @@ Document ids:
 
 import json
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata
 from slm4ie.data.schema import Document
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 _RESERVED_FIELDS = {"text", "fullText", "doc_id"}
 
@@ -89,17 +98,22 @@ _SP_CLAIMS_FIELDS = (
 )
 
 
-def _join_string_fields(record: Dict[str, Any], keys: tuple) -> str:
+# ===============================
+# Helper functions
+# ===============================
+
+
+def _join_string_fields(record: dict[str, Any], keys: tuple) -> str:
     """Concatenate non-empty string fields from a record.
 
     Args:
-        record (Dict[str, Any]): Source record.
-        keys (tuple): Field names to read in order.
+        record: Source record.
+        keys: Field names to read in order.
 
     Returns:
-        str: Fields joined with blank lines, or "" if none present.
+        Fields joined with blank lines, or "" if none present.
     """
-    parts: List[str] = []
+    parts: list[str] = []
     for key in keys:
         value = record.get(key)
         if isinstance(value, str) and value.strip():
@@ -107,7 +121,7 @@ def _join_string_fields(record: Dict[str, Any], keys: tuple) -> str:
     return "\n\n".join(parts)
 
 
-def _candidate_texts(record: Dict[str, Any]) -> List[Tuple[str, str]]:
+def _candidate_texts(record: dict[str, Any]) -> list[tuple[str, str]]:
     """List every present text source of a COLESLAW record.
 
     Precedence order: `text` -> `fullText` -> sp_courts fields ->
@@ -115,14 +129,14 @@ def _candidate_texts(record: Dict[str, Any]) -> List[Tuple[str, str]]:
     any further entries are shadowed sources worth warning about.
 
     Args:
-        record (Dict[str, Any]): A parsed JSONL record.
+        record: A parsed JSONL record.
 
     Returns:
-        List[Tuple[str, str]]: `(source_name, text)` pairs for every
+        `(source_name, text)` pairs for every
             non-empty source, in precedence order. Empty if the
             record has no usable text.
     """
-    candidates: List[Tuple[str, str]] = []
+    candidates: list[tuple[str, str]] = []
 
     text = record.get("text")
     if isinstance(text, str) and text.strip():
@@ -143,6 +157,11 @@ def _candidate_texts(record: Dict[str, Any]) -> List[Tuple[str, str]]:
     return candidates
 
 
+# ===============================
+# COLESLAW extractor
+# ===============================
+
+
 class ColeslawExtractor(FileBasedExtractor):
     """Extracts Documents from the COLESLAW v1.0 corpus.
 
@@ -152,42 +171,43 @@ class ColeslawExtractor(FileBasedExtractor):
     the subcorpus key.
     """
 
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return sorted .jsonl files under input_dir.
 
         Args:
-            input_dir (Path): Directory containing the COLESLAW
+            input_dir: Directory containing the COLESLAW
                 subcorpora (searched recursively).
 
         Returns:
-            List[Path]: Sorted .jsonl file paths.
+            Sorted .jsonl file paths.
         """
         return sorted(p for p in input_dir.rglob("*.jsonl") if p.is_file())
 
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from the given COLESLAW JSONL files.
 
         Args:
-            files (List[Path]): JSONL files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root; unused, as ids key off each
+            files: JSONL files to parse, in order.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            input_dir: Dataset root; unused, as ids key off each
                 file's subcorpus directory and stem.
-            metadata (Optional[Dict[str, Any]]): Ignored; this
+            metadata: Ignored; this
                 extractor sources metadata from each record itself.
 
         Yields:
-            Document: One document per record with non-empty text.
+            One document per record with non-empty text.
         """
         del input_dir, metadata
-        # Subcorpus dir + stem, not the full path: "COLESLAW 1.0/" has a space.
+
+        # key each file by subcorpus dir + stem, as "COLESLAW 1.0/" has a space
         for filepath in files:
             yield from self._parse_file(filepath, source, domain, f"{filepath.parent.name}/{filepath.stem}")
 
@@ -201,17 +221,19 @@ class ColeslawExtractor(FileBasedExtractor):
         """Parse one COLESLAW JSONL file and yield Documents.
 
         Args:
-            filepath (Path): Path to the JSONL file.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            unit (str): The file's subcorpus directory name and stem
+            filepath: Path to the JSONL file.
+            source: Dataset key.
+            domain: Domain label.
+            unit: The file's subcorpus directory name and stem
                 (e.g. "PISRS/register-predpisov"); the id prefix, and
                 its first segment is the subcorpus.
 
         Yields:
-            Document: One document per valid line with usable text.
+            One document per valid line with usable text.
         """
         subcorpus = filepath.parent.name
+
+        # read the file line by line
         with filepath.open(encoding="utf-8") as fh:
             for line_idx, raw_line in enumerate(fh):
                 line = raw_line.strip()
@@ -232,6 +254,7 @@ class ColeslawExtractor(FileBasedExtractor):
                 if not isinstance(record, dict):
                     continue
 
+                # choose the text source, warning about shadowed ones
                 candidates = _candidate_texts(record)
                 if not candidates:
                     continue
@@ -245,6 +268,7 @@ class ColeslawExtractor(FileBasedExtractor):
                         chosen_source,
                     )
 
+                # build the metadata from the unconsumed fields
                 exclude = _RESERVED_FIELDS | set(_SP_COURTS_FIELDS) | set(_SP_CLAIMS_FIELDS)
                 metadata = {
                     "subcorpus": subcorpus,

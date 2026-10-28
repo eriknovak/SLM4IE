@@ -13,14 +13,33 @@ import logging
 import random
 import unicodedata
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.utils.io import open_output, open_text_stream
 from slm4ie.utils.parallel import run_parallel
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
+
+#: The two sides of a corpus split.
+SPLIT_SIDES = ("train", "eval")
+
+#: Rank value above every 64-bit hash, so a source can put all its documents on one side.
+_RANK_CEILING = 2**64
+
+# ===============================
+# Sampling
+# ===============================
 
 
 @dataclass
@@ -28,40 +47,40 @@ class SampleBudget:
     """Constraints controlling how much text `sample_corpus` draws.
 
     Attributes:
-        max_bytes (Optional[int]): Total UTF-8 byte budget across the whole
+        max_bytes (int | None): Total UTF-8 byte budget across the whole
             sample, or None for no byte cap.
-        max_docs (Optional[int]): Total document budget, or None for no cap.
+        max_docs (int | None): Total document budget, or None for no cap.
         seed (int): Seed for the deterministic shard shuffle.
         weight_key (str): Metadata field used to group documents into sources
             for weighting (typically `dataset` or `domain`).
-        source_weights (Dict[str, float]): Relative weights per source value.
+        source_weights (dict[str, float]): Relative weights per source value.
             Sources absent from the map default to weight 1.0; a weight of 0
             excludes a source. An empty map samples all sources uniformly.
     """
 
-    max_bytes: Optional[int] = None
-    max_docs: Optional[int] = None
+    max_bytes: int | None = None
+    max_docs: int | None = None
     seed: int = 0
     weight_key: str = "dataset"
-    source_weights: Dict[str, float] = field(default_factory=dict)
+    source_weights: dict[str, float] = field(default_factory=dict)
 
 
 def iter_dedup_documents(
     root: Path,
-    datasets: Optional[List[str]] = None,
-) -> Iterator[Dict[str, Any]]:
+    datasets: list[str] | None = None,
+) -> Iterator[dict[str, Any]]:
     """Stream datatrove documents from the deduplicated corpus tree.
 
     Reads `root/<dataset>/*.jsonl.gz` in sorted, deterministic order. Hidden
     and underscore-prefixed subdirectories (e.g. dedup state) are skipped.
 
     Args:
-        root (Path): Corpus root, e.g. `pretrain/06_sentence_dedup`.
-        datasets (Optional[List[str]]): Restrict to these dataset subdirs;
+        root: Corpus root, e.g. `pretrain/06_sentence_dedup`.
+        datasets: Restrict to these dataset subdirs;
             None reads every subdir.
 
     Yields:
-        Dict[str, Any]: One parsed `{text, id, metadata}` record per line.
+        One parsed `{text, id, metadata}` record per line.
     """
     for _source, shard in _iter_shards(Path(root), datasets):
         with open_text_stream(shard) as handle:
@@ -75,9 +94,9 @@ def iter_dedup_documents(
 def iter_sample_documents(
     root: Path,
     budget: SampleBudget,
-    split: Optional["CorpusSplit"] = None,
-    side: Optional[str] = None,
-) -> Iterator[Tuple[str, str]]:
+    split: "CorpusSplit | None" = None,
+    side: str | None = None,
+) -> Iterator[tuple[str, str]]:
     """Yield `(source, text)` for each sampled document, honoring the budget.
 
     Per-source byte/document quotas are computed from the normalized weights,
@@ -88,20 +107,22 @@ def iter_sample_documents(
     sample keeps the side's source mix.
 
     Args:
-        root (Path): Corpus root, e.g. `pretrain/06_sentence_dedup`.
-        budget (SampleBudget): Sampling constraints.
-        split (Optional[CorpusSplit]): The corpus split to draw from, or None
+        root: Corpus root, e.g. `pretrain/06_sentence_dedup`.
+        budget: Sampling constraints.
+        split: The corpus split to draw from, or None
             to draw from every document.
-        side (Optional[str]): `train` or `eval`; required with `split`.
+        side: `train` or `eval`; required with `split`.
 
     Yields:
-        Tuple[str, str]: The source name and the `text` of each sampled document.
+        The source name and the `text` of each sampled document.
 
     Raises:
         ValueError: If `split` is given without a valid `side`.
     """
     if split is not None and side not in SPLIT_SIDES:
         raise ValueError(f"side must be one of {SPLIT_SIDES} with a split, got {side!r}")
+
+    # resolve the per-source weights
     root = Path(root)
     sources = _group_shards_by_source(root, budget.weight_key)
     source_weights = budget.source_weights
@@ -111,6 +132,7 @@ def iter_sample_documents(
     total_weight = sum(weights.values()) or 1.0
     rng = random.Random(budget.seed)
 
+    # draw each source up to its quota
     for source in sorted(weights):
         weight = weights[source]
         share = weight / total_weight
@@ -145,19 +167,19 @@ def iter_sample_documents(
 def sample_corpus(
     root: Path,
     budget: SampleBudget,
-    split: Optional["CorpusSplit"] = None,
-    side: Optional[str] = None,
+    split: "CorpusSplit | None" = None,
+    side: str | None = None,
 ) -> Iterator[str]:
     """Yield sampled document texts honoring the budget and source weights.
 
     Args:
-        root (Path): Corpus root, e.g. `pretrain/06_sentence_dedup`.
-        budget (SampleBudget): Sampling constraints.
-        split (Optional[CorpusSplit]): The corpus split to draw from, or None.
-        side (Optional[str]): `train` or `eval`; required with `split`.
+        root: Corpus root, e.g. `pretrain/06_sentence_dedup`.
+        budget: Sampling constraints.
+        split: The corpus split to draw from, or None.
+        side: `train` or `eval`; required with `split`.
 
     Yields:
-        str: The `text` field of each sampled document.
+        The `text` field of each sampled document.
     """
     for _source, text in iter_sample_documents(root, budget, split, side):
         yield text
@@ -171,14 +193,16 @@ def write_sample(texts: Iterator[str], cache_path: Path) -> Path:
     is gzip-compressed when `cache_path` ends in `.gz`.
 
     Args:
-        texts (Iterator[str]): Sampled document texts.
-        cache_path (Path): Destination file (`.txt` or `.txt.gz`).
+        texts: Sampled document texts.
+        cache_path: Destination file (`.txt` or `.txt.gz`).
 
     Returns:
-        Path: `cache_path`, for convenient chaining.
+        `cache_path`, for convenient chaining.
     """
     cache_path = Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # write one flattened document per line
     with open_output(cache_path) as out:
         for text in texts:
             flattened = " ".join(text.split())
@@ -193,8 +217,8 @@ def materialize_sample(
     root: Path,
     budget: SampleBudget,
     cache_path: Path,
-    split: Optional["CorpusSplit"] = None,
-    side: Optional[str] = None,
+    split: "CorpusSplit | None" = None,
+    side: str | None = None,
 ) -> Path:
     """Draw a sample, write it with `write_sample`, and record its source mix.
 
@@ -203,16 +227,16 @@ def materialize_sample(
     tabled without re-reading it.
 
     Args:
-        root (Path): Corpus root.
-        budget (SampleBudget): Sampling constraints.
-        cache_path (Path): Destination of the sample (`.txt` or `.txt.gz`).
-        split (Optional[CorpusSplit]): The corpus split to draw from, or None.
-        side (Optional[str]): `train` or `eval`; required with `split`.
+        root: Corpus root.
+        budget: Sampling constraints.
+        cache_path: Destination of the sample (`.txt` or `.txt.gz`).
+        split: The corpus split to draw from, or None.
+        side: `train` or `eval`; required with `split`.
 
     Returns:
-        Path: `cache_path`, for convenient chaining.
+        `cache_path`, for convenient chaining.
     """
-    counts: Dict[str, Dict[str, int]] = {}
+    counts: dict[str, dict[str, int]] = {}
 
     def tallied() -> Iterator[str]:
         for source, text in iter_sample_documents(root, budget, split, side):
@@ -222,27 +246,28 @@ def materialize_sample(
             tally["bytes"] += len(text.encode("utf-8"))
             yield text
 
+    # write the sample
     write_sample(tallied(), cache_path)
+
+    # write the source mix
     sources_path = Path(cache_path).with_name(Path(cache_path).name + ".sources.json")
     sources_path.write_text(json.dumps({"side": side, "sources": counts}, indent=2, sort_keys=True), encoding="utf-8")
     return Path(cache_path)
 
 
-#: The two sides of a corpus split.
-SPLIT_SIDES = ("train", "eval")
-
-#: Rank value above every 64-bit hash, so a source can put all its documents on one side.
-_RANK_CEILING = 2**64
+# ===============================
+# Corpus split
+# ===============================
 
 
 def stable_rank(key: str) -> int:
     """Return a reproducible 64-bit rank for `key`, uniform over keys.
 
     Args:
-        key (str): Any identifier, such as `<source>/<document id>`.
+        key: Any identifier, such as `<source>/<document id>`.
 
     Returns:
-        int: The first eight bytes of the key's BLAKE2b digest, as an integer.
+        The first eight bytes of the key's BLAKE2b digest, as an integer.
     """
     return int.from_bytes(hashlib.blake2b(key.encode("utf-8"), digest_size=8).digest(), "big")
 
@@ -257,28 +282,28 @@ class CorpusSplit:
 
     Attributes:
         train_share (float): Share of each source's documents on the training side.
-        thresholds (Dict[str, int]): Per source, the rank below which a document
+        thresholds (dict[str, int]): Per source, the rank below which a document
             is on the training side.
-        counts (Dict[str, Dict[str, Dict[str, int]]]): Per source and side, the
+        counts (dict[str, dict[str, dict[str, int]]]): Per source and side, the
             `documents`, `words` and `bytes` the side holds.
         corpus_fingerprint (str): `corpus_fingerprint` of the corpus the split
             was fitted on.
     """
 
     train_share: float
-    thresholds: Dict[str, int]
-    counts: Dict[str, Dict[str, Dict[str, int]]]
+    thresholds: dict[str, int]
+    counts: dict[str, dict[str, dict[str, int]]]
     corpus_fingerprint: str
 
     def side_of(self, source: str, doc_id: str) -> str:
         """Return the side a document belongs to.
 
         Args:
-            source (str): The document's source (its dataset subdir).
-            doc_id (str): The document's `id`.
+            source: The document's source (its dataset subdir).
+            doc_id: The document's `id`.
 
         Returns:
-            str: `train` or `eval`.
+            `train` or `eval`.
 
         Raises:
             KeyError: If `source` was not part of the corpus the split was fitted on.
@@ -286,22 +311,23 @@ class CorpusSplit:
         return "train" if stable_rank(f"{source}/{doc_id}") < self.thresholds[source] else "eval"
 
 
-def _rank_source(source: str, *, root: Path, train_share: float) -> Dict[str, Any]:
+def _rank_source(source: str, *, root: Path, train_share: float) -> dict[str, Any]:
     """Rank one source's documents and find its training-side threshold.
 
     Top-level so it pickles for the process pool.
 
     Args:
-        source (str): Dataset subdir under `root`.
-        root (Path): Corpus root.
-        train_share (float): Share of documents on the training side.
+        source: Dataset subdir under `root`.
+        root: Corpus root.
+        train_share: Share of documents on the training side.
 
     Returns:
-        Dict[str, Any]: The source's `threshold` and per-side `counts`.
+        The source's `threshold` and per-side `counts`.
     """
-    ranks: List[int] = []
-    words: List[int] = []
-    sizes: List[int] = []
+    # rank every document
+    ranks: list[int] = []
+    words: list[int] = []
+    sizes: list[int] = []
     for _name, shard in _iter_shards(root, [source]):
         with open_text_stream(shard) as handle:
             for line in handle:
@@ -313,9 +339,13 @@ def _rank_source(source: str, *, root: Path, train_share: float) -> Dict[str, An
                 ranks.append(stable_rank(f"{source}/{record.get('id')}"))
                 words.append(len(text.split()))
                 sizes.append(len(text.encode("utf-8")))
+
+    # find the training-side threshold
     order = sorted(range(len(ranks)), key=ranks.__getitem__)
     n_train = round(len(order) * train_share)
     threshold = ranks[order[n_train]] if n_train < len(order) else _RANK_CEILING
+
+    # count each side
     counts = {side: {"documents": 0, "words": 0, "bytes": 0} for side in SPLIT_SIDES}
     for position, index in enumerate(order):
         tally = counts["train" if position < n_train else "eval"]
@@ -331,12 +361,12 @@ def fit_corpus_split(root: Path, train_share: float, max_workers: int) -> Corpus
     One streaming pass per source, run in parallel across sources.
 
     Args:
-        root (Path): Corpus root, e.g. `pretrain/06_sentence_dedup`.
-        train_share (float): Share of each source's documents on the training side.
-        max_workers (int): Sources ranked at once.
+        root: Corpus root, e.g. `pretrain/06_sentence_dedup`.
+        train_share: Share of each source's documents on the training side.
+        max_workers: Sources ranked at once.
 
     Returns:
-        CorpusSplit: The thresholds and the per-side counts of every source.
+        The thresholds and the per-side counts of every source.
 
     Raises:
         ValueError: If `train_share` is not strictly between 0 and 1.
@@ -344,6 +374,8 @@ def fit_corpus_split(root: Path, train_share: float, max_workers: int) -> Corpus
     """
     if not 0 < train_share < 1:
         raise ValueError(f"train_share must be in (0, 1), got {train_share}")
+
+    # rank the sources in parallel
     sources = sorted(_group_shards_by_source(Path(root), "dataset"))
     results, failures = run_parallel(
         _rank_source,
@@ -366,14 +398,16 @@ def save_corpus_split(split: CorpusSplit, path: Path) -> Path:
     """Write a corpus split to JSON.
 
     Args:
-        split (CorpusSplit): The split to persist.
-        path (Path): Destination `.json` file.
+        split: The split to persist.
+        path: Destination `.json` file.
 
     Returns:
-        Path: `path`, for convenient chaining.
+        `path`, for convenient chaining.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # write the split
     payload = {
         "train_share": split.train_share,
         "thresholds": split.thresholds,
@@ -388,10 +422,10 @@ def load_corpus_split(path: Path) -> CorpusSplit:
     """Read a corpus split written by `save_corpus_split`.
 
     Args:
-        path (Path): The split's `.json` file.
+        path: The split's `.json` file.
 
     Returns:
-        CorpusSplit: The persisted split.
+        The persisted split.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -415,11 +449,12 @@ def corpus_fingerprint(root: Path) -> str:
     fitted on the old corpus is refused rather than reused.
 
     Args:
-        root (Path): Corpus root.
+        root: Corpus root.
 
     Returns:
-        str: The SHA-256 hex digest over every shard's relative path, size and mtime.
+        The SHA-256 hex digest over every shard's relative path, size and mtime.
     """
+    # hash each shard's path, size and mtime
     digest = hashlib.sha256()
     for _source, shard in _iter_shards(Path(root), None):
         stat = shard.stat()
@@ -427,12 +462,17 @@ def corpus_fingerprint(root: Path) -> str:
     return digest.hexdigest()
 
 
+# ===============================
+# Cached samples
+# ===============================
+
+
 def check_sample_side(cache_path: Path, side: str) -> None:
     """Refuse a cached sample that was not drawn from `side` of a corpus split.
 
     Args:
-        cache_path (Path): A sample written by `materialize_sample`.
-        side (str): The side the caller needs, `train` or `eval`.
+        cache_path: A sample written by `materialize_sample`.
+        side: The side the caller needs, `train` or `eval`.
 
     Raises:
         ValueError: If the sample has no source sidecar or was drawn from another side.
@@ -449,10 +489,10 @@ def iter_sample(cache_path: Path) -> Iterator[str]:
     """Yield one text per line from a cache written by `write_sample`.
 
     Args:
-        cache_path (Path): Path to the `.txt`/`.txt.gz` cache file.
+        cache_path: Path to the `.txt`/`.txt.gz` cache file.
 
     Yields:
-        str: One cached document per line, trailing newline stripped.
+        One cached document per line, trailing newline stripped.
     """
     with open_text_stream(Path(cache_path)) as handle:
         for line in handle:
@@ -468,35 +508,44 @@ def count_sample_characters(cache_path: Path) -> Counter:
     a symbol, so these counts are the ones their alphabets are drawn from.
 
     Args:
-        cache_path (Path): Path to the `.txt`/`.txt.gz` cache file.
+        cache_path: Path to the `.txt`/`.txt.gz` cache file.
 
     Returns:
-        Counter: Occurrences of each character.
+        Occurrences of each character.
     """
+    # count the characters
     counts: Counter = Counter()
     for line in iter_sample(cache_path):
         counts.update(unicodedata.normalize("NFC", line))
+
+    # drop whitespace
     for char in [c for c in counts if c.isspace()]:
         del counts[char]
     return counts
 
 
+# ===============================
+# Private helpers
+# ===============================
+
+
 def _iter_shards(
     root: Path,
-    datasets: Optional[List[str]],
-) -> Iterator[Tuple[str, Path]]:
+    datasets: list[str] | None,
+) -> Iterator[tuple[str, Path]]:
     """Yield `(dataset, shard_path)` pairs across the corpus tree.
 
     Args:
-        root (Path): Corpus root.
-        datasets (Optional[List[str]]): Restrict to these subdirs, or None.
+        root: Corpus root.
+        datasets: Restrict to these subdirs, or None.
 
     Yields:
-        Tuple[str, Path]: Dataset subdir name and one shard path.
+        Dataset subdir name and one shard path.
     """
     if not root.exists():
         logger.warning("Corpus root does not exist: %s", root)
         return
+    # walk the dataset subdirs in name order
     wanted = set(datasets) if datasets else None
     for sub in sorted(p for p in root.iterdir() if p.is_dir()):
         if sub.name.startswith((".", "_")):
@@ -507,7 +556,7 @@ def _iter_shards(
             yield sub.name, shard
 
 
-def _group_shards_by_source(root: Path, weight_key: str) -> Dict[str, List[Path]]:
+def _group_shards_by_source(root: Path, weight_key: str) -> dict[str, list[Path]]:
     """Group corpus shards by their source value.
 
     The source value is the directory name, which equals the dataset key for
@@ -516,14 +565,14 @@ def _group_shards_by_source(root: Path, weight_key: str) -> Dict[str, List[Path]
     every record, so directory-level grouping (dataset) is used.
 
     Args:
-        root (Path): Corpus root.
-        weight_key (str): Metadata field the caller intends to weight on.
+        root: Corpus root.
+        weight_key: Metadata field the caller intends to weight on.
 
     Returns:
-        Dict[str, List[Path]]: Shard paths grouped by source name.
+        Shard paths grouped by source name.
     """
-    del weight_key  # Directory-level grouping; documented above.
-    grouped: Dict[str, List[Path]] = {}
+    del weight_key  # directory-level grouping, as documented above
+    grouped: dict[str, list[Path]] = {}
     for source, shard in _iter_shards(root, None):
         grouped.setdefault(source, []).append(shard)
     return grouped
@@ -531,19 +580,19 @@ def _group_shards_by_source(root: Path, weight_key: str) -> Dict[str, List[Path]
 
 def _resolve_weights(
     sources: Any,
-    source_weights: Dict[str, float],
-) -> Dict[str, float]:
+    source_weights: dict[str, float],
+) -> dict[str, float]:
     """Assign a positive weight to each available source.
 
     Args:
-        sources (Any): Iterable of available source names.
-        source_weights (Dict[str, float]): User-supplied weights; missing
+        sources: Iterable of available source names.
+        source_weights: User-supplied weights; missing
             sources default to 1.0, non-positive weights are dropped.
 
     Returns:
-        Dict[str, float]: Source name to positive weight.
+        Source name to positive weight.
     """
-    resolved: Dict[str, float] = {}
+    resolved: dict[str, float] = {}
     for source in sources:
         weight = source_weights.get(source, 1.0)
         if weight > 0:
@@ -554,19 +603,19 @@ def _resolve_weights(
 def _quota_met(
     used_bytes: int,
     used_docs: int,
-    quota_bytes: Optional[int],
-    quota_docs: Optional[int],
+    quota_bytes: int | None,
+    quota_docs: int | None,
 ) -> bool:
     """Return True when any active quota has been reached.
 
     Args:
-        used_bytes (int): Bytes consumed so far for the source.
-        used_docs (int): Documents consumed so far for the source.
-        quota_bytes (Optional[int]): Byte quota, or None.
-        quota_docs (Optional[int]): Document quota, or None.
+        used_bytes: Bytes consumed so far for the source.
+        used_docs: Documents consumed so far for the source.
+        quota_bytes: Byte quota, or None.
+        quota_docs: Document quota, or None.
 
     Returns:
-        bool: True if a set quota is met or exceeded.
+        True if a set quota is met or exceeded.
     """
     if quota_bytes is not None and used_bytes >= quota_bytes:
         return True

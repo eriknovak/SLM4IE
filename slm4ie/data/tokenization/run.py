@@ -31,13 +31,17 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, IO, Iterable, List, Optional
+from typing import IO, Any
 
 from tqdm import tqdm
 
 from slm4ie.data.download.config import DatasetConfig, load_download_config
+from slm4ie.data.tokenization.config import load_tokenization_config
+from slm4ie.data.tokenization.lexicons import LEXICONS
+from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.utils.io import open_output
 from slm4ie.utils.parallel import (
     configure_script_logging,
@@ -46,11 +50,16 @@ from slm4ie.utils.parallel import (
     run_parallel,
     workers_quiet,
 )
-from slm4ie.data.tokenization.config import load_tokenization_config
-from slm4ie.data.tokenization.lexicons import LEXICONS
-from slm4ie.utils.cli import stamped_log_dir
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Summary
+# ===============================
 
 
 @dataclass
@@ -63,12 +72,17 @@ class TokenizationSummary:
         failed: Keys whose conversion raised.
     """
 
-    records: Dict[str, int] = field(default_factory=dict)
-    skipped: List[str] = field(default_factory=list)
-    failed: List[str] = field(default_factory=list)
+    records: dict[str, int] = field(default_factory=dict)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
 
 
-def write_records(records: Iterable[Dict[str, Any]], out_stream: IO[str]) -> int:
+# ===============================
+# Conversion
+# ===============================
+
+
+def write_records(records: Iterable[dict[str, Any]], out_stream: IO[str]) -> int:
     """Write `records` as JSONL lines and return the count.
 
     Args:
@@ -91,7 +105,7 @@ def convert_dataset(
     raw_dir: Path,
     output_dir: Path,
     force: bool = False,
-) -> Optional[int]:
+) -> int | None:
     """Convert one tokenizer-eval dataset to `<output_dir>/<key>.jsonl.gz`.
 
     Args:
@@ -118,13 +132,14 @@ def convert_dataset(
         logger.warning("Raw dir for %r does not exist: %s", key, raw_dir)
         return None
 
+    # prepare the output path and skip existing output
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{key}.jsonl.gz"
-
     if out_path.exists() and not force:
         logger.info("Skipping %r, output already exists: %s (use --force to overwrite)", key, out_path)
         return 0
 
+    # convert the lexicon entries
     logger.info("Converting %s -> %s", raw_dir, out_path)
     progress = tqdm(read_lexicon(raw_dir), desc=key, unit="entry", disable=workers_quiet())
     with open_output(out_path) as out_stream:
@@ -133,9 +148,8 @@ def convert_dataset(
         finally:
             progress.close()
 
+    # an empty output means a lexicon/format mismatch: remove it and fail loudly
     if count == 0:
-        # An empty output almost always means a lexicon/format mismatch;
-        # remove the bogus file and fail loudly instead of exiting 0.
         out_path.unlink(missing_ok=True)
         raise ValueError(
             f"Conversion of {key!r} produced 0 records from {raw_dir}; "
@@ -157,14 +171,14 @@ def _resolve_dataset_subdir(download_config_path: Path, key: str) -> str:
         The `output_dir` value declared for `key` in download.yaml, or `key`
         itself if no per-dataset override exists.
     """
-    cfg: Optional[DatasetConfig] = load_download_config(download_config_path).datasets.get(key)
+    cfg: DatasetConfig | None = load_download_config(download_config_path).datasets.get(key)
     return cfg.output_dir if cfg and cfg.output_dir else key
 
 
 def convert_tokenization_datasets(
     config_path: Path,
     download_config_path: Path,
-    dataset_keys: Optional[List[str]] = None,
+    dataset_keys: list[str] | None = None,
     force: bool = False,
     max_workers: int = 0,
 ) -> TokenizationSummary:
@@ -181,8 +195,8 @@ def convert_tokenization_datasets(
     Returns:
         Per-key record counts plus the skipped and failed keys.
     """
+    # select the dataset keys
     config = load_tokenization_config(config_path)
-
     if dataset_keys is None:
         keys = list(config.datasets)
         if not keys:
@@ -194,14 +208,14 @@ def convert_tokenization_datasets(
         if unknown:
             logger.warning("Dataset key(s) %s not listed in %s; proceeding anyway.", unknown, config_path)
 
-    # Resolve per-dataset raw dirs in the parent (avoids re-parsing
-    # download.yaml inside every worker).
+    # resolve raw dirs in the parent, not in every worker
     dataset_dirs = {key: config.input_dir / _resolve_dataset_subdir(download_config_path, key) for key in keys}
 
+    # set up workers and logging
     workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
     configure_script_logging(parallel=workers > 1)
 
-    def kwargs_for(key: str) -> Dict[str, Any]:
+    def kwargs_for(key: str) -> dict[str, Any]:
         """Return per-worker kwargs for `convert_dataset`.
 
         Args:
@@ -212,6 +226,7 @@ def convert_tokenization_datasets(
         """
         return {"raw_dir": dataset_dirs[key], "output_dir": config.output_dir, "force": force}
 
+    # convert the datasets in parallel
     results, failures = run_parallel(
         convert_dataset,
         keys,
@@ -222,6 +237,7 @@ def convert_tokenization_datasets(
         log_dir=stamped_log_dir("tokenization"),
     )
 
+    # summarise the outcome
     summary = TokenizationSummary(
         records={k: v for k, v in results.items() if v is not None},
         skipped=[k for k, v in results.items() if v is None],

@@ -2,7 +2,11 @@
 
 import dataclasses
 import json
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
+
+# ===============================
+# Annotation classes
+# ===============================
 
 
 @dataclasses.dataclass
@@ -11,30 +15,30 @@ class Token:
 
     Attributes:
         form (str): Surface form of the token.
-        lemma (Optional[str]): Lemma of the token.
-        upos (Optional[str]): Universal POS tag.
-        feats (Optional[str]): Morphological features.
+        lemma (str | None): Lemma of the token.
+        upos (str | None): Universal POS tag.
+        feats (str | None): Morphological features.
         space_after (bool): Whether a space follows this token in the
             original text. False for e.g. a token directly followed by
             punctuation. Defaults to True.
     """
 
     form: str
-    lemma: Optional[str] = None
-    upos: Optional[str] = None
-    feats: Optional[str] = None
+    lemma: str | None = None
+    upos: str | None = None
+    feats: str | None = None
     space_after: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Returns a dict representation, excluding None fields.
 
         Returns:
-            Dict[str, Any]: Token fields with non-None values only.
+            Token fields with non-None values only.
         """
         return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
 
 
-def render_sentence(tokens: List["Token"]) -> str:
+def render_sentence(tokens: list["Token"]) -> str:
     """Reconstruct sentence text from tokens honoring `space_after`.
 
     Consecutive tokens are separated by a single space unless the left
@@ -42,12 +46,13 @@ def render_sentence(tokens: List["Token"]) -> str:
     the final token regardless of its `space_after` value.
 
     Args:
-        tokens (List[Token]): Sentence tokens in reading order.
+        tokens: Sentence tokens in reading order.
 
     Returns:
-        str: The reconstructed sentence text.
+        The reconstructed sentence text.
     """
-    parts: List[str] = []
+    # join the token forms
+    parts: list[str] = []
     last = len(tokens) - 1
     for i, token in enumerate(tokens):
         parts.append(token.form)
@@ -67,11 +72,11 @@ class Annotations:
     `sentences == [[0, 4], [5, 11]]`.
 
     Attributes:
-        tokens (List[Token]): Flat token sequence across all
+        tokens (list[Token]): Flat token sequence across all
             sentences in the document.
-        sentences (List[List[int]]): One inclusive `[start, end]`
+        sentences (list[list[int]]): One inclusive `[start, end]`
             token-index pair per sentence, in document order.
-        spans (Optional[List[List[Any]]]): Entity spans as
+        spans (list[list[Any]] | None): Entity spans as
             `[start, end, label]` triples, where `start` and `end`
             are character offsets into the document text (`end`
             exclusive) and `label` is upper-case. An empty list is an
@@ -79,24 +84,29 @@ class Annotations:
             carries no `NER=` tags at all.
     """
 
-    tokens: List[Token]
-    sentences: List[List[int]]
-    spans: Optional[List[List[Any]]] = None
+    tokens: list[Token]
+    sentences: list[list[int]]
+    spans: list[list[Any]] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Returns a dict representation with tokens serialized.
 
         Returns:
-            Dict[str, Any]: Annotations as a plain dict; `spans` is
+            Annotations as a plain dict; `spans` is
                 included only when the document carries entity spans.
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "tokens": [t.to_dict() for t in self.tokens],
             "sentences": self.sentences,
         }
         if self.spans is not None:
             data["spans"] = self.spans
         return data
+
+
+# ===============================
+# Document class
+# ===============================
 
 
 @dataclasses.dataclass
@@ -107,29 +117,29 @@ class Document:
         text (str): Raw text of the document.
         source (str): Dataset key (e.g. "ssj500k").
         domain (str): Text domain (e.g. "web", "parliamentary").
-        doc_id (Optional[str]): Document identifier, unique within
+        doc_id (str | None): Document identifier, unique within
             `source` and stable across re-extraction. Either the
             source's native id, when that is unique, or a positional
             id (see `slm4ie.data.extract.extractors.assembly.positional_doc_id`).
-        native_id (Optional[str]): The identifier the raw source
+        native_id (str | None): The identifier the raw source
             itself carries for this document, verbatim. Kept for
             tracing a document back to its origin; not required to be
             unique. None when the source has no per-document id.
-        metadata (Dict): Arbitrary metadata.
-        annotations (Optional[Annotations]): Token/sentence
+        metadata (dict): Arbitrary metadata.
+        annotations (Annotations | None): Token/sentence
             annotations, if available.
     """
 
     text: str
     source: str
     domain: str
-    doc_id: Optional[str] = None
-    native_id: Optional[str] = None
-    metadata: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    annotations: Optional[Annotations] = None
+    doc_id: str | None = None
+    native_id: str | None = None
+    metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
+    annotations: Annotations | None = None
 
     @property
-    def uid(self) -> Optional[str]:
+    def uid(self) -> str | None:
         """Globally unique example identifier across datasets.
 
         Combines `source` and `doc_id` so that documents from
@@ -138,7 +148,7 @@ class Document:
         absent (no stable per-document key from the source).
 
         Returns:
-            Optional[str]: `"{source}:{doc_id}"` or None.
+            `"{source}:{doc_id}"` or None.
         """
         if self.doc_id is None:
             return None
@@ -152,9 +162,9 @@ class Document:
         Uses ensure_ascii=False to preserve Unicode characters.
 
         Returns:
-            str: A single JSON line with no trailing newline.
+            A single JSON line with no trailing newline.
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "text": self.text,
             "source": self.source,
             "domain": self.domain,
@@ -168,7 +178,7 @@ class Document:
             data["metadata"] = self.metadata
         return json.dumps(data, ensure_ascii=False)
 
-    def to_annotation_line(self) -> Optional[str]:
+    def to_annotation_line(self) -> str | None:
         """Serializes annotations as compact parallel arrays.
 
         Returns None if the document has no annotations. Output
@@ -178,16 +188,19 @@ class Document:
         when the source carries them (see `Annotations.spans`).
 
         Returns:
-            Optional[str]: A single JSON line, or None.
+            A single JSON line, or None.
         """
         if self.annotations is None:
             return None
 
+        # identify the document
         tokens = self.annotations.tokens
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
         if self.doc_id is not None:
             data["doc_id"] = self.doc_id
             data["uid"] = self.uid
+
+        # write the parallel arrays
         data["forms"] = [t.form for t in tokens]
         data["lemmas"] = [t.lemma for t in tokens]
         data["upos"] = [t.upos for t in tokens]
@@ -197,6 +210,11 @@ class Document:
         if self.annotations.spans is not None:
             data["spans"] = self.annotations.spans
         return json.dumps(data, ensure_ascii=False)
+
+
+# ===============================
+# Task example schemas
+# ===============================
 
 
 class NerExample(TypedDict):
@@ -211,7 +229,7 @@ class NerExample(TypedDict):
 
     id: str
     text: str
-    spans: List[Dict[str, Any]]
+    spans: list[dict[str, Any]]
 
 
 class SentimentExample(TypedDict):
@@ -276,8 +294,8 @@ class CorefExample(TypedDict):
 
     id: str
     text: str
-    span1: Dict[str, Any]
-    span2: Dict[str, Any]
+    span1: dict[str, Any]
+    span2: dict[str, Any]
     label: bool
 
 

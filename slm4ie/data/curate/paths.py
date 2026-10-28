@@ -15,9 +15,20 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.data.curate.stages import STAGE_DIRS
+
+# ===============================
+# Constants
+# ===============================
+
+#: Per-stage index of executor log folders, kept beside them.
+BUCKET_INDEX_NAME = "buckets.json"
+
+# ===============================
+# Paths class
+# ===============================
 
 
 @dataclass
@@ -37,7 +48,7 @@ class CuratePaths:
 
     input_folder: Path
     output_dir: Path
-    log_scope: Optional[str] = None
+    log_scope: str | None = None
 
     def stage_dir(self, stage: str) -> Path:
         """Return the folder under `output_dir` that holds *stage*'s output.
@@ -94,11 +105,12 @@ class CuratePaths:
         return root if self.log_scope is None else root / self.log_scope
 
 
-#: Per-stage index of executor log folders, kept beside them.
-BUCKET_INDEX_NAME = "buckets.json"
+# ===============================
+# Executor log folders
+# ===============================
 
 
-def bucket_log_scope(bucket_hash: str, keys: List[str]) -> str:
+def bucket_log_scope(bucket_hash: str, keys: list[str]) -> str:
     """Name the log folder of one executor of a scoped stage.
 
     Args:
@@ -115,7 +127,7 @@ def bucket_log_scope(bucket_hash: str, keys: List[str]) -> str:
     return f"{bucket_hash.split(':', 1)[-1][:16]}-{keys_digest[:8]}"
 
 
-def read_bucket_index(stage_logs: Path) -> Dict[str, Dict[str, Any]]:
+def read_bucket_index(stage_logs: Path) -> dict[str, dict[str, Any]]:
     """Read which executors logged under a scoped stage's log folder.
 
     Args:
@@ -132,7 +144,7 @@ def read_bucket_index(stage_logs: Path) -> Dict[str, Dict[str, Any]]:
     return json.loads(index.read_text(encoding="utf-8"))
 
 
-def record_bucket(stage_logs: Path, folder: str, bucket_hash: str, keys: List[str]) -> None:
+def record_bucket(stage_logs: Path, folder: str, bucket_hash: str, keys: list[str]) -> None:
     """Record the executor about to run one config bucket in the stage's index.
 
     Every dataset is listed under the executor that ran it last: *keys* are
@@ -146,6 +158,7 @@ def record_bucket(stage_logs: Path, folder: str, bucket_hash: str, keys: List[st
         bucket_hash: The bucket's config hash.
         keys: Dataset keys the executor runs.
     """
+    # drop the keys from the other executors' entries
     index = read_bucket_index(stage_logs)
     for name, entry in list(index.items()):
         remaining = [key for key in entry["datasets"] if key not in keys]
@@ -156,12 +169,13 @@ def record_bucket(stage_logs: Path, folder: str, bucket_hash: str, keys: List[st
         else:
             del index[name]
             shutil.rmtree(stage_logs / name, ignore_errors=True)
+    # record this executor and write the index
     index[folder] = {"config_hash": bucket_hash, "datasets": list(keys)}
     stage_logs.mkdir(parents=True, exist_ok=True)
     (stage_logs / BUCKET_INDEX_NAME).write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def executor_task_stats(logging_dir: Path) -> List[Path]:
+def executor_task_stats(logging_dir: Path) -> list[Path]:
     """List the per-task stats files of the tasks an executor declares.
 
     datatrove writes `stats/<rank>.json` per finished task and never removes
@@ -181,6 +195,11 @@ def executor_task_stats(logging_dir: Path) -> List[Path]:
     return [path for path in files if tasks is None or int(path.stem) < tasks]
 
 
+# ===============================
+# Shard helpers
+# ===============================
+
+
 def count_jsonl_rows(path: Path) -> int:
     """Count newline-delimited records in a `.jsonl` or `.jsonl.gz` file.
 
@@ -197,6 +216,7 @@ def count_jsonl_rows(path: Path) -> int:
     Returns:
         The number of rows (documents) in the file.
     """
+    # count newline bytes chunk by chunk
     opener = gzip.open if path.suffix == ".gz" else open
     count = 0
     last = b"\n"
@@ -204,12 +224,13 @@ def count_jsonl_rows(path: Path) -> int:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             count += chunk.count(b"\n")
             last = chunk[-1:]
+    # a final record without a trailing newline still counts
     if last not in (b"\n", b""):
         count += 1
     return count
 
 
-def filter_stage_subset(stage_dir: Path, keys: List[str], holder: Optional[Path] = None) -> Path:
+def filter_stage_subset(stage_dir: Path, keys: list[str], holder: Path | None = None) -> Path:
     """Materialize a folder of symlinks restricted to *keys* under *stage_dir*.
 
     Args:
@@ -228,7 +249,8 @@ def filter_stage_subset(stage_dir: Path, keys: List[str], holder: Optional[Path]
         FileNotFoundError: If any requested shard folder is missing or
             empty under *stage_dir*.
     """
-    missing: List[str] = []
+    # find the datasets without shards
+    missing: list[str] = []
     for key in keys:
         src = stage_dir / key
         if not src.is_dir() or not any(src.glob("*.jsonl.gz")):
@@ -237,11 +259,13 @@ def filter_stage_subset(stage_dir: Path, keys: List[str], holder: Optional[Path]
         raise FileNotFoundError(
             f"No converted shard folder(s) under {stage_dir} for dataset(s): " + ", ".join(repr(k) for k in missing)
         )
+    # prepare the folder that holds the view
     if holder is None:
         holder = Path(tempfile.mkdtemp(prefix="slm4ie-pretrain-subset-"))
     else:
         shutil.rmtree(holder, ignore_errors=True)
         holder.mkdir(parents=True)
+    # symlink the shards of each key
     try:
         for key in keys:
             src = stage_dir / key
@@ -273,7 +297,7 @@ def has_stage_output(stage_dir: Path, key: str) -> bool:
     return folder.is_dir() and any(folder.glob("*.jsonl.gz"))
 
 
-def shard_layout(view: Path) -> Tuple[int, str]:
+def shard_layout(view: Path) -> tuple[int, str]:
     """Count and hash the layout of the shards a corpus stage will read.
 
     Args:

@@ -16,14 +16,24 @@ from __future__ import annotations
 import gzip
 import json
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any
 
 from slm4ie.tokenizers.base import BaseTokenizer, TrainContext, split_words
 from slm4ie.tokenizers.registry import register_tokenizer
 
+# ===============================
+# Defaults
+# ===============================
+
 #: Fraction of the (non-special) vocabulary budget reserved for whole morphemes.
 _MORPHEME_BUDGET_FRACTION = 0.5
+
+
+# ===============================
+# MorphPiece class
+# ===============================
 
 
 @register_tokenizer("morphpiece")
@@ -40,21 +50,21 @@ class MorphPieceTokenizer(BaseTokenizer):
         """Wrap an optional byte-level BPE `tokenizers.Tokenizer`.
 
         Args:
-            bpe (Any): A trained byte-level BPE tokenizer, or None.
+            bpe: A trained byte-level BPE tokenizer, or None.
         """
         super().__init__()
         self._bpe = bpe
-        self._table: Dict[str, List[str]] = {}
-        self._vocab: Dict[str, int] = {}
-        self._special_tokens: List[str] = []
+        self._table: dict[str, list[str]] = {}
+        self._vocab: dict[str, int] = {}
+        self._special_tokens: list[str] = []
 
     def train(self, corpus: Iterable[str], vocab_size: int, *, config: TrainContext) -> None:
         """Train the byte-level BPE path and select the morpheme vocabulary.
 
         Args:
-            corpus (Iterable[str]): Training sentences.
-            vocab_size (int): Target total vocabulary size.
-            config (TrainContext): Shared settings; `lexicon` is required.
+            corpus: Training sentences.
+            vocab_size: Target total vocabulary size.
+            config: Shared settings; `lexicon` is required.
 
         Raises:
             ValueError: If no morpheme lexicon is provided.
@@ -67,7 +77,7 @@ class MorphPieceTokenizer(BaseTokenizer):
         self._special_tokens = list(config.special_tokens)
         sample = list(corpus)
 
-        # Rank candidate morphemes by corpus frequency of the words using them.
+        # rank candidate morphemes by corpus frequency of the words using them
         word_freqs: Counter = Counter()
         for line in sample:
             word_freqs.update(split_words(line))
@@ -78,16 +88,18 @@ class MorphPieceTokenizer(BaseTokenizer):
                 for morpheme in seg.morphemes:
                     morpheme_freqs[morpheme] += freq
 
+        # select the morphemes within the budget
         n_special = len(self._special_tokens)
         morph_budget = max(0, int((vocab_size - n_special) * _MORPHEME_BUDGET_FRACTION))
         kept = {m for m, _ in morpheme_freqs.most_common(morph_budget)}
-        # Only keep forms whose every morpheme is a kept token; others fall to BPE.
+        # keep only forms whose every morpheme is kept; others fall to BPE
         self._table = {
             form: list(seg.morphemes)
             for form, seg in lexicon.by_form.items()
             if len(seg.morphemes) > 1 and all(m in kept for m in seg.morphemes)
         }
 
+        # train the byte-level BPE path
         bpe_budget = max(n_special + 256, vocab_size - len(kept))
         tokenizer = Tokenizer(models.BPE())
         tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=True, trim_offsets=True)
@@ -99,15 +111,17 @@ class MorphPieceTokenizer(BaseTokenizer):
             show_progress=False,
         )
         tokenizer.train_from_iterator(sample, trainer=trainer)
+
+        # combine the vocabularies
         self._bpe = tokenizer
         self._build_vocab(sorted(kept))
         self.vocab_size = vocab_size
 
-    def _build_vocab(self, morpheme_tokens: List[str]) -> None:
+    def _build_vocab(self, morpheme_tokens: list[str]) -> None:
         """Combine the BPE vocabulary with the morpheme tokens.
 
         Args:
-            morpheme_tokens (List[str]): Kept morpheme token strings.
+            morpheme_tokens: Kept morpheme token strings.
         """
         vocab = dict(self._bpe.get_vocab())
         next_id = (max(vocab.values()) + 1) if vocab else 0
@@ -117,20 +131,21 @@ class MorphPieceTokenizer(BaseTokenizer):
                 next_id += 1
         self._vocab = vocab
 
-    def _compose(self, text: str) -> List[Tuple[str, int, int]]:
+    def _compose(self, text: str) -> list[tuple[str, int, int]]:
         """Tokenize `text` via the two paths, returning pieces with spans.
 
         Args:
-            text (str): Input text.
+            text: Input text.
 
         Returns:
-            List[Tuple[str, int, int]]: `(piece, char_start, char_end)` where
+            `(piece, char_start, char_end)` where
                 known words yield morpheme pieces and others yield byte-level
                 BPE pieces.
         """
+        # encode with the BPE path
         encoding = self._bpe.encode(text)
         tokens, offsets, word_ids = encoding.tokens, encoding.offsets, encoding.word_ids
-        result: List[Tuple[str, int, int]] = []
+        result: list[tuple[str, int, int]] = []
         index = 0
         count = len(tokens)
         while index < count:
@@ -156,35 +171,35 @@ class MorphPieceTokenizer(BaseTokenizer):
             index = stop
         return result
 
-    def encode(self, text: str) -> List[str]:
+    def encode(self, text: str) -> list[str]:
         """Return the two-path pieces for `text`.
 
         Args:
-            text (str): Input text.
+            text: Input text.
 
         Returns:
-            List[str]: Morpheme pieces for known words, byte-level BPE pieces
+            Morpheme pieces for known words, byte-level BPE pieces
                 otherwise.
         """
         return [piece for piece, _start, _end in self._compose(text)]
 
-    def encode_offsets(self, text: str) -> List[Tuple[str, int, int]]:
+    def encode_offsets(self, text: str) -> list[tuple[str, int, int]]:
         """Return each piece with its character span in `text`.
 
         Args:
-            text (str): Input text.
+            text: Input text.
 
         Returns:
-            List[Tuple[str, int, int]]: `(piece, char_start, char_end)` spans.
+            `(piece, char_start, char_end)` spans.
         """
         return self._compose(text)
 
     @property
-    def vocab(self) -> Dict[str, int]:
+    def vocab(self) -> dict[str, int]:
         """Return the combined token-to-id vocabulary.
 
         Returns:
-            Dict[str, int]: Token string to integer id.
+            Token string to integer id.
         """
         return dict(self._vocab)
 
@@ -205,31 +220,37 @@ class MorphPieceTokenizer(BaseTokenizer):
         """Persist the BPE tokenizer, the MorphTable, and the combined vocab.
 
         Args:
-            out_dir (Path): Destination directory.
+            out_dir: Destination directory.
         """
+        # save the BPE tokenizer and the vocabulary
         self._bpe.save(str(out_dir / "tokenizer.json"))
         meta = {"special_tokens": self._special_tokens, "vocab": self._vocab}
         (out_dir / "morphpiece.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+        # save the morpheme table
         with gzip.open(out_dir / "morpheme_table.jsonl.gz", "wt", encoding="utf-8") as handle:
             for form, morphemes in self._table.items():
                 handle.write(json.dumps({"form": form, "morphemes": morphemes}, ensure_ascii=False) + "\n")
 
     @classmethod
-    def _load_model(cls, out_dir: Path) -> "MorphPieceTokenizer":
+    def _load_model(cls, out_dir: Path) -> MorphPieceTokenizer:
         """Reconstruct a MorphPiece tokenizer from saved files.
 
         Args:
-            out_dir (Path): Directory holding the saved model.
+            out_dir: Directory holding the saved model.
 
         Returns:
-            MorphPieceTokenizer: The reconstructed tokenizer.
+            The reconstructed tokenizer.
         """
         from tokenizers import Tokenizer
 
+        # load the BPE tokenizer and the vocabulary
         tokenizer = cls(Tokenizer.from_file(str(out_dir / "tokenizer.json")))
         meta = json.loads((out_dir / "morphpiece.json").read_text(encoding="utf-8"))
         tokenizer._special_tokens = meta.get("special_tokens", [])
         tokenizer._vocab = {token: int(i) for token, i in meta["vocab"].items()}
+
+        # load the morpheme table
         with gzip.open(out_dir / "morpheme_table.jsonl.gz", "rt", encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()

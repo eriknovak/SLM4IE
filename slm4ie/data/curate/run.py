@@ -27,16 +27,18 @@ import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, cast
 
 from slm4ie.data.curate.config import (
     CurateConfig,
     bucket_keys_by_effective_hash,
     effective_stage_config,
     load_curate_config,
+    stage_slice,
+    validate_overrides,
 )
-from slm4ie.data.curate.config import stage_slice, validate_overrides
 from slm4ie.data.curate.lineage import (
+    PASS_THROUGH,
     SENTINEL_NAME,
     check_unit,
     corpus_has_input,
@@ -46,7 +48,6 @@ from slm4ie.data.curate.lineage import (
     integrity_failure,
     invalidate_dataset_sentinels,
     legacy_units,
-    PASS_THROUGH,
     pass_through_label,
     read_sentinel,
     recover_promotion,
@@ -79,11 +80,22 @@ from slm4ie.data.curate.stages import (
 from slm4ie.data.curate.status import orphaned_units, selection_report
 from slm4ie.utils.versioning import EMPTY_DIGEST, merge_digests, shard_files
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
 
+# ===============================
+# Constants
+# ===============================
 
 #: File in a corpus stage folder recording what an unfinished run started with.
 PROGRESS_NAME: str = ".in_progress.json"
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str, tasks: int, inputs: str) -> bool:
@@ -107,6 +119,7 @@ def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str
     Returns:
         True when resuming, False when the staging folder was cleared.
     """
+    # resume when the progress file matches this run
     staging = paths.staging_dir(stage)
     progress_file = staging / PROGRESS_NAME
     expected = {
@@ -117,6 +130,8 @@ def _prepare_corpus_stage(paths: CuratePaths, stage: str, config_hash_value: str
     }
     if progress_file.is_file() and json.loads(progress_file.read_text(encoding="utf-8")) == expected:
         return True
+
+    # clear the leftovers and start fresh
     shutil.rmtree(staging, ignore_errors=True)
     shutil.rmtree(paths.logs_dir(stage), ignore_errors=True)
     shutil.rmtree(paths.scratch_dir(stage), ignore_errors=True)
@@ -150,7 +165,7 @@ def _starting_input_hint(paths: CuratePaths, stage: str) -> str:
     return f" (input records ~{sentinel.records_out})"
 
 
-def _extracted_input_summary(input_dir: Path, keys: List[str]) -> Tuple[int, int]:
+def _extracted_input_summary(input_dir: Path, keys: list[str]) -> tuple[int, int]:
     """Summarize the convert stage's input without reading record contents.
 
     The convert stage performs a 1:1 format conversion, so its input
@@ -170,6 +185,7 @@ def _extracted_input_summary(input_dir: Path, keys: List[str]) -> Tuple[int, int
         excluded from both figures (the convert stage reports them as
         skipped).
     """
+    # count the present datasets and their bytes
     present = 0
     total_bytes = 0
     for key in keys:
@@ -181,7 +197,7 @@ def _extracted_input_summary(input_dir: Path, keys: List[str]) -> Tuple[int, int
     return present, total_bytes
 
 
-def _resolve_requested_stages(stage: str, run_all: bool) -> Tuple[str, ...]:
+def _resolve_requested_stages(stage: str, run_all: bool) -> tuple[str, ...]:
     """Resolve which stages a run executes.
 
     A subset run (`run_all` False) with `--stage all` runs only the
@@ -200,7 +216,7 @@ def _resolve_requested_stages(stage: str, run_all: bool) -> Tuple[str, ...]:
     return STAGE_NAMES if run_all else SCOPED_STAGES
 
 
-def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: List[str]) -> None:
+def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: list[str]) -> None:
     """Apply `--force` per the scoped/corpus force matrix.
 
     Args:
@@ -212,8 +228,8 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
     """
     paths = CuratePaths(input_folder=output_dir, output_dir=output_dir)
 
-    # Whole-corpus reset only when --all is combined with the default
-    # (all) stage. A subset `--stage all` must never wipe other datasets.
+    # reset the whole corpus: only --all with the default (all) stage
+    # (a subset `--stage all` must never wipe other datasets)
     if run_all and stage == "all":
         if output_dir.exists():
             for child in output_dir.iterdir():
@@ -224,8 +240,7 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
         logger.warning("--force: cleared %s", output_dir)
         return
 
-    # Forcing a corpus stage (only reachable under --all): drop the
-    # corpus stage folders (data + sentinel) from that stage downstream.
+    # force a corpus stage (only under --all): drop its folders downstream
     if stage in CORPUS_STAGES:
         affected = cascade_from(stage)
         for name in affected:
@@ -236,9 +251,8 @@ def _apply_force(output_dir: Path, *, stage: str, run_all: bool, dataset_keys: L
         logger.warning("--force --stage %s: removed %s", stage, list(affected))
         return
 
-    # Forcing scoped work: drop the requested keys' per-dataset sentinels
-    # and shard subfolders for the affected scoped stages, then drop the
-    # corpus stages' sentinels (their data is rebuilt on the next --all).
+    # force scoped work: drop the keys' sentinels and shards, then the corpus sentinels
+    # (the corpus data is rebuilt on the next --all)
     scoped_affected = SCOPED_STAGES if stage == "all" else tuple(s for s in cascade_from(stage) if is_scoped(s))
     for name in scoped_affected:
         folder = paths.stage_dir(name)
@@ -265,6 +279,8 @@ def _handle_orphans(setup: CurateConfig, prune: bool) -> None:
     orphans = orphaned_units(setup)
     if not orphans:
         return
+
+    # name the orphans, or delete them under --prune
     if not prune:
         names = ", ".join(f"{unit.stage}/{unit.dataset}" for unit in orphans)
         logger.warning("%d orphaned unit(s) kept; pass --prune to remove them: %s", len(orphans), names)
@@ -278,15 +294,15 @@ def _handle_orphans(setup: CurateConfig, prune: bool) -> None:
 def _run_scoped_bucket(
     setup: CurateConfig,
     stage: str,
-    bucket_keys: List[str],
-    effective: Dict[str, Any],
+    bucket_keys: list[str],
+    effective: dict[str, Any],
     bucket_hash: str,
-    inputs: Dict[str, Tuple[Optional[str], Optional[Dict[str, Any]]]],
+    inputs: dict[str, tuple[str | None, dict[str, Any] | None]],
     workers: int,
-    log_dir: Optional[Path],
-    info: Dict[str, Any],
+    log_dir: Path | None,
+    info: dict[str, Any],
     pass_through: bool = False,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """Build one config bucket of a scoped stage into staging, check it, promote it.
 
     Every unit is checked before any is promoted, so a failure keeps every
@@ -314,6 +330,7 @@ def _run_scoped_bucket(
     Raises:
         RuntimeError: If any unit fails its integrity check.
     """
+    # prepare the staging and log folders of the bucket
     scope = bucket_log_scope(bucket_hash, bucket_keys)
     paths = replace(setup.paths, log_scope=scope)
     staging = paths.staging_dir(stage)
@@ -321,9 +338,11 @@ def _run_scoped_bucket(
     staging.mkdir(parents=True)
     shutil.rmtree(paths.logs_dir(stage), ignore_errors=True)
     record_bucket(paths.logs_dir(stage).parent, scope, bucket_hash, bucket_keys)
+
+    # run the stage, or link the upstream shards when passing through
     upstream = upstream_stage(stage)
     up_dir = paths.stage_dir(upstream) if upstream is not None else None
-    # A key whose upstream unit kept no documents is promoted empty, not skipped.
+    # a key whose upstream unit kept no documents is promoted empty, not skipped
     with_docs = [k for k in bucket_keys if up_dir is None or has_stage_output(up_dir, k)]
     counts = (0, 0)
     if pass_through and up_dir is not None:
@@ -332,7 +351,8 @@ def _run_scoped_bucket(
     elif with_docs:
         counts = _run_bucket_stage(setup, stage, paths, effective, with_docs, staging, up_dir, workers, log_dir)
 
-    errors: Dict[str, str] = {}
+    # check every unit and write its sentinel
+    errors: dict[str, str] = {}
     scanned_in = scanned_out = 0
     for key in bucket_keys:
         if up_dir is None:
@@ -362,6 +382,8 @@ def _run_scoped_bucket(
     if errors:
         shutil.rmtree(staging, ignore_errors=True)
         raise integrity_failure(stage, errors)
+
+    # promote the units
     for key in bucket_keys:
         swap_into_place(staging / key, paths.stage_dir(stage) / key)
     shutil.rmtree(staging, ignore_errors=True)
@@ -385,13 +407,13 @@ def _run_bucket_stage(
     setup: CurateConfig,
     stage: str,
     paths: CuratePaths,
-    effective: Dict[str, Any],
-    keys: List[str],
+    effective: dict[str, Any],
+    keys: list[str],
     staging: Path,
-    up_dir: Optional[Path],
+    up_dir: Path | None,
     workers: int,
-    log_dir: Optional[Path],
-) -> Tuple[int, int]:
+    log_dir: Path | None,
+) -> tuple[int, int]:
     """Run a scoped stage's executor for *keys* into *staging*.
 
     Args:
@@ -428,7 +450,7 @@ def _run_bucket_stage(
 
 
 def _curate_scoped(
-    setup: CurateConfig, stage: str, dataset_keys: List[str], workers: int, log_dir: Path, info: Dict[str, Any]
+    setup: CurateConfig, stage: str, dataset_keys: list[str], workers: int, log_dir: Path, info: dict[str, Any]
 ) -> None:
     """Rebuild every stale unit of one scoped stage.
 
@@ -440,13 +462,14 @@ def _curate_scoped(
         log_dir: Per-task log folder for the convert stage.
         info: Informational sentinel fields.
     """
+    # find the stale units
     paths = setup.paths
-    todo: List[str] = []
-    inputs: Dict[str, Tuple[Optional[str], Optional[Dict[str, Any]]]] = {}
-    no_input: List[str] = []
+    todo: list[str] = []
+    inputs: dict[str, tuple[str | None, dict[str, Any] | None]] = {}
+    no_input: list[str] = []
     for key in dataset_keys:
         recover_promotion(paths.staging_dir(stage) / key, paths.stage_dir(stage) / key)
-        # An unmounted extracted tier or an unbuilt upstream must not wipe output.
+        # an unmounted extracted tier or an unbuilt upstream must not wipe output
         if not has_input(paths, stage, key):
             no_input.append(key)
             continue
@@ -463,7 +486,7 @@ def _curate_scoped(
         logger.info("[%s] all requested datasets current; skipping.", stage)
         return
 
-    # Datasets sharing an effective config run together in one executor.
+    # datasets sharing an effective config run together in one executor
     extra = setup.extra(stage)
     buckets = bucket_keys_by_effective_hash(todo, stage, setup.cfg, setup.overrides, extra)
     logger.info("[%s] %d dataset(s) in %d config group(s)", stage, len(todo), len(buckets))
@@ -510,7 +533,7 @@ def _curate_scoped(
         )
 
 
-def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str, Any]) -> None:
+def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: dict[str, Any]) -> None:
     """Rebuild a corpus stage when it is stale, resuming an unfinished build.
 
     Args:
@@ -522,6 +545,7 @@ def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str
     Raises:
         RuntimeError: If a dataset's output fails its integrity check.
     """
+    # skip when the upstream is unbuilt or the stage is current
     paths = setup.paths
     recover_promotion(paths.staging_dir(stage), paths.stage_dir(stage))
     if not corpus_has_input(setup, stage):
@@ -533,9 +557,10 @@ def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str
         logger.info("[%s] sentinel current; skipping.", stage)
         return
     logger.info("[%s] %s", stage, reason)
+
+    # promote an empty output when every dataset was filtered out upstream
     expected_hash = setup.expected_hash(stage)
     if not input_keys:
-        # Every dataset was filtered out upstream: the stage's output is empty.
         staging = paths.staging_dir(stage)
         shutil.rmtree(staging, ignore_errors=True)
         write_sentinel(
@@ -551,9 +576,10 @@ def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str
         )
         swap_into_place(staging, paths.stage_dir(stage))
         return
+    # prepare the input view and resume or start fresh
     up_dir = paths.stage_dir(cast(str, upstream_stage(stage)))
     view = filter_stage_subset(up_dir, input_keys, holder=paths.output_dir / "_inputs" / stage)
-    # One task per shard caps task memory and keeps a crashed run resumable.
+    # one task per shard caps task memory and keeps a crashed run resumable
     tasks, shards = shard_layout(view)
     resumed = _prepare_corpus_stage(paths, stage, expected_hash, tasks, f"{input_digest}|{shards}")
     logger.info(
@@ -578,21 +604,24 @@ def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str
     )
     records_in, records_out = run_stage(stage, job)
 
-    document_digest: Optional[str] = None
+    # check the integrity of the output
+    document_digest: str | None = None
     if stage != "statistics":
-        errors: Dict[str, str] = {}
-        digests: List[str] = []
+        errors: dict[str, str] = {}
+        digests: list[str] = []
         for key in input_keys:
             _, out_scan, error = check_unit(shard_files(up_dir / key), shard_files(staging / key), workers)
             if error:
                 errors[key] = error
             digests.append(cast(str, out_scan.document_digest))
         if errors:
-            # Resuming would only reproduce the failure, so start fresh next time.
+            # resuming would only reproduce the failure, so start fresh next time
             shutil.rmtree(staging, ignore_errors=True)
             shutil.rmtree(paths.logs_dir(stage), ignore_errors=True)
             raise integrity_failure(stage, errors)
         document_digest = merge_digests(digests)
+
+    # write the sentinel and promote the stage
     (staging / PROGRESS_NAME).unlink(missing_ok=True)
     write_sentinel(
         staging,
@@ -611,19 +640,24 @@ def _curate_corpus(setup: CurateConfig, stage: str, workers: int, info: Dict[str
     logger.info("[%s] done (records_in=%d, records_out=%d)", stage, records_in, records_out)
 
 
+# ===============================
+# Main function
+# ===============================
+
+
 def curate(
     *,
-    datasets: List[str],
+    datasets: list[str],
     run_all: bool,
     stage: str,
-    input_dir: Optional[Path],
-    output_dir: Optional[Path],
+    input_dir: Path | None,
+    output_dir: Path | None,
     force: bool,
     workers: int,
     pretrain_config: Path,
     prune: bool = False,
-    extract_config: Optional[Path] = None,
-    mlflow_enabled: Optional[bool] = None,
+    extract_config: Path | None = None,
+    mlflow_enabled: bool | None = None,
 ) -> None:
     """Run the curation pipeline (argv-free entry point).
 
@@ -658,24 +692,25 @@ def curate(
         raise ValueError("datasets must be empty when run_all is True")
     if prune and not run_all:
         raise ValueError("prune requires run_all")
+
+    # load the config
     setup = load_curate_config(input_dir, output_dir, pretrain_config, extract_config)
     cfg = setup.cfg
     paths = setup.paths
     output_dir = paths.output_dir
-    # Validate overrides up front so a typo fails before any stage runs.
+    # validate overrides up front so a typo fails before any stage runs
     validate_overrides(setup.overrides, setup.declared)
 
+    # report the selection and resolve the workers
     for line in selection_report(setup):
         if line.startswith("warning: "):
             logger.warning("[selection] %s", line.removeprefix("warning: "))
         else:
             logger.info("[selection] %s", line)
     dataset_keys = list(setup.roster) if run_all else list(datasets)
-    # `workers` is a CPU budget, not an item count. The convert stage caps
-    # it at the dataset count itself (run_convert_stage); the datatrove
-    # stages use it as their `tasks` rank count, where shards -- far more
-    # numerous than datasets -- are the unit of work. So an explicit
-    # --max-workers is honored as-is; auto (0) resolves to cpu_count // 2.
+    # `workers` is a CPU budget, not an item count: the convert stage caps it at
+    # the dataset count itself, the datatrove stages use it as their task count.
+    # An explicit --max-workers is honored as-is; auto (0) is cpu_count // 2.
     workers = workers if workers > 0 else max(1, (os.cpu_count() or 2) // 2)
     if run_all:
         logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
@@ -686,11 +721,13 @@ def curate(
             ", ".join(dataset_keys),
             workers,
         )
-    output_dir.mkdir(parents=True, exist_ok=True)
 
+    # reset when forced
+    output_dir.mkdir(parents=True, exist_ok=True)
     if force:
         _apply_force(output_dir, stage=stage, run_all=run_all, dataset_keys=dataset_keys)
 
+    # refuse legacy units and handle orphans
     legacy = legacy_units(setup, dataset_keys, corpus=run_all)
     if legacy:
         raise RuntimeError(
@@ -700,6 +737,7 @@ def curate(
     if run_all:
         _handle_orphans(setup, prune)
 
+    # run the requested stages
     info = run_info(setup.project_root)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     convert_log_dir = setup.project_root / "logs" / "curate" / stamp / "convert"
@@ -710,10 +748,11 @@ def curate(
             _curate_corpus(setup, stage_name, workers, info)
         else:
             logger.warning("[%s] corpus stage requires --all; skipping.", stage_name)
+
+    # bring the lock file up to date
     refresh_lock(setup)
 
-    # Post-hoc MLflow tracking: only after a full build, reflecting the corpus
-    # as it now exists on disk (decoupled from which stages ran this time).
+    # track the corpus in MLflow: only after a full build, as it now exists on disk
     if run_all:
         mlflow_cfg = cfg.get("mlflow") or {}
         enabled = bool(mlflow_cfg.get("enabled", False)) if mlflow_enabled is None else mlflow_enabled

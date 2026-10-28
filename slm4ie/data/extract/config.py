@@ -2,9 +2,13 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
+
+# ===============================
+# Config class
+# ===============================
 
 
 @dataclass
@@ -21,8 +25,13 @@ class ExtractConfig:
 
     input_dir: str
     output_dir: str
-    datasets: Dict[str, Dict] = field(default_factory=dict)
-    mlflow: Dict[str, Any] = field(default_factory=dict)
+    datasets: dict[str, dict] = field(default_factory=dict)
+    mlflow: dict[str, Any] = field(default_factory=dict)
+
+
+# ===============================
+# Loader
+# ===============================
 
 
 def load_extract_config(config_path: Path) -> ExtractConfig:
@@ -32,7 +41,7 @@ def load_extract_config(config_path: Path) -> ExtractConfig:
         config_path: Path to the YAML config file.
 
     Returns:
-        ExtractConfig: Parsed config.
+        Parsed config.
 
     Raises:
         FileNotFoundError: If config file does not exist.
@@ -40,9 +49,11 @@ def load_extract_config(config_path: Path) -> ExtractConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
+    # read the YAML file
     with open(config_path) as f:
         raw = yaml.safe_load(f)
 
+    # build the config with defaults
     return ExtractConfig(
         input_dir=raw.get("input_dir", "data/raw"),
         output_dir=raw.get("output_dir", "data/extracted"),

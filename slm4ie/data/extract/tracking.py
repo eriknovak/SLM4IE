@@ -33,13 +33,21 @@ import logging
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from slm4ie.utils.versioning import config_hash, corpus_digest
 from slm4ie.data.extract.records import find_dataset_files
 from slm4ie.utils import mlflow as ml
+from slm4ie.utils.versioning import config_hash, corpus_digest
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Experiment name for extraction builds, following the project's
 #: `slm4ie/<workstream>/<dataset>` convention.
@@ -48,6 +56,10 @@ DEFAULT_EXPERIMENT = "slm4ie/data/extract"
 #: Fields every extracted record must carry (see CLAUDE.md data layout). Their
 #: per-source presence rate is part of the quality profile.
 REQUIRED_FIELDS = ("text", "source", "domain", "doc_id", "metadata")
+
+# ===============================
+# Profile class
+# ===============================
 
 
 @dataclass
@@ -69,20 +81,25 @@ class DatasetProfile:
     """
 
     key: str
-    domain: Optional[str] = None
+    domain: str | None = None
     present: bool = False
     rows: int = 0
     empty_text: int = 0
     parse_errors: int = 0
-    missing_fields: Dict[str, int] = field(default_factory=dict)
+    missing_fields: dict[str, int] = field(default_factory=dict)
     has_annotations: bool = False
     annotation_rows: int = 0
-    sidecar_aligned: Optional[bool] = None
+    sidecar_aligned: bool | None = None
 
     @property
     def empty_text_rate(self) -> float:
         """Return the fraction of records with empty/whitespace-only text."""
         return self.empty_text / self.rows if self.rows else 0.0
+
+
+# ===============================
+# Profiling functions
+# ===============================
 
 
 def _count_gz_rows(path: Path) -> int:
@@ -97,20 +114,21 @@ def _count_gz_rows(path: Path) -> int:
     """
     import gzip
 
+    # count the newlines chunk by chunk
     count = 0
     last = b"\n"
     with gzip.open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             count += chunk.count(b"\n")
             last = chunk[-1:]
+
+    # count a trailing partial line
     if last not in (b"\n", b""):
         count += 1
     return count
 
 
-def profile_dataset(
-    key: str, text_path: Path, annotations_path: Optional[Path], domain: Optional[str]
-) -> DatasetProfile:
+def profile_dataset(key: str, text_path: Path, annotations_path: Path | None, domain: str | None) -> DatasetProfile:
     """Profile one extracted source by a single pass over its text JSONL.
 
     Args:
@@ -125,6 +143,7 @@ def profile_dataset(
     profile = DatasetProfile(key=key, domain=domain, present=True)
     profile.missing_fields = {f: 0 for f in REQUIRED_FIELDS}
 
+    # scan the text records
     with text_path.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -143,6 +162,7 @@ def profile_dataset(
                 if record.get(required) in (None, ""):
                     profile.missing_fields[required] += 1
 
+    # count the annotation sidecar rows
     if annotations_path is not None:
         profile.has_annotations = True
         profile.annotation_rows = _count_gz_rows(annotations_path)
@@ -151,7 +171,7 @@ def profile_dataset(
     return profile
 
 
-def build_extract_profile(output_base: Path, datasets: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def build_extract_profile(output_base: Path, datasets: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Build the full per-source extraction profile from disk.
 
     Profiles every configured dataset that has a `<key>.jsonl` under
@@ -168,11 +188,12 @@ def build_extract_profile(output_base: Path, datasets: Dict[str, Dict[str, Any]]
         A dict with `by_source` (per-key profile dicts) and `totals`
         (corpus-wide row/empty/missing aggregates).
     """
-    by_source: Dict[str, Dict[str, Any]] = {}
+    by_source: dict[str, dict[str, Any]] = {}
     total_rows = 0
     total_empty = 0
     present_count = 0
 
+    # profile each configured source
     for key in sorted(datasets):
         domain = datasets[key].get("domain")
         found = find_dataset_files(output_base, key)
@@ -186,6 +207,7 @@ def build_extract_profile(output_base: Path, datasets: Dict[str, Dict[str, Any]]
         total_empty += profile.empty_text
         present_count += 1
 
+    # aggregate the corpus totals
     totals = {
         "sources_configured": len(datasets),
         "sources_present": present_count,
@@ -196,16 +218,21 @@ def build_extract_profile(output_base: Path, datasets: Dict[str, Dict[str, Any]]
     return {"by_source": by_source, "totals": totals}
 
 
+# ===============================
+# Tracking function
+# ===============================
+
+
 def log_extract_run(
     output_base: Path,
-    datasets: Dict[str, Dict[str, Any]],
+    datasets: dict[str, dict[str, Any]],
     *,
     enabled: bool = True,
     experiment: str = DEFAULT_EXPERIMENT,
-    tracking_uri: Optional[str] = None,
+    tracking_uri: str | None = None,
     force: bool = False,
-    artifact_dir: Optional[Path] = None,
-) -> Optional[str]:
+    artifact_dir: Path | None = None,
+) -> str | None:
     """Upsert a single MLflow run describing the current extraction build.
 
     Computes the digest of the extracted tree, and -- unless `force` is set --
@@ -234,6 +261,7 @@ def log_extract_run(
         logger.warning("MLflow unavailable; skipping extraction tracking.")
         return None
 
+    # skip or replace an existing run for this digest
     digest = corpus_digest(output_base)
     existing = ml.find_run_by_tag(experiment, "corpus_digest", digest, tracking_uri=tracking_uri)
     if existing is not None and not force:
@@ -242,15 +270,16 @@ def log_extract_run(
     if existing is not None:
         ml.delete_run(existing, tracking_uri=tracking_uri)
 
+    # build the profile and write it to disk
     profile = build_extract_profile(output_base, datasets)
-
     artifact_root = artifact_dir if artifact_dir is not None else Path(tempfile.mkdtemp(prefix="extract-profile-"))
     artifact_root.mkdir(parents=True, exist_ok=True)
     profile_path = artifact_root / "profile.json"
     with profile_path.open("w", encoding="utf-8") as fh:
         json.dump(profile, fh, ensure_ascii=False, indent=2)
 
-    metrics: Dict[str, float] = {}
+    # collect the metrics
+    metrics: dict[str, float] = {}
     for key, source in profile["by_source"].items():
         if not source["present"]:
             continue
@@ -260,6 +289,7 @@ def log_extract_run(
     metrics["rows_total"] = profile["totals"]["rows"]
     metrics["sources_present"] = profile["totals"]["sources_present"]
 
+    # collect the tags
     tags = {
         "run_type": "data_pipeline",
         "pipeline": "extract",
@@ -270,6 +300,7 @@ def log_extract_run(
     if commit is not None:
         tags["git_commit"] = commit
 
+    # log the run
     with ml.mlflow_run("extract-build", tags=tags):
         ml.log_params(
             {

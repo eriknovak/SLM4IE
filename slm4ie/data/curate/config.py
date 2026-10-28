@@ -34,22 +34,31 @@ import copy
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
+from slm4ie.data.curate.paths import CuratePaths
+from slm4ie.data.curate.resources.stopwords import load_stopwords
+from slm4ie.data.curate.stages import SCOPED_STAGES, is_scoped
 from slm4ie.data.download.config import SELECTED, DatasetConfig, Selection, load_download_config, resolve_selection
 from slm4ie.utils.config import deep_merge
-from slm4ie.data.curate.paths import CuratePaths
-from slm4ie.data.curate.stages import SCOPED_STAGES, is_scoped
-from slm4ie.utils.io import find_project_root as _find_project_root, resolve_project_path
-from slm4ie.data.curate.resources.stopwords import load_stopwords
+from slm4ie.utils.io import find_project_root as _find_project_root
+from slm4ie.utils.io import resolve_project_path
 from slm4ie.utils.versioning import config_hash
 
 if TYPE_CHECKING:
     from slm4ie.data.curate.stages.spam import SpamAssets
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Knob that switches a content stage off for a dataset (a pass-through unit).
 ENABLED_KNOB: str = "enabled"
@@ -57,7 +66,7 @@ ENABLED_KNOB: str = "enabled"
 #: Knobs each scoped stage accepts as an override. Bar `enabled`, which the
 #: driver consumes, the quality, spam and repetition sets mirror their stage
 #: dataclasses; `test_config.py` asserts they stay in lockstep.
-STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
+STAGE_KNOBS: dict[str, frozenset[str]] = {
     "convert": frozenset(
         {
             "text_field",
@@ -121,7 +130,7 @@ STAGE_KNOBS: Dict[str, FrozenSet[str]] = {
 
 #: Knobs the two corpus-wide dedup stages read from their global blocks; the
 #: stage runners in `stages/dedup.py` read exactly these keys.
-DEDUP_KNOBS: Dict[str, FrozenSet[str]] = {
+DEDUP_KNOBS: dict[str, frozenset[str]] = {
     "exact_dedup": frozenset({"precision", "hash_fc", "only_dedup_in_index"}),
     "sentence_dedup": frozenset(
         {
@@ -135,11 +144,16 @@ DEDUP_KNOBS: Dict[str, FrozenSet[str]] = {
 }
 
 
+# ===============================
+# Validation
+# ===============================
+
+
 class OverrideConfigError(ValueError):
     """Raised when the `overrides:` block is malformed or out of bounds."""
 
 
-def validate_spam_knobs(knobs: Dict[str, Any], where: str) -> None:
+def validate_spam_knobs(knobs: dict[str, Any], where: str) -> None:
     """Bounds-check the spam stage's threshold knobs.
 
     A huge threshold stays legal: it neutralises a signal without skipping
@@ -154,15 +168,18 @@ def validate_spam_knobs(knobs: Dict[str, Any], where: str) -> None:
             an integer of at least 1, or `keep_fraction` is not a number
             in `[0, 1]`.
     """
+    # check the hit thresholds
     for name in ("min_adult_hits", "min_spam_hits"):
         if name in knobs:
             value = knobs[name]
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise OverrideConfigError(f"{where}.{name}: expected an integer >= 1, got {value!r}")
+
+    # check the keep fraction
     _check_fraction(knobs, "keep_fraction", where)
 
 
-def _check_fraction(knobs: Dict[str, Any], name: str, where: str) -> None:
+def _check_fraction(knobs: dict[str, Any], name: str, where: str) -> None:
     """Require `knobs[name]`, when present, to be a number in `[0, 1]`.
 
     Args:
@@ -181,7 +198,7 @@ def _check_fraction(knobs: Dict[str, Any], name: str, where: str) -> None:
         raise OverrideConfigError(f"{where}.{name}: expected a number in [0, 1], got {value!r}")
 
 
-def validate_dedup_knobs(cfg: Dict[str, Any]) -> None:
+def validate_dedup_knobs(cfg: dict[str, Any]) -> None:
     """Check the two dedup blocks' keys, and the kept-fraction floor's range.
 
     The dedup stages run over the whole corpus, so their blocks are never
@@ -195,6 +212,7 @@ def validate_dedup_knobs(cfg: Dict[str, Any]) -> None:
             its stage does not read, or `sentence_dedup.min_kept_fraction`
             is not a number in `[0, 1]`.
     """
+    # check the keys of each dedup block
     for stage, known in DEDUP_KNOBS.items():
         knobs = cfg.get(stage) or {}
         if not isinstance(knobs, dict):
@@ -202,6 +220,8 @@ def validate_dedup_knobs(cfg: Dict[str, Any]) -> None:
         unknown = set(knobs) - known
         if unknown:
             raise OverrideConfigError(f"{stage}: unknown knob(s) {sorted(unknown)}; allowed: {sorted(known)}")
+
+    # check the kept-fraction floor
     _check_fraction(cfg.get("sentence_dedup") or {}, "min_kept_fraction", "sentence_dedup")
 
 
@@ -237,7 +257,7 @@ def _validate_sections(sections: Any, where: str) -> None:
             validate_spam_knobs(knobs, f"{where}.spam")
 
 
-def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -> None:
+def validate_overrides(overrides: dict[str, Any] | None, roster: list[str]) -> None:
     """Validate the `overrides:` block against the dataset roster.
 
     Args:
@@ -253,6 +273,7 @@ def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -
     """
     if not overrides:
         return
+    # check each dataset's sections
     roster_set = set(roster)
     for dataset, sections in overrides.items():
         if dataset not in roster_set:
@@ -260,7 +281,7 @@ def validate_overrides(overrides: Optional[Dict[str, Any]], roster: List[str]) -
         _validate_sections(sections, f"overrides.{dataset}")
 
 
-def resolve_profiles(profiles: Optional[Dict[str, Any]], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def resolve_profiles(profiles: dict[str, Any] | None, overrides: dict[str, Any] | None) -> dict[str, Any]:
     """Expand `profile:` references into plain per-dataset overrides.
 
     Each dataset's override starts from its profile's knobs, if it names
@@ -281,12 +302,15 @@ def resolve_profiles(profiles: Optional[Dict[str, Any]], overrides: Optional[Dic
             fails the override validation, or a dataset names an unknown
             profile.
     """
+    # validate the profiles
     profiles = profiles or {}
     if not isinstance(profiles, dict):
         raise OverrideConfigError("profiles: expected a mapping of profile -> stage -> knobs")
     for name, sections in profiles.items():
         _validate_sections(sections, f"profiles.{name}")
-    resolved: Dict[str, Any] = {}
+
+    # apply each dataset's profile
+    resolved: dict[str, Any] = {}
     for dataset, sections in (overrides or {}).items():
         if not isinstance(sections, dict) or "profile" not in sections:
             resolved[dataset] = sections
@@ -301,12 +325,17 @@ def resolve_profiles(profiles: Optional[Dict[str, Any]], overrides: Optional[Dic
     return resolved
 
 
+# ===============================
+# Config resolution
+# ===============================
+
+
 def effective_stage_config(
-    cfg: Dict[str, Any],
-    overrides: Optional[Dict[str, Any]],
+    cfg: dict[str, Any],
+    overrides: dict[str, Any] | None,
     dataset: str,
     stage: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return *dataset*'s effective config for *stage*.
 
     Deep-merges the dataset's stage override (if any) over the global
@@ -323,16 +352,17 @@ def effective_stage_config(
     Returns:
         A new mapping of the effective knobs for the dataset and stage.
     """
+    # merge the dataset's override over the global slice
     base = dict(cfg.get(stage) or {})
     override = ((overrides or {}).get(dataset) or {}).get(stage) or {}
     effective = deep_merge(base, override)
-    # `enabled: true` is the default; dropping it keeps such a dataset in the default bucket.
+    # `enabled: true` is the default; drop it to stay in the default bucket
     if effective.get(ENABLED_KNOB) is True:
         del effective[ENABLED_KNOB]
     return effective
 
 
-def _load_yaml(path: Path) -> Dict[str, Any]:
+def _load_yaml(path: Path) -> dict[str, Any]:
     """Read a YAML file, returning an empty dict when the path does not exist.
 
     Args:
@@ -347,7 +377,7 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
-def _list_datasets(extract_config: Path) -> List[str]:
+def _list_datasets(extract_config: Path) -> list[str]:
     """Return the pretraining dataset keys declared in `extract.yaml`.
 
     Entries with `role: benchmark` are evaluation gold and never enter the
@@ -364,7 +394,7 @@ def _list_datasets(extract_config: Path) -> List[str]:
     return [key for key, spec in datasets.items() if (spec or {}).get("role", "pretrain") == "pretrain"]
 
 
-def _resolve_dirs(input_dir: Optional[Path], output_dir: Optional[Path], cfg: Dict[str, Any]) -> Tuple[Path, Path]:
+def _resolve_dirs(input_dir: Path | None, output_dir: Path | None, cfg: dict[str, Any]) -> tuple[Path, Path]:
     """Resolve input/output dirs from overrides or the pretrain config.
 
     Args:
@@ -379,6 +409,7 @@ def _resolve_dirs(input_dir: Optional[Path], output_dir: Optional[Path], cfg: Di
         FileNotFoundError: If neither the override nor the YAML key is
             set on either side.
     """
+    # use the override, else the config value
     raw_input = input_dir if input_dir is not None else cfg.get("input_dir")
     raw_output = output_dir if output_dir is not None else cfg.get("output_dir")
     if raw_input is None or raw_output is None:
@@ -386,12 +417,14 @@ def _resolve_dirs(input_dir: Optional[Path], output_dir: Optional[Path], cfg: Di
             "Curation paths not set. Provide --input-dir/--output-dir or set "
             "the pretrain config's input_dir / output_dir."
         )
+
+    # resolve relative config paths against the project root
     resolved_input = Path(raw_input) if input_dir is not None else resolve_project_path(raw_input)
     resolved_output = Path(raw_output) if output_dir is not None else resolve_project_path(raw_output)
     return resolved_input, resolved_output
 
 
-def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
+def _load_stopwords(cfg: dict[str, Any]) -> tuple[set[str], bytes]:
     """Load the stopword set and return (set, raw_bytes_for_hashing).
 
     Thin wrapper over `slm4ie.data.curate.resources.stopwords.load_stopwords`. Reads the
@@ -418,7 +451,7 @@ def _load_stopwords(cfg: Dict[str, Any]) -> Tuple[Set[str], bytes]:
     return load_stopwords(code)
 
 
-def _load_spam_assets(cfg: Dict[str, Any]) -> SpamAssets:
+def _load_spam_assets(cfg: dict[str, Any]) -> SpamAssets:
     """Load the spam-filter lexicons and domain blocklist from config.
 
     Reads the languages and URL-blocklist toggle from `cfg['spam']`,
@@ -439,13 +472,14 @@ def _load_spam_assets(cfg: Dict[str, Any]) -> SpamAssets:
     """
     from slm4ie.data.curate.stages.spam import load_spam_assets
 
+    # read the spam settings and load the assets
     scfg = cfg.get("spam") or {}
     languages = scfg.get("languages") or []
     url_blocklist = bool(scfg.get("url_blocklist", True))
     return load_spam_assets(languages, url_blocklist=url_blocklist)
 
 
-def stage_slice(stage: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def stage_slice(stage: str, cfg: dict[str, Any]) -> dict[str, Any]:
     """Return the config slice that drives *stage*'s sentinel hash.
 
     Args:
@@ -460,12 +494,12 @@ def stage_slice(stage: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def bucket_keys_by_effective_hash(
-    keys: List[str],
+    keys: list[str],
     stage: str,
-    cfg: Dict[str, Any],
-    overrides: Dict[str, Any],
+    cfg: dict[str, Any],
+    overrides: dict[str, Any],
     extra: bytes,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """Group *keys* by their effective-config hash for *stage*.
 
     Datasets that resolve to the same effective stage config share a hash
@@ -485,14 +519,15 @@ def bucket_keys_by_effective_hash(
         Mapping of effective-config hash to the keys sharing it. Bucket
         insertion order follows first appearance.
     """
-    buckets: Dict[str, List[str]] = {}
+    # group the keys by effective hash
+    buckets: dict[str, list[str]] = {}
     for key in keys:
         slice_ = effective_stage_config(cfg, overrides, key, stage)
         buckets.setdefault(config_hash(slice_, extra=extra), []).append(key)
     return buckets
 
 
-def _dataset_keys_payload(dataset_keys: List[str]) -> bytes:
+def _dataset_keys_payload(dataset_keys: list[str]) -> bytes:
     """Return canonical bytes for the dataset key list (for hashing).
 
     Args:
@@ -530,12 +565,16 @@ def _stage_extra(stage: str, stopwords_bytes: bytes, spam_bytes: bytes, dataset_
     """
     roster = b"" if is_scoped(stage) else dataset_keys_bytes
     if stage == "spam":
-        # Spam is scoped, so `roster` is empty; the lexicon/domain bytes
-        # are what make an edited list invalidate the stage.
+        # spam is scoped (empty roster); its list bytes invalidate the stage
         return spam_bytes
     if stage in ("quality", "statistics"):
         return stopwords_bytes + b"\x00" + roster if roster else stopwords_bytes
     return roster
+
+
+# ===============================
+# Curate config class
+# ===============================
 
 
 @dataclass
@@ -557,15 +596,15 @@ class CurateConfig:
         spam_assets: Loaded spam lexicons and domain blocklist.
     """
 
-    cfg: Dict[str, Any]
-    overrides: Dict[str, Any]
+    cfg: dict[str, Any]
+    overrides: dict[str, Any]
     paths: CuratePaths
     project_root: Path
     lock_path: Path
-    roster: List[str]
-    declared: List[str]
+    roster: list[str]
+    declared: list[str]
     selection: Selection
-    stopwords: Set[str]
+    stopwords: set[str]
     stopwords_raw: bytes
     spam_assets: SpamAssets
 
@@ -580,7 +619,7 @@ class CurateConfig:
         """
         return _stage_extra(stage, self.stopwords_raw, self.spam_assets.raw_bytes, _dataset_keys_payload(self.roster))
 
-    def expected_hash(self, stage: str, key: Optional[str] = None) -> str:
+    def expected_hash(self, stage: str, key: str | None = None) -> str:
         """Return the config hash a unit must carry to be current.
 
         Args:
@@ -617,7 +656,12 @@ class CurateConfig:
         return bool(effective_stage_config(self.cfg, self.overrides, key, "convert").get("include_annotations", False))
 
 
-def load_selection(download_config: Path, declared: List[str]) -> Selection:
+# ===============================
+# Loading
+# ===============================
+
+
+def load_selection(download_config: Path, declared: list[str]) -> Selection:
     """Resolve the pretraining selection over the download catalog.
 
     Keys `extract.yaml` declares that the catalog lacks carry no relation and
@@ -630,9 +674,12 @@ def load_selection(download_config: Path, declared: List[str]) -> Selection:
     Returns:
         The catalog's selection, followed by the declared keys it lacks.
     """
-    datasets: Dict[str, DatasetConfig] = {}
+    # read the catalog, when present
+    datasets: dict[str, DatasetConfig] = {}
     if download_config.is_file():
         datasets = load_download_config(download_config).datasets
+
+    # select the declared keys the catalog lacks
     selection = resolve_selection(datasets)
     for key in declared:
         selection.status.setdefault(key, SELECTED)
@@ -652,11 +699,11 @@ def lock_path_for(pretrain_config: Path) -> Path:
 
 
 def load_curate_config(
-    input_dir: Optional[Path],
-    output_dir: Optional[Path],
+    input_dir: Path | None,
+    output_dir: Path | None,
     pretrain_config: Path,
-    extract_config: Optional[Path],
-    download_config: Optional[Path] = None,
+    extract_config: Path | None,
+    download_config: Path | None = None,
 ) -> CurateConfig:
     """Load the config and everything derived from it.
 
@@ -677,16 +724,23 @@ def load_curate_config(
             `min_kept_fraction`, or a profile is invalid or unknown.
         ConfigError: If the download catalog's relations are invalid.
     """
+    # resolve the paths
     project_root = _find_project_root()
     extract_path = extract_config or (project_root / "configs" / "data" / "extract.yaml")
+
+    # load and validate the config
     cfg = _load_yaml(pretrain_config)
     validate_spam_knobs(cfg.get("spam") or {}, "spam")
     validate_dedup_knobs(cfg)
     overrides = resolve_profiles(cfg.get("profiles"), cfg.get("overrides"))
+
+    # load the directories, stopwords and roster
     resolved_input, resolved_output = _resolve_dirs(input_dir, output_dir, cfg)
     stopwords, stopwords_raw = _load_stopwords(cfg)
     declared = _list_datasets(extract_path)
     selection = load_selection(download_config or (project_root / "configs" / "data" / "download.yaml"), declared)
+
+    # assemble the config
     return CurateConfig(
         cfg=cfg,
         overrides=overrides,

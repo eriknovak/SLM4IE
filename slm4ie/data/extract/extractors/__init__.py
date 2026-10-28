@@ -1,12 +1,22 @@
 """Base extractor ABCs and extractor registry for the SLM4IE pipeline."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Type
+from typing import Any
 
 from slm4ie.data.schema import Document
 
-_REGISTRY: Dict[str, Type["BaseExtractor"]] = {}
+# ===============================
+# Registry
+# ===============================
+
+_REGISTRY: dict[str, type["BaseExtractor"]] = {}
+
+
+# ===============================
+# Extractor classes
+# ===============================
 
 
 class BaseExtractor(ABC):
@@ -22,22 +32,22 @@ class BaseExtractor(ABC):
         input_dir: Path,
         source: str,
         domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Extract documents from input_dir and yield them.
 
         Args:
-            input_dir (Path): Directory containing the raw source data.
-            source (str): Dataset key (e.g. "ssj500k").
-            domain (str): Text domain (e.g. "web").
-            metadata (Optional[Dict[str, Any]]): Optional parsed
+            input_dir: Directory containing the raw source data.
+            source: Dataset key (e.g. "ssj500k").
+            domain: Text domain (e.g. "web").
+            metadata: Optional parsed
                 `metadata:` config block from extract.yaml. When given,
                 extractors that support it merge per-document fields
                 from an external TSV into `Document.metadata`.
                 Extractors that ignore the kwarg simply pass through.
 
         Yields:
-            Document: Extracted documents in unified schema format.
+            Extracted documents in unified schema format.
         """
 
 
@@ -52,14 +62,14 @@ class FileBasedExtractor(BaseExtractor):
     """
 
     @abstractmethod
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return the sorted input files this extractor will read.
 
         Args:
-            input_dir (Path): Directory containing the raw source data.
+            input_dir: Directory containing the raw source data.
 
         Returns:
-            List[Path]: Input files in deterministic (sorted) order.
+            Input files in deterministic (sorted) order.
                 The full list is materialized (not a generator) so the
                 orchestrator can take `len(files)` and split it into
                 shards; for very large corpora this is O(n_files) memory.
@@ -68,25 +78,25 @@ class FileBasedExtractor(BaseExtractor):
     @abstractmethod
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents parsed from an explicit list of files.
 
         Args:
-            files (List[Path]): Files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root, used to resolve a metadata
+            files: Files to parse, in order.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            input_dir: Dataset root, used to resolve a metadata
                 table that lives alongside the input files.
-            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
+            metadata: Optional `metadata:`
                 config block; consumed by extractors that support it.
 
         Yields:
-            Document: Extracted documents in unified schema format.
+            Extracted documents in unified schema format.
         """
 
     def extract(
@@ -94,19 +104,19 @@ class FileBasedExtractor(BaseExtractor):
         input_dir: Path,
         source: str,
         domain: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from every file under input_dir.
 
         Args:
-            input_dir (Path): Directory containing the raw source data.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
+            input_dir: Directory containing the raw source data.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            metadata: Optional `metadata:`
                 config block; consumed by extractors that support it.
 
         Yields:
-            Document: Extracted documents in unified schema format.
+            Extracted documents in unified schema format.
         """
         yield from self.extract_files(
             self.iter_input_files(input_dir),
@@ -117,15 +127,20 @@ class FileBasedExtractor(BaseExtractor):
         )
 
 
+# ===============================
+# Registry functions
+# ===============================
+
+
 def register_extractor(
     name: str,
-    cls: Type[BaseExtractor],
+    cls: type[BaseExtractor],
 ) -> None:
     """Register an extractor class under the given name.
 
     Args:
-        name (str): Registry key for the extractor.
-        cls (Type[BaseExtractor]): Extractor class to register.
+        name: Registry key for the extractor.
+        cls: Extractor class to register.
     """
     _REGISTRY[name] = cls
 
@@ -134,10 +149,10 @@ def get_extractor(name: str) -> BaseExtractor:
     """Return an instantiated extractor for the given name.
 
     Args:
-        name (str): Registry key of the desired extractor.
+        name: Registry key of the desired extractor.
 
     Returns:
-        BaseExtractor: A new instance of the registered extractor.
+        A new instance of the registered extractor.
 
     Raises:
         KeyError: If name is not found in the registry.

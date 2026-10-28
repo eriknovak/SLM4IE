@@ -27,11 +27,12 @@ import json
 import multiprocessing
 import pickle
 from collections import Counter
+from collections import Counter as TypingCounter
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Counter as TypingCounter
-from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Any
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin, clone
@@ -48,19 +49,29 @@ from slm4ie.utils import mlflow as ml
 from slm4ie.utils.config import load_yaml
 from slm4ie.utils.versioning import corpus_digest, file_sha256
 
+# ===============================
+# Defaults
+# ===============================
+
 #: Turns a batch of texts into one vector per text.
 Encoder = Callable[[Sequence[str]], np.ndarray]
 
+#: Documents labelled at once within a shard; bounds the feature matrix held in memory.
+LABEL_BATCH = 2_000
 
-def _require(config: Mapping[str, Any], key: str, where: str) -> Any:
-    """Return `config[key]`, naming the key and where it was expected when missing."""
-    if key not in config:
-        raise ValueError(f"classifier config key '{key}' missing in {where}")
-    return config[key]
+#: Per-process state of a corpus pass: the classifier, the word counter and the gold ids.
+_labeller: dict[str, Any] = {}
+
+#: The name the curation build logs its final corpus under, so MLflow links the pass to the build.
+FINAL_CORPUS_DATASET = "pretrain/06_sentence_dedup"
+
+# ===============================
+# Feature backends
+# ===============================
 
 
 def tfidf_features(
-    word_ngrams: Tuple[int, int], char_ngrams: Tuple[int, int], min_df: int, max_features: int
+    word_ngrams: tuple[int, int], char_ngrams: tuple[int, int], min_df: int, max_features: int
 ) -> FeatureUnion:
     """Build the TF-IDF backend: word and character n-grams side by side.
 
@@ -112,7 +123,7 @@ class EmbeddingFeatures(BaseEstimator, TransformerMixin):
         prefix: str,
         batch_size: int,
         max_length: int,
-        encoder: Optional[Encoder] = None,
+        encoder: Encoder | None = None,
     ) -> None:
         """Keep the settings; the encoder is loaded on the first transform unless one is passed."""
         self.model = model
@@ -132,6 +143,19 @@ class EmbeddingFeatures(BaseEstimator, TransformerMixin):
             self.encoder = self._load_encoder()
         return self.encoder([self.prefix + text for text in texts])
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickle the settings only; the encoder is reloaded from its name."""
+        return {key: value for key, value in self.__dict__.items() if key != "encoder"}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore the settings with no encoder loaded."""
+        self.__dict__.update(state)
+        self.encoder = None
+
+    # =================================
+    # Private methods
+    # =================================
+
     def _load_encoder(self) -> Encoder:
         """Load the named sentence-embedding model; the import is deferred to keep the TF-IDF path light."""
         from sentence_transformers import SentenceTransformer
@@ -140,14 +164,17 @@ class EmbeddingFeatures(BaseEstimator, TransformerMixin):
         encoder.max_seq_length = self.max_length
         return lambda texts: encoder.encode(list(texts), batch_size=self.batch_size, normalize_embeddings=True)
 
-    def __getstate__(self) -> Dict[str, Any]:
-        """Pickle the settings only; the encoder is reloaded from its name."""
-        return {key: value for key, value in self.__dict__.items() if key != "encoder"}
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
-        """Restore the settings with no encoder loaded."""
-        self.__dict__.update(state)
-        self.encoder = None
+# ===============================
+# Candidates
+# ===============================
+
+
+def _require(config: Mapping[str, Any], key: str, where: str) -> Any:
+    """Return `config[key]`, naming the key and where it was expected when missing."""
+    if key not in config:
+        raise ValueError(f"classifier config key '{key}' missing in {where}")
+    return config[key]
 
 
 @dataclass(frozen=True)
@@ -168,14 +195,14 @@ class Candidate:
     name: str
     features: Any
     max_chars: int
-    regularisation: Tuple[float, ...]
+    regularisation: tuple[float, ...]
     folds: int
     workers: int
     seed: int
     max_iterations: int
 
 
-def _build_features(name: str, settings: Mapping[str, Any], encoder: Optional[Encoder]) -> Any:
+def _build_features(name: str, settings: Mapping[str, Any], encoder: Encoder | None) -> Any:
     """Build the feature backend a candidate names."""
     where = f"candidate '{name}'"
     kind = _require(settings, "features", where)
@@ -198,9 +225,7 @@ def _build_features(name: str, settings: Mapping[str, Any], encoder: Optional[En
     raise ValueError(f"{where} names features '{kind}', not one of tfidf, embeddings")
 
 
-def load_candidate(
-    config: Union[str, Path, Mapping[str, Any]], name: str, encoder: Optional[Encoder] = None
-) -> Candidate:
+def load_candidate(config: str | Path | Mapping[str, Any], name: str, encoder: Encoder | None = None) -> Candidate:
     """Read one candidate from the classifier config.
 
     The config has `max_chars`, `folds`, `workers`, `seed`, `regularisation`
@@ -237,6 +262,11 @@ def load_candidate(
     )
 
 
+# ===============================
+# Classifier
+# ===============================
+
+
 @dataclass
 class DomainClassifier:
     """A fitted classifier: the features and the logistic regression over them, as one pipeline.
@@ -251,7 +281,7 @@ class DomainClassifier:
     regularisation: float
     max_chars: int
 
-    def predict(self, texts: Sequence[str]) -> List[str]:
+    def predict(self, texts: Sequence[str]) -> list[str]:
         """Label texts, each cut to `max_chars` first.
 
         Args:
@@ -273,7 +303,7 @@ class DomainClassifier:
         return pickle.loads(path.read_bytes())
 
 
-def cut_texts(texts: Sequence[str], max_chars: int) -> List[str]:
+def cut_texts(texts: Sequence[str], max_chars: int) -> list[str]:
     """Return the first `max_chars` characters of every text."""
     return [text[:max_chars] for text in texts]
 
@@ -290,7 +320,7 @@ def fit_classifier(
     groups: Sequence[str],
     label_set: Sequence[str],
     candidate: Candidate,
-) -> Tuple[DomainClassifier, List[Dict[str, Any]]]:
+) -> tuple[DomainClassifier, list[dict[str, Any]]]:
     """Fit a candidate, picking its regularisation by cross-validation on the fitting documents.
 
     Each regularisation strength is scored by the macro-F1 over the label
@@ -315,6 +345,8 @@ def fit_classifier(
     outside = sorted(set(labels) - set(label_set))
     if outside:
         raise ValueError(f"training labels {outside} are not in the scored label set {list(label_set)}")
+
+    # score every regularisation strength by cross-validation
     cut = cut_texts(texts, candidate.max_chars)
     truth = np.asarray(labels)
     folds = StratifiedGroupKFold(n_splits=candidate.folds, shuffle=True, random_state=candidate.seed)
@@ -324,6 +356,8 @@ def fit_classifier(
         predicted = cross_val_predict(pipeline, cut, truth, groups=groups, cv=folds, n_jobs=candidate.workers)
         macro = f1_score(truth, predicted, labels=list(label_set), average="macro", zero_division=0)
         rows.append({"regularisation": regularisation, "macro_f1": float(macro)})
+
+    # refit the winner on every document
     picked = max(rows, key=lambda row: (row["macro_f1"], -row["regularisation"]))
     pipeline = _pipeline(candidate.features, picked["regularisation"], candidate.max_iterations).fit(cut, truth)
     classifier = DomainClassifier(
@@ -332,14 +366,9 @@ def fit_classifier(
     return classifier, [{**row, "picked": row is picked} for row in rows]
 
 
-#: Documents labelled at once within a shard; bounds the feature matrix held in memory.
-LABEL_BATCH = 2_000
-
-#: Per-process state of a corpus pass: the classifier, the word counter and the gold ids.
-_labeller: Dict[str, Any] = {}
-
-#: The name the curation build logs its final corpus under, so MLflow links the pass to the build.
-FINAL_CORPUS_DATASET = "pretrain/06_sentence_dedup"
+# ===============================
+# Corpus labelling
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -352,28 +381,28 @@ class CorpusLabels:
         gold_ids: The gold document ids the corpus still holds.
     """
 
-    documents: Dict[str, Dict[str, int]]
-    words: Dict[str, Dict[str, int]]
-    gold_ids: List[str]
+    documents: dict[str, dict[str, int]]
+    words: dict[str, dict[str, int]]
+    gold_ids: list[str]
 
 
-def _start_labeller(classifier_path: Path, stopwords: Set[str], gold_ids: FrozenSet[str]) -> None:
+def _start_labeller(classifier_path: Path, stopwords: set[str], gold_ids: frozenset[str]) -> None:
     """Load the classifier and word counter once per worker process."""
     _labeller["classifier"] = DomainClassifier.load(classifier_path)
     _labeller["counter"] = CorpusStats(stopwords=stopwords)
     _labeller["gold_ids"] = gold_ids
 
 
-def _label_batch(batch: List[Dict[str, Any]], documents: Counter, words: Counter) -> None:
+def _label_batch(batch: list[dict[str, Any]], documents: Counter, words: Counter) -> None:
     """Label one batch of documents and add it to the per-label counts."""
     labels = _labeller["classifier"].predict([document["text"] for document in batch])
     for document, label in zip(batch, labels):
         documents[label] += 1
-        # The statistics stage's own word rule, so tokens match the source-label counts.
+        # the statistics stage's own word rule, so tokens match the source-label counts
         words[label] += len(_labeller["counter"]._tokenize_words(document["text"]))
 
 
-def _label_shard(shard: Path) -> Dict[str, Any]:
+def _label_shard(shard: Path) -> dict[str, Any]:
     """Label every document of one shard.
 
     Args:
@@ -384,8 +413,8 @@ def _label_shard(shard: Path) -> Dict[str, Any]:
     """
     documents: TypingCounter[str] = Counter()
     words: TypingCounter[str] = Counter()
-    found: List[str] = []
-    batch: List[Dict[str, Any]] = []
+    found: list[str] = []
+    batch: list[dict[str, Any]] = []
     with gzip.open(shard, "rt", encoding="utf-8") as handle:
         for line in handle:
             document = json.loads(line)
@@ -400,13 +429,13 @@ def _label_shard(shard: Path) -> Dict[str, Any]:
     return {"documents": dict(documents), "words": dict(words), "gold_ids": found}
 
 
-def _pass_key(document_digest: str, classifier_path: Path, stopwords: Set[str], gold_ids: FrozenSet[str]) -> str:
+def _pass_key(document_digest: str, classifier_path: Path, stopwords: set[str], gold_ids: frozenset[str]) -> str:
     """Hash everything a shard's counts depend on, so a checkpoint is reused only for the same pass."""
     payload = json.dumps([document_digest, file_sha256(classifier_path), sorted(stopwords), sorted(gold_ids)])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _resume_checkpoint(checkpoint: Path, key: str) -> Dict[str, Dict[str, Any]]:
+def _resume_checkpoint(checkpoint: Path, key: str) -> dict[str, dict[str, Any]]:
     """Read the shards a checkpoint already holds and leave it ready to append to.
 
     A line cut short by a crash is dropped, and the file rewritten without it,
@@ -430,7 +459,7 @@ def _resume_checkpoint(checkpoint: Path, key: str) -> Dict[str, Dict[str, Any]]:
     written = json.loads(lines[0])["key"]
     if written != key:
         raise ValueError(f"checkpoint {checkpoint} belongs to pass {written}, not {key}; delete it to start over")
-    done: Dict[str, Dict[str, Any]] = {}
+    done: dict[str, dict[str, Any]] = {}
     for number, line in enumerate(lines[1:], start=2):
         try:
             row = json.loads(line)
@@ -446,11 +475,11 @@ def _resume_checkpoint(checkpoint: Path, key: str) -> Dict[str, Dict[str, Any]]:
 def label_corpus(
     stage_dir: Path,
     classifier_path: Path,
-    stopwords: Set[str],
-    gold_ids: FrozenSet[str],
+    stopwords: set[str],
+    gold_ids: frozenset[str],
     checkpoint: Path,
     workers: int,
-    shards_per_source: Optional[int] = None,
+    shards_per_source: int | None = None,
 ) -> CorpusLabels:
     """Label every document of a corpus stage with a saved classifier.
 
@@ -477,13 +506,17 @@ def label_corpus(
     sentinel = read_sentinel(stage_dir)
     if sentinel is None or sentinel.document_digest is None:
         raise FileNotFoundError(f"no completed sentinel with a document digest at {stage_dir}")
+
+    # list the shards and resume the checkpoint
     sources = [folder for folder in sorted(stage_dir.iterdir()) if folder.is_dir()]
     shards = [shard for folder in sources for shard in sorted(folder.glob("*.jsonl.gz"))[:shards_per_source]]
     if not shards:
         raise FileNotFoundError(f"no *.jsonl.gz shard under {stage_dir}")
     done = _resume_checkpoint(checkpoint, _pass_key(sentinel.document_digest, classifier_path, stopwords, gold_ids))
     pending = [shard for shard in shards if str(shard.relative_to(stage_dir)) not in done]
-    # spawn: forking a process that already runs BLAS and tokenizer threads can deadlock the children.
+
+    # label the pending shards in worker processes
+    # spawn: forking a process that already runs BLAS and tokenizer threads can deadlock the children
     pool = ProcessPoolExecutor(
         max_workers=workers,
         mp_context=multiprocessing.get_context("spawn"),
@@ -502,8 +535,10 @@ def label_corpus(
                 handle.flush()
                 done[row["shard"]] = row
     finally:
-        # Without cancelling, a failed shard would wait for every queued shard before raising.
+        # cancel queued shards, else a failed shard waits for all of them before raising
         pool.shutdown(cancel_futures=True)
+
+    # sum the counts and check them against the sentinel
     labels = _sum_shards([done[str(shard.relative_to(stage_dir))] for shard in shards], [f.name for f in sources])
     counted = sum(sum(counts.values()) for counts in labels.documents.values())
     if shards_per_source is None and counted != sentinel.records_out:
@@ -513,8 +548,8 @@ def label_corpus(
 
 def _sum_shards(rows: Sequence[Mapping[str, Any]], sources: Sequence[str]) -> CorpusLabels:
     """Sum per-shard counts into per-source counts, every source present even when empty."""
-    documents: Dict[str, TypingCounter[str]] = {source: Counter() for source in sources}
-    words: Dict[str, TypingCounter[str]] = {source: Counter() for source in sources}
+    documents: dict[str, TypingCounter[str]] = {source: Counter() for source in sources}
+    words: dict[str, TypingCounter[str]] = {source: Counter() for source in sources}
     for row in rows:
         documents[row["source"]].update(row["documents"])
         words[row["source"]].update(row["words"])
@@ -525,6 +560,11 @@ def _sum_shards(rows: Sequence[Mapping[str, Any]], sources: Sequence[str]) -> Co
     )
 
 
+# ===============================
+# Tracking
+# ===============================
+
+
 def track_corpus_labels(
     labels: CorpusLabels,
     destination: Path,
@@ -533,7 +573,7 @@ def track_corpus_labels(
     run_name: str,
     params: Mapping[str, Any],
     tags: Mapping[str, str],
-) -> Optional[str]:
+) -> str | None:
     """Write a corpus pass's counts to JSON and log them as one MLflow run.
 
     The run carries the documents and words per label summed over sources,
@@ -552,8 +592,11 @@ def track_corpus_labels(
     Returns:
         The MLflow run id, or None when tracking is unavailable.
     """
+    # write the counts
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(asdict(labels), indent=1), encoding="utf-8")
+
+    # sum the counts into metrics
     documents: TypingCounter[str] = sum((Counter(counts) for counts in labels.documents.values()), Counter())
     words: TypingCounter[str] = sum((Counter(counts) for counts in labels.words.values()), Counter())
     metrics = {
@@ -563,6 +606,8 @@ def track_corpus_labels(
         **{f"documents__{label}": count for label, count in documents.items()},
         **{f"words__{label}": count for label, count in words.items()},
     }
+
+    # log the run
     if not ml.ensure_experiment(experiment):
         return None
     with ml.mlflow_run(run_name, tags={**tags, "base_commit": ml.git_commit()}) as run:

@@ -7,12 +7,12 @@ has to know the overlay exists.
 """
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
 
-def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge `override` into `base` without mutating either.
 
     Mappings are merged key by key; for matching keys that are both
@@ -27,6 +27,7 @@ def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]
     Returns:
         New merged mapping.
     """
+    # merge key by key
     merged = dict(base)
     for key, value in override.items():
         existing = merged.get(key)
@@ -37,7 +38,7 @@ def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]
     return merged
 
 
-def load_yaml(config_path: Path) -> Dict[str, Any]:
+def load_yaml(config_path: Path) -> dict[str, Any]:
     """Load a YAML config and deep-merge its `*.local.yaml` sibling over it.
 
     Args:
@@ -51,7 +52,11 @@ def load_yaml(config_path: Path) -> Dict[str, Any]:
     """
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    # load the committed file
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+
+    # overlay the local file
     local_path = config_path.with_suffix(".local.yaml")
     if local_path.exists():
         local_raw = yaml.safe_load(local_path.read_text(encoding="utf-8")) or {}

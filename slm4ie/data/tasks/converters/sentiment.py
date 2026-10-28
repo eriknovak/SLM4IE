@@ -16,10 +16,12 @@ therefore lands entirely in that one split without any special-casing here.
 """
 
 import csv
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from slm4ie.data.schema import SentimentExample
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
@@ -29,10 +31,13 @@ from slm4ie.data.tasks.run import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.config import TaskEntry, TasksRoots
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Map common label spellings to canonical 3-class labels.
-_LABEL_NORMALIZATION: Dict[str, str] = {
+_LABEL_NORMALIZATION: dict[str, str] = {
     "negative": "negative",
     "neutral": "neutral",
     "positive": "positive",
@@ -42,7 +47,12 @@ _LABEL_NORMALIZATION: Dict[str, str] = {
 }
 
 
-def normalize_label(raw_label: Optional[Any], allow: Optional[set]) -> Optional[str]:
+# ===============================
+# Helper functions
+# ===============================
+
+
+def normalize_label(raw_label: Any | None, allow: set | None) -> str | None:
     """Map a raw label string to the canonical form, if allowed.
 
     Args:
@@ -69,8 +79,8 @@ def normalize_label(raw_label: Optional[Any], allow: Optional[set]) -> Optional[
 def _iter_extracted(
     entry: TaskEntry,
     roots: TasksRoots,
-    allow: Optional[set],
-) -> Iterator[Tuple[str, SentimentExample]]:
+    allow: set | None,
+) -> Iterator[tuple[str, SentimentExample]]:
     """Yield `(stable_id, example)` pairs from extracted sources.
 
     Args:
@@ -84,6 +94,7 @@ def _iter_extracted(
     Raises:
         FileNotFoundError: If a source JSONL is missing.
     """
+    # convert the extracted records
     index = 0
     for record in iter_extracted_records(entry, roots):
         raw_label = (
@@ -108,8 +119,8 @@ def _iter_extracted(
 def _iter_raw_sentinews_format(
     source_dir: Path,
     dataset: str,
-    allow: Optional[set],
-) -> Iterator[Tuple[str, SentimentExample]]:
+    allow: set | None,
+) -> Iterator[tuple[str, SentimentExample]]:
     """Yield `(stable_id, example)` from SentiNews-format TSV files.
 
     The held-out Twitter sentiment dataset ships in the same
@@ -126,11 +137,12 @@ def _iter_raw_sentinews_format(
     Raises:
         FileNotFoundError: If no SentiNews-format files are present.
     """
-    candidates: List[Path] = []
+    # collect the input files
+    candidates: list[Path] = []
     for pattern in ("SentiNews_*-level.*", "*.tsv", "*.txt"):
         candidates.extend(sorted(source_dir.glob(pattern)))
     seen: set = set()
-    files: List[Path] = []
+    files: list[Path] = []
     for path in candidates:
         if path.is_file() and path not in seen:
             files.append(path)
@@ -138,6 +150,7 @@ def _iter_raw_sentinews_format(
     if not files:
         raise FileNotFoundError(f"No sentiment input files found in {source_dir}.")
 
+    # read the rows of each file
     text_keys = ("content", "text", "sentence", "paragraph", "tweet")
     index = 0
     for path in files:
@@ -164,8 +177,8 @@ def _iter_raw_sentinews_format(
 def _iter_raw(
     entry: TaskEntry,
     roots: TasksRoots,
-    allow: Optional[set],
-) -> Iterator[Tuple[str, SentimentExample]]:
+    allow: set | None,
+) -> Iterator[tuple[str, SentimentExample]]:
     """Yield `(stable_id, example)` pairs from raw sentiment sources.
 
     Args:
@@ -186,6 +199,11 @@ def _iter_raw(
         yield from _iter_raw_sentinews_format(source_dir, entry.dataset, allow)
 
 
+# ===============================
+# Converter class
+# ===============================
+
+
 @register_converter("sentiment")
 class SentimentConverter(TaskConverter):
     """Converter for the sentiment-analysis task family."""
@@ -199,8 +217,8 @@ class SentimentConverter(TaskConverter):
         entry: TaskEntry,
         roots: TasksRoots,
         ctx: ConvertContext,
-        splits: List[str],
-    ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        splits: list[str],
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
         """Yield `(stable_id, SentimentExample)` pairs for one entry.
 
         Args:

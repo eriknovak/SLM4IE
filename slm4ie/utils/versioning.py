@@ -32,22 +32,13 @@ import io
 import json
 import os
 from array import array
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Dict,
-    Hashable,
-    Iterable,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
     TypeVar,
 )
 
@@ -55,6 +46,10 @@ import yaml
 
 if TYPE_CHECKING:
     import numpy as np
+
+# ===============================
+# Constants
+# ===============================
 
 K = TypeVar("K", bound=Hashable)
 
@@ -68,6 +63,10 @@ _MODULUS = 1 << 256
 
 #: Digest of an empty document set.
 EMPTY_DIGEST = _DIGEST_PREFIX + "0" * 64
+
+# ===============================
+# Document digest
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -85,9 +84,9 @@ class UnitScan:
     """
 
     records: int
-    document_digest: Optional[str]
+    document_digest: str | None
     id_hashes: np.ndarray
-    raw_sha256: Optional[str] = None
+    raw_sha256: str | None = None
 
 
 def _format_digest(total: int) -> str:
@@ -106,7 +105,7 @@ def _parse_digest(digest: str) -> int:
     return int(digest[len(_DIGEST_PREFIX) :], 16)
 
 
-def _document_hash(record: Dict[str, Any]) -> int:
+def _document_hash(record: dict[str, Any]) -> int:
     """Return the SHA-256 of *record*'s canonical JSON as an integer.
 
     Args:
@@ -117,9 +116,12 @@ def _document_hash(record: Dict[str, Any]) -> int:
     """
     import orjson
 
+    # drop the volatile metadata keys
     metadata = record.get("metadata")
     if isinstance(metadata, dict) and VOLATILE_METADATA_KEYS & metadata.keys():
         record = {**record, "metadata": {k: v for k, v in metadata.items() if k not in VOLATILE_METADATA_KEYS}}
+
+    # hash the canonical JSON
     canonical = orjson.dumps(record, option=orjson.OPT_SORT_KEYS)
     return int.from_bytes(hashlib.sha256(canonical).digest(), "big")
 
@@ -141,10 +143,16 @@ def merge_scans(scans: Sequence[UnitScan]) -> UnitScan:
     """
     import numpy as np
 
+    # merge the digests and the id hashes
     digests = [s.document_digest for s in scans]
     merged = None if any(d is None for d in digests) else merge_digests(d for d in digests if d is not None)
     ids = np.sort(np.concatenate([s.id_hashes for s in scans])) if scans else np.empty(0, dtype=np.uint64)
     return UnitScan(records=sum(s.records for s in scans), document_digest=merged, id_hashes=ids)
+
+
+# ===============================
+# Scanning
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -171,7 +179,7 @@ _READ_BYTES = 64 << 20
 _MAX_IN_FLIGHT_BYTES = 8 << 30
 
 
-def _plan_ranges(path: Path, buffer: bytearray, sha: Optional[Any]) -> Iterator[Tuple[int, int]]:
+def _plan_ranges(path: Path, buffer: bytearray, sha: Any | None) -> Iterator[tuple[int, int]]:
     """Read *path* once, sequentially, and yield the byte ranges workers should scan.
 
     The read goes into one reused *buffer*, so it costs no allocation or page
@@ -188,11 +196,12 @@ def _plan_ranges(path: Path, buffer: bytearray, sha: Optional[Any]) -> Iterator[
     Yields:
         `(start, end)` byte offsets in file order, covering the file.
     """
+    # read the file block by block, cutting ranges at newlines
     view = memoryview(buffer)
     gz = path.suffix == ".gz"
     start = offset = 0
     with open(path, "rb", buffering=0) as fh:
-        # A larger kernel readahead keeps the disk head on this file.
+        # larger kernel readahead keeps the disk head on this file
         os.posix_fadvise(fh.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
         while n := fh.readinto(view):
             if sha is not None:
@@ -220,6 +229,7 @@ def _scan_stream(stream: Iterable[bytes], id_key: str, digest: bool) -> UnitScan
     import numpy as np
     import orjson
 
+    # hash the id and the document of every line
     total = 0
     records = 0
     ids = array("Q")
@@ -231,6 +241,8 @@ def _scan_stream(stream: Iterable[bytes], id_key: str, digest: bool) -> UnitScan
         ids.append(_id_hash(record.get(id_key)))
         if digest:
             total += _document_hash(record)
+
+    # collect the scan
     id_hashes = np.sort(np.frombuffer(ids, dtype=np.uint64)) if records else np.empty(0, dtype=np.uint64)
     return UnitScan(records=records, document_digest=_format_digest(total) if digest else None, id_hashes=id_hashes)
 
@@ -257,8 +269,8 @@ def _scan_range(path: Path, start: int, end: int, id_key: str, digest: bool) -> 
 
 
 def scan_units(
-    requests: Mapping[K, ScanRequest], workers: int = 1, progress: Optional[Callable[[Path, int], None]] = None
-) -> Dict[K, UnitScan]:
+    requests: Mapping[K, ScanRequest], workers: int = 1, progress: Callable[[Path, int], None] | None = None
+) -> dict[K, UnitScan]:
     """Scan many units with one sequential reader feeding a pool of workers.
 
     On a spinning disk, parallel readers make the head seek between files and
@@ -274,11 +286,12 @@ def scan_units(
     Returns:
         The `UnitScan` per unit key; `raw_sha256` is set where requested.
     """
-    parts: Dict[K, List[UnitScan]] = {key: [] for key in requests}
-    raw: Dict[K, str] = {}
+    # set up the reader, the pool and the bookkeeping
+    parts: dict[K, list[UnitScan]] = {key: [] for key in requests}
+    raw: dict[K, str] = {}
     buffer = bytearray(_READ_BYTES)
     pool = ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
-    pending: Dict[Future, Tuple[K, int]] = {}
+    pending: dict[Future, tuple[K, int]] = {}
     in_flight = 0
 
     def collect(done: Iterable[Future]) -> None:
@@ -288,6 +301,7 @@ def scan_units(
             parts[key].append(future.result())
             in_flight -= size
 
+    # read each file once and hand its ranges to the workers
     try:
         for key, request in requests.items():
             for path in request.files:
@@ -310,7 +324,8 @@ def scan_units(
         if pool is not None:
             pool.shutdown(cancel_futures=True)
 
-    scans: Dict[K, UnitScan] = {}
+    # merge the parts of each unit
+    scans: dict[K, UnitScan] = {}
     for key, request in requests.items():
         merged = merge_scans(parts[key])
         document_digest = (merged.document_digest or EMPTY_DIGEST) if request.digest else None
@@ -351,11 +366,15 @@ def scan_files(files: Sequence[Path], *, id_key: str = "id", digest: bool = True
     return scan_units({0: ScanRequest(files, id_key, digest)}, workers)[0]
 
 
+# ===============================
+# Shard files and integrity
+# ===============================
+
 #: Folder inside a unit that holds the documents its stage dropped.
 REMOVED_DIR = "removed"
 
 
-def shard_files(folder: Path) -> List[Path]:
+def shard_files(folder: Path) -> list[Path]:
     """Return the gzipped JSONL shards under *folder*, sorted.
 
     Args:
@@ -370,7 +389,7 @@ def shard_files(folder: Path) -> List[Path]:
     return sorted(p for p in folder.rglob("*.jsonl.gz") if REMOVED_DIR not in p.relative_to(folder).parts[:-1])
 
 
-def check_integrity(inp: UnitScan, out: UnitScan) -> Optional[str]:
+def check_integrity(inp: UnitScan, out: UnitScan) -> str | None:
     """Check that a stage's output could have come from its input.
 
     Ids need not be unique: a source may repeat an id, so each id may appear
@@ -385,9 +404,12 @@ def check_integrity(inp: UnitScan, out: UnitScan) -> Optional[str]:
     """
     import numpy as np
 
+    # compare the record counts
     problems = []
     if out.records > inp.records:
         problems.append(f"records_out {out.records} > records_in {inp.records}")
+
+    # count the ids the output has beyond what the input allows
     out_ids, out_counts = np.unique(out.id_hashes, return_counts=True)
     in_ids, in_counts = np.unique(inp.id_hashes, return_counts=True)
     pos = np.searchsorted(in_ids, out_ids)
@@ -399,6 +421,11 @@ def check_integrity(inp: UnitScan, out: UnitScan) -> Optional[str]:
     if excess:
         problems.append(f"{excess} id(s) appear more often in the output than in the input")
     return "; ".join(problems) or None
+
+
+# ===============================
+# Digest helpers
+# ===============================
 
 
 def merge_digests(digests: Iterable[str]) -> str:
@@ -413,7 +440,7 @@ def merge_digests(digests: Iterable[str]) -> str:
     return _format_digest(sum(_parse_digest(d) for d in digests))
 
 
-def combine_named_digests(digests: Mapping[str, Optional[str]]) -> str:
+def combine_named_digests(digests: Mapping[str, str | None]) -> str:
     """Hash a key-to-digest mapping, keeping which key owns which digest.
 
     Args:
@@ -428,7 +455,7 @@ def combine_named_digests(digests: Mapping[str, Optional[str]]) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
-def shard_set(folder: Path) -> Dict[str, int]:
+def shard_set(folder: Path) -> dict[str, int]:
     """Return every visible file under *folder* with its byte size.
 
     Args:
@@ -441,6 +468,7 @@ def shard_set(folder: Path) -> Dict[str, int]:
     """
     if not folder.is_dir():
         return {}
+    # list the visible files with their sizes
     files = {}
     for path in folder.rglob("*"):
         rel = path.relative_to(folder)
@@ -465,7 +493,12 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def read_lock(path: Path) -> Dict[str, Any]:
+# ===============================
+# Lock file
+# ===============================
+
+
+def read_lock(path: Path) -> dict[str, Any]:
     """Read a lock file, or return `{}` when it does not exist.
 
     Args:
@@ -479,7 +512,7 @@ def read_lock(path: Path) -> Dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def write_lock(path: Path, entries: Dict[str, Any], header: str = "") -> bool:
+def write_lock(path: Path, entries: dict[str, Any], header: str = "") -> bool:
     """Write a lock file atomically, leaving it untouched when nothing changed.
 
     Args:
@@ -490,16 +523,24 @@ def write_lock(path: Path, entries: Dict[str, Any], header: str = "") -> bool:
     Returns:
         True if the file was written, False if it already held these entries.
     """
+    # skip the write when nothing changed
     text = header + yaml.safe_dump(entries, sort_keys=False, allow_unicode=True)
     if path.is_file() and path.read_text(encoding="utf-8") == text:
         return False
+
+    # write to a temp file, then swap it in
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
     return True
 
 
-def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
+# ===============================
+# Config hash
+# ===============================
+
+
+def config_hash(slice_: dict[str, Any], extra: bytes | None = None) -> str:
     """Compute a stable hash for a config slice.
 
     The slice is serialized as canonical JSON (sorted keys, no
@@ -517,22 +558,24 @@ def config_hash(slice_: Dict[str, Any], extra: Optional[bytes] = None) -> str:
         Lower-case hex digest prefixed with `"sha256:"`.
     """
     h = hashlib.sha256()
-    # default=str coerces non-JSON-native YAML values (datetime, date, etc.)
-    # to a stable string form so the hash remains computable.
+    # default=str: stable string form for YAML values JSON lacks (datetime, date)
     h.update(json.dumps(slice_, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8"))
     if extra is not None:
-        # NUL-separate the slice from `extra` so byte boundaries can't collide
-        # between (slice ending in null bytes) and (slice + extra=b"...").
+        # NUL-separate the slice from `extra` so byte boundaries cannot collide
         h.update(b"\x00")
         h.update(extra)
     return "sha256:" + h.hexdigest()
 
 
+# ===============================
+# Corpus digest
+# ===============================
+
 #: Glob patterns matched, relative to the corpus root, when building a manifest.
 #: Covers plain and gzipped JSONL shards, the only output shapes the pipelines
 #: emit. The two patterns are disjoint (a `.jsonl.gz` file never matches
 #: `*.jsonl`), so no shard is counted twice.
-DEFAULT_SHARD_GLOBS: Tuple[str, ...] = ("*.jsonl", "*.jsonl.gz")
+DEFAULT_SHARD_GLOBS: tuple[str, ...] = ("*.jsonl", "*.jsonl.gz")
 
 #: Row-count value recorded for a shard when `with_rows` is False, i.e. the
 #: count was deliberately not computed. Distinguishes "not counted" from a
@@ -553,6 +596,7 @@ def _count_rows(path: Path) -> int:
     Returns:
         The number of rows (documents) in the shard.
     """
+    # count newline bytes chunk by chunk
     opener = gzip.open if path.suffix == ".gz" else open
     count = 0
     last = b"\n"
@@ -568,9 +612,9 @@ def _count_rows(path: Path) -> int:
 def shard_listing(
     root: Path,
     *,
-    globs: Tuple[str, ...] = DEFAULT_SHARD_GLOBS,
+    globs: tuple[str, ...] = DEFAULT_SHARD_GLOBS,
     with_rows: bool = False,
-) -> List[Tuple[str, int, int]]:
+) -> list[tuple[str, int, int]]:
     """Build a sorted manifest of the output shards under a corpus root.
 
     Walks `root` recursively for files matching `globs` and records, per shard,
@@ -597,13 +641,15 @@ def shard_listing(
     if not root.exists():
         raise FileNotFoundError(f"corpus root does not exist: {root}")
 
+    # collect the shards
     shards = {}
     for pattern in globs:
         for path in root.rglob(pattern):
             if path.is_file():
                 shards[path.relative_to(root).as_posix()] = path
 
-    manifest: List[Tuple[str, int, int]] = []
+    # build the sorted manifest
+    manifest: list[tuple[str, int, int]] = []
     for rel in sorted(shards):
         path = shards[rel]
         rows = _count_rows(path) if with_rows else ROWS_NOT_COUNTED
@@ -614,7 +660,7 @@ def shard_listing(
 def corpus_digest(
     root: Path,
     *,
-    globs: Tuple[str, ...] = DEFAULT_SHARD_GLOBS,
+    globs: tuple[str, ...] = DEFAULT_SHARD_GLOBS,
     with_rows: bool = False,
 ) -> str:
     """Compute a stable content digest for a corpus directory.
@@ -638,6 +684,7 @@ def corpus_digest(
     Raises:
         FileNotFoundError: If `root` does not exist.
     """
+    # hash the manifest lines
     manifest = shard_listing(root, globs=globs, with_rows=with_rows)
     h = hashlib.sha256()
     for rel, size, rows in manifest:

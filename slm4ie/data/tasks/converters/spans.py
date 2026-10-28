@@ -14,9 +14,11 @@ deterministic hash of its stable id.
 """
 
 import logging
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any
 
 from slm4ie.data.schema import NerExample
+from slm4ie.data.tasks.config import TaskEntry, TasksRoots
 from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
@@ -26,12 +28,19 @@ from slm4ie.data.tasks.run import (
     register_converter,
     synthesize_id,
 )
-from slm4ie.data.tasks.config import TaskEntry, TasksRoots
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
 
+# ===============================
+# Helper functions
+# ===============================
 
-def normalize_spans(raw_spans: Any) -> List[Tuple[int, int, str]]:
+
+def normalize_spans(raw_spans: Any) -> list[tuple[int, int, str]]:
     """Normalize spans from list-of-lists or list-of-dicts to tuples.
 
     Args:
@@ -44,9 +53,11 @@ def normalize_spans(raw_spans: Any) -> List[Tuple[int, int, str]]:
     Raises:
         ValueError: If a span entry is malformed.
     """
-    normalized: List[Tuple[int, int, str]] = []
+    normalized: list[tuple[int, int, str]] = []
     if not raw_spans:
         return normalized
+
+    # normalize each span
     for span in raw_spans:
         if isinstance(span, dict):
             normalized.append((int(span["start"]), int(span["end"]), str(span["label"])))
@@ -59,11 +70,11 @@ def normalize_spans(raw_spans: Any) -> List[Tuple[int, int, str]]:
 
 
 def _record_to_example(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     index: int,
-    label_allow: Optional[set],
+    label_allow: set | None,
     dropped_labels: set,
-) -> Optional[NerExample]:
+) -> NerExample | None:
     """Convert one joined record to a `NerExample`, or None.
 
     Args:
@@ -82,9 +93,12 @@ def _record_to_example(
     if raw_spans is None:
         return None
 
+    # normalize the spans
     spans = normalize_spans(raw_spans)
+
+    # drop spans outside the label allow-list
     if label_allow is not None:
-        filtered: List[Tuple[int, int, str]] = []
+        filtered: list[tuple[int, int, str]] = []
         for start, end, label in spans:
             if label in label_allow:
                 filtered.append((start, end, label))
@@ -92,11 +106,17 @@ def _record_to_example(
                 dropped_labels.add(label)
         spans = filtered
 
+    # build the example
     return NerExample(
         id=synthesize_id(record, record.get("source", "unknown"), index),
         text=record.get("text", ""),
         spans=[{"start": start, "end": end, "label": label} for start, end, label in spans],
     )
+
+
+# ===============================
+# Spans converter
+# ===============================
 
 
 @register_converter("spans")
@@ -115,8 +135,8 @@ class SpansConverter(TaskConverter):
         entry: TaskEntry,
         roots: TasksRoots,
         ctx: ConvertContext,
-        splits: List[str],
-    ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        splits: list[str],
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
         """Yield `(stable_id, NerExample)` pairs for every joined record.
 
         Args:
@@ -138,15 +158,16 @@ class SpansConverter(TaskConverter):
                 f"{entry.source.kind!r} for {entry.task}/{entry.dataset}."
             )
 
+        # convert every joined record
         label_allow = label_allow_set(entry)
         dropped_labels: set = set()
-
         for index, record in enumerate(iter_extracted_records(entry, roots)):
             example = _record_to_example(record, index, label_allow, dropped_labels)
             if example is None:
                 continue
             yield example["id"], dict(example)
 
+        # warn once about dropped labels
         if dropped_labels:
             logger.warning(
                 "Entry %s/%s dropped spans with %d label(s) outside allow-list (%s): %s",

@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, cast
 
 from slm4ie.data.curate.config import CurateConfig, load_curate_config
 from slm4ie.data.curate.lineage import (
@@ -58,23 +58,31 @@ from slm4ie.utils.versioning import (
     shard_files,
 )
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
 
+# ===============================
+# Defaults
+# ===============================
 
 #: Status reason for a unit whose sentinel disagrees with the committed lock file.
 LOCK_DIFFERS = "differs from lock"
 
-
 #: Status reason for a built unit whose input is gone; a run leaves it as it is.
 NO_INPUT = "no input; output kept"
-
 
 #: State of a built unit whose dataset the selection does not keep.
 ORPHANED = "orphaned"
 
-
 #: Reason for an orphaned unit whose dataset `extract.yaml` does not declare.
 NOT_DECLARED = "not declared in extract.yaml"
+
+# ===============================
+# Unit status
+# ===============================
 
 
 @dataclass(frozen=True)
@@ -93,18 +101,18 @@ class UnitStatus:
     """
 
     stage: str
-    dataset: Optional[str]
+    dataset: str | None
     state: str
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 def _unit_status(
     stage: str,
-    dataset: Optional[str],
-    sentinel: Optional[Sentinel],
-    reason: Optional[str],
+    dataset: str | None,
+    sentinel: Sentinel | None,
+    reason: str | None,
     buildable: bool,
-    locked: Optional[Dict[str, Any]],
+    locked: dict[str, Any] | None,
     lock_exists: bool,
 ) -> UnitStatus:
     """Classify one unit from its sentinel, stale reason and lock entry.
@@ -121,6 +129,7 @@ def _unit_status(
     Returns:
         The unit's `UnitStatus`.
     """
+    # classify the unit
     if not buildable:
         return UnitStatus(stage, dataset, "missing", NO_INPUT if sentinel is not None else None)
     if sentinel is None:
@@ -130,7 +139,7 @@ def _unit_status(
     return UnitStatus(stage, dataset, "stale" if reason else "current", reason)
 
 
-def orphaned_units(setup: CurateConfig) -> List[UnitStatus]:
+def orphaned_units(setup: CurateConfig) -> list[UnitStatus]:
     """Find every built unit of a scoped stage whose dataset the selection does not keep.
 
     A unit counts when its folder holds a sentinel and its dataset is outside
@@ -143,8 +152,9 @@ def orphaned_units(setup: CurateConfig) -> List[UnitStatus]:
     Returns:
         One `orphaned` `UnitStatus` per such unit, in pipeline order, then by dataset.
     """
+    # find built units outside the roster
     selected = set(setup.roster)
-    orphans: List[UnitStatus] = []
+    orphans: list[UnitStatus] = []
     for stage in SCOPED_STAGES:
         folder = setup.paths.stage_dir(stage)
         if not folder.is_dir():
@@ -159,7 +169,7 @@ def orphaned_units(setup: CurateConfig) -> List[UnitStatus]:
     return orphans
 
 
-def selection_report(setup: CurateConfig) -> List[str]:
+def selection_report(setup: CurateConfig) -> list[str]:
     """Render the resolved pretraining selection as `status` and `run` print it.
 
     Args:
@@ -170,6 +180,7 @@ def selection_report(setup: CurateConfig) -> List[str]:
         warning per selected overlapping pair, and, when the selection the
         lock file recorded differs, a line naming every key whose status moved.
     """
+    # compare the selection to the lock file
     lines = setup.selection.report()
     locked = read_lock(setup.lock_path).get(SELECTION)
     if locked is None:
@@ -177,6 +188,7 @@ def selection_report(setup: CurateConfig) -> List[str]:
     current = selection_entry(setup.selection)
     was = set(locked.get("selected") or [])
     now = set(current["selected"])
+    # name every key whose status moved
     moved = [f"{key} now selected" for key in current["selected"] if key not in was]
     moved += [
         f"{key} now skipped ({current['skipped'][key]})" for key in sorted(was - now) if key in current["skipped"]
@@ -189,11 +201,11 @@ def selection_report(setup: CurateConfig) -> List[str]:
 
 def selection_status(
     *,
-    input_dir: Optional[Path],
-    output_dir: Optional[Path],
+    input_dir: Path | None,
+    output_dir: Path | None,
     pretrain_config: Path,
-    extract_config: Optional[Path] = None,
-) -> List[str]:
+    extract_config: Path | None = None,
+) -> list[str]:
     """Load the config and render its selection (see `selection_report`).
 
     Args:
@@ -210,13 +222,13 @@ def selection_status(
 
 def status(
     *,
-    input_dir: Optional[Path],
-    output_dir: Optional[Path],
+    input_dir: Path | None,
+    output_dir: Path | None,
     pretrain_config: Path,
-    extract_config: Optional[Path] = None,
+    extract_config: Path | None = None,
     adopt: bool = False,
     workers: int = 1,
-) -> List[UnitStatus]:
+) -> list[UnitStatus]:
     """Report every unit as current, stale (with the reason) or missing, then the orphaned ones.
 
     Read-only unless *adopt* is set: no stage runs and no data is written.
@@ -236,13 +248,16 @@ def status(
         One `UnitStatus` per roster unit, in pipeline order, followed by
         the orphaned units (see `orphaned_units`).
     """
+    # load the setup, adopting legacy sentinels on request
     setup = load_curate_config(input_dir, output_dir, pretrain_config, extract_config)
     if adopt:
         adopt_legacy(setup, workers)
     lock = read_lock(setup.lock_path)
     lock_exists = setup.lock_path.is_file()
     paths = setup.paths
-    results: List[UnitStatus] = []
+
+    # judge every roster unit in pipeline order
+    results: list[UnitStatus] = []
     for stage in STAGE_NAMES:
         if is_scoped(stage):
             for key in setup.roster:
@@ -262,7 +277,12 @@ def status(
     return results + orphaned_units(setup)
 
 
-def _scan_all(requests: Dict[Tuple[str, str], ScanRequest], workers: int) -> Dict[Tuple[str, str], UnitScan]:
+# ===============================
+# Adoption of legacy sentinels
+# ===============================
+
+
+def _scan_all(requests: dict[tuple[str, str], ScanRequest], workers: int) -> dict[tuple[str, str], UnitScan]:
     """Scan every adoption unit with `scan_units`, logging progress by bytes read.
 
     Args:
@@ -273,6 +293,7 @@ def _scan_all(requests: Dict[Tuple[str, str], ScanRequest], workers: int) -> Dic
     Returns:
         The `UnitScan` per unit.
     """
+    # log the scan size
     files = [f for request in requests.values() for f in request.files]
     total = sum(f.stat().st_size for f in files)
     logger.info(
@@ -282,6 +303,8 @@ def _scan_all(requests: Dict[Tuple[str, str], ScanRequest], workers: int) -> Dic
         len(requests),
         workers,
     )
+
+    # scan, logging progress by bytes read
     done = {"files": 0, "bytes": 0}
 
     def progress(path: Path, size: int) -> None:
@@ -318,15 +341,13 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
     """
     paths = setup.paths
 
-    def adoptable(sentinel: Optional[Sentinel], expected: str) -> bool:
+    def adoptable(sentinel: Sentinel | None, expected: str) -> bool:
         return sentinel is not None and sentinel.is_legacy and sentinel.config_hash == expected
 
-    # Keys outside the roster (e.g. benchmarks run by name) are adopted too.
+    # stamp the code version on units that only lack it; keys outside the roster count too
     keys = dataset_keys_on_disk(setup)
     stamped = 0
-    folders: List[Tuple[str, Path, Optional[str]]] = [
-        (s, paths.stage_dir(s) / k, k) for s in SCOPED_STAGES for k in keys
-    ]
+    folders: list[tuple[str, Path, str | None]] = [(s, paths.stage_dir(s) / k, k) for s in SCOPED_STAGES for k in keys]
     folders += [(s, paths.stage_dir(s), None) for s in CORPUS_STAGES]
     for stage, folder, key in folders:
         sentinel = read_sentinel(folder)
@@ -335,6 +356,8 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
             stamped += 1
     if stamped:
         logger.info("[adopt] recorded the current code version on %d unit(s)", stamped)
+
+    # collect the legacy units to adopt
     scoped = [
         (stage, key)
         for stage in SCOPED_STAGES
@@ -346,7 +369,8 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
         logger.info("[adopt] no legacy sentinels to adopt")
         return
 
-    requests: Dict[Tuple[str, str], ScanRequest] = {}
+    # request the scans
+    requests: dict[tuple[str, str], ScanRequest] = {}
 
     def need(stage: str, key: str, digest: bool) -> None:
         if stage == "extracted":
@@ -367,9 +391,10 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
             for key in corpus_inputs(setup, stage):
                 need(stage, key, True)
                 need(cast(str, upstream_stage(stage)), key, False)
+
+    # scan the units, reusing each source file's hash so it is not read twice
     scans = _scan_all(requests, workers)
-    # Reuse the hash each source file's scan took, so it is not read twice.
-    input_files: Dict[str, Dict[str, Any]] = {}
+    input_files: dict[str, dict[str, Any]] = {}
     for stage, key in scoped:
         source = paths.input_folder / f"{key}.jsonl"
         if stage == "convert" and source.is_file():
@@ -379,6 +404,8 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
             input_files[key] = convert_input_files(paths.input_folder, key, setup.include_annotations(key), previous)
         elif stage == "convert":
             input_files[key] = convert_input_files(paths.input_folder, key, setup.include_annotations(key))
+
+    # rewrite the sentinels with lineage
     info = {**run_info(setup.project_root), "adopted_at": datetime.now(timezone.utc).isoformat()}
 
     for stage, key in scoped:
@@ -387,11 +414,11 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
         out_scan = scans[(stage, key)]
         upstream = upstream_stage(stage)
         in_scan = scans[(upstream or "extracted", key)]
-        files: Optional[Dict[str, Any]] = None
+        files: dict[str, Any] | None = None
         if upstream is None:
             files = input_files[key]
-            input_digest: Optional[str] = input_files_digest(files)
-            # Without its source file there is nothing to check the output against.
+            input_digest: str | None = input_files_digest(files)
+            # without its source file there is nothing to check the output against
             error = check_integrity(in_scan, out_scan) if requests[("extracted", key)].files else None
         else:
             input_digest = upstream_digest(paths, stage, key)
@@ -412,12 +439,13 @@ def adopt_legacy(setup: CurateConfig, workers: int = 1) -> None:
         )
         logger.info("[adopt] %s/%s: %s", STAGE_DIRS[stage], key, error or "ok")
 
+    # rewrite the corpus-stage sentinels
     for stage in corpus:
         folder = paths.stage_dir(stage)
         legacy = cast(Sentinel, read_sentinel(folder))
         input_keys = corpus_inputs(setup, stage)
-        document_digest: Optional[str] = None
-        errors: Dict[str, str] = {}
+        document_digest: str | None = None
+        errors: dict[str, str] = {}
         if stage != "statistics":
             upstream = cast(str, upstream_stage(stage))
             for key in input_keys:

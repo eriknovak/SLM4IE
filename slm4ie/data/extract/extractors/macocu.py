@@ -33,15 +33,25 @@ Example:
 """
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
+
 from lxml import etree
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.extractors.assembly import positional_doc_id, relative_unit
 from slm4ie.data.schema import Document
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 _DOC_METADATA_KEYS = (
     "title",
@@ -53,6 +63,10 @@ _DOC_METADATA_KEYS = (
     "lm_score",
 )
 
+# ===============================
+# Helper functions
+# ===============================
+
 
 def _doc_text(doc_elem: "etree._Element") -> str:
     """Build a document's text by joining its <p> contents.
@@ -61,13 +75,12 @@ def _doc_text(doc_elem: "etree._Element") -> str:
     whitespace on each paragraph is stripped.
 
     Args:
-        doc_elem (etree._Element): A <doc> element.
+        doc_elem: A <doc> element.
 
     Returns:
-        str: Concatenated paragraph text. Empty if no paragraph
-            yielded any text.
+        Concatenated paragraph text. Empty if no paragraph yielded any text.
     """
-    parts: List[str] = []
+    parts: list[str] = []
     for p_elem in doc_elem.iter("p"):
         text = "".join(p_elem.itertext()).strip()
         if text:
@@ -75,22 +88,26 @@ def _doc_text(doc_elem: "etree._Element") -> str:
     return "\n".join(parts)
 
 
-def _doc_metadata(doc_elem: "etree._Element") -> Dict[str, Any]:
+def _doc_metadata(doc_elem: "etree._Element") -> dict[str, Any]:
     """Collect metadata from a <doc> element's attributes.
 
     Args:
-        doc_elem (etree._Element): A <doc> element.
+        doc_elem: A <doc> element.
 
     Returns:
-        Dict[str, Any]: Selected attributes (title, url, etc.) that
-            are present and non-empty.
+        Selected attributes (title, url, etc.) that are present and non-empty.
     """
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     for key in _DOC_METADATA_KEYS:
         value = doc_elem.get(key)
         if value:
             metadata[key] = value
     return metadata
+
+
+# ===============================
+# Extractor class
+# ===============================
 
 
 class MacocuExtractor(FileBasedExtractor):
@@ -104,24 +121,24 @@ class MacocuExtractor(FileBasedExtractor):
     loading the entire tree into memory.
     """
 
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return sorted .xml files under input_dir.
 
         Args:
-            input_dir (Path): Directory searched recursively.
+            input_dir: Directory searched recursively.
 
         Returns:
-            List[Path]: Sorted .xml file paths.
+            Sorted .xml file paths.
         """
         return sorted(p for p in input_dir.rglob("*.xml") if p.is_file())
 
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from the given MaCoCu XML files.
 
@@ -130,15 +147,15 @@ class MacocuExtractor(FileBasedExtractor):
         silently.
 
         Args:
-            files (List[Path]): .xml files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root; names the unit of a
+            files: .xml files to parse, in order.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            input_dir: Dataset root; names the unit of a
                 positional id when a <doc> carries no id attribute.
-            metadata (Optional[Dict[str, Any]]): Ignored.
+            metadata: Ignored.
 
         Yields:
-            Document: One document per non-empty <doc> element.
+            One document per non-empty <doc> element.
         """
         del metadata
         for filepath in files:
@@ -146,6 +163,10 @@ class MacocuExtractor(FileBasedExtractor):
                 yield from self._parse_file(filepath, source, domain, relative_unit(filepath, input_dir))
             except etree.XMLSyntaxError as exc:
                 logger.warning("Skipping %s — parse error: %s", filepath, exc)
+
+    # =================================
+    # Private methods
+    # =================================
 
     def _parse_file(
         self,
@@ -157,13 +178,13 @@ class MacocuExtractor(FileBasedExtractor):
         """Stream-parse one MaCoCu XML file.
 
         Args:
-            filepath (Path): Path to the MaCoCu XML file.
-            source (str): Dataset key.
-            domain (str): Domain label.
-            unit (str): The file's unit name for positional ids.
+            filepath: Path to the MaCoCu XML file.
+            source: Dataset key.
+            domain: Domain label.
+            unit: The file's unit name for positional ids.
 
         Yields:
-            Document: One document per non-empty <doc> element, with
+            One document per non-empty <doc> element, with
                 the <doc> id attribute as `doc_id` and `native_id`, or
                 the positional id `<unit>:<doc ordinal>` when absent.
         """
@@ -182,5 +203,9 @@ class MacocuExtractor(FileBasedExtractor):
 
             elem.clear()
 
+
+# ===============================
+# Registration
+# ===============================
 
 register_extractor("macocu", MacocuExtractor)

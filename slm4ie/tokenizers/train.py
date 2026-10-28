@@ -15,21 +15,16 @@ import json
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Tuple
+from typing import Any
 
 import slm4ie.tokenizers.backends  # noqa: F401  (registers backends on import)
-from slm4ie.utils.versioning import corpus_digest, file_sha256
-from slm4ie.utils.parallel import (
-    configure_script_logging,
-    cpu_default,
-    resolve_workers,
-    run_parallel,
-)
 from slm4ie.tokenizers.base import TrainContext, covering_alphabet
+from slm4ie.tokenizers.config import SweepConfig
 from slm4ie.tokenizers.corpus import (
     CorpusSplit,
     check_sample_side,
@@ -53,9 +48,23 @@ from slm4ie.tokenizers.morphology import (
 from slm4ie.tokenizers.registry import get_tokenizer
 from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
-from slm4ie.tokenizers.config import SweepConfig
+from slm4ie.utils.parallel import (
+    configure_script_logging,
+    cpu_default,
+    resolve_workers,
+    run_parallel,
+)
+from slm4ie.utils.versioning import corpus_digest, file_sha256
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Sidecar carrying per-run training stats, read by the MLflow logger.
 TRAIN_STATS_FILENAME = "train_stats.json"
@@ -68,34 +77,38 @@ RSS_POLL_SECONDS = 1.0
 #: backends, `spm.model` for SentencePiece) plus its `metadata.json`. Volatile
 #: sidecars (timing, eval cache, MLflow link) are excluded so the digest is a
 #: stable tokenizer identity across reruns.
-TOKENIZER_ARTIFACT_GLOBS: Tuple[str, ...] = ("tokenizer.json", "spm.model", "metadata.json")
+TOKENIZER_ARTIFACT_GLOBS: tuple[str, ...] = ("tokenizer.json", "spm.model", "metadata.json")
 
 #: Sidecar carrying the MLflow run linkage, read by the evaluation logger to
 #: cross-link each eval run back to the training run that produced it.
 MLFLOW_LINK_FILENAME = "mlflow_train.json"
+
+# ===============================
+# Sweep planning
+# ===============================
 
 
 def sweep_run_key(name: str, vocab_size: int) -> str:
     """Return the canonical run key for a tokenizer and vocab size.
 
     Args:
-        name (str): Tokenizer registry key.
-        vocab_size (int): Vocabulary size.
+        name: Tokenizer registry key.
+        vocab_size: Vocabulary size.
 
     Returns:
-        str: `"<name>-<vocab_size>"`.
+        `"<name>-<vocab_size>"`.
     """
     return f"{name}-{vocab_size}"
 
 
-def parse_sweep_run_key(key: str) -> Tuple[str, int]:
+def parse_sweep_run_key(key: str) -> tuple[str, int]:
     """Split a run key back into its tokenizer name and vocab size.
 
     Args:
-        key (str): A key produced by `sweep_run_key`.
+        key: A key produced by `sweep_run_key`.
 
     Returns:
-        Tuple[str, int]: The tokenizer name and vocab size.
+        The tokenizer name and vocab size.
 
     Raises:
         ValueError: If `key` is not of the form `<name>-<int>`.
@@ -106,27 +119,27 @@ def parse_sweep_run_key(key: str) -> Tuple[str, int]:
     return name, int(vocab)
 
 
-def plan_sweep_runs(cfg: SweepConfig) -> List[str]:
+def plan_sweep_runs(cfg: SweepConfig) -> list[str]:
     """Enumerate every tokenizer x vocab-size run key in the sweep.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
+        cfg: The resolved sweep configuration.
 
     Returns:
-        List[str]: Run keys in tokenizer-major, vocab-minor order.
+        Run keys in tokenizer-major, vocab-minor order.
     """
     return [sweep_run_key(name, vocab) for name, vocab in product(cfg.tokenizers, cfg.vocab_sizes)]
 
 
-def corpus_split_for(cfg: SweepConfig, max_workers: int = 1) -> Optional[CorpusSplit]:
+def corpus_split_for(cfg: SweepConfig, max_workers: int = 1) -> CorpusSplit | None:
     """Return the sweep's corpus split, fitting and saving it on first use.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        max_workers (int): Sources ranked at once when the split is fitted.
+        cfg: The resolved sweep configuration.
+        max_workers: Sources ranked at once when the split is fitted.
 
     Returns:
-        Optional[CorpusSplit]: The split, or None when the config sets no
+        The split, or None when the config sets no
             `corpus.split.train_share`.
 
     Raises:
@@ -135,6 +148,8 @@ def corpus_split_for(cfg: SweepConfig, max_workers: int = 1) -> Optional[CorpusS
     """
     if cfg.corpus_train_share is None:
         return None
+
+    # reuse a saved split after checking it still fits
     if cfg.corpus_split_path.exists():
         split = load_corpus_split(cfg.corpus_split_path)
         if split.train_share != cfg.corpus_train_share:
@@ -145,13 +160,20 @@ def corpus_split_for(cfg: SweepConfig, max_workers: int = 1) -> Optional[CorpusS
         if split.corpus_fingerprint != corpus_fingerprint(cfg.corpus_root):
             raise ValueError(f"{cfg.corpus_root} changed since {cfg.corpus_split_path} was fitted; remove it to refit")
         return split
+
+    # fit and save a new split
     logger.info("Fitting the %.0f/%.0f corpus split", 100 * cfg.corpus_train_share, 100 * (1 - cfg.corpus_train_share))
     split = fit_corpus_split(cfg.corpus_root, cfg.corpus_train_share, max_workers)
     save_corpus_split(split, cfg.corpus_split_path)
     return split
 
 
-def prepare_inputs(cfg: SweepConfig, force: bool = False, max_workers: int = 1) -> Tuple[Path, Optional[Path]]:
+# ===============================
+# Input preparation
+# ===============================
+
+
+def prepare_inputs(cfg: SweepConfig, force: bool = False, max_workers: int = 1) -> tuple[Path, Path | None]:
     """Materialize the shared training sample and morpheme lexicon.
 
     Both artifacts are reused across every run. Existing artifacts are kept
@@ -160,14 +182,15 @@ def prepare_inputs(cfg: SweepConfig, force: bool = False, max_workers: int = 1) 
     left out of the morpheme table.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        force (bool): Rebuild even when the artifacts already exist.
-        max_workers (int): Sources ranked at once if the corpus split is fitted.
+        cfg: The resolved sweep configuration.
+        force: Rebuild even when the artifacts already exist.
+        max_workers: Sources ranked at once if the corpus split is fitted.
 
     Returns:
-        Tuple[Path, Optional[Path]]: The training-sample path and the morpheme
+        The training-sample path and the morpheme
             lexicon path (None when no morphological backend is requested).
     """
+    # prepare the training sample
     sample_path = cfg.corpus_sample_path
     if force or not sample_path.exists():
         logger.info("Sampling training corpus -> %s", sample_path)
@@ -178,7 +201,8 @@ def prepare_inputs(cfg: SweepConfig, force: bool = False, max_workers: int = 1) 
             check_sample_side(sample_path, "train")
         logger.info("Reusing cached training sample: %s", sample_path)
 
-    lexicon_path: Optional[Path] = None
+    # prepare the morpheme lexicon
+    lexicon_path: Path | None = None
     if cfg.needs_morphology():
         lexicon_path = cfg.lexicon_path
         if force or not lexicon_path.exists():
@@ -190,8 +214,7 @@ def prepare_inputs(cfg: SweepConfig, force: bool = False, max_workers: int = 1) 
                 logger.info("Deriving derivational lexicon from %s", cfg.sloleks_relations_path)
                 deriv = build_derivational_lexicon(cfg.sloleks_relations_path)
                 save_lexicon(deriv, cfg.deriv_lexicon_path)
-                # Derivational splits win ties so a lemma's morpheme split beats
-                # its trivial single-stem inflectional entry in the table.
+                # derivational splits win ties over the trivial single-stem inflectional entry
                 table = merge_lexicons(deriv, infl)
             if cfg.heldout_lexeme_share is not None:
                 heldout = split_lexemes(cfg.inflection_path, cfg.heldout_lexeme_share).heldout_forms
@@ -209,8 +232,8 @@ def _check_table_excludes_heldout(cfg: SweepConfig, lexicon_path: Path) -> None:
     """Refuse a cached morpheme table that holds a held-out form.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration, with held-out lexemes set.
-        lexicon_path (Path): The cached morpheme table.
+        cfg: The resolved sweep configuration, with held-out lexemes set.
+        lexicon_path: The cached morpheme table.
 
     Raises:
         ValueError: If the table and the held-out forms share any form.
@@ -221,29 +244,34 @@ def _check_table_excludes_heldout(cfg: SweepConfig, lexicon_path: Path) -> None:
         raise ValueError(f"{lexicon_path} holds {len(leaked)} held-out forms; rerun `sample --force`")
 
 
+# ===============================
+# Training
+# ===============================
+
+
 def train_one(
     key: str,
     *,
     cfg: SweepConfig,
     sample_path: Path,
-    lexicon_path: Optional[Path],
+    lexicon_path: Path | None,
     force: bool = False,
-    alphabet: Optional[FrozenSet[str]] = None,
-) -> Optional[Path]:
+    alphabet: frozenset[str] | None = None,
+) -> Path | None:
     """Train and persist one tokenizer x vocab-size run.
 
     Args:
-        key (str): Run key (`<name>-<vocab>`).
-        cfg (SweepConfig): The resolved sweep configuration.
-        sample_path (Path): Cached training-sample path.
-        lexicon_path (Optional[Path]): Morpheme lexicon path for morphological
+        key: Run key (`<name>-<vocab>`).
+        cfg: The resolved sweep configuration.
+        sample_path: Cached training-sample path.
+        lexicon_path: Morpheme lexicon path for morphological
             backends, or None.
-        force (bool): Retrain even when the artifact already exists.
-        alphabet (Optional[FrozenSet[str]]): Base alphabet of the
+        force: Retrain even when the artifact already exists.
+        alphabet: Base alphabet of the
             character-level backends (`sample_alphabet`), or None for all.
 
     Returns:
-        Optional[Path]: The artifact directory, or None when the run was
+        The artifact directory, or None when the run was
             skipped because its output already exists.
 
     Raises:
@@ -255,12 +283,14 @@ def train_one(
         logger.info("Skipping %s; artifact exists (use --force to retrain).", key)
         return None
 
+    # load the morpheme lexicon for morphological backends
     lexicon = None
     if name.startswith("morph"):
         if lexicon_path is None:
             raise ValueError(f"{name} requires a morpheme lexicon but none was prepared.")
         lexicon = load_lexicon(lexicon_path)
 
+    # train the tokenizer
     context = TrainContext(
         special_tokens=list(cfg.special_tokens),
         seed=cfg.train_budget.seed,
@@ -273,17 +303,24 @@ def train_one(
     with track_peak_rss() as memory:
         tokenizer.train(iter_sample(sample_path), vocab_size, config=context)
     train_seconds = time.perf_counter() - start
+
+    # save the tokenizer and its stats
     tokenizer.save(out_dir)
     _write_train_stats(out_dir, key, name, vocab_size, len(tokenizer.vocab), train_seconds, cfg, memory, alphabet)
     logger.info("Saved %s -> %s (%.1fs)", key, out_dir, train_seconds)
     return out_dir
 
 
-def _resident_bytes() -> Optional[int]:
+# ===============================
+# Memory tracking
+# ===============================
+
+
+def _resident_bytes() -> int | None:
     """Return this process's resident memory, read from `/proc/self/status`.
 
     Returns:
-        Optional[int]: Resident set size in bytes, or None where `/proc` is absent.
+        Resident set size in bytes, or None where `/proc` is absent.
     """
     try:
         with open("/proc/self/status", encoding="ascii") as handle:
@@ -296,7 +333,7 @@ def _resident_bytes() -> Optional[int]:
 
 
 @contextmanager
-def track_peak_rss() -> Iterator[Dict[str, Optional[int]]]:
+def track_peak_rss() -> Iterator[dict[str, int | None]]:
     """Track the peak resident memory of this process while the block runs.
 
     A pool worker trains several runs in one process, so the lifetime peak
@@ -304,11 +341,12 @@ def track_peak_rss() -> Iterator[Dict[str, Optional[int]]]:
     gives each run its own peak.
 
     Yields:
-        Dict[str, Optional[int]]: `start_rss_bytes` and, once the block exits,
+        `start_rss_bytes` and, once the block exits,
             `peak_rss_bytes`; both None where `/proc` is absent.
     """
+    # take the starting reading
     start = _resident_bytes()
-    reading: Dict[str, Optional[int]] = {"start_rss_bytes": start, "peak_rss_bytes": start}
+    reading: dict[str, int | None] = {"start_rss_bytes": start, "peak_rss_bytes": start}
     stop = threading.Event()
 
     def record() -> None:
@@ -320,6 +358,7 @@ def track_peak_rss() -> Iterator[Dict[str, Optional[int]]]:
         while not stop.wait(RSS_POLL_SECONDS):
             record()
 
+    # poll the peak in the background while the block runs
     poller = threading.Thread(target=poll, daemon=True)
     poller.start()
     try:
@@ -338,8 +377,8 @@ def _write_train_stats(
     vocab_used: int,
     train_seconds: float,
     cfg: SweepConfig,
-    memory: Dict[str, Optional[int]],
-    alphabet: Optional[FrozenSet[str]] = None,
+    memory: dict[str, int | None],
+    alphabet: frozenset[str] | None = None,
 ) -> None:
     """Write the per-run training-stats sidecar for later MLflow logging.
 
@@ -347,15 +386,15 @@ def _write_train_stats(
     artifact and logged from the parent process after the pool drains.
 
     Args:
-        out_dir (Path): The run's artifact directory.
-        key (str): Run key (`<name>-<vocab>`).
-        name (str): Tokenizer registry name.
-        vocab_size (int): Target vocabulary size.
-        vocab_used (int): Actual vocabulary size after training.
-        train_seconds (float): Wall-clock training time in seconds.
-        cfg (SweepConfig): The resolved sweep configuration.
-        memory (Dict[str, Optional[int]]): What `track_peak_rss` measured.
-        alphabet (Optional[FrozenSet[str]]): The base alphabet the run trained
+        out_dir: The run's artifact directory.
+        key: Run key (`<name>-<vocab>`).
+        name: Tokenizer registry name.
+        vocab_size: Target vocabulary size.
+        vocab_used: Actual vocabulary size after training.
+        train_seconds: Wall-clock training time in seconds.
+        cfg: The resolved sweep configuration.
+        memory: What `track_peak_rss` measured.
+        alphabet: The base alphabet the run trained
             with, or None for every character.
     """
     stats = {
@@ -378,24 +417,30 @@ def _write_train_stats(
     (out_dir / TRAIN_STATS_FILENAME).write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ===============================
+# Run selection
+# ===============================
+
+
 def select_sweep_runs(
     cfg: SweepConfig,
     *,
-    run_keys: Optional[List[str]] = None,
-    tokenizers: Optional[List[str]] = None,
-    vocab_sizes: Optional[List[int]] = None,
-) -> List[str]:
+    run_keys: list[str] | None = None,
+    tokenizers: list[str] | None = None,
+    vocab_sizes: list[int] | None = None,
+) -> list[str]:
     """Resolve which run keys to execute from explicit keys or filters.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        run_keys (Optional[List[str]]): Explicit run keys; takes precedence.
-        tokenizers (Optional[List[str]]): Restrict to these tokenizer names.
-        vocab_sizes (Optional[List[int]]): Restrict to these vocab sizes.
+        cfg: The resolved sweep configuration.
+        run_keys: Explicit run keys; takes precedence.
+        tokenizers: Restrict to these tokenizer names.
+        vocab_sizes: Restrict to these vocab sizes.
 
     Returns:
-        List[str]: The selected run keys, preserving sweep order.
+        The selected run keys, preserving sweep order.
     """
+    # explicit keys take precedence
     planned = plan_sweep_runs(cfg)
     if run_keys:
         planned_set = set(planned)
@@ -404,6 +449,7 @@ def select_sweep_runs(
             logger.warning("Run key(s) not in the configured sweep: %s", unknown)
         return list(run_keys)
 
+    # filter by tokenizer and vocab size
     selected = planned
     if tokenizers:
         wanted = set(tokenizers)
@@ -418,9 +464,9 @@ def resolve_sweep_runs(
     cfg: SweepConfig,
     *,
     all_runs: bool,
-    tokenizer: Optional[str],
-    vocab_size: Optional[int],
-) -> List[str]:
+    tokenizer: str | None,
+    vocab_size: int | None,
+) -> list[str]:
     """Resolve run keys from the shared one-or-all CLI selection.
 
     The tokenizer scripts (`train`, `analyze`, `export`) select runs the same
@@ -428,14 +474,14 @@ def resolve_sweep_runs(
     narrowed to one `vocab_size`. The two modes are mutually exclusive.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        all_runs (bool): Select the whole sweep (the `--all` flag).
-        tokenizer (Optional[str]): The one tokenizer to select, or None.
-        vocab_size (Optional[int]): A single vocab size narrowing `tokenizer`,
+        cfg: The resolved sweep configuration.
+        all_runs: Select the whole sweep (the `--all` flag).
+        tokenizer: The one tokenizer to select, or None.
+        vocab_size: A single vocab size narrowing `tokenizer`,
             or None for all of its sizes.
 
     Returns:
-        List[str]: The selected run keys, in sweep order.
+        The selected run keys, in sweep order.
 
     Raises:
         ValueError: If the selection is missing, combined illegally, or names a
@@ -455,11 +501,16 @@ def resolve_sweep_runs(
     return select_sweep_runs(cfg, tokenizers=[tokenizer], vocab_sizes=vocab_sizes)
 
 
+# ===============================
+# MLflow logging
+# ===============================
+
+
 def _write_mlflow_link(
     out_dir: Path,
     experiment: str,
-    parent_run_id: Optional[str],
-    run_id: Optional[str],
+    parent_run_id: str | None,
+    run_id: str | None,
     run_name: str,
 ) -> None:
     """Persist the MLflow training-run linkage next to the artifact.
@@ -468,11 +519,11 @@ def _write_mlflow_link(
     the training run that produced the artifact.
 
     Args:
-        out_dir (Path): The run's artifact directory.
-        experiment (str): MLflow experiment name.
-        parent_run_id (Optional[str]): The training sweep parent run id.
-        run_id (Optional[str]): The per-run training child run id.
-        run_name (str): The training child run name (the run key).
+        out_dir: The run's artifact directory.
+        experiment: MLflow experiment name.
+        parent_run_id: The training sweep parent run id.
+        run_id: The per-run training child run id.
+        run_name: The training child run name (the run key).
     """
     link = {
         "experiment": experiment,
@@ -483,27 +534,27 @@ def _write_mlflow_link(
     (out_dir / MLFLOW_LINK_FILENAME).write_text(json.dumps(link, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def run_tags(cfg: SweepConfig) -> Dict[str, str]:
+def run_tags(cfg: SweepConfig) -> dict[str, str]:
     """Return the tags every sweep run carries beside its structural ones.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
+        cfg: The resolved sweep configuration.
 
     Returns:
-        Dict[str, str]: The configured `mlflow_tags` plus `base_commit`, the
+        The configured `mlflow_tags` plus `base_commit`, the
             commit the run executes from.
     """
     return {**cfg.mlflow_tags, "base_commit": ml.git_commit() or "unknown"}
 
 
-def sweep_inputs(paths: Dict[str, Path]) -> List[Tuple[str, str, str]]:
+def sweep_inputs(paths: dict[str, Path]) -> list[tuple[str, str, str]]:
     """Digest the shared sweep inputs that exist, for logging as dataset inputs.
 
     Args:
-        paths (Dict[str, Path]): Input name (e.g. `train-sample`) to its file.
+        paths: Input name (e.g. `train-sample`) to its file.
 
     Returns:
-        List[Tuple[str, str, str]]: `(name, digest, path)` per existing file, the
+        `(name, digest, path)` per existing file, the
             name prefixed `sweep/` and the digest a `sha256:` content hash.
     """
     return [
@@ -511,20 +562,20 @@ def sweep_inputs(paths: Dict[str, Path]) -> List[Tuple[str, str, str]]:
     ]
 
 
-def log_sweep_lineage(cfg: SweepConfig, inputs: List[Tuple[str, str, str]], context: str) -> None:
+def log_sweep_lineage(cfg: SweepConfig, inputs: list[tuple[str, str, str]], context: str) -> None:
     """Log the split shares and the digested sweep inputs on the active run.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        inputs (List[Tuple[str, str, str]]): What `sweep_inputs` returned.
-        context (str): Lineage context of the inputs (`training` or `eval`).
+        cfg: The resolved sweep configuration.
+        inputs: What `sweep_inputs` returned.
+        context: Lineage context of the inputs (`training` or `eval`).
     """
     ml.log_params({"corpus_train_share": cfg.corpus_train_share, "heldout_lexeme_share": cfg.heldout_lexeme_share})
     for name, digest, source in inputs:
         ml.log_dataset_input(name, digest, source, context=context)
 
 
-def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
+def log_train_runs(keys: list[str], cfg: SweepConfig) -> None:
     """Log the training sweep to MLflow as a parent run with nested children.
 
     Each child run records the run's training parameters and timing under the
@@ -534,8 +585,8 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
     their training run. A no-op when tracking is disabled or MLflow is absent.
 
     Args:
-        keys (List[str]): Run keys whose `train_stats.json` should be logged.
-        cfg (SweepConfig): The resolved sweep configuration.
+        keys: Run keys whose `train_stats.json` should be logged.
+        cfg: The resolved sweep configuration.
     """
     if not cfg.mlflow_enabled:
         return
@@ -543,6 +594,7 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
         logger.warning("MLflow unavailable; skipping training logging.")
         return
 
+    # collect the tags and shared inputs
     commit = ml.git_commit()
     tags = run_tags(cfg)
     inputs = sweep_inputs(
@@ -552,6 +604,8 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
             "morph-table": cfg.lexicon_path,
         }
     )
+
+    # log one child run per trained tokenizer
     with ml.mlflow_run("sweep-train", tags={**tags, "run_type": "sweep", "phase": "train"}) as parent:
         parent_run_id = parent.info.run_id if parent is not None else None
         for key in keys:
@@ -559,7 +613,7 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
             if not stats_path.exists():
                 logger.warning("No %s for %s; skipping its training log.", TRAIN_STATS_FILENAME, key)
                 continue
-            stats: Dict[str, Any] = json.loads(stats_path.read_text(encoding="utf-8"))
+            stats: dict[str, Any] = json.loads(stats_path.read_text(encoding="utf-8"))
             with ml.mlflow_run(
                 key,
                 nested=True,
@@ -595,9 +649,7 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
                         **{k: stats[k] for k in ("start_rss_bytes", "peak_rss_bytes") if stats.get(k) is not None},
                     }
                 )
-                # Emit the trained tokenizer as a `produced` dataset input so a
-                # downstream pretraining run can declare which tokenizer it
-                # consumed (corpus -> tokenizer -> model -> eval lineage).
+                # a `produced` dataset input lets a pretraining run declare its tokenizer
                 tokenizer_dir = cfg.output_root / key
                 ml.log_dataset_input(
                     f"tokenizer/{key}",
@@ -607,6 +659,11 @@ def log_train_runs(keys: List[str], cfg: SweepConfig) -> None:
                 )
                 child_run_id = child.info.run_id if child is not None else None
             _write_mlflow_link(cfg.output_root / key, cfg.mlflow_experiment, parent_run_id, child_run_id, key)
+
+
+# ===============================
+# Sweep driver
+# ===============================
 
 
 @dataclass
@@ -619,24 +676,26 @@ class TrainSummary:
         failed: Run keys whose training raised.
     """
 
-    trained: List[str] = field(default_factory=list)
-    skipped: List[str] = field(default_factory=list)
-    failed: List[str] = field(default_factory=list)
+    trained: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
 
 
-def sample_alphabet(cfg: SweepConfig, sample_path: Path) -> Optional[FrozenSet[str]]:
+def sample_alphabet(cfg: SweepConfig, sample_path: Path) -> frozenset[str] | None:
     """Return the characters covering `cfg.character_coverage` of the training sample.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        sample_path (Path): Cached training-sample path.
+        cfg: The resolved sweep configuration.
+        sample_path: Cached training-sample path.
 
     Returns:
-        Optional[FrozenSet[str]]: The covering characters, or None when the
+        The covering characters, or None when the
             coverage is 1.0 and every character is kept.
     """
     if cfg.character_coverage >= 1.0:
         return None
+
+    # count the characters and pick the covering alphabet
     counts = count_sample_characters(sample_path)
     alphabet = covering_alphabet(counts, cfg.character_coverage)
     logger.info(
@@ -648,7 +707,7 @@ def sample_alphabet(cfg: SweepConfig, sample_path: Path) -> Optional[FrozenSet[s
     return alphabet
 
 
-def longest_first(keys: List[str]) -> List[str]:
+def longest_first(keys: list[str]) -> list[str]:
     """Order run keys so the slowest runs start first in the pool.
 
     The morphological backends train far slower than the rest, and every
@@ -656,13 +715,13 @@ def longest_first(keys: List[str]) -> List[str]:
     lead.
 
     Args:
-        keys (List[str]): Run keys (`<name>-<vocab>`).
+        keys: Run keys (`<name>-<vocab>`).
 
     Returns:
-        List[str]: The same keys, morphological backends first, largest vocabulary first.
+        The same keys, morphological backends first, largest vocabulary first.
     """
 
-    def cost(key: str) -> Tuple[bool, int]:
+    def cost(key: str) -> tuple[bool, int]:
         name, vocab = parse_sweep_run_key(key)
         return (not name.startswith("morph"), -vocab)
 
@@ -671,7 +730,7 @@ def longest_first(keys: List[str]) -> List[str]:
 
 def train_sweep(
     cfg: SweepConfig,
-    keys: List[str],
+    keys: list[str],
     force: bool = False,
     max_workers: int = 0,
 ) -> TrainSummary:
@@ -682,34 +741,38 @@ def train_sweep(
     pool.
 
     Args:
-        cfg (SweepConfig): The resolved sweep configuration.
-        keys (List[str]): Run keys (`<name>-<vocab>`) to train.
-        force (bool): Retrain runs whose artifacts already exist. The sample
+        cfg: The resolved sweep configuration.
+        keys: Run keys (`<name>-<vocab>`) to train.
+        force: Retrain runs whose artifacts already exist. The sample
             and the morpheme table are reused as they are; only
             `prepare_inputs(force=True)` (the `sample --force` step) redraws them.
-        max_workers (int): Parallel runs. 0=auto (cpu_count // 2), 1=serial.
+        max_workers: Parallel runs. 0=auto (cpu_count // 2), 1=serial.
 
     Returns:
-        TrainSummary: The trained, skipped, and failed run keys.
+        The trained, skipped, and failed run keys.
     """
+    # guard: MLflow must be reachable when tracking is on
     if cfg.mlflow_enabled and not ml.ensure_experiment(cfg.mlflow_experiment, tracking_uri=cfg.mlflow_tracking_uri):
         raise RuntimeError(f"MLflow unreachable for {cfg.mlflow_experiment}; refusing to train runs it cannot log")
+
+    # set up workers and logging
     cfg.output_root.mkdir(parents=True, exist_ok=True)
     workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
+    # prepare the shared inputs
     sample_path, lexicon_path = prepare_inputs(cfg)
     alphabet = sample_alphabet(cfg, sample_path)
     keys = longest_first(keys)
 
-    def kwargs_for(_key: str) -> Dict[str, Any]:
+    def kwargs_for(_key: str) -> dict[str, Any]:
         """Return per-run kwargs for `train_one`.
 
         Args:
-            _key (str): Run key (unused; kwargs are identical per run).
+            _key: Run key (unused; kwargs are identical per run).
 
         Returns:
-            Dict[str, Any]: Keyword arguments for `train_one`.
+            Keyword arguments for `train_one`.
         """
         return {
             "cfg": cfg,
@@ -719,6 +782,7 @@ def train_sweep(
             "alphabet": alphabet,
         }
 
+    # train the runs in a process pool
     results, failures = run_parallel(
         train_one,
         keys,
@@ -729,6 +793,7 @@ def train_sweep(
         log_dir=stamped_log_dir("tokenizer-train"),
     )
 
+    # summarise the outcome
     summary = TrainSummary(
         trained=[k for k, v in results.items() if v is not None],
         skipped=[k for k, v in results.items() if v is None],
@@ -740,7 +805,8 @@ def train_sweep(
         len(summary.skipped),
         summary.failed or "none",
     )
-    # A skipped run with no MLflow link was trained by a run that ended before logging.
+
+    # log the new runs, plus skipped ones trained by a run that ended before logging
     unlogged = [k for k in summary.skipped if not (cfg.output_root / k / MLFLOW_LINK_FILENAME).exists()]
     if summary.trained or unlogged:
         log_train_runs([*summary.trained, *unlogged], cfg)

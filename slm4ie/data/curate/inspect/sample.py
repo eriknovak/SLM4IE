@@ -33,9 +33,10 @@ import json
 import logging
 import random
 from array import array
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 import yaml
@@ -43,11 +44,19 @@ import yaml
 from slm4ie.data.curate.stages import STAGE_DIRS, final_corpus_dir, upstream_stage
 from slm4ie.utils.io import resolve_project_path
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Stages that make a keep-or-drop decision per document. `convert` only
 #: reshapes records and `statistics` writes no corpus, so neither is judged.
-JUDGED_STAGES: Tuple[str, ...] = (
+JUDGED_STAGES: tuple[str, ...] = (
     "language",
     "spam",
     "quality",
@@ -57,11 +66,18 @@ JUDGED_STAGES: Tuple[str, ...] = (
 )
 
 #: The two decisions a judged stage can make about a document.
-DECISIONS: Tuple[str, str] = ("kept", "dropped")
+DECISIONS: tuple[str, str] = ("kept", "dropped")
 
 #: Bytes read from disk at a time. The corpus lives on a spinning disk, where
 #: large reads keep concurrent shard scans from turning into seeks.
 READ_BUFFER: int = 1 << 23
+
+#: Keeps a Python `hash` within 64 bits.
+_HASH_MASK: int = 0xFFFFFFFFFFFFFFFF
+
+# ===============================
+# Helper functions
+# ===============================
 
 
 def _cell_rng(seed: int, *key_parts: str) -> random.Random:
@@ -79,7 +95,7 @@ def _cell_rng(seed: int, *key_parts: str) -> random.Random:
     return random.Random(int.from_bytes(digest, "big"))
 
 
-def _iter_shard(path: Path) -> Iterator[Dict[str, Any]]:
+def _iter_shard(path: Path) -> Iterator[dict[str, Any]]:
     """Yield every document in a gzipped JSONL shard.
 
     Args:
@@ -94,7 +110,7 @@ def _iter_shard(path: Path) -> Iterator[Dict[str, Any]]:
                 yield json.loads(line)
 
 
-def _field(doc: Dict[str, Any], key: str) -> Optional[str]:
+def _field(doc: dict[str, Any], key: str) -> str | None:
     """Read a field that may sit at the top level or inside `metadata`.
 
     The convert stage writes `dataset` and `domain` as top-level keys; every
@@ -113,7 +129,7 @@ def _field(doc: Dict[str, Any], key: str) -> Optional[str]:
     return None if value is None else str(value)
 
 
-def _reservoir_add(reservoir: List[Any], item: Any, seen: int, size: int, rng: random.Random) -> None:
+def _reservoir_add(reservoir: list[Any], item: Any, seen: int, size: int, rng: random.Random) -> None:
     """Offer one item to a reservoir sample of fixed size.
 
     Args:
@@ -131,7 +147,7 @@ def _reservoir_add(reservoir: List[Any], item: Any, seen: int, size: int, rng: r
         reservoir[index] = item
 
 
-def resolve_sample_dir(config_path: Path, override: Optional[Path] = None) -> Path:
+def resolve_sample_dir(config_path: Path, override: Path | None = None) -> Path:
     """Resolve the folder holding the stage outputs.
 
     Args:
@@ -158,7 +174,7 @@ def resolve_sample_dir(config_path: Path, override: Optional[Path] = None) -> Pa
     return resolve_project_path(output_dir)
 
 
-def roster(output_dir: Path) -> List[str]:
+def roster(output_dir: Path) -> list[str]:
     """List the datasets that reached the final corpus.
 
     Args:
@@ -173,7 +189,7 @@ def roster(output_dir: Path) -> List[str]:
     return sorted(child.name for child in final_dir.iterdir() if child.is_dir())
 
 
-def _shards(output_dir: Path, stage: str, dataset: str) -> List[Path]:
+def _shards(output_dir: Path, stage: str, dataset: str) -> list[Path]:
     """List a stage's shards for one dataset, in sorted order.
 
     Args:
@@ -186,6 +202,11 @@ def _shards(output_dir: Path, stage: str, dataset: str) -> List[Path]:
     """
     stage_dir = output_dir / STAGE_DIRS[stage] / dataset
     return sorted(stage_dir.glob("*.jsonl.gz")) if stage_dir.is_dir() else []
+
+
+# ===============================
+# Survivor index
+# ===============================
 
 
 class SurvivorIndex:
@@ -204,7 +225,7 @@ class SurvivorIndex:
     def __init__(self) -> None:
         """Start an empty index."""
         self._hashes = array("Q")
-        self._sorted: Optional[Any] = None
+        self._sorted: Any | None = None
 
     def add(self, document_id: str) -> None:
         """Record one surviving id.
@@ -212,7 +233,7 @@ class SurvivorIndex:
         Args:
             document_id: The document's id.
         """
-        self._hashes.append(hash(document_id) & 0xFFFFFFFFFFFFFFFF)
+        self._hashes.append(hash(document_id) & _HASH_MASK)
 
     def freeze(self) -> None:
         """Sort the recorded hashes so the index can be queried."""
@@ -229,8 +250,8 @@ class SurvivorIndex:
             probability around 1e-5 over a corpus this size, so a rare drop
             may read as a survivor; none is ever invented the other way.
         """
-        # An int needle < 2**63 makes searchsorted recast the whole index.
-        needle = np.uint64(hash(document_id) & 0xFFFFFFFFFFFFFFFF)
+        # an int needle < 2**63 makes searchsorted recast the whole index
+        needle = np.uint64(hash(document_id) & _HASH_MASK)
         position = int(np.searchsorted(self._sorted, needle))
         return position < len(self._sorted) and bool(self._sorted[position] == needle)
 
@@ -243,7 +264,12 @@ class SurvivorIndex:
         return len(self._hashes)
 
 
-def _row(doc: Dict[str, Any], dataset: str, stage: str, decision: str, shard: Path, max_chars: int) -> Dict[str, Any]:
+# ===============================
+# Sampling
+# ===============================
+
+
+def _row(doc: dict[str, Any], dataset: str, stage: str, decision: str, shard: Path, max_chars: int) -> dict[str, Any]:
     """Build one sample row from a document.
 
     Args:
@@ -278,7 +304,7 @@ def sample_cell(
     shards_per_cell: int,
     max_chars: int,
     seed: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Draw the kept and dropped samples for one dataset and stage.
 
     Reads the stage's whole output for this dataset, which gives both the kept
@@ -310,7 +336,8 @@ def sample_cell(
         logger.warning("[%s/%s] no shards; skipped", dataset, stage)
         return []
 
-    kept: List[Dict[str, Any]] = []
+    # sample the kept documents and index the survivors
+    kept: list[dict[str, Any]] = []
     kept_rng = _cell_rng(seed, dataset, stage, "kept")
     kept_seen = 0
     survivors = SurvivorIndex()
@@ -321,12 +348,14 @@ def sample_cell(
             survivors.add(doc["id"])
     survivors.freeze()
 
+    # pick the input shards to search for drops
     inputs = _shards(output_dir, previous, dataset)
     chooser = _cell_rng(seed, dataset, stage, "shards")
     if 0 < shards_per_cell < len(inputs):
         inputs = sorted(chooser.sample(inputs, shards_per_cell))
 
-    dropped: List[Dict[str, Any]] = []
+    # sample the documents the index does not know
+    dropped: list[dict[str, Any]] = []
     dropped_rng = _cell_rng(seed, dataset, stage, "dropped")
     dropped_seen = read = 0
     for shard in inputs:
@@ -352,7 +381,7 @@ def sample_cell(
     return kept + dropped
 
 
-def _merge(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Collapse rows that describe the same document.
 
     A document kept by one stage is usually kept by the next, so the same
@@ -366,13 +395,16 @@ def _merge(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         One row per document id, sorted by id, with the cells merged and
         sorted.
     """
-    merged: Dict[str, Dict[str, Any]] = {}
+    # merge the cells of each document
+    merged: dict[str, dict[str, Any]] = {}
     for row in rows:
         existing = merged.get(row["id"])
         if existing is None:
             merged[row["id"]] = row
             continue
         existing["cells"].extend(row["cells"])
+
+    # sort the cells of each document
     for row in merged.values():
         row["cells"].sort(key=lambda cell: (cell["stage"], cell["decision"]))
     return [merged[key] for key in sorted(merged)]
@@ -395,6 +427,7 @@ def _cache_dir(destination: Path, per_cell: int, shards_per_cell: int, max_chars
     Returns:
         Path to the cache folder beside *destination*.
     """
+    # fold the settings into the folder name
     settings = f"{per_cell}-{shards_per_cell}-{max_chars}-{seed}"
     digest = hashlib.blake2b(settings.encode("utf-8"), digest_size=4).hexdigest()
     return destination.parent / f"{destination.stem}.cells-{digest}"
@@ -414,7 +447,7 @@ def _cell_file(cache: Path, dataset: str, stage: str) -> Path:
     return cache / f"{dataset}__{stage}.jsonl"
 
 
-def _read_cell(cache: Path, dataset: str, stage: str) -> List[Dict[str, Any]]:
+def _read_cell(cache: Path, dataset: str, stage: str) -> list[dict[str, Any]]:
     """Read a cell's drawn rows back from the cache.
 
     Args:
@@ -428,22 +461,22 @@ def _read_cell(cache: Path, dataset: str, stage: str) -> List[Dict[str, Any]]:
     path = _cell_file(cache, dataset, stage)
     if not path.is_file():
         return []
-    # split("\n"), not splitlines(): document text carries \u2028 and friends,
-    # which splitlines() would treat as line breaks and tear a JSON row in half.
+    # split on \n, not splitlines(): \u2028 in document text would tear a JSON row
     return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
-def _draw_cell(argument: Tuple[Path, str, str, int, int, int, int, Path]) -> None:
+def _draw_cell(argument: tuple[Path, str, str, int, int, int, int, Path]) -> None:
     """Draw one cell and write it to the cache.
 
     Args:
         argument: The cell's arguments for `sample_cell`, with the cache folder
             last. Packed into one tuple so the call maps over a process pool.
     """
+    # draw the cell
     output_dir, dataset, stage, per_cell, shards_per_cell, max_chars, seed, cache = argument
     rows = sample_cell(output_dir, dataset, stage, per_cell, shards_per_cell, max_chars, seed)
     path = _cell_file(cache, dataset, stage)
-    # Written aside, then moved: a cell file exists only once it is complete.
+    # write aside, then move: a cell file exists only once it is complete
     partial = path.with_suffix(".partial")
     partial.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
     partial.replace(path)
@@ -452,14 +485,14 @@ def _draw_cell(argument: Tuple[Path, str, str, int, int, int, int, Path]) -> Non
 def draw_stratified_sample(
     output_dir: Path,
     destination: Path,
-    datasets: Optional[List[str]] = None,
+    datasets: list[str] | None = None,
     stages: Sequence[str] = JUDGED_STAGES,
     per_cell: int = 40,
     shards_per_cell: int = 3,
     max_chars: int = 2000,
     seed: int = 20260916,
     workers: int = 1,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Draw a `dataset x stage x decision` sample and write it as JSONL.
 
     Args:
@@ -490,16 +523,19 @@ def draw_stratified_sample(
     if unknown:
         raise ValueError(f"not judged stages: {', '.join(unknown)}; expected {', '.join(JUDGED_STAGES)}")
 
+    # list the cells to draw
     keys = datasets or roster(output_dir)
     cells = [(dataset, stage) for dataset in sorted(keys) for stage in stages]
     logger.info("sampling %d cells over %d dataset(s) with %d worker(s)", len(cells), len(keys), workers)
 
+    # skip the cells already in the cache
     cache = _cache_dir(destination, per_cell, shards_per_cell, max_chars, seed)
     cache.mkdir(parents=True, exist_ok=True)
     pending = [cell for cell in cells if not _cell_file(cache, *cell).is_file()]
     if len(pending) < len(cells):
         logger.info("%d cell(s) already drawn in %s; %d to go", len(cells) - len(pending), cache, len(pending))
 
+    # draw the pending cells
     arguments = [
         (output_dir, dataset, stage, per_cell, shards_per_cell, max_chars, seed, cache) for dataset, stage in pending
     ]
@@ -510,6 +546,7 @@ def draw_stratified_sample(
         for argument in arguments:
             _draw_cell(argument)
 
+    # merge the cells and write the sample
     rows = [row for cell in cells for row in _read_cell(cache, *cell)]
     merged = _merge(rows)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -517,6 +554,7 @@ def draw_stratified_sample(
         for row in merged:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+    # count the sample
     counts = {
         "documents": len(merged),
         "cells": len(rows),

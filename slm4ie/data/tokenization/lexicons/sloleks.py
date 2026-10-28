@@ -25,8 +25,13 @@ extract/datatrove/curate pipelines.
 """
 
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
+
+# ===============================
+# XML helpers
+# ===============================
 
 
 def _local_name(tag: str) -> str:
@@ -37,22 +42,22 @@ def _local_name(tag: str) -> str:
             (e.g. `"{http://www.tei-c.org/ns/1.0}entry"`).
 
     Returns:
-        str: The local name with any namespace prefix stripped.
+        The local name with any namespace prefix stripped.
     """
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
     return tag
 
 
-def _text_or_none(elem: Optional[ET.Element]) -> Optional[str]:
+def _text_or_none(elem: ET.Element | None) -> str | None:
     """Return stripped text content of *elem*, or None when empty.
 
     Args:
         elem: An XML element, or None.
 
     Returns:
-        Optional[str]: The trimmed text content, or None when the
-            element is missing or its text is blank.
+        The trimmed text content, or None when the element is missing or
+        its text is blank.
     """
     if elem is None or elem.text is None:
         return None
@@ -68,14 +73,14 @@ def _iter_children(elem: ET.Element, name: str) -> Iterator[ET.Element]:
         name: The local (namespace-stripped) tag name to match.
 
     Yields:
-        ET.Element: Matching direct child elements, in document order.
+        Matching direct child elements, in document order.
     """
     for child in elem:
         if _local_name(child.tag) == name:
             yield child
 
 
-def _first_descendant(elem: ET.Element, path: List[str]) -> Optional[ET.Element]:
+def _first_descendant(elem: ET.Element, path: list[str]) -> ET.Element | None:
     """Return the first element reached by following *path* of local names.
 
     Args:
@@ -84,10 +89,10 @@ def _first_descendant(elem: ET.Element, path: List[str]) -> Optional[ET.Element]
             against direct children of the previous level.
 
     Returns:
-        Optional[ET.Element]: The element at the end of the first matching
-            chain, or None when any level is absent.
+        The element at the end of the first matching chain, or None when
+        any level is absent.
     """
-    current: Optional[ET.Element] = elem
+    current: ET.Element | None = elem
     for name in path:
         if current is None:
             return None
@@ -95,7 +100,7 @@ def _first_descendant(elem: ET.Element, path: List[str]) -> Optional[ET.Element]
     return current
 
 
-def _entry_id(entry: ET.Element) -> Optional[str]:
+def _entry_id(entry: ET.Element) -> str | None:
     """Return a stable identifier for a Sloleks `<entry>`.
 
     Prefers the `sloleksId` of the `head/lexicalUnit` element, then its
@@ -105,7 +110,7 @@ def _entry_id(entry: ET.Element) -> Optional[str]:
         entry: A Sloleks `<entry>` element.
 
     Returns:
-        Optional[str]: The lexical-unit identifier, or None when absent.
+        The lexical-unit identifier, or None when absent.
     """
     head = next(_iter_children(entry, "head"), None)
     if head is None:
@@ -116,35 +121,33 @@ def _entry_id(entry: ET.Element) -> Optional[str]:
     return unit.get("sloleksId") or unit.get("sloleksKey")
 
 
-def _entry_lemma(entry: ET.Element) -> Optional[str]:
+def _entry_lemma(entry: ET.Element) -> str | None:
     """Return the headword lemma of a Sloleks `<entry>`.
 
     Args:
         entry: A Sloleks `<entry>` element.
 
     Returns:
-        Optional[str]: The lemma text from `head/headword/lemma`, or None
-            when absent.
+        The lemma text from `head/headword/lemma`, or None when absent.
     """
     lemma = _first_descendant(entry, ["head", "headword", "lemma"])
     return _text_or_none(lemma)
 
 
-def _wordform_msd(wordform: ET.Element) -> Optional[str]:
+def _wordform_msd(wordform: ET.Element) -> str | None:
     """Return the JOS MSD of a `<wordForm>` element.
 
     Args:
         wordform: A `<wordForm>` element.
 
     Returns:
-        Optional[str]: The text of the direct `<msd>` child, or None when
-            absent.
+        The text of the direct `<msd>` child, or None when absent.
     """
     msd = next(_iter_children(wordform, "msd"), None)
     return _text_or_none(msd)
 
 
-def _wordform_orth_forms(wordform: ET.Element) -> List[str]:
+def _wordform_orth_forms(wordform: ET.Element) -> list[str]:
     """Return the orthographic surface forms of a `<wordForm>`.
 
     Reads only `formRepresentations/orthographyList/orthography/form`,
@@ -155,10 +158,10 @@ def _wordform_orth_forms(wordform: ET.Element) -> List[str]:
         wordform: A `<wordForm>` element.
 
     Returns:
-        List[str]: Orthographic form strings, in document order (one per
-            `<orthography>` variant).
+        Orthographic form strings, in document order (one per
+        `<orthography>` variant).
     """
-    forms: List[str] = []
+    forms: list[str] = []
     for reps in _iter_children(wordform, "formRepresentations"):
         for orth_list in _iter_children(reps, "orthographyList"):
             for orth in _iter_children(orth_list, "orthography"):
@@ -169,23 +172,23 @@ def _wordform_orth_forms(wordform: ET.Element) -> List[str]:
     return forms
 
 
-def _entry_to_record(entry: ET.Element) -> Optional[Dict[str, Any]]:
+def _entry_to_record(entry: ET.Element) -> dict[str, Any] | None:
     """Convert a single Sloleks `<entry>` element into a JSONL-ready record.
 
     Args:
         entry: An `<entry>` element from a Sloleks lexicon file.
 
     Returns:
-        Optional[Dict[str, Any]]: A record with `entry_id`, `lemma`,
-            `lemma_msd`, and `forms` keys; or None when the entry has no
-            lemma or no orthographic forms.
+        A record with `entry_id`, `lemma`, `lemma_msd`, and `forms` keys; or
+        None when the entry has no lemma or no orthographic forms.
     """
     lemma = _entry_lemma(entry)
     if lemma is None:
         return None
 
-    forms: List[Dict[str, Optional[str]]] = []
-    lemma_msd: Optional[str] = None
+    # collect the orthographic forms
+    forms: list[dict[str, str | None]] = []
+    lemma_msd: str | None = None
 
     body = next(_iter_children(entry, "body"), None)
     if body is not None:
@@ -200,8 +203,7 @@ def _entry_to_record(entry: ET.Element) -> Optional[Dict[str, Any]]:
     if not forms:
         return None
 
-    # Fall back to the first form's MSD when no form orthographically
-    # matches the headword (e.g. suppletive or multi-word lemmas).
+    # fall back to the first form's MSD: suppletive or multi-word lemmas match no form
     if lemma_msd is None:
         lemma_msd = forms[0]["msd"]
 
@@ -213,7 +215,12 @@ def _entry_to_record(entry: ET.Element) -> Optional[Dict[str, Any]]:
     }
 
 
-def iter_sloleks_entries(xml_path: Path) -> Iterator[Dict[str, Any]]:
+# ===============================
+# Public parsers
+# ===============================
+
+
+def iter_sloleks_entries(xml_path: Path) -> Iterator[dict[str, Any]]:
     """Stream entries from a single Sloleks lexicon XML file.
 
     Uses `xml.etree.ElementTree.iterparse` so memory use stays bounded
@@ -223,10 +230,11 @@ def iter_sloleks_entries(xml_path: Path) -> Iterator[Dict[str, Any]]:
         xml_path: Path to a Sloleks lexicon XML file.
 
     Yields:
-        Dict[str, Any]: One record per `<entry>` element with a lemma and
-            at least one orthographic form, with `entry_id`, `lemma`,
-            `lemma_msd`, and `forms` keys.
+        One record per `<entry>` element with a lemma and at least one
+        orthographic form, with `entry_id`, `lemma`, `lemma_msd`, and
+        `forms` keys.
     """
+    # stream the entries
     context = ET.iterparse(str(xml_path), events=("end",))
     for _, elem in context:
         if _local_name(elem.tag) != "entry":
@@ -237,7 +245,7 @@ def iter_sloleks_entries(xml_path: Path) -> Iterator[Dict[str, Any]]:
         elem.clear()
 
 
-def iter_sloleks_dir(root: Path) -> Iterator[Dict[str, Any]]:
+def iter_sloleks_dir(root: Path) -> Iterator[dict[str, Any]]:
     """Stream entries from every Sloleks XML file under *root*.
 
     Walks recursively, sorts files by name for determinism, and skips
@@ -248,8 +256,9 @@ def iter_sloleks_dir(root: Path) -> Iterator[Dict[str, Any]]:
             (typically `/vault/data/SLM4IE/raw/sloleks/`).
 
     Yields:
-        Dict[str, Any]: Records as produced by `iter_sloleks_entries`.
+        Records as produced by `iter_sloleks_entries`.
     """
+    # walk the files in name order
     files = sorted(root.rglob("*.xml"))
     for path in files:
         if path.name.endswith("_mezzanine.xml"):

@@ -74,13 +74,19 @@ Example:
 """
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
+
 from lxml import etree
 
 from slm4ie.data.extract.extractors import FileBasedExtractor, register_extractor
 from slm4ie.data.extract.metadata_table import MetadataTable
 from slm4ie.data.schema import Annotations, Document, Token, render_sentence
+
+# ===============================
+# Defaults
+# ===============================
 
 _TEI_NS = "http://www.tei-c.org/ns/1.0"
 _XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -101,8 +107,7 @@ _LARGE_FILE_BYTES = 64 * 1024 * 1024
 _NAME_TAG = f"{{{_TEI_NS}}}name"
 _XML_ID = f"{{{_XML_NS}}}id"
 
-# MULTEXT-East v6 category code (1st char of compact MSD) → UPOS.
-# Refined by the 2nd char in `_mte_to_upos` for N/V/C distinctions.
+# MULTEXT-East v6 category (1st char of compact MSD) to UPOS; `_mte_to_upos` refines it
 _MTE_CATEGORY_UPOS = {
     "N": "NOUN",
     "V": "VERB",
@@ -122,28 +127,33 @@ _MTE_CATEGORY_UPOS = {
 logger = logging.getLogger(__name__)
 
 
+# ===============================
+# Helper functions
+# ===============================
+
+
 def _parse_msd(
-    msd: Optional[str],
-) -> Tuple[Optional[str], Optional[str]]:
+    msd: str | None,
+) -> tuple[str | None, str | None]:
     """Parse a morphosyntactic description string into UPOS and feats.
 
     The UPosTag=X part is extracted as UPOS; all remaining Key=Value
     parts are rejoined with "|" as the feats string.
 
     Args:
-        msd (Optional[str]): MSD string such as
+        msd: MSD string such as
             "UPosTag=NOUN|Case=Nom|Gender=Masc", or None.
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (upos, feats) where
-            either may be None if not present.
+        `(upos, feats)`; either may be None if not present.
     """
     if not msd:
         return None, None
 
+    # split the MSD into UPOS and feats
     parts = msd.split("|")
-    upos: Optional[str] = None
-    remaining: List[str] = []
+    upos: str | None = None
+    remaining: list[str] = []
 
     for part in parts:
         if part.startswith("UPosTag="):
@@ -155,7 +165,7 @@ def _parse_msd(
     return upos, feats
 
 
-def _mte_to_upos(mte: str) -> Optional[str]:
+def _mte_to_upos(mte: str) -> str | None:
     """Map a MULTEXT-East v6 compact MSD to a UPOS tag.
 
     Uses the first character (category) for the base mapping and the
@@ -163,19 +173,21 @@ def _mte_to_upos(mte: str) -> Optional[str]:
     CCONJ vs SCONJ.
 
     Args:
-        mte (str): Compact MSD such as "Ncnsn" or "Z".
+        mte: Compact MSD such as "Ncnsn" or "Z".
 
     Returns:
-        Optional[str]: UPOS tag, or None if the category is unknown.
+        UPOS tag, or None if the category is unknown.
     """
     if not mte:
         return None
 
+    # map the category
     cat = mte[0]
     upos = _MTE_CATEGORY_UPOS.get(cat)
     if upos is None:
         return None
 
+    # refine by the type character
     if len(mte) >= 2:
         sub = mte[1]
         if cat == "N" and sub == "p":
@@ -189,8 +201,8 @@ def _mte_to_upos(mte: str) -> Optional[str]:
 
 
 def _parse_ana(
-    ana: Optional[str],
-) -> Tuple[Optional[str], Optional[str]]:
+    ana: str | None,
+) -> tuple[str | None, str | None]:
     """Parse a TEI ana attribute into UPOS and feats.
 
     Looks for a mte:<descriptor> value (MULTEXT-East v6 compact MSD,
@@ -198,11 +210,10 @@ def _parse_ana(
     in feats as MTE=<descriptor>.
 
     Args:
-        ana (Optional[str]): The ana attribute value, or None.
+        ana: The ana attribute value, or None.
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (upos, feats) where
-            either may be None if no MTE descriptor is found.
+        `(upos, feats)`; either may be None if no MTE descriptor is found.
     """
     if not ana:
         return None, None
@@ -219,16 +230,16 @@ def _parse_ana(
 
 def _parse_morph(
     elem: "etree._Element",
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Extract UPOS and feats from a token element.
 
     Prefers msd (ParlaMint, siParl) over ana (KAS).
 
     Args:
-        elem (etree._Element): A <w> or <pc> element.
+        elem: A <w> or <pc> element.
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (upos, feats).
+        (upos, feats).
     """
     msd = elem.get("msd")
     if msd:
@@ -238,7 +249,7 @@ def _parse_morph(
 
 def _extract_tokens_from_sentence(
     s_elem: "etree._Element",
-) -> List[Token]:
+) -> list[Token]:
     """Extract Token objects from a <s> element.
 
     Iterates direct and <name>-wrapped children to find all <w> and
@@ -251,14 +262,15 @@ def _extract_tokens_from_sentence(
     is right-joined or B is left-joined.
 
     Args:
-        s_elem (etree._Element): The <s> XML element.
+        s_elem: The <s> XML element.
 
     Returns:
-        List[Token]: Extracted tokens in document order, with
+        Extracted tokens in document order, with
             `space_after` set from the `join` attributes.
     """
-    tokens: List[Token] = []
-    joins: List[Optional[str]] = []
+    # collect the tokens and their join attributes
+    tokens: list[Token] = []
+    joins: list[str | None] = []
 
     def _append(elem: "etree._Element") -> None:
         upos, feats = _parse_morph(elem)
@@ -280,6 +292,7 @@ def _extract_tokens_from_sentence(
                 if wc.tag in (_W_TAG, _PC_TAG):
                     _append(wc)
 
+    # drop the space where a join attribute says so
     for i, join in enumerate(joins):
         next_join = joins[i + 1] if i + 1 < len(joins) else None
         if join in ("right", "both") or next_join in ("left", "both"):
@@ -289,13 +302,13 @@ def _extract_tokens_from_sentence(
 
 
 def _build_document(
-    s_elems: List["etree._Element"],
+    s_elems: list["etree._Element"],
     doc_id: str,
     source: str,
     domain: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    native_id: Optional[str] = None,
-) -> Optional[Document]:
+    metadata: dict[str, Any] | None = None,
+    native_id: str | None = None,
+) -> Document | None:
     """Combine `<s>` siblings into one document-level Document.
 
     Sentence texts are reconstructed from each sentence's tokens,
@@ -305,26 +318,27 @@ def _build_document(
     `[start, end]` token-index spans for every contained sentence.
 
     Args:
-        s_elems (List[etree._Element]): The `<s>` elements
+        s_elems: The `<s>` elements
             that constitute this document, in reading order.
-        doc_id (str): Identifier for the resulting Document.
-        source (str): Dataset key.
-        domain (str): Domain label.
-        metadata (Optional[Dict[str, Any]]): Optional metadata to
+        doc_id: Identifier for the resulting Document.
+        source: Dataset key.
+        domain: Domain label.
+        metadata: Optional metadata to
             attach to the Document. For utterance-level docs this
             typically merges per-file `MetadataTable` fields with
             the utterance's `who` / `ana` attributes.
-        native_id (Optional[str]): The element's own `xml:id` when
+        native_id: The element's own `xml:id` when
             the document is one `<u>`; None when it is a whole file
             and `doc_id` is the filename stem.
 
     Returns:
-        Optional[Document]: One Document, or `None` when every
+        One Document, or `None` when every
             `<s>` element parsed to zero tokens.
     """
-    sentence_texts: List[str] = []
-    flat_tokens: List[Token] = []
-    spans: List[List[int]] = []
+    # aggregate the sentences
+    sentence_texts: list[str] = []
+    flat_tokens: list[Token] = []
+    spans: list[list[int]] = []
     cursor = 0
 
     for s_elem in s_elems:
@@ -340,6 +354,7 @@ def _build_document(
     if not flat_tokens:
         return None
 
+    # build the document
     annotations = Annotations(tokens=flat_tokens, sentences=spans)
     return Document(
         text="\n".join(sentence_texts),
@@ -357,8 +372,8 @@ def _stream_per_file_document(
     doc_id: str,
     source: str,
     domain: str,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Tuple[Optional[Document], bool]:
+    metadata: dict[str, Any] | None = None,
+) -> tuple[Document | None, bool]:
     """Stream-aggregate a large per-file annotated TEI into one Document.
 
     Reads `<s>` elements via `etree.iterparse` (with `huge_tree`) and
@@ -374,22 +389,23 @@ def _stream_per_file_document(
     wrapped in a `<u>`, or if the file has no `<s>` at all.
 
     Args:
-        filepath (Path): Path to the large TEI XML file.
-        doc_id (str): Identifier for the produced Document.
-        source (str): Dataset key.
-        domain (str): Domain label.
-        metadata (Optional[Dict[str, Any]]): Per-file metadata table fields.
+        filepath: Path to the large TEI XML file.
+        doc_id: Identifier for the produced Document.
+        source: Dataset key.
+        domain: Domain label.
+        metadata: Per-file metadata table fields.
 
     Returns:
-        Tuple[Optional[Document], bool]: `(document, handled)`. When
+        `(document, handled)`. When
             `handled` is True the streaming path applies: `document` is
             the aggregated Document, or `None` if every `<s>` parsed to
             zero tokens. When `handled` is False the file is not
             per-file annotated and the caller must use the full-DOM path.
     """
-    sentence_texts: List[str] = []
-    flat_tokens: List[Token] = []
-    spans: List[List[int]] = []
+    # stream the sentences
+    sentence_texts: list[str] = []
+    flat_tokens: list[Token] = []
+    spans: list[list[int]] = []
     cursor = 0
     saw_sentence = False
 
@@ -399,8 +415,7 @@ def _stream_per_file_document(
             saw_sentence = True
             parent = s_elem.getparent()
             if parent is not None and parent.tag == _U_TAG:
-                # Utterance-structured; per-file aggregation does not
-                # apply. Caller falls back to the full-DOM dispatch.
+                # utterance-structured: the caller falls back to the full-DOM path
                 return None, False
 
         tokens = _extract_tokens_from_sentence(s_elem)
@@ -411,19 +426,19 @@ def _stream_per_file_document(
             cursor += len(tokens)
             spans.append([start, cursor - 1])
 
-        # Free the parsed sentence and any already-processed siblings so
-        # the in-memory tree never grows past the current sentence.
+        # free the parsed sentence so the tree never outgrows one sentence
         s_elem.clear()
         while s_elem.getprevious() is not None:
             del s_elem.getparent()[0]
 
     if not saw_sentence:
-        # No <s> at all: plain or empty. Let the caller decide.
+        # no <s> at all: plain or empty, the caller decides
         return None, False
 
     if not flat_tokens:
         return None, True
 
+    # build the document
     annotations = Annotations(tokens=flat_tokens, sentences=spans)
     document = Document(
         text="\n".join(sentence_texts),
@@ -436,18 +451,18 @@ def _stream_per_file_document(
     return document, True
 
 
-def _utterance_metadata(u_elem: "etree._Element") -> Dict[str, Any]:
+def _utterance_metadata(u_elem: "etree._Element") -> dict[str, Any]:
     """Return `Document.metadata` derived from a `<u>` element.
 
     Args:
-        u_elem (etree._Element): The `<u>` element.
+        u_elem: The `<u>` element.
 
     Returns:
-        Dict[str, Any]: `who` and `ana` attribute values when
+        `who` and `ana` attribute values when
             present; the key is omitted when the attribute is absent
             so that callers can use `"key" in metadata` cleanly.
     """
-    md: Dict[str, Any] = {}
+    md: dict[str, Any] = {}
     who = u_elem.get("who")
     if who is not None:
         md["who"] = who
@@ -461,7 +476,7 @@ def _parse_annotated_with_utterances(
     root: "etree._Element",
     source: str,
     domain: str,
-    extra_metadata: Optional[Dict[str, Any]] = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> Iterator[Document]:
     """Yield one Document per `<u>` element in an annotated TEI tree.
 
@@ -471,18 +486,19 @@ def _parse_annotated_with_utterances(
     top of any per-file fields supplied via *extra_metadata*.
 
     Args:
-        root (etree._Element): Parsed XML root element.
-        source (str): Dataset key.
-        domain (str): Domain label.
-        extra_metadata (Optional[Dict[str, Any]]): Per-file fields
+        root: Parsed XML root element.
+        source: Dataset key.
+        domain: Domain label.
+        extra_metadata: Per-file fields
             from `MetadataTable`. Utterance attributes (`who`,
             `ana`) take precedence on key collision since they are
             more specific.
 
     Yields:
-        Document: One document per non-empty `<u>`.
+        One document per non-empty `<u>`.
     """
-    base: Dict[str, Any] = dict(extra_metadata) if extra_metadata else {}
+    # build one document per utterance
+    base: dict[str, Any] = dict(extra_metadata) if extra_metadata else {}
     for u_elem in root.iter(_U_TAG):
         s_elems = list(u_elem.iter(_S_TAG))
         native_id = u_elem.get(_XML_ID)
@@ -504,7 +520,7 @@ def _parse_annotated_per_file(
     source: str,
     domain: str,
     doc_id: str,
-    extra_metadata: Optional[Dict[str, Any]] = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> Iterator[Document]:
     """Yield exactly one Document by aggregating every `<s>` in *root*.
 
@@ -513,15 +529,15 @@ def _parse_annotated_per_file(
     source filename's stem).
 
     Args:
-        root (etree._Element): Parsed XML root element.
-        source (str): Dataset key.
-        domain (str): Domain label.
-        doc_id (str): Identifier for the single produced Document.
-        extra_metadata (Optional[Dict[str, Any]]): Per-file fields
+        root: Parsed XML root element.
+        source: Dataset key.
+        domain: Domain label.
+        doc_id: Identifier for the single produced Document.
+        extra_metadata: Per-file fields
             from `MetadataTable`, copied onto the produced Document.
 
     Yields:
-        Document: One document per file, or nothing if the file had
+        One document per file, or nothing if the file had
             no token-bearing sentences.
     """
     s_elems = list(root.iter(_S_TAG))
@@ -540,7 +556,7 @@ def _parse_plain(
     root: "etree._Element",
     source: str,
     domain: str,
-    extra_metadata: Optional[Dict[str, Any]] = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> Iterator[Document]:
     """Yield Documents from a plain TEI tree (no <w> elements).
 
@@ -552,18 +568,20 @@ def _parse_plain(
     comes from the xml:id attribute on `<p>`.
 
     Args:
-        root (etree._Element): Parsed XML root element.
-        source (str): Dataset key.
-        domain (str): Domain label.
-        extra_metadata (Optional[Dict[str, Any]]): Per-document
+        root: Parsed XML root element.
+        source: Dataset key.
+        domain: Domain label.
+        extra_metadata: Per-document
             fields copied into every yielded Document.metadata.
 
     Yields:
-        Document: One document per non-empty body paragraph.
+        One document per non-empty body paragraph.
     """
     body = root.find(f".//{_BODY_TAG}")
     if body is None:
         return
+
+    # build one document per paragraph
     for p_elem in body.iter(_P_TAG):
         text = "".join(p_elem.itertext()).strip()
         if not text:
@@ -577,6 +595,11 @@ def _parse_plain(
             native_id=doc_id,
             metadata=dict(extra_metadata) if extra_metadata else {},
         )
+
+
+# ===============================
+# Extractor class
+# ===============================
 
 
 class TeiExtractor(FileBasedExtractor):
@@ -597,49 +620,46 @@ class TeiExtractor(FileBasedExtractor):
     download catalogue but supported).
     """
 
-    def iter_input_files(self, input_dir: Path) -> List[Path]:
+    def iter_input_files(self, input_dir: Path) -> list[Path]:
         """Return sorted .xml files under input_dir.
 
         Args:
-            input_dir (Path): Directory searched recursively.
+            input_dir: Directory searched recursively.
 
         Returns:
-            List[Path]: Sorted .xml file paths.
+            Sorted .xml file paths.
         """
         return sorted(input_dir.rglob("*.xml"))
 
     def extract_files(
         self,
-        files: List[Path],
+        files: list[Path],
         source: str,
         domain: str,
         input_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Iterator[Document]:
         """Yield Documents from the given TEI XML files.
 
         Args:
-            files (List[Path]): .xml files to parse, in order.
-            source (str): Dataset key assigned to every Document.
-            domain (str): Domain label assigned to every Document.
-            input_dir (Path): Dataset root, used to locate an optional
+            files: .xml files to parse, in order.
+            source: Dataset key assigned to every Document.
+            domain: Domain label assigned to every Document.
+            input_dir: Dataset root, used to locate an optional
                 `MetadataTable` TSV.
-            metadata (Optional[Dict[str, Any]]): Optional `metadata:`
+            metadata: Optional `metadata:`
                 config block describing an external per-document TSV.
 
         Yields:
-            Document: Extracted documents in unified schema format.
+            Extracted documents in unified schema format.
         """
-        table: Optional[MetadataTable] = MetadataTable.from_config(input_dir, metadata) if metadata else None
+        table: MetadataTable | None = MetadataTable.from_config(input_dir, metadata) if metadata else None
 
         for filepath in files:
             extra = table.get_for_path(filepath) if table else {}
 
-            # Large files would build a multi-GB DOM under etree.parse,
-            # OOMing the extractor under parallel sharding. Stream them
-            # with bounded memory. Non per-file structures (utterance /
-            # plain) — none of which are large in practice — fall through
-            # to the full-DOM path below.
+            # stream large files: a multi-GB DOM would OOM the extractor under sharding
+            # (utterance and plain files are never large; they fall through to the DOM path)
             try:
                 is_large = filepath.stat().st_size > _LARGE_FILE_BYTES
             except OSError:
@@ -651,6 +671,7 @@ class TeiExtractor(FileBasedExtractor):
                         yield doc
                     continue
 
+            # parse the full DOM
             try:
                 tree = etree.parse(str(filepath))
             except etree.XMLSyntaxError as exc:
@@ -664,8 +685,7 @@ class TeiExtractor(FileBasedExtractor):
                 yield from _parse_plain(root, source, domain, extra)
                 continue
 
-            # Annotated: prefer <u>-based grouping when the file uses
-            # it; otherwise fall back to one Document per file.
+            # annotated: group by <u> when present, else one document per file
             if root.find(f".//{_U_TAG}") is not None:
                 yield from _parse_annotated_with_utterances(root, source, domain, extra)
             else:

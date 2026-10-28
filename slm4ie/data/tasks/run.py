@@ -35,24 +35,18 @@ import abc
 import enum
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Type
+from typing import Any
 
 from slm4ie.data.extract.records import iter_joined_records
-from slm4ie.utils.parallel import (
-    configure_script_logging,
-    cpu_default,
-    resolve_workers,
-    run_parallel,
-)
 from slm4ie.data.tasks.config import (
     TaskEntry,
     TasksRoots,
     load_tasks_config,
     resolve_output_dir,
 )
-from slm4ie.data.tasks.tracking import log_tasks_runs
 from slm4ie.data.tasks.splits import (
     SPLIT_TRAIN,
     all_outputs_exist,
@@ -60,9 +54,24 @@ from slm4ie.data.tasks.splits import (
     outputs_for_splits,
     write_jsonl_splits,
 )
+from slm4ie.data.tasks.tracking import log_tasks_runs
 from slm4ie.utils.cli import stamped_log_dir
+from slm4ie.utils.parallel import (
+    configure_script_logging,
+    cpu_default,
+    resolve_workers,
+    run_parallel,
+)
+
+# ===============================
+# Logging
+# ===============================
 
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Constants
+# ===============================
 
 #: Zero-pad width for the `idx-<N>` fallback id, shared across families so a
 #: synthesized id has one consistent shape regardless of the converter.
@@ -75,7 +84,9 @@ _IDX_PAD: int = 8
 _HELD_OUT_VAL_PCT: int = 50
 
 
-# --- Split policy and per-run context ---
+# ===============================
+# Split policy and run context
+# ===============================
 
 
 class SplitPolicy(enum.Enum):
@@ -104,20 +115,22 @@ class ConvertContext:
             SuperGLUE). Empty for converters that read no options.
     """
 
-    def __init__(self, options: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, options: dict[str, Any] | None = None) -> None:
         """Initialize the context.
 
         Args:
             options: Converter-specific options, or None for an empty mapping.
         """
-        self.options: Dict[str, Any] = dict(options or {})
+        self.options: dict[str, Any] = dict(options or {})
 
 
-# --- Shared record helpers (id synthesis, label sets, extracted reads) ---
+# ===============================
+# Shared record helpers
+# ===============================
 
 
 def synthesize_id(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     dataset: str,
     index: int,
     pad: int = _IDX_PAD,
@@ -149,8 +162,8 @@ def synthesize_id(
     if uid:
         return str(uid)
 
+    # fall back to the explicit id, the doc id or the index
     source = record.get("source", dataset)
-
     raw = record.get("id") if record.get("id") is not None else record.get("idx")
     if isinstance(raw, bool):
         raw = None
@@ -168,7 +181,7 @@ def synthesize_id(
     return f"{source}:idx-{index:0{pad}d}"
 
 
-def label_allow_set(entry: TaskEntry) -> Optional[Set[str]]:
+def label_allow_set(entry: TaskEntry) -> set[str] | None:
     """Return the entry's label allow-list as a string set, or None.
 
     Shared by the label-filtering families so the `entry.labels` -> set
@@ -186,7 +199,7 @@ def label_allow_set(entry: TaskEntry) -> Optional[Set[str]]:
     return {str(lbl) for lbl in entry.labels}
 
 
-def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[Dict[str, Any]]:
+def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[dict[str, Any]]:
     """Yield joined records from an entry's `extracted` sources.
 
     Reads each source key's `<key>.jsonl` text file joined with its optional
@@ -205,34 +218,40 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[Dict
     Raises:
         FileNotFoundError: If a source or excluded `<key>.jsonl` is missing.
     """
-    excluded: Set[str] = set()
+    # collect the doc ids of the excluded sources
+    excluded: set[str] = set()
     for key in entry.source.exclude:
         path = roots.extracted / f"{key}.jsonl"
         if not path.exists():
             raise FileNotFoundError(f"Excluded source for {entry.task}/{entry.dataset}: {path} does not exist.")
         with path.open(encoding="utf-8") as fh:
             excluded.update(json.loads(line)["doc_id"] for line in fh if line.strip())
+    # yield the joined records, dropping excluded documents
     dropped = 0
     for key in entry.source.keys:
         text_path = roots.extracted / f"{key}.jsonl"
         ann_path = roots.extracted / f"{key}.annotations.jsonl.gz"
         if not text_path.exists():
             raise FileNotFoundError(f"Source for {entry.task}/{entry.dataset}: {text_path} does not exist.")
-        ann_arg: Optional[Path] = ann_path if ann_path.exists() else None
+        ann_arg: Path | None = ann_path if ann_path.exists() else None
         for record in iter_joined_records(text_path, ann_arg):
             if record.get("doc_id") in excluded:
                 dropped += 1
                 continue
             yield record
+
+    # report the dropped documents
     if entry.source.exclude:
         logger.info(
             "%s/%s: dropped %d document(s) of %s", entry.task, entry.dataset, dropped, ", ".join(entry.source.exclude)
         )
 
 
-# --- Converter registry and abstract base ---
+# ===============================
+# Converter registry and base class
+# ===============================
 
-_CONVERTER_REGISTRY: Dict[str, Type["TaskConverter"]] = {}
+_CONVERTER_REGISTRY: dict[str, type[TaskConverter]] = {}
 
 
 def register_converter(name: str):
@@ -248,7 +267,7 @@ def register_converter(name: str):
         A class decorator that registers the class and returns it unchanged.
     """
 
-    def decorator(cls: Type["TaskConverter"]) -> Type["TaskConverter"]:
+    def decorator(cls: type[TaskConverter]) -> type[TaskConverter]:
         """Register `cls` under the captured name.
 
         Args:
@@ -263,7 +282,7 @@ def register_converter(name: str):
     return decorator
 
 
-def get_converter(name: str) -> "TaskConverter":
+def get_converter(name: str) -> TaskConverter:
     """Instantiate the registered converter for `name`.
 
     Args:
@@ -303,8 +322,8 @@ class TaskConverter(abc.ABC):
         entry: TaskEntry,
         roots: TasksRoots,
         ctx: ConvertContext,
-        splits: List[str],
-    ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        splits: list[str],
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
         """Yield `(split_key, example)` pairs for one entry.
 
         For `SplitPolicy.HASH`, `split_key` is a stable id the run loop hashes
@@ -325,10 +344,12 @@ class TaskConverter(abc.ABC):
         """
 
 
-# --- Split assignment and the conversion run loop ---
+# ===============================
+# Conversion run loop
+# ===============================
 
 
-def target_splits(entry: TaskEntry) -> List[str]:
+def target_splits(entry: TaskEntry) -> list[str]:
     """Return the split names to write for `entry`, applying the role gate.
 
     A `held_out` entry never writes a `train` split; every other declared split
@@ -347,7 +368,7 @@ def target_splits(entry: TaskEntry) -> List[str]:
     return names
 
 
-def assign_hash_split(key: str, targets: List[str]) -> str:
+def assign_hash_split(key: str, targets: list[str]) -> str:
     """Assign `key` to one of `targets` by deterministic hash bucket.
 
     When `train` is among `targets`, the standard 70/15/15 train/val/test
@@ -375,7 +396,7 @@ def convert_entry(
     ctx: ConvertContext,
     converter: TaskConverter,
     force: bool = False,
-) -> Optional[Dict[str, int]]:
+) -> dict[str, int] | None:
     """Convert one entry, writing one gzipped JSONL per target split.
 
     Applies the role gate (`target_splits`), skips when every target output
@@ -394,6 +415,7 @@ def convert_entry(
         Mapping `{split: written_count}`, or None when the outputs already
         existed and `force` is False.
     """
+    # resolve the target outputs
     output_dir = resolve_output_dir(entry, roots)
     targets = target_splits(entry)
     target_files = {split: entry.splits[split] for split in targets}
@@ -407,10 +429,11 @@ def convert_entry(
         )
         return None
 
+    # convert and write the examples
     logger.info("Converting %s -> %s", key, output_dir)
     examples = converter.iter_examples(entry, roots, ctx, targets)
     if converter.split_policy is SplitPolicy.HASH:
-        pairs: Iterator[Tuple[str, Dict[str, Any]]] = (
+        pairs: Iterator[tuple[str, dict[str, Any]]] = (
             (assign_hash_split(split_key, targets), example) for split_key, example in examples
         )
     else:
@@ -422,7 +445,7 @@ def convert_entry(
     return counts
 
 
-def resolve_keys(entries: List[TaskEntry], requested: Optional[List[str]] = None) -> List[str]:
+def resolve_keys(entries: list[TaskEntry], requested: list[str] | None = None) -> list[str]:
     """Resolve which entry keys to process.
 
     Args:
@@ -438,6 +461,7 @@ def resolve_keys(entries: List[TaskEntry], requested: Optional[List[str]] = None
     known = [f"{e.task}/{e.dataset}" for e in entries]
     if requested is None:
         return known
+
     unknown = [k for k in requested if k not in known]
     if unknown:
         raise KeyError(f"Unknown task entries: {unknown}. Known: {sorted(known)}")
@@ -454,18 +478,18 @@ class TasksSummary:
         failed: Keys whose conversion raised.
     """
 
-    records: Dict[str, int] = field(default_factory=dict)
-    skipped: List[str] = field(default_factory=list)
-    failed: List[str] = field(default_factory=list)
+    records: dict[str, int] = field(default_factory=dict)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
 
 
 def convert_tasks(
     config_path: Path,
-    entry_keys: Optional[List[str]] = None,
+    entry_keys: list[str] | None = None,
     force: bool = False,
-    mlflow_enabled: Optional[bool] = None,
+    mlflow_enabled: bool | None = None,
     max_workers: int = 0,
-    options: Optional[Dict[str, Any]] = None,
+    options: dict[str, Any] | None = None,
 ) -> TasksSummary:
     """Convert the selected task-registry entries to per-split JSONL.
 
@@ -491,6 +515,7 @@ def convert_tasks(
     """
     import slm4ie.data.tasks.converters  # noqa: F401  (registers converters on import)
 
+    # load the registry and resolve the entries
     tasks_config = load_tasks_config(config_path)
     by_key = {f"{e.task}/{e.dataset}": e for e in tasks_config.entries}
     keys = resolve_keys(tasks_config.entries, entry_keys)
@@ -498,13 +523,14 @@ def convert_tasks(
         logger.warning("No entries to process in %s.", config_path)
         return TasksSummary()
 
+    # prepare the converters and the workers
     ctx = ConvertContext(options=options)
     converters = {key: get_converter(by_key[key].converter) for key in keys}
     workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
     configure_script_logging(parallel=workers > 1)
     roots = tasks_config.roots
 
-    def kwargs_for(key: str) -> Dict[str, Any]:
+    def kwargs_for(key: str) -> dict[str, Any]:
         """Return per-entry keyword arguments for `convert_entry`.
 
         Args:
@@ -521,6 +547,7 @@ def convert_tasks(
             "force": force,
         }
 
+    # convert the entries in parallel
     results, failures = run_parallel(
         convert_entry,
         keys,
@@ -531,6 +558,7 @@ def convert_tasks(
         log_dir=stamped_log_dir("tasks"),
     )
 
+    # summarize the run
     summary = TasksSummary(
         records={k: sum(v.values()) for k, v in results.items() if v is not None},
         skipped=[k for k, v in results.items() if v is None],
@@ -543,6 +571,8 @@ def convert_tasks(
         sum(summary.records.values()),
         summary.failed or "none",
     )
+
+    # track the processed entries
     processed = [k for k in keys if k not in set(summary.failed)]
     log_tasks_runs(tasks_config, by_key, processed, mlflow_enabled=mlflow_enabled, force=force)
     return summary

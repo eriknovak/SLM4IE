@@ -10,16 +10,24 @@ paths on disk.
 import dataclasses
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Literal
 
 import yaml
 
 from slm4ie.data.download.config import contained_in, load_download_config
 from slm4ie.utils.io import find_project_root, resolve_project_path
 
+# ===============================
+# Constants
+# ===============================
+
 _KEY_PATTERN = re.compile(r"^[a-z]+/[a-z0-9_]+$")
 _VALID_ROLES = {"finetune_and_eval", "held_out"}
 _VALID_KINDS = {"extracted", "raw"}
+
+# ===============================
+# Config classes
+# ===============================
 
 
 @dataclasses.dataclass
@@ -53,8 +61,8 @@ class EntrySource:
     """
 
     kind: Literal["extracted", "raw"]
-    keys: List[str]
-    exclude: List[str] = dataclasses.field(default_factory=list)
+    keys: list[str]
+    exclude: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -83,9 +91,9 @@ class TaskEntry:
     dataset: str
     role: Literal["finetune_and_eval", "held_out"]
     source: EntrySource
-    splits: Dict[str, str]
-    labels: Optional[List[Any]]
-    suite: Optional[str]
+    splits: dict[str, str]
+    labels: list[Any] | None
+    suite: str | None
     language: str
     license: str
     converter: str
@@ -104,12 +112,17 @@ class TasksConfig:
     """
 
     roots: TasksRoots
-    converter_defaults: Dict[str, str]
-    entries: List[TaskEntry]
-    mlflow: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    converter_defaults: dict[str, str]
+    entries: list[TaskEntry]
+    mlflow: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-def load_tasks_config(yaml_path: Path, download_config: Optional[Path] = None) -> TasksConfig:
+# ===============================
+# Loader and resolvers
+# ===============================
+
+
+def load_tasks_config(yaml_path: Path, download_config: Path | None = None) -> TasksConfig:
     """Loads and validates `configs/data/tasks.yaml`.
 
     Args:
@@ -135,26 +148,30 @@ def load_tasks_config(yaml_path: Path, download_config: Optional[Path] = None) -
     if not yaml_path.exists():
         raise FileNotFoundError(f"Task registry not found: {yaml_path}")
 
+    # read the YAML file
     with yaml_path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
 
     if not isinstance(raw, dict):
         raise ValueError(f"Task registry must be a mapping at the top level; got {type(raw).__name__}")
 
+    # parse roots, converter defaults and entries
     roots = _parse_roots(raw.get("roots"))
     converter_defaults = _parse_converter_defaults(raw.get("converters"))
     entries_raw = raw.get("entries")
     if not isinstance(entries_raw, dict) or not entries_raw:
         raise ValueError("Task registry `entries:` must be a non-empty mapping.")
 
-    entries: List[TaskEntry] = []
+    entries: list[TaskEntry] = []
     for key, value in entries_raw.items():
         entries.append(_parse_entry(key, value, converter_defaults))
 
+    # check the train/held-out source isolation
     catalog_path = download_config or find_project_root() / "configs" / "data" / "download.yaml"
     catalog = load_download_config(catalog_path).datasets if catalog_path.is_file() else {}
     check_source_isolation(entries, {key: contained_in(catalog, key) for key in catalog})
 
+    # build the config
     return TasksConfig(
         roots=roots,
         converter_defaults=converter_defaults,
@@ -163,7 +180,7 @@ def load_tasks_config(yaml_path: Path, download_config: Optional[Path] = None) -
     )
 
 
-def check_source_isolation(entries: List[TaskEntry], contains: Dict[str, Set[str]]) -> None:
+def check_source_isolation(entries: list[TaskEntry], contains: dict[str, set[str]]) -> None:
     """Reject a training and a held-out entry of one task whose sources share documents.
 
     Two such entries may not read the same source key, and no key on one side
@@ -178,7 +195,8 @@ def check_source_isolation(entries: List[TaskEntry], contains: Dict[str, Set[str
         ValueError: Naming both entries and the shared or containing key, for
             every violating pair.
     """
-    problems: List[str] = []
+    # pair every training entry with the held-out entries of its task
+    problems: list[str] = []
     train = [e for e in entries if e.role == "finetune_and_eval"]
     held = [e for e in entries if e.role == "held_out"]
     for a in train:
@@ -197,12 +215,7 @@ def check_source_isolation(entries: List[TaskEntry], contains: Dict[str, Set[str
         raise ValueError("Task sources are not isolated:\n  - " + "\n  - ".join(problems))
 
 
-def _excludes(source: EntrySource, key: str, contains: Dict[str, Set[str]]) -> bool:
-    """Return whether *source* drops *key*'s documents, directly or through an excluded superset."""
-    return any(key == x or key in contains.get(x, set()) for x in source.exclude)
-
-
-def resolve_source_paths(entry: TaskEntry, roots: TasksRoots) -> List[Path]:
+def resolve_source_paths(entry: TaskEntry, roots: TasksRoots) -> list[Path]:
     """Resolves source paths for a task entry.
 
     For `kind="extracted"`, each key resolves to
@@ -239,6 +252,16 @@ def resolve_output_dir(entry: TaskEntry, roots: TasksRoots) -> Path:
     return roots.tasks / entry.task / entry.dataset
 
 
+# ===============================
+# Private helpers
+# ===============================
+
+
+def _excludes(source: EntrySource, key: str, contains: dict[str, set[str]]) -> bool:
+    """Return whether *source* drops *key*'s documents, directly or through an excluded superset."""
+    return any(key == x or key in contains.get(x, set()) for x in source.exclude)
+
+
 def _parse_roots(raw: Any) -> TasksRoots:
     """Parses and validates the `roots:` block.
 
@@ -265,7 +288,7 @@ def _parse_roots(raw: Any) -> TasksRoots:
     )
 
 
-def _parse_converter_defaults(raw: Any) -> Dict[str, str]:
+def _parse_converter_defaults(raw: Any) -> dict[str, str]:
     """Parses and validates the `converters:` defaults map.
 
     Args:
@@ -280,7 +303,7 @@ def _parse_converter_defaults(raw: Any) -> Dict[str, str]:
     """
     if not isinstance(raw, dict) or not raw:
         raise ValueError("Task registry `converters:` must be a non-empty mapping.")
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for task, converter in raw.items():
         if not isinstance(task, str) or not task:
             raise ValueError(f"Converter map keys must be non-empty strings; got {task!r}")
@@ -290,7 +313,7 @@ def _parse_converter_defaults(raw: Any) -> Dict[str, str]:
     return out
 
 
-def _parse_entry(key: Any, value: Any, converter_defaults: Dict[str, str]) -> TaskEntry:
+def _parse_entry(key: Any, value: Any, converter_defaults: dict[str, str]) -> TaskEntry:
     """Parses and validates a single entry under `entries:`.
 
     Args:
@@ -314,6 +337,7 @@ def _parse_entry(key: Any, value: Any, converter_defaults: Dict[str, str]) -> Ta
 
     task, dataset = key.split("/", 1)
 
+    # validate role, source, splits and labels
     role = value.get("role")
     if role not in _VALID_ROLES:
         raise ValueError(f"Entry {key!r} role must be one of {sorted(_VALID_ROLES)}; got {role!r}")
@@ -322,6 +346,7 @@ def _parse_entry(key: Any, value: Any, converter_defaults: Dict[str, str]) -> Ta
     splits = _parse_splits(key, value.get("splits"))
     labels = _parse_labels(key, value.get("labels"))
 
+    # validate suite, language and license
     if "suite" not in value:
         raise ValueError(f"Entry {key!r} must declare `suite` (may be null).")
     suite = value["suite"]
@@ -336,6 +361,7 @@ def _parse_entry(key: Any, value: Any, converter_defaults: Dict[str, str]) -> Ta
     if not isinstance(license_, str) or not license_:
         raise ValueError(f"Entry {key!r} `license` must be a non-empty string.")
 
+    # resolve the converter
     converter_override = value.get("converter")
     if converter_override is not None:
         if not isinstance(converter_override, str) or not converter_override:
@@ -349,6 +375,7 @@ def _parse_entry(key: Any, value: Any, converter_defaults: Dict[str, str]) -> Ta
             f"entry in `converters:` and no per-entry override."
         )
 
+    # build the entry
     return TaskEntry(
         task=task,
         dataset=dataset,
@@ -395,7 +422,7 @@ def _parse_source(key: str, raw: Any) -> EntrySource:
     return EntrySource(kind=kind, keys=list(keys), exclude=list(exclude))
 
 
-def _parse_splits(key: str, raw: Any) -> Dict[str, str]:
+def _parse_splits(key: str, raw: Any) -> dict[str, str]:
     """Parses and validates an entry's `splits:` block.
 
     Args:
@@ -410,7 +437,7 @@ def _parse_splits(key: str, raw: Any) -> Dict[str, str]:
     """
     if not isinstance(raw, dict) or not raw:
         raise ValueError(f"Entry {key!r} `splits` must be a non-empty mapping.")
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for split_name, filename in raw.items():
         if not isinstance(split_name, str) or not split_name:
             raise ValueError(f"Entry {key!r} split names must be non-empty strings.")
@@ -420,7 +447,7 @@ def _parse_splits(key: str, raw: Any) -> Dict[str, str]:
     return out
 
 
-def _parse_labels(key: str, raw: Any) -> Optional[List[Any]]:
+def _parse_labels(key: str, raw: Any) -> list[Any] | None:
     """Parses and validates an entry's `labels` field.
 
     Args:

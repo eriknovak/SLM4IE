@@ -15,11 +15,20 @@ Every entry names the converter that reads it, so one `convert_tasks` call can
 span every family and `tasks.yaml` stays the only place that mapping lives.
 """
 
+from slm4ie.data.tasks.config import (
+    EntrySource,
+    TaskEntry,
+    TasksConfig,
+    TasksRoots,
+    load_tasks_config,
+    resolve_output_dir,
+    resolve_source_paths,
+)
 from slm4ie.data.tasks.run import (
     ConvertContext,
     SplitPolicy,
-    TasksSummary,
     TaskConverter,
+    TasksSummary,
     assign_hash_split,
     convert_entry,
     convert_tasks,
@@ -30,15 +39,6 @@ from slm4ie.data.tasks.run import (
     resolve_keys,
     synthesize_id,
     target_splits,
-)
-from slm4ie.data.tasks.config import (
-    TaskEntry,
-    EntrySource,
-    TasksConfig,
-    TasksRoots,
-    load_tasks_config,
-    resolve_output_dir,
-    resolve_source_paths,
 )
 
 __all__ = [

@@ -34,11 +34,20 @@ import csv
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Pattern
+from re import Pattern
+from typing import Any
 
 from slm4ie.utils.io import open_text_stream
 
+# ===============================
+# Logging
+# ===============================
+
 logger = logging.getLogger(__name__)
+
+# ===============================
+# Defaults
+# ===============================
 
 #: Values that should be filtered out as missing/NA. Includes empty
 #: strings and the conventional `"-"` marker used by OSS/KAS TSVs.
@@ -46,6 +55,10 @@ _NA_VALUES = frozenset({"", "-"})
 
 #: Supported strategies for deriving the lookup key from a source file.
 _KEY_FROM_VALID = frozenset({"filename_stem"})
+
+# ===============================
+# Metadata table class
+# ===============================
 
 
 class MetadataTable:
@@ -69,25 +82,25 @@ class MetadataTable:
     """
 
     key_column: str
-    fields: Dict[str, str]
-    splits: Dict[str, str]
+    fields: dict[str, str]
+    splits: dict[str, str]
     key_from: str
-    key_pattern: Optional[Pattern[str]]
+    key_pattern: Pattern[str] | None
 
     def __init__(
         self,
         path: Path,
         key_column: str,
-        fields: Dict[str, str],
-        splits: Optional[Dict[str, str]] = None,
+        fields: dict[str, str],
+        splits: dict[str, str] | None = None,
         key_from: str = "filename_stem",
-        key_pattern: Optional[str] = None,
+        key_pattern: str | None = None,
     ) -> None:
         """Load and index a metadata TSV.
 
         Args:
             path: Path to a tab-separated file. `.gz` is handled
-                transparently via :func:`open_text_stream`.
+                transparently via `open_text_stream`.
             key_column: Column to index rows by. Must be present in the
                 TSV header.
             fields: Mapping `{tsv_column: metadata_field}`. Only these
@@ -105,11 +118,13 @@ class MetadataTable:
                 lacks a capture group, or `key_column` is missing
                 from the TSV header.
         """
+        # guard the path and the key strategy
         if not path.exists():
             raise FileNotFoundError(f"Metadata table not found: {path}")
         if key_from not in _KEY_FROM_VALID:
             raise ValueError(f"Unsupported key_from={key_from!r}; expected one of {sorted(_KEY_FROM_VALID)}")
 
+        # store the settings
         self.key_column = key_column
         self.fields = dict(fields)
         self.splits = dict(splits or {})
@@ -118,14 +133,15 @@ class MetadataTable:
         if self.key_pattern is not None and self.key_pattern.groups < 1:
             raise ValueError(f"key_pattern {key_pattern!r} must contain at least one capture group")
 
-        self._rows: Dict[str, Dict[str, Any]] = {}
+        # load the rows
+        self._rows: dict[str, dict[str, Any]] = {}
         self._load(path)
 
     @classmethod
     def from_config(
         cls,
         input_dir: Path,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
     ) -> "MetadataTable":
         """Build a metadata table from a YAML `metadata:` block.
 
@@ -137,7 +153,7 @@ class MetadataTable:
                 `key_pattern`.
 
         Returns:
-            MetadataTable: A loaded, ready-to-query instance.
+            A loaded, ready-to-query instance.
 
         Raises:
             KeyError: If required keys are missing from `cfg`.
@@ -151,6 +167,39 @@ class MetadataTable:
             key_pattern=cfg.get("key_pattern"),
         )
 
+    def get(self, key: str) -> dict[str, Any]:
+        """Look up a row by key and return the renamed/split fields.
+
+        Args:
+            key: Value to match against the configured `key_column`.
+
+        Returns:
+            Metadata fields for the row, with empty/NA
+            values filtered out. `{}` when no row matches.
+        """
+        row = self._rows.get(key)
+        if row is None:
+            return {}
+        return self._project_row(row)
+
+    def get_for_path(self, filepath: Path) -> dict[str, Any]:
+        """Derive a key from `filepath` and look up the row.
+
+        Args:
+            filepath: Source file currently being extracted.
+
+        Returns:
+            Metadata fields, or `{}` if no row matches.
+        """
+        derived = self._derive_key(filepath)
+        if derived is None:
+            return {}
+        return self.get(derived)
+
+    # ===============================
+    # Private methods
+    # ===============================
+
     def _load(self, path: Path) -> None:
         """Read the TSV and populate the row index.
 
@@ -160,6 +209,7 @@ class MetadataTable:
         Raises:
             ValueError: If `self.key_column` is missing from the header.
         """
+        # read the rows keyed by the key column
         with open_text_stream(path) as fh:
             reader = csv.DictReader(fh, delimiter="\t")
             if reader.fieldnames is None or self.key_column not in reader.fieldnames:
@@ -171,6 +221,7 @@ class MetadataTable:
                 if not key:
                     continue
                 self._rows[key] = row
+
         logger.info(
             "Loaded %d metadata rows from %s (key=%s)",
             len(self._rows),
@@ -178,46 +229,17 @@ class MetadataTable:
             self.key_column,
         )
 
-    def get(self, key: str) -> Dict[str, Any]:
-        """Look up a row by key and return the renamed/split fields.
-
-        Args:
-            key: Value to match against the configured `key_column`.
-
-        Returns:
-            Dict[str, Any]: Metadata fields for the row, with empty/NA
-                values filtered out. `{}` when no row matches.
-        """
-        row = self._rows.get(key)
-        if row is None:
-            return {}
-        return self._project_row(row)
-
-    def get_for_path(self, filepath: Path) -> Dict[str, Any]:
-        """Derive a key from `filepath` and look up the row.
-
-        Args:
-            filepath: Source file currently being extracted.
-
-        Returns:
-            Dict[str, Any]: Metadata fields, or `{}` if no row matches.
-        """
-        derived = self._derive_key(filepath)
-        if derived is None:
-            return {}
-        return self.get(derived)
-
-    def _derive_key(self, filepath: Path) -> Optional[str]:
+    def _derive_key(self, filepath: Path) -> str | None:
         """Compute the lookup key for `filepath` per configured strategy.
 
         Args:
             filepath: Source file currently being extracted.
 
         Returns:
-            Optional[str]: The lookup key, or None when `key_pattern`
-                does not match the derived stem.
+            The lookup key, or None when `key_pattern`
+            does not match the derived stem.
         """
-        # Only "filename_stem" is currently supported; validated in __init__.
+        # "filename_stem" is the only strategy, validated in __init__
         derived = filepath.stem
         if self.key_pattern is None:
             return derived
@@ -226,7 +248,7 @@ class MetadataTable:
             return None
         return match.group(1)
 
-    def _project_row(self, row: Dict[str, str]) -> Dict[str, Any]:
+    def _project_row(self, row: dict[str, str]) -> dict[str, Any]:
         """Project a raw row through `fields` and `splits`.
 
         Drops NA/empty values, renames columns to their target metadata
@@ -236,9 +258,10 @@ class MetadataTable:
             row: Raw TSV row as a dict of strings.
 
         Returns:
-            Dict[str, Any]: The projected metadata dict.
+            The projected metadata dict.
         """
-        out: Dict[str, Any] = {}
+        # keep, rename and split the configured columns
+        out: dict[str, Any] = {}
         for src_col, dst_field in self.fields.items():
             raw = row.get(src_col)
             if raw is None:
