@@ -1,0 +1,4 @@
+# written by labflow_report/ship.py; the copy is refreshed only while
+# its files still hash to this version
+version = "d0ceb83d90e11c16b87e63039ed98748f901cf517605538e50a8de5869514b2b"
+shipped = 2026-11-06

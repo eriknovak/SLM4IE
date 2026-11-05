@@ -1,0 +1,103 @@
+{#- the record page: head, answer, clause trace, section bar, sections, folds, builds on this -#}
+{% extends "page.html" %}
+{% import "components/words.html" as words %}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/answer.html" as answer_card %}
+{% import "components/findings.html" as finding %}
+{% import "components/decisions.html" as decisions %}
+{% import "components/inputs.html" as inputs %}
+
+{% block body %}
+{#- the head: kicker, short name, title, then the parents and the muted tail -#}
+{{ layout.kicker(head.kicker) }}<h1>{{ head.short }}</h1>
+{%- if head.title %}<p class="lede" data-nolink>{{ head.title }}</p>{% endif %}
+<div class="row small headrow">{% for g in head.programmes %}<span class="muted">in</span> <a class="cc inprog" href="{{ g.href }}" title="{{ g.title }}">{{ g.name }}</a> {% endfor %}{% if head.parents %}<span class="muted">builds on</span> {% for p in head.parents %}{{ p }} {% endfor %}{% else %}{{ inline.missing("builds on nothing") }}{% endif %} <span class="muted">· {% for t in head.tail %}{{ t }}{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+{%- if head.entries %}<div class="row small uses">{% for key, named in head.entries %}<span class="muted">{{ key }}</span> {% for name, href in named %}{% if href %}<a class="term" href="{{ href }}">{{ name }}</a>{% else %}{{ name }}{% endif %}{% if not loop.last %} <span class="muted">·</span> {% endif %}{% endfor %} {% endfor %}</div>{% endif %}
+
+{#- the answer card, then how each clause was settled and the needs line -#}
+{% call layout.section(page.id, "answer", "Answer", "muted") %}{{ answer_card.record_answer(answer) }}{% if not trace and needs %}{{ layout.needs(needs) }}{% endif %}{% endcall %}
+{% if trace %}
+{% call layout.section(page.id, "clauses", "How each clause was settled", "h") -%}
+<div class="box scrollx trace"><table class="pt"><thead><tr><th>Clause</th>{% if trace.linked %}<th>Decided</th><th>Measured by</th>{% endif %}{% if trace.has_found %}<th>Found</th>{% endif %}<th>So</th></tr></thead><tbody>
+{%- for r in trace.rows %}<tr id="{{ r.id }}"{% if r.planned %} class="plan"{% endif %}><td>{{ r.chip }}<div class="small claimline">{{ r.claim }}</div>{% if r.tags %}<div class="small muted">{{ r.tags }}</div>{% endif %}</td>
+{%- if trace.linked %}<td><div class="cells">{{ r.decided }}</div></td><td><div class="cells">{{ r.measured_by }}</div></td>{% endif -%}
+{%- if trace.has_found %}<td class="small">{{ r.found }} {{ r.chips }}</td>{% endif -%}
+{%- if r.so_span %}<td class="small"{% if r.so_span > 1 %} rowspan="{{ r.so_span }}"{% endif %}>{{ r.so }}{% if not trace.has_found and r.chips %} {{ r.chips }}{% endif %}</td>{% endif %}</tr>{% endfor -%}
+</tbody></table></div>
+{%- if not trace.linked %}<p class="small muted tnote">{% if trace.under %}The record reads every clause under {{ trace.under }}, and links{% else %}The record links{% endif %} no clause to its own decisions or methods, so the Decided and Measured columns are left out.</p>{% endif -%}
+{%- if trace.rests_on %}<p class="small restson"><b>Rests on</b>{% for r in trace.rests_on %}<span>{{ r.chips }} {{ r.label }}</span>{% endfor %}</p>{% endif -%}
+{%- if needs %}{{ layout.needs(needs) }}{% endif -%}
+{%- endcall %}
+{% endif %}
+
+{% if bar %}{{ layout.section_bar(bar) }}{% endif %}
+
+{#- findings: the deciding key cards, then every other finding on a line -#}
+{% set s = sections.findings %}
+{% if s.n %}
+{% call layout.section(page.id, "findings", findings_title, "accent", s.n) -%}
+<div class="stack cards">{% for c in s.cards %}{{ finding.key_card(c) }}{% endfor %}</div>
+{%- if s.others %}<p class="chap fothers">Other findings</p>{{ finding.small_cards(s.others, wide=true) }}{% endif -%}
+{%- endcall %}
+{% elif skeleton %}
+{% call layout.section(page.id, "findings", findings_title, "accent") %}{{ layout.empty(empty.findings) }}{% endcall %}
+{% endif %}
+
+{% set s = sections.discussion %}
+{% if s.n %}
+{% call layout.section(page.id, "discussion", "Discussion", "muted", s.n) -%}
+{% for d in s.folds %}{% call layout.fold(d.title, d.meta, id=d.id, open=d.open, has_body=d.text != "") %}<p class="small">{{ d.text }}</p>{% endcall %}{% endfor %}
+{%- endcall %}
+{% elif skeleton %}
+{% call layout.section(page.id, "discussion", "Discussion", "muted") %}{{ layout.empty(empty.discussion) }}{% endcall %}
+{% endif %}
+
+{% set s = sections.decisions %}
+{% if s.n %}
+{% call layout.section(page.id, "decisions", "Decisions", "d", s.n) -%}
+{% for title, items in s.groups %}{% if title %}{{ decisions.group(title, items | length) }}{% endif %}{% for d in items %}{{ decisions.decision(d) }}{% endfor %}{% endfor %}
+{%- endcall %}
+{% elif skeleton %}
+{% call layout.section(page.id, "decisions", "Decisions", "d") %}{{ layout.empty(empty.decisions) }}{% endcall %}
+{% endif %}
+
+{% set s = sections.methods %}
+{% if s.n %}
+{% call layout.section(page.id, "methods", "Methods", "m", s.n) %}{% for m in s.methods %}{{ decisions.method(m) }}{% endfor %}{% endcall %}
+{% elif skeleton %}
+{% call layout.section(page.id, "methods", "Methods", "m") %}{{ layout.empty(empty.methods) }}{% endcall %}
+{% endif %}
+
+{% set s = sections.limits %}
+{% if s.n %}
+{% call layout.section(page.id, "limits", "Limitations", "run", s.n) %}<ul class="small limits">{% for i in s["items"] %}<li>{{ i }}</li>{% endfor %}</ul>{% endcall %}
+{% elif skeleton %}
+{% call layout.section(page.id, "limits", "Limitations", "run") %}{{ layout.empty(empty.limits) }}{% endcall %}
+{% endif %}
+
+{% set s = sections.datasets %}
+{% if s.n %}
+{% call layout.section(page.id, "datasets", "Datasets", "muted", s.n) -%}
+<div class="inputs">{% for d in s.rows %}{{ inputs.dataset(d) }}{% endfor %}</div>
+{%- endcall %}
+{% elif skeleton %}
+{% call layout.section(page.id, "datasets", "Datasets", "muted") %}{{ layout.empty(empty.datasets) }}{% endcall %}
+{% endif %}
+
+{% if sections.docs.n %}
+{% call layout.section(page.id, "docs", "Side documents", "muted", sections.docs.n) %}{{ inputs.docs(sections.docs.documents) }}{% endcall %}
+{% endif %}
+{% if sections.references.n %}
+{% call layout.section(page.id, "references", "References", "muted", sections.references.n) %}{{ inputs.refs(sections.references) }}{% endcall %}
+{% endif %}
+
+{#- the folds: question and setup, adoption, reproduce -#}
+{% if folds.question or folds.adoption or folds.reproduce %}
+<div class="sec folds">{% if folds.question %}{{ inputs.setup(folds.question) }}{% endif %}{% if folds.adoption %}{{ inputs.adoption(folds.adoption) }}{% endif %}{% if folds.reproduce %}{{ inputs.reproduce(folds.reproduce) }}{% endif %}</div>
+{% endif %}
+
+{% if builds.n %}
+{% call layout.section(page.id, "builds", "Builds on this", "muted", builds.n) %}{{ inputs.builds(builds.records) }}{% endcall %}
+{% endif %}
+{% endblock %}

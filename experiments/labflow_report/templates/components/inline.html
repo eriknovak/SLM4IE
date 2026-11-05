@@ -1,0 +1,52 @@
+{#- Components board, inline: the chips and tags that sit inside a line of prose -#}
+{% import "components/words.html" as words %}
+
+{#- an entry's code chip: D, F, M or a clause; with a tip it carries a hover card -#}
+{% macro ct(kind, code, href="", tip="") -%}
+{% if href %}
+<a class="ct {{ kind }}{{ ' ref' if tip else '' }}" href="{{ href }}"{% if tip %} data-tip="{{ tip }}"{% endif %}>{{ code }}</a>
+{%- else %}
+<span class="ct {{ kind }}">{{ code }}</span>
+{%- endif %}
+{%- endmacro %}
+
+{#- an experiment as a pill: its mark and short name, the full title on hover -#}
+{% macro pill(word, name, full="", href="") -%}
+{% set tag = "a" if href else "span" %}
+<{{ tag }} class="cc pill"{% if href %} href="{{ href }}"{% endif %}{% if full %} title="{{ full }}"{% endif %}>{{ words.mark(word) }}<span class="nm">{{ name }}</span></{{ tag }}>
+{%- endmacro %}
+
+{% macro iss(number, title="") -%}
+<span class="iss"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><circle cx="8" cy="8" r="1.2"></circle></svg><span class="n">#{{ number }}</span>{{ title }}</span>
+{%- endmacro %}
+
+{#- a chip for a table or figure the reader can open -#}
+{% macro tbl(path, label="", href="#") -%}
+<a href="{{ href }}" class="tlink"><span class="tic">{{ "▦" if path.endswith(".csv") else "◩" }}</span>{{ label or path }}</a>
+{%- endmacro %}
+
+{% macro commit(sha="") -%}
+{% if sha %}<span class="sha">{{ sha }}</span>{% else %}<span class="sha none">commit not recorded</span>{% endif %}
+{%- endmacro %}
+
+{% macro cite(label, href) -%}
+<a href="{{ href }}" class="cite">{{ label }}</a>
+{%- endmacro %}
+
+{#- a value the record does not hold, said in words, never a blank or a dash -#}
+{% macro missing(text="not recorded") -%}
+<span class="missing">{{ text }}</span>
+{%- endmacro %}
+
+{% macro when(after) -%}
+{% if after %}<span class="when post">after results</span>{% else %}<span class="when pre">before any run</span>{% endif %}
+{%- endmacro %}
+
+{% macro byhand(text="by hand") -%}
+<span class="byhand">{{ text }}</span>
+{%- endmacro %}
+
+{% macro link(text, href) -%}
+<a href="{{ href }}">{{ text }}</a>
+{%- endmacro %}
+

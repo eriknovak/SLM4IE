@@ -32,10 +32,10 @@ datachart-themes = { git = "https://github.com/eriknovak/datachart-themes.git", 
 [tool.ruff]
 line-length = 120
 target-version = "py313"
-# Vendored from the labflow skill; kept byte-identical so it stays diffable
+# Vendored from the labflow skill (builder and record checker); kept byte-identical so it stays diffable
 # against upstream when the skill updates it. force-exclude keeps it excluded
 # when the pre-commit hook passes staged paths explicitly.
-extend-exclude = ["experiments/build_report.py"]
+extend-exclude = ["experiments/build_report.py", "experiments/labflow_report"]
 force-exclude = true
 
 # Formatter (black-compatible): `uv run ruff format <paths>`, check only with `--check`.

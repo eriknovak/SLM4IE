@@ -1,0 +1,53 @@
+{#- Components board, findings: key finding cards and the small cards of the other findings -#}
+{% import "components/words.html" as words %}
+{% import "components/inline.html" as inline %}
+{% import "components/evidence.html" as evidence %}
+
+{#- a finding's reading: its paragraphs, what could overturn it, and So when it has one -#}
+{% macro reading(c) -%}
+{%- for p in c.reading %}<p class="small muted">{{ p }}</p>{% endfor -%}
+{%- if c.overturn %}<p class="small"><b>Could overturn it</b> {{ c.overturn }}</p>{% endif -%}
+{%- if c.so %}<div class="small so"><b>So</b> {{ c.so }}</div>{% endif -%}
+{%- endmacro %}
+
+{#- a finding in full: key number, claim, reading, could overturn it, So, runs, every exhibit, history -#}
+{% macro card_body(c) -%}
+<div class="kc-body"><div><div class="keynum {{ c.number_kind }}">{{ c.number }}</div><div class="small muted">{{ c.number_note }}</div></div><div>
+<p class="claim">{{ c.claim }}</p>{{ reading(c) }}{{ evidence.runs_line(c.runs) }}<div class="exhibit">
+{%- if c.pointer %}<p class="small muted">The figure in the Answer is this finding’s result.</p>
+{%- elif c.exhibit %}{{ evidence.exhibit(c.exhibit) }}{% endif -%}
+{%- if c.more %}<div class="assets">{% for e in c.more %}{{ evidence.exhibit(e) }}{% endfor %}</div>{% endif -%}
+</div>
+{%- if c.history %}<div class="khist">{{ evidence.hist(c.history) }}</div>{% endif -%}
+</div></div>
+{%- endmacro %}
+
+{#- a key finding, open, its supporting findings as small cards under a rule -#}
+{% macro key_card(c) -%}
+<div id="{{ c.anchor }}" class="box keycard"><div class="row kc-head">{{ c.chip }}<span class="badge b-confirmed">key</span><span class="small muted">answers</span>{% for a in c.answers %}{{ a }}{% endfor %}</div>
+{{ card_body(c) }}
+{%- if c.supporting %}<div class="fsupport"><p class="chap">Supporting finding{{ "s" if c.supporting | length > 1 else "" }}</p>{{ small_cards(c.supporting) }}</div>{% endif -%}
+</div>
+{%- endmacro %}
+
+{#- a supporting or other finding: chip and title, clauses, Summary, exhibit, runs; the title opens its reading -#}
+{% macro small_card(k) -%}
+{% set opens = k.reading or k.overturn or k.so or k.history %}
+{% set shown -%}
+<div class="row fhead">{% if opens %}<span class="chev"></span>{% endif %}{{ k.chip }}<b class="ttl">{{ k.title }}{% if k.minor %} <span class="badge b-draft">minor</span>{% endif %}</b></div>
+{%- if k.answers %}<div class="row fans"><span class="small muted">answers</span>{% for a in k.answers %}{{ a }}{% endfor %}</div>{% endif -%}
+<p class="small muted">{{ k.summary }}</p>
+{%- if k.pointer %}<p class="small muted">The figure in the Answer is this finding’s result.</p>{% elif k.exhibit %}{{ evidence.exhibit(k.exhibit) }}{% endif -%}
+{{ evidence.runs_line(k.runs) }}
+{%- endset %}
+{% if opens -%}
+<details id="{{ k.anchor }}" class="mc fcard"><summary>{{ shown }}</summary><div class="fmore">{{ reading(k) }}{% if k.history %}<div class="khist">{{ evidence.hist(k.history) }}</div>{% endif %}</div></details>
+{%- else -%}
+<div id="{{ k.anchor }}" class="mc fcard">{{ shown }}</div>
+{%- endif %}
+{%- endmacro %}
+
+{#- small cards in a grid; a wide grid gives each card the full width -#}
+{% macro small_cards(cards, wide=false) -%}
+<div class="fcards{{ ' wide' if wide else '' }}">{% for k in cards %}{{ small_card(k) }}{% endfor %}</div>
+{%- endmacro %}

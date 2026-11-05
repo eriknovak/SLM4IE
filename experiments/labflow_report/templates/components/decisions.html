@@ -1,0 +1,38 @@
+{#- Components board, decisions: the decision and method folds a record keeps -#}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/evidence.html" as evidence %}
+
+{#- a decision's closed row: when it was set, its last date and how often it changed -#}
+{% macro decision_meta(d) -%}
+{{ inline.when(d.after) }} <span class="mono">{{ d.date or inline.missing("no date") }}{% if d.changes %} · changed {{ d.changes }}×{% endif %}</span>
+{%- endmacro %}
+
+{% macro decision(d) -%}
+{% set title %}{{ d.chip }} {{ d.title }}{% endset %}
+{% call layout.fold(title, decision_meta(d), d.last, id=d.anchor) -%}
+{% set pairs = d.rows + ([("History", evidence.hist(d.history))] if d.history else []) %}
+{{ layout.rows(pairs) }}
+{%- endcall %}
+{%- endmacro %}
+
+{% macro group(title, n) -%}
+<p class="grp"><b>{{ title }}</b><span class="mono muted">{{ n }}</span></p>
+{%- endmacro %}
+
+{#- a Settings row as a table of key, what it sets, value -#}
+{% macro settings(s) -%}
+{% if s.rows %}<table class="kv"><tbody>{% for r in s.rows %}<tr><td>{{ r.key }}</td><td>{{ r.what }}</td><td>{{ r.value or inline.missing("in the config") }}</td></tr>{% endfor %}</tbody></table>
+{%- if s.where %}<p class="small muted">in {{ s.where }}</p>{% endif %}
+{%- else %}<div class="muted">{{ s.text }}</div>{% endif %}
+{%- endmacro %}
+
+{#- a method step: in → out, How as steps with their code, Code, Settings -#}
+{% macro method(m) -%}
+{% set title %}{{ m.chip }} {{ m.title }}{% endset %}
+{% call layout.fold(title, m.meta, id=m.anchor) -%}
+{% set io %}<div class="io"><div><p class="k">Input</p>{{ m.input or inline.missing() }}</div><span class="arr">→</span><div><p class="k">Output</p>{{ m.output or inline.missing() }}</div></div>{% endset %}
+{% set pairs = [("In → out", io)] + ([("How", m.how)] if m.how else []) + ([("Code", m.code)] if m.code else []) + ([("Settings", settings(m.settings))] if m.settings else []) %}
+{{ layout.rows(pairs) }}
+{%- endcall %}
+{%- endmacro %}

@@ -1,0 +1,5 @@
+{#- the page shell every page template extends; the body block holds its sections; a crumb names the page's programme -#}
+<section class="page" id="{{ page.id }}" data-page="{{ page.kind }}" data-title="{{ page.title }}"
+{%- if crumb is defined and crumb %} data-crumb="{{ crumb.name }}" data-crumb-href="{{ crumb.href }}"{% endif %}>
+{%- block body %}{% endblock -%}
+</section>

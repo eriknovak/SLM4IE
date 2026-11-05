@@ -1,0 +1,76 @@
+{#- Components board, answer: the answer card at the top of a record -#}
+{% import "components/words.html" as words %}
+{% import "components/inline.html" as inline %}
+{% import "components/evidence.html" as evidence %}
+
+{#- the question the title asks, with what its answer decides -#}
+{% macro record_question(q) -%}
+<p class="chap qlabel">{{ q.label }}</p><p class="question">{{ q.text }}</p>
+{%- if q.decision %}<p class="small muted qunder"><b>Decision it informs</b> {{ q.decision }}</p>
+{%- elif q.note %}<p class="small muted qunder">{{ q.note }}</p>
+{%- elif q.label == "Question" %}<p class="small muted qunder"><b>Decision it informs</b> {{ inline.missing("not written yet") }}</p>
+{%- endif %}
+{%- endmacro %}
+
+{#- a dated change the reader must see beside the verdict -#}
+{% macro flag(title, text) -%}
+<div class="flag"><span class="fl">{{ words.mark("partial") }}<b>{{ title }}</b></span><p>{{ text }}</p></div>
+{%- endmacro %}
+
+{#- the outcome mark, the one-line answer, the badge with the Outcome's reading -#}
+{% macro record_verdict_line(v) -%}
+<div class="row vline">{{ words.mark(v.word, true) }}<div><b class="answer" data-nolink>{{ v.answer }}</b>
+<div class="small muted vunder">{{ words.badge(v.word) }}{% if v.reading %} {{ v.reading }}{% endif %}</div>
+{%- for f in v.flags %}{{ flag(f.title, f.text) }}{% endfor -%}
+</div></div>
+{%- endmacro %}
+
+{#- clause chip, claim with its passing condition, what was measured -#}
+{% macro record_clause_table(rows) -%}
+{% set measured = rows | selectattr("measured") | list %}
+<div class="scrollx ctable"><table class="pt"><thead><tr><th>Clause</th><th>What it claims, and the bar</th>{% if measured %}<th>Measured</th>{% endif %}</tr></thead><tbody>
+{%- for r in rows %}<tr{% if r.id %} id="{{ r.id }}"{% endif %}{% if r.planned %} class="plan"{% endif %}><td class="nw">{{ r.chip }}</td><td><b class="claim">{{ r.claim }}</b><div class="small muted">{{ r.condition }}</div>
+{%- if r.answer %}<div class="small qanswer">{{ r.answer }}</div>{% endif %}</td>
+{%- if measured %}<td class="small">{{ r.measured }}</td>{% endif %}</tr>{% endfor -%}
+</tbody></table></div>
+{%- endmacro %}
+
+{#- one row per arm: clause chip, grouped quantities with intervals, the adopted and baseline rows, the rule -#}
+{% macro record_arms(a) -%}
+<div class="scrollx arms"><table class="pt lb"><thead>
+{%- if a.groups %}<tr><th></th>{% for name, span in a.groups %}<th colspan="{{ span }}" class="armgroup">{{ name }}</th>{% endfor %}</tr>{% endif -%}
+<tr><th>Arm</th>{% for h in a.heads %}<th{% if h.numeric %} class="n"{% endif %}>{{ h.name }}</th>{% endfor %}</tr></thead><tbody>
+{%- for r in a.rows %}<tr class="{{ 'adopt' if r.adopted else '' }}{{ ' base' if r.baseline else '' }}"><td class="armname" data-nolink><b>{{ r.arm }}</b>{% if r.baseline %} <span class="muted small">baseline</span>{% endif %}{% if r.adopted %}<div>{{ words.badge("adopted") }}</div>{% endif %}</td>
+{%- for kind, value in r.cells %}{% if kind == "number" %}<td class="n">{{ value[0] }}{% if value[1] and value[2] %} <span class="muted">[{{ value[1] }}, {{ value[2] }}]</span>{% endif %}</td>{% else %}<td>{{ value }}</td>{% endif %}{% endfor -%}
+</tr>{% endfor -%}
+</tbody></table></div>
+{%- if a.rule %}<p class="small muted rule">Rule: {{ a.rule }}</p>{% endif %}
+{%- endmacro %}
+
+{#- a note card in the answer: caveat, disclosure or later evidence -#}
+{% macro card_note(n) -%}
+<div class="note {{ n.kind }}"><div class="nh">
+{%- if n.kind == "caveat" %}{{ words.mark("partial") }}{% elif n.kind == "disclosure" %}<span class="dico">!</span>{% else %}{{ words.mark("inconclusive") }}{% endif -%}
+<b>{{ n.title }}</b>{% if n.tag %}<span class="ntag">{{ n.tag }}</span>{% endif %}</div><p>{{ n.text }}</p>
+{%- if n.refs %}<p class="nr">{% for ref in n.refs %}{{ ref }}{% endfor %}</p>{% endif %}</div>
+{%- endmacro %}
+
+{#- the Verdict's Next items: mark, text, then a pill, an issue, chips or "no experiment yet" -#}
+{% macro opened(items) -%}
+<div class="mc opened"><p class="oh">What it opened</p>
+{%- for i in items %}<div class="op">{% if i.word %}{{ words.mark(i.word) }}{% else %}<span class="ph"></span>{% endif %}<p><span>{{ i.text }}</span> {% if i.word %}<span class="nw">→ {{ i.link }}</span>{% elif i.link %}{{ i.link }}{% elif not i.rests %}{{ inline.missing("no experiment yet") }}{% endif %}</p></div>{% endfor -%}
+</div>
+{%- endmacro %}
+
+{#- the whole card: before a verdict only the question and the clause table -#}
+{% macro record_answer(a) -%}
+<div class="box answer">{{ record_question(a.question) }}
+{%- if a.verdict %}{{ record_verdict_line(a.verdict) }}{% endif -%}
+{%- if a.arms %}{{ record_arms(a.arms) }}{% elif a.clause_table %}{{ record_clause_table(a.clause_table) }}{% endif -%}
+{%- if a.strips %}<div class="strips">{% for s in a.strips %}{{ evidence.strip(s) }}{% endfor %}<p class="small muted">Each reading’s value and interval, from <code>tables/clause-readings.csv</code>.</p></div>{% endif -%}
+{%- if a.figure or a.notes or a.opened %}<div class="agrid">{% if a.figure %}{{ evidence.exhibit(a.figure) }}{% endif %}<div class="stack">
+{%- for n in a.notes %}{{ card_note(n) }}{% endfor -%}
+{%- if a.opened %}{{ opened(a.opened) }}{% endif -%}
+</div></div>{% endif -%}
+</div>
+{%- endmacro %}

@@ -1,0 +1,63 @@
+{#- Components board, inputs: datasets, side documents, references and the setup folds -#}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/evidence.html" as evidence %}
+
+{#- a dataset's row: name, kind and labels, one item, size, and the chips that open it -#}
+{% macro input(d, chev=false) -%}
+<div class="input">{% if chev %}<span class="chev"></span>{% endif %}<span class="nm">{{ d.name }}</span><span class="kind">{{ d.kind or inline.missing("no kind") }}{% if d.labels %}<span class="lq">{{ d.labels }} labels</span>{% endif %}</span><span>one item is {{ d.one_item or inline.missing() }}</span>
+<span class="sz">{{ d.size or inline.missing("not recorded") }}</span>
+{%- if d.chips %}<span class="tb">{% for c in d.chips %}{{ c }}{% endfor %}</span>{% endif %}</div>
+{%- endmacro %}
+
+{#- a dataset: its row, which opens to its prose, stats grid, fields list and the tables it links -#}
+{% macro dataset(d) -%}
+{% set has_body = d.prose or d.stats or d.fields or d.exhibits %}
+{% if has_body -%}
+<details class="dfold" id="{{ d.id }}"><summary>{{ input(d, chev=true) }}</summary><div class="dbody">
+{{- d.prose }}
+{%- if d.stats %}<div class="dstats">{% for s in d.stats %}<div><b>{{ s.value }}</b><span>{{ s.statistic }}</span>{% if s.note %}<span class="muted">{{ s.note }}</span>{% endif %}</div>{% endfor %}</div>{% endif -%}
+{%- if d.fields %}<div class="dfields"><p class="k">Fields of one item</p>{% for f in d.fields %}<span class="df"><code>{{ f.field }}</code> <span class="muted">{{ f.type }}</span> {% if f["values"] %}{{ f["values"] | join(", ") }}{% else %}<span class="mono">{{ f.distinct }}</span>{% endif %}</span>{% endfor %}</div>{% endif -%}
+{%- for e in d.exhibits %}{{ evidence.exhibit(e) }}{% endfor -%}
+</div></details>
+{%- else -%}
+<div class="dfold" id="{{ d.id }}">{{ input(d) }}</div>
+{%- endif %}
+{%- endmacro %}
+
+{#- side documents: path, what it is and its length, the entries citing it -#}
+{% macro docs(documents) -%}
+<div class="box docbox"><div class="docs">{% for d in documents %}<div class="doc"><code data-nolink>{{ d.path }}</code><span>{{ d.what }} <span class="muted nw">· {{ d.lines }} lines</span></span><span class="cells">{{ d.chips }}</span></div>{% endfor %}</div></div>
+{%- endmacro %}
+
+{% macro refs(r) -%}
+<ul class="refs">{% for c in r.cited %}<li id="{{ c.id }}"><span class="key">{{ c.label }}</span><span>{{ c.title }}.{% if c.venue %} <i>{{ c.venue }}</i>.{% endif %}</span><span class="small muted">cited for {{ c.where }}</span></li>{% endfor %}
+{%- if r.uncited %}<li class="unc"><span class="key">{{ r.uncited }} more</span><span>entries in references.bib the record does not cite</span><span class="small">listed, not linked</span></li>{% endif %}</ul>
+{%- endmacro %}
+
+{#- Question and setup: the hypothesis and design rows the answer card leaves out -#}
+{% macro setup(s) -%}
+{% call layout.fold("Question and setup", s.meta, s.digest, id=s.id) -%}
+{% set rounds %}{% if s.rounds %}<ul class="rounds">{% for r in s.rounds %}<li id="{{ r.anchor }}"><b>{{ r.id }}</b> {{ r.title }} <span class="muted">· opened {{ r.opened or "—" }}{% if r.closed %} · closed {{ r.closed }}{% else %} · open{% endif %}</span></li>{% endfor %}</ul>{% endif %}{% endset %}
+{{ layout.rows(s.rows + ([("Rounds", rounds)] if s.rounds else [])) }}
+{%- endcall %}
+{%- endmacro %}
+
+{% macro adoption(a) -%}
+{% call layout.fold("Adoption candidate", "", a.digest, id=a.id) %}{{ layout.rows(a.rows) }}{% endcall %}
+{%- endmacro %}
+
+{#- Reproduce: prerequisites by kind, then the steps with their commit and by-hand tag -#}
+{% macro reproduce(r) -%}
+{% call layout.fold("Reproduce", r.meta, r.digest, id=r.id) -%}
+{% if r.prerequisites %}<div class="prereq">{% for kind, things in r.prerequisites %}<b>{{ kind }}</b><span>{% for t in things %}{{ t }}{% if not loop.last %}; {% endif %}{% endfor %}</span>{% endfor %}</div>{% endif %}
+{%- for p in r.loose %}<div class="small">{{ p }}</div>{% endfor -%}
+{%- if r.steps %}<ol class="steps">{% for s in r.steps %}<li class="step{{ ' env' if s.env else '' }}"><span class="n">{{ s.n }}</span><div class="t{{ ' muted' if s.env else '' }}">{{ s.title }}
+{%- if not s.env %} {% for sha in s.commits %}{{ inline.commit(sha) }}{% else %}{{ inline.commit("") }}{% endfor %}{% if s.by_hand %} {{ inline.byhand() }}{% endif %}{% endif %}</div><pre><code>{{ s.code }}</code></pre></li>{% endfor %}</ol>
+{%- else %}<p class="small">{{ inline.missing("no step recorded yet") }}</p>{% endif -%}
+{%- endcall %}
+{%- endmacro %}
+
+{% macro builds(records) -%}
+<div class="builds">{% for b in records %}<div class="small">{{ b.pill }}</div><span class="small muted">{{ b.text }}</span>{% endfor %}</div>
+{%- endmacro %}

@@ -1,0 +1,42 @@
+{#- Components board, evidence: interval strips, figures and tables, runs and dated history -#}
+{% import "components/inline.html" as inline %}
+
+{#- an interval strip: each reading's point and interval on one scale, against a bar or a margin band -#}
+{% macro strip(s) -%}
+<div class="strip{{ ' wide' if s.wide else '' }}">
+{%- for r in s.rows %}<div class="srow"><span class="slab">{{ r.chip }}{% if r.qualifier %}<span class="small muted q">{{ r.qualifier }}</span>{% endif %}</span><span class="track">
+{%- if r.band %}<i class="band" style="left: {{ r.band[0] }}; width: {{ r.band[1] }}"></i><i class="zero" style="left: {{ r.band[2] }}"></i>{% endif -%}
+{%- if r.bar %}<i class="barl" style="left: {{ r.bar }}"></i>{% endif -%}
+<i class="int {{ r.kind }}" style="left: {{ r.low }}; width: {{ r.width }}"></i><i class="pt {{ r.kind }}" style="left: {{ r.point }}"></i></span><span class="sval">{{ r.text }}</span></div>
+{%- endfor -%}
+<div class="srow axis"><span class="slab"></span><span class="track">{% for at, label in s.ticks %}<i style="left: {{ at }}">{{ label }}</i>{% endfor %}</span><span class="sval"><span class="muted">{{ s.legend }}</span></span></div></div>
+{%- endmacro %}
+
+{#- a figure or table: numbered caption, the drawing on its plate, the file under it -#}
+{% macro exhibit(e) -%}
+{% if e.missing %}<p>{{ e.missing }}</p>
+{%- else %}
+<figure{% if e.anchor %} id="{{ e.anchor }}"{% endif %}>{% if e.kind == "Table" or not e.src %}{{ e.html }}{% else %}<div class="fig">{{ e.html }}</div>{% endif %}
+{%- if e.src %}<div class="src">{{ e.src }}</div>{% endif -%}
+<figcaption><b class="lbl">{{ e.label }}</b> {{ e.caption }}</figcaption></figure>
+{%- endif %}
+{%- endmacro %}
+
+{#- run ids under a finding, linked through the record's MLflow address, the analysis commit and replaced runs -#}
+{% macro runs_line(runs) -%}
+<div class="runs"><span class="lb">Runs</span>
+{%- for short, href in runs.ids %}{% if href %}<a href="{{ href }}" class="rid">{{ short }}</a>{% else %}<span class="rid">{{ short }}</span>{% endif %}{% endfor -%}
+{%- if runs.more %}<span class="muted">+{{ runs.more }} more</span>{% endif -%}
+{%- if not runs.ids %}{{ inline.missing("no run" if runs.commits else "no run recorded") }}{% endif -%}
+{%- if runs.commits %}<span class="muted">· analysis</span>{% for sha in runs.commits %}{{ inline.commit(sha) }}{% endfor %}{% if runs.more_commits %}<span class="muted">+{{ runs.more_commits }} more</span>{% endif %}{% endif -%}
+{%- if runs.ids and not runs.linked %}<span class="muted">· no MLflow address, ids not linked</span>{% endif -%}
+</div>
+{%- if runs.replaced %}<div class="runs"><span class="lb">Replaces</span>{% for short, href in runs.replaced %}{% if href %}<a href="{{ href }}" class="rid">{{ short }}</a>{% else %}<span class="rid">{{ short }}</span>{% endif %}{% endfor %}<span class="muted">· superseded runs, kept in MLflow</span></div>{% endif -%}
+{%- endmacro %}
+
+{#- a dated history: date, timing tag, whose call, text -#}
+{% macro hist(entries) -%}
+<ol class="hist">
+{%- for h in entries %}<li><span class="mono muted">{{ h.date }}</span>{% if h.after is not none %}{{ inline.when(h.after) }}{% endif %}{% if h.user %}<span class="who">user's call</span>{% endif %}<span>{{ h.text }}</span></li>{% endfor -%}
+</ol>
+{%- endmacro %}
