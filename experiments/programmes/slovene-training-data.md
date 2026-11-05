@@ -9,10 +9,21 @@ members:
   - ../data/curation-thresholds-slovenian/
   - ../data/kpi-coverage-slovenian/
 planned:
+  - slug: silver-ner-slovenian
+    short: Silver NER examples
+    title: whether LLM annotation of real Slovene text, with generated text only for rare labels, matches the human gold of SUK closely enough to train on
+    ticket: "#43"
+    builds_on: [kpi-coverage-slovenian, ie-benchmark-slovenian]
   - slug: medical-ie-slovenian
     short: Medical extraction examples
-    title: how to build native Slovene medical examples for information extraction, since open supply has too few
-    builds_on: [data-landscape-slovenian]
+    title: whether silver examples labelled with the OMOP data model's domains, on native Slovene medical text, agree with a double-annotated gold set
+    ticket: "#46"
+    builds_on: [data-landscape-slovenian, silver-ner-slovenian]
+  - slug: science-ie-slovenian
+    short: Scientific extraction examples
+    title: whether silver examples labelled with methods, datasets, metrics, parameters and results, on native Slovene scientific text, agree with a double-annotated gold set
+    ticket: "#47"
+    builds_on: [kpi-coverage-slovenian, silver-ner-slovenian]
   - slug: quality-classifier-slovenian
     short: Learned quality filter
     title: whether a classifier trained on the judge's verdicts removes the web junk that the rule-based filters cannot separate from good text
@@ -44,4 +55,6 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 ## Open
 
 - how to remove the web boilerplate and link lists that simple rules cannot separate from good text, and bound the bad text the corpus keeps — answered by quality-classifier-slovenian
+- whether LLM-made silver annotation can be trusted, checked first where human gold already exists — answered by silver-ner-slovenian
 - how native medical extraction examples are built at the scale KPI 2 asks for — answered by medical-ie-slovenian
+- how native scientific extraction examples are built, with a label set the project defines itself — answered by science-ie-slovenian

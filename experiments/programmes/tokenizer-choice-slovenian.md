@@ -30,8 +30,9 @@ planned:
     builds_on: [morph-table-slovenian]
   - slug: tokenizer-downstream-slovenian
     short: Tokenizer and model scores
-    title: whether the tokenizer metrics predict how well a small Slovene model trained with each tokenizer does on Slovene benchmarks
-    builds_on: [metric-redundancy-slovenian, bpe-pruning-slovenian, stem-protection-slovenian]
+    title: whether the tokenizer metrics predict how well a small Slovene encoder pretrained with each tokenizer does on Slovene benchmarks, at proxy scale with the architecture the encoder comparison picks
+    ticket: "#49"
+    builds_on: [morph-gold-slovenian, encoder-architecture-slovenian]
 ---
 
 # Which tokenizer should a small Slovene language model use?
@@ -58,5 +59,5 @@ Slovene is morphologically rich: a noun inflects for six cases in three numbers,
 - which metrics are redundant — answered by metric-redundancy-slovenian
 - whether the morphological algorithms improve once trained on a correct table — answered by morph-table-slovenian
 - whether a changed BPE training rule helps Slovene — answered by bpe-pruning-slovenian and stem-protection-slovenian
-- whether any tokenizer metric predicts model quality — answered by tokenizer-downstream-slovenian
+- whether any tokenizer metric predicts model quality — answered by tokenizer-downstream-slovenian, which starts on the 24 tokenizers of the gold experiment; tokenizers from bpe-pruning-slovenian and stem-protection-slovenian join it as later arms
 - whether freezing the embeddings of some tokens, such as rare tokens or tokens with a single meaning, speeds up pretraining without losing model quality — needs a follow-up on the models of tokenizer-downstream-slovenian, not yet planned
