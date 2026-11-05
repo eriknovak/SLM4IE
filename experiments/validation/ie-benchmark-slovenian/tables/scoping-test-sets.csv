@@ -1,0 +1,14 @@
+entry,family,state,scored_split,documents,gold_units,chars,source,note
+ner/ssj500k,ner,built,test,233,1031,479177,CLARIN.SI 11356/1434,spans: PER 405 LOC 284 ORG 217 MISC 102 DERIV-PER 23; val 258 documents 993 spans
+ner/suk,ner,built,test,733,18548,1899582,CLARIN.SI SUK 1.1,spans: ORG 7271 PER 5331 LOC 4763 MISC 939 DERIV-PER 244; val 641 documents 18321 spans
+ner/janes_tag,ner,to add,test (held-out hash ~50%),~1479,,,CLARIN.SI 11356/1238,Janes-Tag 2.1: 2958 texts and 75276 tokens in all; entity count not published
+ner/slavicner,ner,to add,test (held-out hash ~50%),~252,~10350,,SlavicNER (arXiv 2404.00482),Slovene part: 503 documents and 20711 mentions in all; labels PER ORG LOC EVT PRO; public since 2017
+sentiment/sentinews,classification,not extracted,test (hash 15%),~1564,~1564,~3150000,CLARIN.SI SentiNews 1.0,10427 documents; no extract.yaml entry yet; round 2
+sentiment/twitter_15eu_sl,classification,not downloaded,test,,,,not catalogued,no download entry; round 2
+qa/boolq,qa,unlabelled test,val,18 humant / 3270 googlemt,,,SuperGLUE-SL,test.jsonl has no labels in either bundle; round 2
+nli/cb,classification,unlabelled test,val,22 humant / 56 googlemt,,,SuperGLUE-SL,round 2
+nli/rte,classification,unlabelled test,val,29 humant / 277 googlemt,,,SuperGLUE-SL,round 2
+commonsense/copa,qa,unlabelled test,val,100 humant / 100 googlemt,,,SuperGLUE-SL,round 2
+coref/wsc,classification,unlabelled test,val,104 humant / 0 googlemt,,,SuperGLUE-SL,round 2
+qa/multirc,qa,unlabelled test,val,3 humant / 83 googlemt,,,SuperGLUE-SL,labels nested per answer; round 2
+wsd/wic,classification,absent,,0,,,SuperGLUE-SL,WiC is in neither bundle

@@ -16,6 +16,10 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Recall**: of the correct items, the share the system returned. 1 means nothing was missed.
 - **F1** (F1 score): harmonic mean of precision and recall; 1 is perfect, 0 means nothing right. Macro F1 averages F1 over classes or units with equal weight; micro F1 pools all decisions first.
 - **Macro-F1**: the F1 score computed per class and averaged with equal weight per class, so a rare class such as medical counts as much as a frequent one.
+- **Strict span F1** (span-and-label F1, strict F1): F1 over named-entity mentions where a predicted mention counts as correct only if its start, end and label all equal a gold mention's; micro over all mentions unless macro is named.
+- **Partial-overlap span F1** (partial-overlap F1): span F1 where a predicted mention counts as correct when it shares at least one character with a gold mention of the same label; the gap to strict F1 is the share lost to boundary errors.
+- **Miss rate** (unparseable rate): the share of documents for which a model's answer could not be parsed against the required JSON schema; such a document is scored as having no mentions.
+- **Paired bootstrap**: a bootstrap that redraws the same scored documents for two systems at once and recomputes the difference between them on each draw, so the interval reflects only how the systems differ.
 - **Precision@k** (P@k): precision over the top k ranked items only.
 - **Recall@k** (R@k): the share of correct items found within the top k.
 - **Accuracy**: the share of all decisions that are correct; misleading when classes are imbalanced.
@@ -60,6 +64,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Raw web crawl** (web crawl, web crawls): a source scraped from the open web with little editing — here c4, cc100, culturax, fineweb2, hplt, macocu_sl, classla_web_sl and finepdf. In the curation-thresholds experiment finepdf, a crawl of PDF documents, takes the curated-prose route.
 - **Curated source**: a source assembled or edited by people for a purpose — here the parliamentary, medical, legal, scientific, news, wiki and reference corpora. In the curation-thresholds experiment the medical and academic ones take a route of their own.
 - **Sloleks**: the reference lexicon of Slovene word forms, used here to check whether a token is an ordinary Slovene word.
+- **LLM** (large language model, LLMs): a neural language model trained on large text collections that answers a prompt with generated text; here both the hosted Claude models and the open-weight models run on a local GPU.
 - **LLM judge** (judge): a language model given a fixed rubric and asked to label documents, standing in for a human annotator once its agreement with one is measured.
 - **Bad text** (lenient bar, strict bar): at the lenient bar, a document the judge scores coherence 2 or lower, labels garbage or boilerplate, or flags as adult or spam; the strict bar also counts coherence 3.
 - **Coherence**: the rubric's 1-5 score of whether a document reads as connected, sensible text, from unreadable (1) to fluent, well-formed prose (5).
@@ -136,3 +141,5 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **NUL** (NUL character): the byte value zero, which never belongs in text; in the corpus it stands where a letter was lost upstream.
 - **SSJ** (ssj500k, UD Slovenian SSJ): the manually annotated Slovene reference corpus, whose Universal Dependencies treebank the MorphScore v2 Slovene items are drawn from.
 - **UD** (Universal Dependencies): a cross-lingual scheme of part-of-speech tags, morphological features and syntactic dependencies, with one annotated treebank per language.
+- **SUK** (SUK 1.1): the Slovene training corpus SUK 1.1 from CLARIN.SI, which joins ssj500k, Ambiga, ElexisWSD and SentiCoref under one annotation scheme; `ner/suk` holds its documents outside ssj500k.
+- **Zero-shot** (zero-shot prompting): asking a model to do a task from instructions alone, with no labelled example of the task in the prompt and no training on it.

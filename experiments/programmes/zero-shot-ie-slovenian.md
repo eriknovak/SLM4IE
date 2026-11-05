@@ -3,12 +3,9 @@ title: Can a model under one billion parameters extract Slovene information with
 slug: zero-shot-ie-slovenian
 short: Zero-shot Slovene extraction
 status: open
-members: []
+members:
+  - ../validation/ie-benchmark-slovenian/
 planned:
-  - slug: ie-benchmark-slovenian
-    short: Extraction benchmark
-    title: how frontier and open LLMs score on Slovene NER, question answering and classification under one fixed protocol, with cost and memory per document
-    ticket: "#42"
   - slug: gliner-backbones-slovenian
     short: GLiNER backbones
     title: which backbone, a Slovene or multilingual encoder or a small decoder LLM, gives a GLiNER model the best zero-shot Slovene NER
@@ -33,7 +30,7 @@ _No experiment has concluded yet._
 
 ## Threads
 
-_No members yet._
+- **Reference scores**: where Claude and open LLMs on one local GPU stand on Slovene extraction, and whether a local model can label the silver data — [ie-benchmark-slovenian:C1], [ie-benchmark-slovenian:Q1]
 
 ## Open
 
