@@ -369,3 +369,57 @@ class TestNerFromConllu:
         for row in rows:
             surfaces = [(row["text"][s["start"] : s["end"]], s["label"]) for s in row["spans"]]
             assert surfaces == [("Janez Novak", "PER"), ("Ljubljani", "LOC")]
+
+
+class TestAnnotatedIn:
+    """`source.annotated_in` keeps only documents another source annotates."""
+
+    def test_documents_without_spans_in_the_marker_source_are_dropped(self, tmp_path: Path) -> None:
+        """A doc_id whose marker annotation has no `spans` field is not converted."""
+        tasks_yaml = _make_ner_layout(tmp_path, "big", "finetune_and_eval", _ner_records(4))
+        _write_gz_jsonl(
+            tmp_path / "extracted" / "marker.annotations.jsonl.gz",
+            [{"doc_id": "s0", "spans": []}, {"doc_id": "s1"}, {"doc_id": "s2", "spans": [[0, 3, "PER"]]}],
+        )
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/big"]["source"]["annotated_in"] = ["marker"]
+        tasks_yaml.write_text(yaml.safe_dump(body))
+        cfg = load_tasks_config(tasks_yaml)
+
+        kept = [r["doc_id"] for r in iter_extracted_records(cfg.entries[0], cfg.roots)]
+
+        assert kept == ["s0", "s2"]
+
+
+class TestSplitOn:
+    """`split_on` assigns splits from a metadata field instead of the id hash."""
+
+    def test_listed_field_value_goes_to_its_split_and_the_rest_to_otherwise(self, tmp_path: Path) -> None:
+        """Documents of the listed topic land in test, every other one in val."""
+        records = _ner_records(10)
+        for i, record in enumerate(records):
+            record["metadata"] = {"topic": "elections" if i < 3 else "covid"}
+        tasks_yaml = _make_ner_layout(tmp_path, "kzb", "held_out", records)
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/kzb"]["split_on"] = {
+            "field": "topic",
+            "values": {"test": ["elections"]},
+            "otherwise": "val",
+        }
+        tasks_yaml.write_text(yaml.safe_dump(body))
+
+        convert_tasks(tasks_yaml, entry_keys=["ner/kzb"], max_workers=1)
+
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
+        assert _count_rows(out_dir / "test.jsonl.gz") == 3
+        assert _count_rows(out_dir / "val.jsonl.gz") == 7
+
+    def test_rejects_a_split_the_entry_does_not_write(self, tmp_path: Path) -> None:
+        """A held_out entry cannot send documents to train."""
+        tasks_yaml = _make_ner_layout(tmp_path, "kzb", "held_out", _ner_records(2))
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/kzb"]["split_on"] = {"field": "topic", "values": {"train": ["x"]}, "otherwise": "val"}
+        tasks_yaml.write_text(yaml.safe_dump(body))
+
+        with pytest.raises(ValueError, match="split_on"):
+            load_tasks_config(tasks_yaml)

@@ -485,6 +485,33 @@ def _surfaces(doc: Document) -> List[tuple]:
     return [(doc.text[s:e], label) for s, e, label in doc.annotations.spans]
 
 
+# A multiword token ("naujo" = "ne bojo", Janes-Tag style) whose words do not
+# occur in the text, followed by an entity, and an entity inside a multiword token.
+MULTIWORD_DOC = textwrap.dedent("""\
+    # newdoc id = mwt
+    # sent_id = mwt.s1
+    # text = Da se naujozdaj na Planico.
+    1\tDa\tda\tSCONJ\tCs\t_\t_\t_\t_\tNER=O
+    2\tse\tse\tPRON\tPx\t_\t_\t_\t_\tNER=O
+    3-4\tnaujo\t_\t_\t_\t_\t_\t_\t_\tNER=O|SpaceAfter=No
+    3\tne\tne\tPART\tQ\t_\t_\t_\t_\tNER=O
+    4\tbojo\tbiti\tAUX\tVa\t_\t_\t_\t_\tNER=O
+    5\tzdaj\tzdaj\tADV\tRgp\t_\t_\t_\t_\tNER=O
+    6\tna\tna\tADP\tSa\t_\t_\t_\t_\tNER=O
+    7\tPlanico\tPlanica\tPROPN\tNpfsa\t_\t_\t_\t_\tNER=B-loc|SpaceAfter=No
+    8\t.\t.\tPUNCT\tZ\t_\t_\t_\t_\tNER=O
+
+    # sent_id = mwt.s2
+    # text = Vprašal sem ga.
+    1-2\tVprašal\t_\t_\t_\t_\t_\t_\t_\tNER=O
+    1\tVpraša\tvprašati\tVERB\tVm\t_\t_\t_\t_\tNER=B-per
+    2\tl\tl\tAUX\tVa\t_\t_\t_\t_\tNER=I-per
+    3\tsem\tbiti\tAUX\tVa\t_\t_\t_\t_\tNER=O
+    4\tga\ton\tPRON\tPp\t_\t_\t_\t_\tNER=O|SpaceAfter=No
+    5\t.\t.\tPUNCT\tZ\t_\t_\t_\t_\tNER=O
+""")
+
+
 class TestEntitySpans:
     """Entity spans decoded from `NER=` MISC tags."""
 
@@ -531,3 +558,36 @@ class TestEntitySpans:
             (doc,) = _extract(tmp_path, MISALIGNED_DOC)
         assert doc.annotations.spans == []
         assert any("1 sentence" in rec.message for rec in caplog.records)
+
+    def test_multiword_token_aligns_on_its_surface_form(self, tmp_path: Path) -> None:
+        """Words of a multiword token take its surface range, so later spans are kept."""
+        (doc,) = _extract(tmp_path, MULTIWORD_DOC)
+        assert _surfaces(doc) == [("Planico", "LOC"), ("Vprašal", "PER")]
+
+    def test_multiword_token_without_text_comment_keeps_spans(self, tmp_path: Path) -> None:
+        """Without `# text` the words render the text, so spans after a multiword token survive."""
+        content = "\n".join(line for line in MULTIWORD_DOC.splitlines() if not line.startswith("# text")) + "\n"
+        (doc,) = _extract(tmp_path, content)
+        assert [label for _, label in _surfaces(doc)] == ["LOC", "PER"]
+
+
+class TestSentenceDocuments:
+    """A document listed in `sentence_documents` yields one Document per sentence."""
+
+    def test_listed_document_splits_into_sentences_keyed_by_sent_id(self, tmp_path: Path) -> None:
+        """Each sentence becomes its own document, its spans shifted to the sentence."""
+        _write_conllu(tmp_path, "test.conllu", ENTITY_DOC)
+
+        docs = list(ConlluExtractor().extract(tmp_path, "test", "news", metadata={"sentence_documents": ["ent1"]}))
+
+        assert [d.doc_id for d in docs] == ["ent1.s1", "ent1.s2"]
+        assert docs[0].annotations.spans == []
+        assert _surfaces(docs[1])[0] == ("Janez Novak", "PER")
+
+    def test_unlisted_document_stays_whole(self, tmp_path: Path) -> None:
+        """A document not in the list keeps all its sentences."""
+        _write_conllu(tmp_path, "test.conllu", ENTITY_DOC)
+
+        docs = list(ConlluExtractor().extract(tmp_path, "test", "news", metadata={"sentence_documents": ["other"]}))
+
+        assert [d.doc_id for d in docs] == ["ent1"]

@@ -418,6 +418,44 @@ datasets:
       comparison with prior work.
       License: CC BY-NC-SA 4.0.
 
+  janes_tag:
+    enabled: true
+    role: benchmark
+    source: http
+    publisher: clarin.si
+    name: "Janes-Tag 3.0 (CMC Training Corpus)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1732/Janes-Tag.3.0.CoNLL-U.zip?sequence=2&isAllowed=y"
+    output_dir: janes_tag
+    tasks:
+      - POS
+      - LEMMA
+      - NER
+    note: >
+      Manually annotated Slovene computer-mediated communication (tweets, forum
+      posts, blog and news comments). 3.0 replaces 2.1 (11356/1238) with
+      corrected text and adds Janes-RSDO tweets; only the janes-tag part
+      (2,957 texts) carries NER tags, and Twitter handles are tagged PER.
+      License: CC BY-SA 4.0.
+
+  slavicner:
+    enabled: true
+    role: benchmark
+    source: http
+    publisher: github.com
+    name: "SlavicNER (Cross-lingual Named Entity Corpus for Slavic Languages)"
+    urls:
+      - "https://github.com/SlavicNLP/SlavicNER/archive/2c72947c4d85df156537f1dc92bd80f4180f6c71.zip"
+    output_dir: slavicner
+    tasks:
+      - NER
+    note: >
+      BSNLP 2017-2023 shared-task corpus: 5,017 news documents on seven topics in
+      six Slavic languages, with PER, ORG, LOC, EVT and PRO mentions as character
+      offsets. The Slovene part holds 503 documents and 20,698 mentions. Pinned
+      to the 2024-05-18 commit; public on GitHub, so models may have seen it.
+      License: none stated; research use per the LREC-COLING 2024 paper.
+
   superglue_sl:
     enabled: true
     role: benchmark

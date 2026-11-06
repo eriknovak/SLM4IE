@@ -10,7 +10,8 @@ Sources are read from the extraction tree (`<roots.extracted>/<key>.jsonl` plus
 the optional annotations sidecar) and joined on the fly. Annotation spans whose
 label is not in the entry's `labels` allow-list are dropped, with one warning
 per dataset. The split policy is HASH: the run loop buckets each document by a
-deterministic hash of its stable id.
+deterministic hash of its stable id, unless the entry's `split_on` assigns the
+split from a document metadata field.
 """
 
 import logging
@@ -137,7 +138,7 @@ class SpansConverter(TaskConverter):
         ctx: ConvertContext,
         splits: list[str],
     ) -> Iterator[tuple[str, dict[str, Any]]]:
-        """Yield `(stable_id, NerExample)` pairs for every joined record.
+        """Yield `(split_key, NerExample)` pairs for every joined record.
 
         Args:
             entry: NER task entry.
@@ -146,7 +147,8 @@ class SpansConverter(TaskConverter):
             splits: Target split names (unused; the run loop hashes each id).
 
         Yields:
-            `(stable_id, example)` pairs for the HASH split policy.
+            `(stable_id, example)` pairs the run loop hashes into splits, or
+            `(split_name, example)` pairs when the entry sets `split_on`.
 
         Raises:
             ValueError: If the entry source kind is not `extracted`.
@@ -165,7 +167,8 @@ class SpansConverter(TaskConverter):
             example = _record_to_example(record, index, label_allow, dropped_labels)
             if example is None:
                 continue
-            yield example["id"], dict(example)
+            split_key = entry.split_on.split_of(record.get("metadata") or {}) if entry.split_on else example["id"]
+            yield split_key, dict(example)
 
         # warn once about dropped labels
         if dropped_labels:

@@ -58,11 +58,49 @@ class EntrySource:
         exclude: Catalog keys whose documents are dropped from the source
             by `doc_id`, so a superset can be held out against a contained
             training source. `extracted` sources only.
+        annotated_in: Catalog keys that mark which documents carry the
+            annotation layer: only documents whose `doc_id` has entity spans
+            in one of these keys' annotations are kept. `extracted` sources
+            only.
     """
 
     kind: Literal["extracted", "raw"]
     keys: list[str]
     exclude: list[str] = dataclasses.field(default_factory=list)
+    annotated_in: list[str] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class SplitOn:
+    """Assigns splits from a document metadata field instead of a hash.
+
+    Attributes:
+        field: The `Document.metadata` field read.
+        values: Split name -> the field values that go to it.
+        otherwise: The split of a document whose value is in no list.
+    """
+
+    field: str
+    values: dict[str, list[str]]
+    otherwise: str
+
+    def split_of(self, metadata: dict[str, Any]) -> str:
+        """Return the split of a document from its metadata.
+
+        Args:
+            metadata: The document's metadata.
+
+        Returns:
+            The split name.
+
+        Raises:
+            KeyError: If the metadata lacks the field, which would otherwise
+                send the document silently to `otherwise`.
+        """
+        if self.field not in metadata:
+            raise KeyError(f"document metadata has no split_on field {self.field!r}: {sorted(metadata)}")
+        value = metadata[self.field]
+        return next((split for split, listed in self.values.items() if value in listed), self.otherwise)
 
 
 @dataclasses.dataclass
@@ -85,6 +123,8 @@ class TaskEntry:
         converter: Resolved converter module name (e.g.
             `"spans"`). Defaults from the registry's
             `converters:` map and may be overridden per entry.
+        split_on: Optional metadata-field split replacing the hash split,
+            for a source that publishes its own split; `spans` only.
     """
 
     task: str
@@ -97,6 +137,7 @@ class TaskEntry:
     language: str
     license: str
     converter: str
+    split_on: SplitOn | None = None
 
 
 @dataclasses.dataclass
@@ -375,6 +416,8 @@ def _parse_entry(key: Any, value: Any, converter_defaults: dict[str, str]) -> Ta
             f"entry in `converters:` and no per-entry override."
         )
 
+    split_on = _parse_split_on(key, value.get("split_on"), splits, role, converter)
+
     # build the entry
     return TaskEntry(
         task=task,
@@ -387,7 +430,40 @@ def _parse_entry(key: Any, value: Any, converter_defaults: dict[str, str]) -> Ta
         language=language,
         license=license_,
         converter=converter,
+        split_on=split_on,
     )
+
+
+def _parse_split_on(key: str, raw: Any, splits: dict[str, str], role: str, converter: str) -> SplitOn | None:
+    """Parses and validates an entry's optional `split_on:` block.
+
+    Args:
+        key: Owning entry key, used for error messages.
+        raw: Raw `split_on` mapping, or None.
+        splits: The entry's declared splits.
+        role: The entry's role; a `held_out` entry may not name `train`.
+        converter: The entry's converter; only `spans` reads `split_on`.
+
+    Returns:
+        Parsed `SplitOn`, or None when the block is absent.
+
+    Raises:
+        ValueError: If the block is malformed, names an undeclared split, or
+            sits on an entry whose converter does not read it.
+    """
+    if raw is None:
+        return None
+    if converter != "spans":
+        raise ValueError(f"Entry {key!r} `split_on` needs the `spans` converter; got {converter!r}.")
+    if not isinstance(raw, dict) or not isinstance(raw.get("field"), str) or not isinstance(raw.get("values"), dict):
+        raise ValueError(f"Entry {key!r} `split_on` must map `field`, `values` and `otherwise`.")
+    values = {str(split): [str(v) for v in listed] for split, listed in raw["values"].items()}
+    otherwise = raw.get("otherwise")
+    allowed = {s for s in splits if not (role == "held_out" and s == "train")}
+    for split in [*values, otherwise]:
+        if split not in allowed:
+            raise ValueError(f"Entry {key!r} `split_on` names split {split!r}, not among {sorted(allowed)}.")
+    return SplitOn(field=raw["field"], values=values, otherwise=otherwise)
 
 
 def _parse_source(key: str, raw: Any) -> EntrySource:
@@ -419,7 +495,12 @@ def _parse_source(key: str, raw: Any) -> EntrySource:
         raise ValueError(f"Entry {key!r} `source.exclude` must be a list of dataset keys.")
     if exclude and kind != "extracted":
         raise ValueError(f"Entry {key!r} `source.exclude` needs an `extracted` source.")
-    return EntrySource(kind=kind, keys=list(keys), exclude=list(exclude))
+    annotated_in = raw.get("annotated_in") or []
+    if not isinstance(annotated_in, list) or not all(isinstance(k, str) and k for k in annotated_in):
+        raise ValueError(f"Entry {key!r} `source.annotated_in` must be a list of dataset keys.")
+    if annotated_in and kind != "extracted":
+        raise ValueError(f"Entry {key!r} `source.annotated_in` needs an `extracted` source.")
+    return EntrySource(kind=kind, keys=list(keys), exclude=list(exclude), annotated_in=list(annotated_in))
 
 
 def _parse_splits(key: str, raw: Any) -> dict[str, str]:

@@ -1,0 +1,13 @@
+statistic,value,note
+val_documents,1327,hash split of the held-out documents
+val_spans,14262,gold entity mentions
+val_median_document_chars,104,
+val_max_document_chars,6321,longest prompt input
+val_documents_without_spans,487,a model scores only false positives here
+val_nested_spans,0,spans starting inside another span
+test_documents,1453,hash split of the held-out documents
+test_spans,15591,gold entity mentions
+test_median_document_chars,103,
+test_max_document_chars,6425,longest prompt input
+test_documents_without_spans,520,a model scores only false positives here
+test_nested_spans,0,spans starting inside another span

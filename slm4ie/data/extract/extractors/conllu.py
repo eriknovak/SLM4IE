@@ -127,10 +127,12 @@ def _parse_misc(misc: str) -> dict[str, str]:
     return pairs
 
 
-def _parse_block(lines: list[str]) -> tuple[str, list[Token], list[str] | None] | None:
-    """Parse a single CoNLL-U sentence block into (text, tokens, IOB tags).
+def _parse_block(lines: list[str]) -> tuple[str, list[Token], list[str] | None, list[str | None]] | None:
+    """Parse a single CoNLL-U sentence block into (text, tokens, IOB tags, surfaces).
 
-    Skips multiword and empty-node lines (ID contains `-` or `.`).
+    Skips empty-node lines (ID contains `.`). A multiword token line
+    (ID `3-4`) yields no token, but its form is the surface its words
+    are written as in the text, so it is kept for aligning them.
     Each token's `space_after` is derived from the MISC field
     (column 10): False when it carries `SpaceAfter=No`, else True.
     Text is taken from a `# text = ...` comment when present, else
@@ -144,15 +146,20 @@ def _parse_block(lines: list[str]) -> tuple[str, list[Token], list[str] | None] 
         lines: Non-empty lines of the sentence block.
 
     Returns:
-        `(text, tokens, tags)` for the sentence, where `tags` is
-        None when no token carried `NER=`; None when the block had
-        no token lines.
+        `(text, tokens, tags, surfaces)` for the sentence, where `tags`
+        is None when no token carried `NER=` and `surfaces` holds, per
+        token, the form written in the text: its own form, its multiword
+        token's form for the first word of one, and None for the later
+        words, which share that surface. None when the block had no
+        token lines.
     """
     # parse the token lines
     text = ""
     tokens: list[Token] = []
     tags: list[str] = []
+    surfaces: list[str | None] = []
     tagged = False
+    multiword_form, multiword_first, multiword_last = "", 0, -1
 
     for line in lines:
         if line.startswith("#"):
@@ -165,9 +172,20 @@ def _parse_block(lines: list[str]) -> tuple[str, list[Token], list[str] | None] 
             continue
 
         token_id = parts[0]
-        # skip multiword tokens ("1-2") and empty nodes ("1.1")
-        if "-" in token_id or "." in token_id:
+        # skip empty nodes ("1.1"); keep a multiword token's ("1-2") surface
+        if "." in token_id:
             continue
+        if "-" in token_id:
+            first, _, last = token_id.partition("-")
+            multiword_form, multiword_first, multiword_last = parts[1], int(first), int(last)
+            continue
+
+        # a word inside a multiword token is written as that token's form
+        word_id = int(token_id)
+        if multiword_first <= word_id <= multiword_last:
+            surfaces.append(multiword_form if word_id == multiword_first else None)
+        else:
+            surfaces.append(parts[1])
 
         misc = _parse_misc(parts[9])
         tokens.append(
@@ -187,10 +205,12 @@ def _parse_block(lines: list[str]) -> tuple[str, list[Token], list[str] | None] 
     if not tokens:
         return None
 
+    # rendered text is written from the words, so they align on their own forms
     if not text:
         text = render_sentence(tokens)
+        surfaces = [token.form for token in tokens]
 
-    return text, tokens, (tags if tagged else None)
+    return text, tokens, (tags if tagged else None), surfaces
 
 
 def _decode_iob(tags: list[str]) -> list[tuple[int, int, str]]:
@@ -232,17 +252,19 @@ def _decode_iob(tags: list[str]) -> list[tuple[int, int, str]]:
     return spans
 
 
-def _align_tokens(text: str, tokens: list[Token]) -> list[tuple[int, int]] | None:
+def _align_tokens(text: str, surfaces: list[str | None]) -> list[tuple[int, int]] | None:
     """Locate each token's character range in its sentence text.
 
     Walks the text with a cursor that skips whitespace before every
-    token and requires the token form to start exactly there, so a
+    token and requires the token's surface to start exactly there, so a
     `# text` line that disagrees with the tokens is detected rather
     than matched to a later occurrence.
 
     Args:
         text: The sentence text the tokens were drawn from.
-        tokens: The sentence's tokens in reading order.
+        surfaces: Per token in reading order, the form written in the
+            text, or None for a later word of a multiword token, which
+            takes the range of the word before it.
 
     Returns:
         One `(start, end)` pair per
@@ -252,19 +274,22 @@ def _align_tokens(text: str, tokens: list[Token]) -> list[tuple[int, int]] | Non
     # place each token after the previous one
     offsets: list[tuple[int, int]] = []
     cursor = 0
-    for token in tokens:
+    for surface in surfaces:
+        if surface is None:
+            offsets.append(offsets[-1])
+            continue
         while cursor < len(text) and text[cursor].isspace():
             cursor += 1
-        if not text.startswith(token.form, cursor):
+        if not text.startswith(surface, cursor):
             return None
-        offsets.append((cursor, cursor + len(token.form)))
-        cursor += len(token.form)
+        offsets.append((cursor, cursor + len(surface)))
+        cursor += len(surface)
     return offsets
 
 
 def _entity_spans(
     sentence_texts: list[str],
-    sentence_tokens: list[list[Token]],
+    sentence_surfaces: list[list[str | None]],
     sentence_tags: list[list[str] | None],
 ) -> tuple[list[list[Any]] | None, int]:
     """Turn per-sentence IOB tags into document-level character spans.
@@ -276,7 +301,8 @@ def _entity_spans(
 
     Args:
         sentence_texts: Text for each sentence in order.
-        sentence_tokens: Tokens per sentence.
+        sentence_surfaces: Per sentence, each token's surface form as
+            `_parse_block` returns it.
         sentence_tags: IOB tags per
             sentence, None for a sentence without `NER=` tags.
 
@@ -292,9 +318,9 @@ def _entity_spans(
     spans: list[list[Any]] = []
     misaligned = 0
     offset = 0
-    for text, tokens, tags in zip(sentence_texts, sentence_tokens, sentence_tags):
+    for text, surfaces, tags in zip(sentence_texts, sentence_surfaces, sentence_tags):
         if tags:
-            offsets = _align_tokens(text, tokens)
+            offsets = _align_tokens(text, surfaces)
             if offsets is None:
                 misaligned += 1
             else:
@@ -320,6 +346,21 @@ def _newdoc_id(lines: list[str]) -> str | None:
         # comments precede tokens: stop at the first token row
         if not line.startswith("#"):
             return None
+    return None
+
+
+def _sent_id(lines: list[str]) -> str | None:
+    """Return a sentence block's `# sent_id` value.
+
+    Args:
+        lines: Lines of one sentence block.
+
+    Returns:
+        The id, or None when the block has no `# sent_id` comment.
+    """
+    for line in lines:
+        if line.startswith("# sent_id = "):
+            return line[len("# sent_id = ") :]
     return None
 
 
@@ -357,6 +398,7 @@ def _build_document(
     sentence_texts: list[str],
     sentence_tokens: list[list[Token]],
     sentence_tags: list[list[str] | None],
+    sentence_surfaces: list[list[str | None]],
     doc_id: str,
     source: str,
     domain: str,
@@ -371,6 +413,8 @@ def _build_document(
             in the same order as *sentence_texts*.
         sentence_tags: IOB tags for each
             sentence, None where the sentence carried no `NER=`.
+        sentence_surfaces: Each sentence's token surfaces, used to place
+            the entity spans in the text.
         doc_id: Identifier for the resulting Document.
         source: Dataset key.
         domain: Domain label.
@@ -403,7 +447,7 @@ def _build_document(
         sentences.append([start, cursor - 1])
 
     # build the document
-    spans, misaligned = _entity_spans(sentence_texts, sentence_tokens, sentence_tags)
+    spans, misaligned = _entity_spans(sentence_texts, sentence_surfaces, sentence_tags)
     annotations = Annotations(tokens=flat_tokens, sentences=sentences, spans=spans)
     document = Document(
         text=_SENTENCE_SEP.join(sentence_texts),
@@ -466,21 +510,26 @@ class ConlluExtractor(FileBasedExtractor):
             input_dir: Dataset root, used to locate an optional
                 `MetadataTable` TSV.
             metadata: Optional `metadata:`
-                config block describing an external per-document TSV.
+                config block: an external per-document TSV (when it has a
+                `path`) and `sentence_documents`, the document ids whose
+                sentences are unrelated and become one Document each.
 
         Yields:
             Document: One Document per `# newdoc id` block when those
                 markers are present; otherwise one per leading
-                `# sent_id` prefix; otherwise one per file.
+                `# sent_id` prefix; otherwise one per file. A document
+                listed in `sentence_documents` yields one per sentence.
         """
-        # load the optional metadata table
-        table: MetadataTable | None = MetadataTable.from_config(input_dir, metadata) if metadata else None
+        # load the optional metadata table and sentence-document ids
+        metadata = metadata or {}
+        table: MetadataTable | None = MetadataTable.from_config(input_dir, metadata) if "path" in metadata else None
+        sentence_documents = frozenset(metadata.get("sentence_documents", []))
         misaligned = [0]
 
         # parse each file
         for filepath in files:
             extra = table.get_for_path(filepath) if table else {}
-            yield from self._parse_file(filepath, source, domain, extra, misaligned)
+            yield from self._parse_file(filepath, source, domain, extra, misaligned, sentence_documents)
 
         # report the dropped entity spans
         if misaligned[0]:
@@ -501,6 +550,7 @@ class ConlluExtractor(FileBasedExtractor):
         domain: str,
         extra_metadata: dict[str, Any] | None,
         misaligned: list[int],
+        sentence_documents: frozenset[str] = frozenset(),
     ) -> Iterator[Document]:
         """Parse a single CoNLL-U file and yield Documents.
 
@@ -521,6 +571,8 @@ class ConlluExtractor(FileBasedExtractor):
             misaligned: One-cell counter the caller shares
                 across files; incremented by the number of sentences
                 whose entity spans were dropped.
+            sentence_documents: Document ids whose sentences are
+                yielded as one Document each, keyed by `# sent_id`.
 
         Yields:
             Document: One Document per detected boundary, or one per
@@ -531,33 +583,48 @@ class ConlluExtractor(FileBasedExtractor):
         sentence_texts: list[str] = []
         sentence_tokens: list[list[Token]] = []
         sentence_tags: list[list[str] | None] = []
+        sentence_surfaces: list[list[str | None]] = []
+        sentence_ids: list[str | None] = []
         current_doc_id: str | None = None
         # after a `# newdoc id` the sent_id-prefix heuristic is off
         seen_newdoc_marker = False
         current_prefix: str | None = None
 
-        def _flush() -> Document | None:
+        def _flush() -> list[Document]:
             if not sentence_tokens:
-                return None
+                return []
             doc_id = current_doc_id if current_doc_id is not None else filepath.stem
-            document, dropped = _build_document(
-                sentence_texts=sentence_texts,
-                sentence_tokens=sentence_tokens,
-                sentence_tags=sentence_tags,
-                doc_id=doc_id,
-                source=source,
-                domain=domain,
-                extra_metadata=extra_metadata,
-                native_id=current_doc_id,
-            )
-            misaligned[0] += dropped
-            return document
+
+            # one group of sentences per document: all of them, or one each
+            if doc_id in sentence_documents:
+                groups = [([i], sentence_ids[i] or f"{doc_id}.{i}") for i in range(len(sentence_tokens))]
+            else:
+                groups = [(list(range(len(sentence_tokens))), doc_id)]
+
+            documents: list[Document] = []
+            for indices, group_id in groups:
+                document, dropped = _build_document(
+                    sentence_texts=[sentence_texts[i] for i in indices],
+                    sentence_tokens=[sentence_tokens[i] for i in indices],
+                    sentence_tags=[sentence_tags[i] for i in indices],
+                    sentence_surfaces=[sentence_surfaces[i] for i in indices],
+                    doc_id=group_id,
+                    source=source,
+                    domain=domain,
+                    extra_metadata=extra_metadata,
+                    native_id=current_doc_id,
+                )
+                misaligned[0] += dropped
+                documents.append(document)
+            return documents
 
         def _reset() -> None:
-            nonlocal sentence_texts, sentence_tokens, sentence_tags
+            nonlocal sentence_texts, sentence_tokens, sentence_tags, sentence_surfaces, sentence_ids
             sentence_texts = []
             sentence_tokens = []
             sentence_tags = []
+            sentence_surfaces = []
+            sentence_ids = []
 
         def _consume(block: list[str]) -> Iterator[Document]:
             nonlocal current_doc_id, seen_newdoc_marker, current_prefix
@@ -565,9 +632,7 @@ class ConlluExtractor(FileBasedExtractor):
             newdoc = _newdoc_id(block)
             if newdoc is not None:
                 if sentence_tokens:
-                    doc = _flush()
-                    if doc is not None:
-                        yield doc
+                    yield from _flush()
                     _reset()
                 seen_newdoc_marker = True
                 current_doc_id = newdoc
@@ -580,19 +645,19 @@ class ConlluExtractor(FileBasedExtractor):
                         current_doc_id = prefix
                     elif prefix != current_prefix:
                         if sentence_tokens:
-                            doc = _flush()
-                            if doc is not None:
-                                yield doc
+                            yield from _flush()
                             _reset()
                         current_prefix = prefix
                         current_doc_id = prefix
 
             parsed = _parse_block(block)
             if parsed is not None:
-                text, tokens, tags = parsed
+                text, tokens, tags, surfaces = parsed
                 sentence_texts.append(text)
                 sentence_tokens.append(tokens)
                 sentence_tags.append(tags)
+                sentence_surfaces.append(surfaces)
+                sentence_ids.append(_sent_id(block))
 
         # read the sentence blocks
         with filepath.open(encoding="utf-8") as fh:
@@ -610,9 +675,7 @@ class ConlluExtractor(FileBasedExtractor):
             yield from _consume(current_block)
 
         # flush the last document
-        final = _flush()
-        if final is not None:
-            yield final
+        yield from _flush()
 
 
 register_extractor("conllu", ConlluExtractor)

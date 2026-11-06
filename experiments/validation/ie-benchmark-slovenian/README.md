@@ -58,7 +58,7 @@ concluded:
 - **Inputs**: the validation and test splits of four NER task registry entries: `ner/ssj500k` and `ner/suk` as built, and `ner/janes_tag` and `ner/slavicner`, which `labflow:data` adds as held-out entries, described in `## Datasets`.
 - **Method / factors**: one pass from a test document to a score per model and test set.
   - Write a plain-language description for every label of every label set ([D4], [M1]).
-  - Prompt every model once per document with the same template and JSON schema, at temperature 0 ([D3], [M2]).
+  - Prompt every model once per sentence window of a document with the same template and JSON schema, at temperature 0 ([D3], [M2]).
   - Align the returned mentions to character spans, score strict and partial-overlap span F1, and bootstrap over documents ([D5], [M3]).
   - Pick each arm's best model on the validation splits and compare the two on the test splits ([D1], [M4]).
   - Factors: the arm (Claude, local open model) is scientific. Each arm's best is picked from its models ([D7]). The Claude arm holds Opus, Sonnet and Haiku 5.5. The local arm holds Qwen3.5, Gemma 4, Llama and GaMS at two or more sizes that fit on the GPU. The prompt, the schema, the decoding and the label descriptions are fixed for every model.
@@ -66,13 +66,15 @@ concluded:
 - **Protocol**: one tracked MLflow run per model, entry and split under `slm4ie/validation/ie-benchmark-slovenian`, tagged `language=sl`. Each run logs every raw answer, so `analysis.py` rescores without calling a model again. Decoding is greedy, so each model runs once with no seeds.
 - **Compute**: local GPU — one GeForce 4080 GPU with 16 GB serves the open models through the local vllm-service, or through HuggingFace transformers when vllm cannot serve a model. Models over about 9B parameters run quantised.
 - **People**: about 1 hour — the user reviews the label descriptions before the first tracked run.
-- **Data access**: open — Janes-Tag 2.1 from CLARIN.SI under CC BY-SA 4.0; SlavicNER from its GitHub release, for research use.
+- **Data access**: open — Janes-Tag 3.0 from CLARIN.SI under CC BY-SA 4.0; SlavicNER from its GitHub release, for research use.
 - **External dependency**: Claude subscription — the Claude models run through the user's subscription in Claude Code's headless mode, whose rate limits bound throughput; the open models need the local vllm-service.
 
 ## Datasets
 
-<Written by labflow:data at the data-ready gate: one row per test set, in the
-order the pipeline meets them, each linking its statistics tables.>
+- **ssj500k** (benchmark; gold labels): one item is one NER-annotated document of ssj500k 2.3 (CLARIN.SI 11356/1434), a sample of the FidaPLUS reference corpus, with its named entities as character spans. It is the `ner/ssj500k` task registry entry, kept to the documents annotated for entities and split by a hash of the document id ([D11]). [Documents, spans and document lengths per split](tables/dataset-ssj500k-summary.csv) [Fields](tables/dataset-ssj500k-fields.csv) [Spans per split and label](tables/dataset-ssj500k-statistics.csv)
+- **SUK** (benchmark; gold labels): one item is one document, or one ElexisWSD sentence, of SUK 1.1 (CLARIN.SI 11356/1959), the Slovene training corpus, with its named entities as character spans. It is the held-out `ner/suk` entry without the ssj500k documents it contains: SentiCoref news articles, and ElexisWSD sentences counted one per document; split in half by a hash of the document id ([D11]). [Documents, spans and document lengths per split](tables/dataset-suk-summary.csv) [Fields](tables/dataset-suk-fields.csv) [Spans per split and label](tables/dataset-suk-statistics.csv)
+- **Janes-Tag** (benchmark; gold labels): one item is one tweet, forum post, blog comment or news comment of Janes-Tag 3.0 (CLARIN.SI 11356/1732), with its named entities as character spans; Twitter handles are tagged as persons. Only the janes-tag part carries entities, so the newer Janes-RSDO tweets are left out. It is the held-out `ner/janes_tag` entry, split in half by a hash of the document id ([D9]). [Documents, spans and document lengths per split](tables/dataset-janes-tag-summary.csv) [Fields](tables/dataset-janes-tag-fields.csv) [Spans per split and label](tables/dataset-janes-tag-statistics.csv)
+- **SlavicNER** (benchmark; gold labels): one item is one Slovene news article of SlavicNER, the BSNLP 2017–2023 shared-task corpus, with its person, organisation, location, event and product mentions as character spans. It is read from the GitHub repository at commit 2c72947 (2024-05-18) as the held-out `ner/slavicner` entry, split by the paper's single-topic-out protocol, with US Election 2020 as the test topic, after repeated articles are dropped ([D10], [D11]). [Documents, spans and document lengths per split](tables/dataset-slavicner-summary.csv) [Fields](tables/dataset-slavicner-fields.csv) [Spans per split and label](tables/dataset-slavicner-statistics.csv)
 
 ## Methods
 
@@ -101,12 +103,14 @@ best model per arm.>
 
 ### D3 — Give every model the same zero-shot prompt and JSON schema, and count an unparseable answer as empty
 
-- **Decision**: every model sees one prompt template per task family, with the label descriptions and the document, and must answer as JSON against one schema listing mention text and label. An answer that does not parse scores as no mentions.
-- **Why**: one protocol makes scores comparable across this and later experiments. An annotator that cannot produce valid output is not usable, so the failure counts against it.
+- **Decision**: every model sees one prompt template per task family, with the label descriptions and a window of whole sentences up to about 2,000 characters. It answers as JSON against one schema of mention text and label. Mentions map back by the window's offset; scores stay per document. An unparseable answer scores as no mentions for its window.
+- **Why**: one protocol makes scores comparable across this and later experiments. Published Slovene NER scores come from sentence-level input (CLASSLA, SloBENCH, the SlavicNER baseline's 256-token sequences), and a window that fits every model's context keeps context length out of the comparison between the two arms. An annotator that cannot produce valid output is not usable, so the failure counts against it.
 - **Alternatives**:
   - Retry until the answer parses: hides a failure an annotation pipeline would meet.
+  - One prompt per whole document: fewer calls, but the longest documents overflow a 16 GB model's context.
 - **History**:
   - 2026-11-06 (before runs) one zero-shot template, one schema, no retries.
+  - 2026-11-06 (before runs; user) sentence windows of about 2,000 characters in place of whole documents, following published protocols.
 
 ### D4 — Pass labels as plain-language descriptions and score each test set on its own labels
 
@@ -149,10 +153,31 @@ best model per arm.>
 
 ### D9 — Score four NER test sets, preferring download-gated sources
 
-- **Decision**: the test sets are ssj500k, SUK without its ssj500k documents, Janes-Tag 2.1 and the Slovene part of SlavicNER. SBL-51abbr is left out, being too small for an interval narrower than the margin.
+- **Decision**: the test sets are ssj500k, SUK without its ssj500k documents, the entity-tagged part of Janes-Tag 3.0 and the Slovene part of SlavicNER. SBL-51abbr is left out, being too small for an interval narrower than the margin.
 - **Why**: download-gated CLARIN.SI data is less likely to be in a model's training data. Janes-Tag adds non-standard social-media text, and SlavicNER adds size, two new labels and a public-data contrast.
 - **History**:
   - 2026-11-06 (before runs; user) Janes-Tag and SlavicNER added to the two built entries.
+  - 2026-11-06 (before runs) Janes-Tag 3.0 in place of 2.1: the release replaces 2.1 with corrected text, and its entity-tagged part is the 2.1 texts.
+
+### D10 — Keep one copy of a SlavicNER article stored under several topics
+
+- **Decision**: an article whose text repeats exactly under another topic is kept once, under its first path in sorted order; the 11 later copies of 10 articles are dropped before the split.
+- **Why**: the copies carry different ids, so the hash split placed eight of them on the other side of an article already in the validation split. The validation-picked model would then be scored on test texts it was picked on, and the bootstrap would count one article twice.
+- **Alternatives**:
+  - Split on a hash of the text: keeps the copies together, but they still count twice in the bootstrap, with annotations that differ slightly.
+- **History**:
+  - 2026-11-06 (before runs) first copy kept, exact-text match.
+
+### D11 — Follow a test set's published split where one fits, and score only documents annotated for entities
+
+- **Decision**: SlavicNER uses its paper's single-topic-out split: the US Election 2020 documents are the test split and the other topics the validation split. ssj500k keeps only the documents SUK's ssj500k-syn part annotates for entities, split by a hash of the document id. ElexisWSD sentences in SUK each count as one document. Janes-Tag and SUK keep the hash split by document.
+- **Why**: a published split makes scores comparable with prior work; CLASSLA cuts Janes-Tag by sentence and SloBENCH hides its SUK test set, so neither fits. Standalone ssj500k marks 1,038 never-annotated documents entity-free, turning correct answers into false positives. ElexisWSD is 2,024 unrelated sentences under one id, which would be one bootstrap unit.
+- **Alternatives**:
+  - CLASSLA's document split for ssj500k: comparable, but 51 test documents with 620 spans give a wide interval.
+  - The hash split for SlavicNER: more test documents across all topics, but nothing published to compare with.
+  - Dropping ElexisWSD: no code change, but 1,769 gold spans lost.
+- **History**:
+  - 2026-11-06 (before runs; user) single topic out for SlavicNER, annotated documents with the hash split for ssj500k, ElexisWSD split into sentences.
 
 ## Findings
 

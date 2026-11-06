@@ -20,6 +20,13 @@
 #                one task may not share a key, nor may one side's key contain
 #                (download.yaml `contains`) the other's unless excluded; the
 #                registry fails to load otherwise.
+#                Optional annotated_in (catalog keys whose annotations mark
+#                which documents carry the layer: only doc_ids with entity
+#                spans there are kept; extracted only).
+#   split_on     Optional; assign splits from a document metadata field instead
+#                of the id hash: field, values ({split: [field values]}),
+#                otherwise (split for the rest). For a source with a published
+#                split; `spans` converter only.
 #   splits       Split name -> output filename.
 #   labels       Label set for the task.
 #   suite        Parent benchmark suite, or null.
@@ -63,7 +70,8 @@ entries:
   # --- Sequence labeling & classification -------------------------------
   ner/ssj500k:
     role: finetune_and_eval
-    source: { kind: extracted, keys: [ssj500k] }
+    # only SUK's ssj500k-syn part carries NER; the rest is filled with O tags
+    source: { kind: extracted, keys: [ssj500k], annotated_in: [suk] }
     splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
@@ -79,6 +87,26 @@ entries:
     suite: null
     language: sl
     license: cc-by-sa-4.0
+
+  ner/janes_tag:
+    role: held_out
+    source: { kind: extracted, keys: [janes_tag] }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
+    labels: [PER, LOC, ORG, MISC, DERIV-PER]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  ner/slavicner:
+    role: held_out
+    source: { kind: extracted, keys: [slavicner] }
+    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
+    # the paper's single-topic-out split: US Election 2020 is the test topic
+    split_on: { field: topic, values: { test: [us_election_2020] }, otherwise: val }
+    labels: [PER, ORG, LOC, EVT, PRO]
+    suite: null
+    language: sl
+    license: research-only
 
   sentiment/sentinews:
     role: finetune_and_eval

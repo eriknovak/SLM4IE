@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import abc
 import enum
+import gzip
 import json
 import logging
 from collections.abc import Iterator
@@ -206,7 +207,8 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[dict
     `<key>.annotations.jsonl.gz` sidecar. Shared by the document-shaped families
     (`spans`, `sentiment`) so the extraction-tree read lives in one place.
     Records whose `doc_id` occurs in a `source.exclude` key's text file are
-    dropped.
+    dropped, and with `source.annotated_in` only records whose `doc_id` has
+    entity spans in one of those keys' annotations are kept.
 
     Args:
         entry: A task entry whose `source.kind` is `extracted`.
@@ -216,8 +218,20 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[dict
         Joined records (text plus, when present, an `annotations` field).
 
     Raises:
-        FileNotFoundError: If a source or excluded `<key>.jsonl` is missing.
+        FileNotFoundError: If a source, excluded `<key>.jsonl` or
+            `annotated_in` annotations file is missing.
     """
+    # collect the doc ids the annotated_in sources annotate
+    annotated: set[str] | None = None
+    if entry.source.annotated_in:
+        annotated = set()
+        for key in entry.source.annotated_in:
+            path = roots.extracted / f"{key}.annotations.jsonl.gz"
+            if not path.exists():
+                raise FileNotFoundError(f"annotated_in source for {entry.task}/{entry.dataset}: {path} does not exist.")
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                annotated.update(row["doc_id"] for row in map(json.loads, fh) if row.get("spans") is not None)
+
     # collect the doc ids of the excluded sources
     excluded: set[str] = set()
     for key in entry.source.exclude:
@@ -226,8 +240,9 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[dict
             raise FileNotFoundError(f"Excluded source for {entry.task}/{entry.dataset}: {path} does not exist.")
         with path.open(encoding="utf-8") as fh:
             excluded.update(json.loads(line)["doc_id"] for line in fh if line.strip())
-    # yield the joined records, dropping excluded documents
+    # yield the joined records, dropping excluded and unannotated documents
     dropped = 0
+    unannotated = 0
     for key in entry.source.keys:
         text_path = roots.extracted / f"{key}.jsonl"
         ann_path = roots.extracted / f"{key}.annotations.jsonl.gz"
@@ -238,12 +253,23 @@ def iter_extracted_records(entry: TaskEntry, roots: TasksRoots) -> Iterator[dict
             if record.get("doc_id") in excluded:
                 dropped += 1
                 continue
+            if annotated is not None and record.get("doc_id") not in annotated:
+                unannotated += 1
+                continue
             yield record
 
     # report the dropped documents
     if entry.source.exclude:
         logger.info(
             "%s/%s: dropped %d document(s) of %s", entry.task, entry.dataset, dropped, ", ".join(entry.source.exclude)
+        )
+    if annotated is not None:
+        logger.info(
+            "%s/%s: dropped %d document(s) %s does not annotate",
+            entry.task,
+            entry.dataset,
+            unannotated,
+            ", ".join(entry.source.annotated_in),
         )
 
 
@@ -432,7 +458,7 @@ def convert_entry(
     # convert and write the examples
     logger.info("Converting %s -> %s", key, output_dir)
     examples = converter.iter_examples(entry, roots, ctx, targets)
-    if converter.split_policy is SplitPolicy.HASH:
+    if converter.split_policy is SplitPolicy.HASH and entry.split_on is None:
         pairs: Iterator[tuple[str, dict[str, Any]]] = (
             (assign_hash_split(split_key, targets), example) for split_key, example in examples
         )

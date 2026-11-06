@@ -13,11 +13,12 @@
 #   extractor    Registered reader (see Notes: extractors).
 #   domain       Free-text provenance tag flowing into Document.metadata (web,
 #                wiki, parliamentary, academic, legal, medical, scientific, forum,
-#                blog, news, student, mixed); drives source-weighted sampling.
-#   metadata     Optional; two unrelated uses (see Notes: metadata).
+#                blog, news, social, student, mixed); drives source-weighted sampling.
+#   metadata     Optional; three uses (see Notes: metadata).
 #   include      Optional; shell globs matched against each input file's path
 #                under raw/<key>/ (`*` also crosses `/`). Keeps only matching
-#                files; file-based extractors only (conllu, tei, text, macocu, json).
+#                files; file-based extractors only (conllu, tei, text, macocu, json,
+#                slavicner).
 #                Use it when a source ships the same documents twice (layers,
 #                corrected/original versions), since doc_id must be unique
 #                within a dataset (CONTEXT.md, "Document id").
@@ -32,7 +33,8 @@
 #   extractors   jsonl (line-delimited JSON), json (single doc/array), text
 #     (plain text), conllu (CoNLL-U columns), tei (TEI XML, parliamentary/academic),
 #     macocu (MaCoCu monolingual XML), coleslaw (COLESLAW legal), huggingface
-#     (locally cached HF dataset). Registry lives in slm4ie/data/extract/extractors/.
+#     (locally cached HF dataset), slavicner (SlavicNER text + offset TSV pairs).
+#     Registry lives in slm4ie/data/extract/extractors/.
 #   metadata     (a) conllu/tei extractors: per-document metadata loaded from an
 #     external TSV — keys path, key_column, key_from ("filename_stem" only),
 #     key_pattern (regex, group 1 = key), fields ({tsv_column: metadata_field}),
@@ -40,6 +42,9 @@
 #     (b) jsonl extractor: field-mapping knobs — text_field (default "text"),
 #     id_field (default "doc_id"), metadata_fields (whitelist; default every
 #     non-structural field).
+#     (c) conllu extractor: sentence_documents (list of `# newdoc id` values
+#     whose sentences are unrelated) yields one document per sentence, keyed by
+#     its `# sent_id`.
 #   mlflow       When enabled, one run per build is upserted to `experiment`
 #     (keyed by a content digest of the extracted tree): per-source row counts +
 #     empty-text rates as metrics, a per-source quality profile as profile.json,
@@ -228,6 +233,8 @@ datasets:
     role: benchmark
     # UD layer only (as ssj500k): .jos.conllu repeats every document.
     include: ["*.ud.conllu"]
+    # ElexisWSD is unrelated sentences under one newdoc id
+    metadata: { sentence_documents: [elexiswsd] }
 
   ssj500k:
     extractor: conllu
@@ -235,3 +242,17 @@ datasets:
     role: benchmark
     # The only file carrying `NER=` tags; sl_ssj-ud-* repeat its document ids.
     include: ["*/ssj500k-morpho.conllu"]
+
+  janes_tag:
+    extractor: conllu
+    domain: social
+    role: benchmark
+    # NER-tagged part, UD layer only: the .jos file repeats every document.
+    include: ["*/janes-tag.ud.conllu"]
+
+  slavicner:
+    extractor: slavicner
+    domain: news
+    role: benchmark
+    # Slovene part only; the extractor pairs each text with its ner/ offsets.
+    include: ["*/raw/*/sl/*.txt"]
