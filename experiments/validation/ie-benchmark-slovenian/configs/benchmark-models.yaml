@@ -1,0 +1,89 @@
+# benchmark-models.yaml — The models of round 1's two arms (D7, D8).
+#
+# Read by: scripts/evaluate_llms.py run --model-key <key>
+#          picks the backend block named by --backend and passes its model and
+#          options to slm4ie/evaluation/backends::get_backend.
+#
+# Top-level keys:
+#   models       Map of model key -> model spec. The key names the model in tables
+#                and, for a run launched with --model-key, in its `model_key` tag.
+#
+# Model spec fields:
+#   arm          `claude` or `local`; analysis.py picks each arm's best (D1).
+#   weights      Where the weights come from: a HuggingFace repository, or
+#                `subscription` for Claude.
+#   <backend>    One block per backend that can run the model:
+#                  model     the model in that backend's naming (Claude id,
+#                            vllm-service served name, HuggingFace id);
+#                  options   backend settings passed to get_backend (default none).
+#
+# Notes:
+#   Local models answer the benchmark through the vllm-service, which also
+#   reports their memory (M5): `evaluate_llms.py memory` reads it from the
+#   container's startup log. The vllm-service serves fp8 where the spec says so;
+#   Google's Gemma 4 checkpoints are 4-bit QAT (compressed-tensors). The
+#   transformers blocks stay for runs outside the vllm-service; transformers
+#   decompresses the Gemma 4 checkpoints to bf16, which does not fit 16 GB.
+
+models:
+  # --- Claude arm: the subscription, through Claude Code's headless mode -----
+  claude-opus-5-5:
+    arm: claude
+    weights: subscription
+    claude: { model: claude-opus-5-5 }
+  claude-sonnet-5-5:
+    arm: claude
+    weights: subscription
+    claude: { model: claude-sonnet-5-5 }
+  claude-haiku-5-5:
+    arm: claude
+    weights: subscription
+    claude: { model: claude-haiku-5-5 }
+
+  # --- Local arm: open weights on the 16 GB GPU --------------------------------
+  qwen3.5-4b:
+    arm: local
+    weights: Qwen/Qwen3.5-4B                           # bf16
+    vllm: { model: qwen3.5-4b }
+    transformers: { model: Qwen/Qwen3.5-4B }
+  qwen3.5-9b:
+    arm: local
+    weights: Qwen/Qwen3.5-9B                           # fp8 under vllm
+    vllm: { model: qwen3.5-9b }
+    transformers: { model: Qwen/Qwen3.5-9B, options: { quantization: 8bit } }
+  gemma4-e4b:
+    arm: local
+    weights: google/gemma-4-E4B-it-qat-w4a16-ct        # 4-bit QAT
+    vllm: { model: gemma4-e4b }
+    transformers: { model: google/gemma-4-E4B-it-qat-w4a16-ct }
+  gemma4-12b:
+    arm: local
+    weights: google/gemma-4-12B-it-qat-w4a16-ct        # 4-bit QAT
+    vllm: { model: gemma4-12b }
+    transformers: { model: google/gemma-4-12B-it-qat-w4a16-ct }
+  gemma3-12b:
+    arm: local
+    weights: google/gemma-3-12b-it                     # fp8 under vllm; GaMS3 12B's base
+    vllm: { model: gemma3-12b }
+    transformers: { model: google/gemma-3-12b-it, options: { quantization: 8bit } }
+  llama3.2-3b:
+    arm: local
+    weights: meta-llama/Llama-3.2-3B-Instruct          # bf16
+    vllm: { model: llama3.2-3b }
+    transformers: { model: meta-llama/Llama-3.2-3B-Instruct }
+  llama3.1-8b:
+    arm: local
+    weights: meta-llama/Llama-3.1-8B-Instruct          # fp8 under vllm
+    vllm: { model: llama3.1-8b }
+    transformers: { model: meta-llama/Llama-3.1-8B-Instruct, options: { quantization: 8bit } }
+  gams-9b:
+    arm: local
+    weights: cjvt/GaMS-9B-Instruct                     # fp8 under vllm; Gemma 2 based
+    # its chat template rejects a system turn, so the system text opens the user turn (D3)
+    vllm: { model: gams-9b, options: { fold_system: true } }
+    transformers: { model: cjvt/GaMS-9B-Instruct, options: { quantization: 8bit, fold_system: true } }
+  gams3-12b:
+    arm: local
+    weights: cjvt/GaMS3-12B-Instruct                   # fp8 under vllm; Gemma 3 based
+    vllm: { model: gams3-12b }
+    transformers: { model: cjvt/GaMS3-12B-Instruct, options: { quantization: 8bit } }

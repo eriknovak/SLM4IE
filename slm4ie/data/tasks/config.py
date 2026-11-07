@@ -62,12 +62,16 @@ class EntrySource:
             annotation layer: only documents whose `doc_id` has entity spans
             in one of these keys' annotations are kept. `extracted` sources
             only.
+        exclude_doc_ids: Single documents dropped from the source by
+            `doc_id`, each with its reason in the registry. `extracted`
+            sources only.
     """
 
     kind: Literal["extracted", "raw"]
     keys: list[str]
     exclude: list[str] = dataclasses.field(default_factory=list)
     annotated_in: list[str] = dataclasses.field(default_factory=list)
+    exclude_doc_ids: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -490,17 +494,40 @@ def _parse_source(key: str, raw: Any) -> EntrySource:
     for k in keys:
         if not isinstance(k, str) or not k:
             raise ValueError(f"Entry {key!r} `source.keys` entries must be non-empty strings.")
-    exclude = raw.get("exclude") or []
-    if not isinstance(exclude, list) or not all(isinstance(k, str) and k for k in exclude):
-        raise ValueError(f"Entry {key!r} `source.exclude` must be a list of dataset keys.")
-    if exclude and kind != "extracted":
-        raise ValueError(f"Entry {key!r} `source.exclude` needs an `extracted` source.")
-    annotated_in = raw.get("annotated_in") or []
-    if not isinstance(annotated_in, list) or not all(isinstance(k, str) and k for k in annotated_in):
-        raise ValueError(f"Entry {key!r} `source.annotated_in` must be a list of dataset keys.")
-    if annotated_in and kind != "extracted":
-        raise ValueError(f"Entry {key!r} `source.annotated_in` needs an `extracted` source.")
-    return EntrySource(kind=kind, keys=list(keys), exclude=list(exclude), annotated_in=list(annotated_in))
+    exclude = _extracted_string_list(key, raw, "exclude", "dataset keys", kind)
+    annotated_in = _extracted_string_list(key, raw, "annotated_in", "dataset keys", kind)
+    exclude_doc_ids = _extracted_string_list(key, raw, "exclude_doc_ids", "document ids", kind)
+    return EntrySource(
+        kind=kind,
+        keys=list(keys),
+        exclude=exclude,
+        annotated_in=annotated_in,
+        exclude_doc_ids=exclude_doc_ids,
+    )
+
+
+def _extracted_string_list(key: str, raw: dict[str, Any], field: str, what: str, kind: str) -> list[str]:
+    """Read an optional `source.<field>` list of non-empty strings that only an `extracted` source may set.
+
+    Args:
+        key: Owning entry key, used for error messages.
+        raw: Raw `source` mapping.
+        field: The list's key in `source`.
+        what: What the strings name, for the error message.
+        kind: The source kind.
+
+    Returns:
+        The list, empty when the field is unset.
+
+    Raises:
+        ValueError: If the value is not a list of non-empty strings, or is set on a non-`extracted` source.
+    """
+    values = raw.get(field) or []
+    if not isinstance(values, list) or not all(isinstance(v, str) and v for v in values):
+        raise ValueError(f"Entry {key!r} `source.{field}` must be a list of {what}.")
+    if values and kind != "extracted":
+        raise ValueError(f"Entry {key!r} `source.{field}` needs an `extracted` source.")
+    return list(values)
 
 
 def _parse_splits(key: str, raw: Any) -> dict[str, str]:

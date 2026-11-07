@@ -22,7 +22,9 @@
 #                registry fails to load otherwise.
 #                Optional annotated_in (catalog keys whose annotations mark
 #                which documents carry the layer: only doc_ids with entity
-#                spans there are kept; extracted only).
+#                spans there are kept; extracted only). Optional
+#                exclude_doc_ids (single doc_ids dropped, each with its reason
+#                in a comment; extracted only).
 #   split_on     Optional; assign splits from a document metadata field instead
 #                of the id hash: field, values ({split: [field values]}),
 #                otherwise (split for the rest). For a source with a published
@@ -99,7 +101,9 @@ entries:
 
   ner/slavicner:
     role: held_out
-    source: { kind: extracted, keys: [slavicner] }
+    # covid-19/sl/sl-124 is a municipality table read as one 5,425-character
+    # sentence with 212 mentions; its answer outgrows the 2,048-token cap
+    source: { kind: extracted, keys: [slavicner], exclude_doc_ids: [covid-19/sl/sl-124] }
     splits: { val: val.jsonl.gz, test: test.jsonl.gz }
     # the paper's single-topic-out split: US Election 2020 is the test topic
     split_on: { field: topic, values: { test: [us_election_2020] }, otherwise: val }

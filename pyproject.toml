@@ -23,6 +23,16 @@ slm4ie = "datachart_themes.slm4ie:theme"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# evaluation needs transformers 5 (Qwen3.5, Gemma 4), which pulls huggingface-hub 2;
+# the groups below stay on transformers 4 and hub 0.x, so neither installs beside it
+[tool.uv]
+conflicts = [
+    [{ group = "evaluation" }, { group = "data" }],
+    [{ group = "evaluation" }, { group = "corpus" }],
+    [{ group = "evaluation" }, { group = "tokenizers" }],
+    [{ group = "evaluation" }, { group = "embeddings" }],
+]
+
 # the theme entry-point hook is on datachart's main and not yet in a PyPI
 # release; drop the datachart line and raise its floor once it ships
 [tool.uv.sources]
@@ -163,4 +173,17 @@ analysis = [
 embeddings = [
     "sentence-transformers>=3.3",     # multilingual-e5 encoder
     "torch>=2.5",
+]
+
+# Prompting chat models and scoring their answers: slm4ie/evaluation/.
+# Resolved apart from the other HuggingFace groups; see [tool.uv] conflicts.
+evaluation = [
+    {include-group = "tracking"},
+    "accelerate>=1.0",                # slm4ie/evaluation/backends/huggingface.py single-GPU device map
+    "bitsandbytes>=0.45",             # slm4ie/evaluation/backends/huggingface.py 4-bit and 8-bit loading
+    "compressed-tensors>=0.12",       # slm4ie/evaluation/backends/huggingface.py Gemma 4 QAT checkpoints
+    "numpy>=2.4.3",                   # slm4ie/evaluation/scoring.py document bootstrap
+    "torch>=2.5",                     # slm4ie/evaluation/backends/huggingface.py local generation
+    "transformers>=5.22",             # slm4ie/evaluation/backends/huggingface.py tokenizer and model
+    "xgrammar>=0.2.8",                # slm4ie/evaluation/backends/huggingface.py schema-constrained decoding
 ]

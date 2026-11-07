@@ -275,6 +275,45 @@ class TestExcludedDocuments:
         kept = [r["doc_id"] for r in iter_extracted_records(cfg.entries[0], cfg.roots)]
         assert kept == ["s0", "s2"]
 
+    def test_named_doc_ids_are_dropped(self, tmp_path: Path) -> None:
+        """Records whose `doc_id` is listed in `source.exclude_doc_ids` are skipped."""
+        tasks_yaml = _make_ner_layout(tmp_path, "big", "held_out", _ner_records(4))
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/big"]["source"]["exclude_doc_ids"] = ["s1", "s3"]
+        tasks_yaml.write_text(yaml.safe_dump(body))
+        cfg = load_tasks_config(tasks_yaml)
+        kept = [r["doc_id"] for r in iter_extracted_records(cfg.entries[0], cfg.roots)]
+        assert kept == ["s0", "s2"]
+
+    def test_unmatched_named_doc_id_raises(self, tmp_path: Path) -> None:
+        """A listed `doc_id` that matches no document fails instead of being ignored."""
+        tasks_yaml = _make_ner_layout(tmp_path, "big", "held_out", _ner_records(2))
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/big"]["source"]["exclude_doc_ids"] = ["s1", "gone"]
+        tasks_yaml.write_text(yaml.safe_dump(body))
+        cfg = load_tasks_config(tasks_yaml)
+        with pytest.raises(ValueError, match="gone"):
+            list(iter_extracted_records(cfg.entries[0], cfg.roots))
+
+    @pytest.mark.parametrize("value", ["s1", [""], [1]])
+    def test_malformed_named_doc_ids_are_rejected(self, tmp_path: Path, value: Any) -> None:
+        """`exclude_doc_ids` must be a list of non-empty strings."""
+        tasks_yaml = _make_ner_layout(tmp_path, "big", "held_out", _ner_records(2))
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/big"]["source"]["exclude_doc_ids"] = value
+        tasks_yaml.write_text(yaml.safe_dump(body))
+        with pytest.raises(ValueError, match="exclude_doc_ids"):
+            load_tasks_config(tasks_yaml)
+
+    def test_named_doc_ids_need_an_extracted_source(self, tmp_path: Path) -> None:
+        """A `raw` source with `exclude_doc_ids` is rejected when the registry loads."""
+        tasks_yaml = _make_ner_layout(tmp_path, "big", "held_out", _ner_records(2))
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/big"]["source"].update(kind="raw", exclude_doc_ids=["s1"])
+        tasks_yaml.write_text(yaml.safe_dump(body))
+        with pytest.raises(ValueError, match="exclude_doc_ids"):
+            load_tasks_config(tasks_yaml)
+
 
 class TestRoleGatingAcceptance:
     """Acceptance: role changes which splits are written, nothing is dropped."""

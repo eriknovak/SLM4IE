@@ -1,6 +1,6 @@
 field,type,distinct,values
-id,string,492,<source>:<doc_id>
-text,string,492,document text
+id,string,491,<source>:<doc_id>
+text,string,491,document text
 spans.start,integer,,character offset
 spans.end,integer,,"character offset, exclusive"
 spans.label,string,5,EVT LOC ORG PER PRO

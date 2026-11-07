@@ -1,11 +1,11 @@
 statistic,value,note
-val_documents,354,hash split of the held-out documents
-val_spans,13395,gold entity mentions
+val_documents,353,held-out documents in this split (D11)
+val_spans,13178,gold entity mentions
 val_median_document_chars,2976,
 val_max_document_chars,19453,longest prompt input
 val_documents_without_spans,0,a model scores only false positives here
 val_nested_spans,2,spans starting inside another span
-test_documents,138,hash split of the held-out documents
+test_documents,138,held-out documents in this split (D11)
 test_spans,6823,gold entity mentions
 test_median_document_chars,3430,
 test_max_document_chars,12981,longest prompt input
