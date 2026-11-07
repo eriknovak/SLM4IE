@@ -5,10 +5,10 @@ short: Extraction benchmark
 category: validation
 branch: exp/ie-benchmark-slovenian
 base_commit: 909c513
-status: draft
+status: running
 ticket: "#42"
 pr:
-mlflow:
+mlflow: http://localhost:5555/#/experiments/17
 builds_on: []
 varies: []
 uses: []
@@ -50,7 +50,7 @@ concluded:
 - **Tests**: whether a local open model is close enough to Claude on Slovene NER to annotate the silver sets, which three later experiments wait on.
 - **Clauses**: C1, Q1
 - **Budget**: three Claude models and about eight local models, each over the validation and test splits of four entries, about 90 tracked runs. The round ends early when no local model passes the miss-rate gate ([D6]).
-- **Pre-registered at**:
+- **Pre-registered at**: ac2e506
 - **Closed**:
 
 ## Design
@@ -87,7 +87,7 @@ concluded:
   2. Give every label two example lists. `unseen` names match no gold mention of any test split. `common` names are frequent ones; they match 17 of 1,031 ssj500k, 717 of 15,591 SUK, 24 of 2,272 Janes-Tag and 534 of 6,823 SlavicNER test mentions.
   3. Append the chosen list to each description as `Examples: <name>, <name>.`
 - **Code**: `slm4ie/evaluation/prompts.py::load_label_descriptions`
-- **Settings**: `label_sets` (each label set's task entries, and per label its description and both example lists), in `configs/evaluation/ner-labels.yaml`; `DEFAULT_EXAMPLES` (the example list a run uses unless told otherwise, `unseen`), in `slm4ie/evaluation/prompts.py`
+- **Settings**: `label_sets` (each label set's task entries, and per label its description and both example lists), in `configs/evaluation/ner-labels.yaml`; `DEFAULT_EXAMPLES` (the example list a run uses unless told otherwise, unseen), in `slm4ie/evaluation/prompts.py`
 
 ### M2 — Prompt every model once per sentence window and parse its JSON answer
 
@@ -151,7 +151,7 @@ concluded:
   - step 4: `experiments/validation/ie-benchmark-slovenian/analysis.py::read_clause`
   - step 5: `experiments/validation/ie-benchmark-slovenian/analysis.py::verdict`
   - step 6: `experiments/validation/ie-benchmark-slovenian/analysis.py::peak_memory_gib`
-- **Settings**: `MARGIN` (equivalence margin in strict F1, 0.05), `MISS_RATE_CEILING` (highest validation miss rate a pick may have, 0.10), `CLAUSE_EXAMPLES` (example variant C1 reads, `unseen`), in `experiments/validation/ie-benchmark-slovenian/analysis.py`
+- **Settings**: `MARGIN` (equivalence margin in strict F1, 0.05), `MISS_RATE_CEILING` (highest validation miss rate a pick may have, 0.10), `CLAUSE_EXAMPLES` (example variant C1 reads, unseen), in `experiments/validation/ie-benchmark-slovenian/analysis.py`
 
 ### M5 — Run one model over one split, keep every answer and log its usage
 
@@ -171,7 +171,7 @@ concluded:
   - step 4: `slm4ie/evaluation/run.py::score_split`
   - step 5: `slm4ie/evaluation/run.py::split_metrics`
   - step 6: `slm4ie/evaluation/memory.py::measure_vllm_memory`
-- **Settings**: `window_budget` (windows after which a run stops at the next document end; every window when unset), `examples` (label example variant, `unseen`), `resume` (continue an existing answers file, off), `force` (discard an existing answers file, off), `backend_options` (backend settings such as `quantization`, or `fold_system` for a template without a system turn; none), fields of `BenchmarkRun` in `slm4ie/evaluation/run.py`; `CALL_TIMEOUT_SECONDS` (longest Claude call, 600), in `slm4ie/evaluation/backends/claude.py`; `CONTAINER_NAME` (the vllm-service container of a served model, `vllm-{model}`), in `slm4ie/evaluation/memory.py`
+- **Settings**: `window_budget` (windows after which a run stops at the next document end; every window when unset), `examples` (label example variant, unseen), `resume` (continue an existing answers file, off), `force` (discard an existing answers file, off), `backend_options` (backend settings such as quantization, or fold_system for a template without a system turn; none), fields of `BenchmarkRun` in `slm4ie/evaluation/run.py`; `CALL_TIMEOUT_SECONDS` (longest Claude call, 600), in `slm4ie/evaluation/backends/claude.py`; `CONTAINER_NAME` (the vllm-service container of a served model, vllm-{model}), in `slm4ie/evaluation/memory.py`
 
 ## Decisions
 
