@@ -1,4 +1,4 @@
-Merge,Joins,Count,Tied pairs left,hiša after it
+merge,joins,count,tied_pairs_left,word_after_it
 1,h + i,12,iš,hi š a
 2,hi + š,12,none,hiš a
 3,i + z,9,mi,hiš a

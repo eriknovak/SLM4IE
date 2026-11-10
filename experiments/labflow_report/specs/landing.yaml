@@ -1,0 +1,90 @@
+# The landing pages: what a click on the rail's Research or Reference tab
+# opens (ADR-0005; boards ResearchLanding and ReferenceLanding).
+#
+# A landing page stores nothing of its own: each part reads keys that the
+# record, programme, topic and entry specs declare, named here by the rule
+# ids that hold them. load_pages fails when a part reads an id no document
+# spec declares, and test_labflow_report_landing.py fails when a read id
+# leaves its key. Overview and Glossary keep their own pages as landing
+# pages, so this file declares neither.
+#
+# Two parts read sources no spec declares, so their reads stay empty:
+#   running        an open worktree or an unmerged local or remote
+#                  `exp/<slug>` branch; a record with an Outcome never runs
+#   open ideas     reference/ideas.yaml, the cache of tracker issues
+#                  labelled `idea`, by the topics its Touches rows name
+#
+# Every planned experiment states its `category:` (data, methods or
+# validation) for the planned row's chip; the planned row reads the
+# programme rules on that key: PRG-042 makes it required, PRG-034 checks
+# its value.
+#
+# The builder decides the page ids in the built HTML, the order of the
+# topic cards and the text of each empty state.
+
+pages:
+  - page: research
+    tab: Research
+    shows: every experiment, one section per programme in the rail's order, with what each tested and how it came out
+    parts:
+      - part: rail head
+        shows: "\"Research\" atop the rail's Research list; it links this page and is highlighted on it"
+      - part: counts
+        shows: the concluded, running and planned counts in the lede; running from the worktrees and exp/ branches
+        reads: [REC-039, REC-040, PRG-013]
+      - part: outcome tally
+        shows: one outcome mark per outcome the records hold, with its count
+        reads: [REC-039, REC-040]
+      - part: running now
+        shows: one line naming the running experiments, or that nothing runs, or nothing yet when no record has a worktree or an exp/ branch
+        reads: [REC-005, REC-006, REC-007, REC-039]
+      - part: latest conclusion
+        shows: the newest concluded record's mark, short and concluded date
+        reads: [REC-005, REC-006, REC-007, REC-025, REC-026, REC-039, REC-040]
+      - part: open not yet planned
+        shows: the count of Open questions no experiment answers yet, per programme short
+        reads: [PRG-004, PRG-005, PRG-006, PRG-021, PRG-029]
+      - part: show filter
+        shows: All, each outcome present, Running and Planned, each with its count; on a phone a select
+        reads: [REC-039, REC-040, PRG-013]
+      - part: order
+        shows: programme order (members order), newest first or oldest first by concluded date; on a phone a select
+        reads: [PRG-011, PRG-039, REC-025]
+      - part: programme head
+        shows: the programme's short linking its page, its file path, its title under it, and its record count by outcome, or no records yet
+        reads: [PRG-001, PRG-002, PRG-004, PRG-005, PRG-006]
+      - part: record row
+        shows: >-
+          a member in members order: outcome mark (else its status), short linking the record with its title on
+          hover, its Question as a muted line, category chip, outcome badge and concluded date; on a phone a card
+        reads: [PRG-011, PRG-012, PRG-039, REC-001, REC-002, REC-005, REC-006, REC-007, REC-013, REC-014,
+          REC-033, REC-123, REC-008, REC-009, REC-039, REC-040, REC-025, REC-026]
+      - part: planned row
+        shows: a dashed row after the members per planned experiment, unlinked and undated, its short, its title as the question it will ask and its category chip
+        reads: [PRG-013, PRG-031, PRG-032, PRG-033, PRG-034, PRG-042]
+      - part: not in a programme
+        shows: the records no programme's members lists, last, under the head "Not in a programme"; left out when every record is a member
+        reads: [PRG-011, PRG-012]
+
+  - page: reference
+    tab: Reference
+    shows: the reference library, every topic with its question and its entries
+    parts:
+      - part: rail head
+        shows: "\"Reference\" atop the rail's topic list; it links this page and is highlighted on it"
+      - part: lede
+        shows: the topic and entry counts, the entries by status square, and the open idea count from reference/ideas.yaml
+        reads: [ENT-005, ENT-006]
+      - part: topic card
+        shows: >-
+          one card per topic, two to a row: the title linking the topic page, the status badge, the entry
+          count by status and the Question; a topic with no entries says so
+        reads: [TOP-001, TOP-002, TOP-003, TOP-004, TOP-006, TOP-007, TOP-011, TOP-012, ENT-005, ENT-006]
+      - part: entry chip
+        shows: one chip per entry of the topic, its title and the rail's status square, its summary on hover
+        reads: [ENT-001, ENT-002, ENT-005, ENT-006, ENT-007, ENT-008]
+      - part: idea chips
+        shows: the open ideas whose Touches rows name the topic's entries, as issue chips with their number
+      - part: compared table link
+        shows: the card foot linking the topic's Compared table, named by its fact count; with no entries it says the table comes later
+        reads: [TOP-005]

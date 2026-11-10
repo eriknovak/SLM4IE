@@ -1,4 +1,4 @@
-distance (query minus key),"V1 row, k = 512",V2 bucket,"V2 row, 256 buckets",V2 distances below 512 sharing the row
+query_minus_key_distance,v1_row,v2_bucket,v2_row,v2_distances_below_512_sharing_the_row
 0,512,0,256,1
 1,513,1,257,1
 2,514,2,258,1

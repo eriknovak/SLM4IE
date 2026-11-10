@@ -1,0 +1,52 @@
+{#- Components board, findings: key finding cards and the small cards of the other findings -#}
+{% import "components/words.html" as words %}
+{% import "components/inline.html" as inline %}
+{% import "components/evidence.html" as evidence %}
+
+{#- a finding's reading: its paragraphs, what could overturn it, and So when it has one -#}
+{% macro reading(c) -%}
+{%- for p in c.reading %}<p class="small muted">{{ p }}</p>{% endfor -%}
+{%- if c.overturn %}<p class="small"><b>Could overturn it</b> {{ c.overturn }}</p>{% endif -%}
+{%- if c.so %}<div class="small so"><b>So</b> {{ c.so }}</div>{% endif -%}
+{%- endmacro %}
+
+{#- a finding in full: key number, claim, reading, could overturn it, So, runs and history, then every exhibit -#}
+{% macro card_body(c) -%}
+<div class="kc-body"><div><div class="keynum {{ c.number_kind }}">{{ c.number }}</div><div class="small muted">{{ c.number_note }}</div></div><div>
+<p class="claim" data-nolink>{{ c.claim }}</p>{{ reading(c) }}{{ evidence.runs_line(c.runs) }}
+{%- if c.history %}<div class="khist">{{ evidence.hist(c.history) }}</div>{% endif -%}
+{{- evidence.exhibits(([c.exhibit] if c.exhibit else []) + c.more, c.anchor) -}}
+</div></div>
+{%- endmacro %}
+
+{#- a key finding, open, its supporting findings stacked in one box under a rule -#}
+{% macro key_card(c) -%}
+<div id="{{ c.anchor }}" class="box keycard"><div class="row kc-head">{{ c.chip }}<span class="badge b-confirmed">key</span><span class="small muted">answers</span>{% for a in c.answers %}{{ a }}{% endfor %}</div>
+{{ card_body(c) }}
+{%- if c.supporting %}<div class="fsupport"><p class="chap">Supporting finding{{ "s" if c.supporting | length > 1 else "" }}</p>{{ small_cards(c.supporting, stacked=true) }}</div>{% endif -%}
+</div>
+{%- endmacro %}
+
+{#- a supporting or other finding: closed, its title row naming its exhibits and its Summary
+    (clamped); open, the full Summary, then on the same left edge its clauses, reading, runs
+    and history, its exhibit last -#}
+{% macro small_card(k) -%}
+<details id="{{ k.anchor }}" class="mc fcard"><summary><div class="fhead">{{ k.chip }}<b class="ttl" data-nolink>{{ k.title }}</b>{{ exhibit_chips([k.exhibit] if k.exhibit else []) }}<span class="chev"></span></div>
+<p class="fsum small muted">{{ k.summary }}</p></summary><div class="fbd">
+{%- if k.answers %}<div class="row fans"><span class="small muted">answers</span>{% for a in k.answers %}{{ a }}{% endfor %}</div>{% endif -%}
+{{ reading(k) }}{{ evidence.runs_line(k.runs) }}
+{%- if k.history %}<div class="khist">{{ evidence.hist(k.history) }}</div>{% endif -%}
+{{- evidence.exhibits([k.exhibit] if k.exhibit else [], k.anchor) -}}
+</div></details>
+{%- endmacro %}
+
+{#- a closed card's exhibits named in its title row: passive chips, past three a count -#}
+{% macro exhibit_chips(items) -%}
+{%- set shown = items | rejectattr("missing") | list -%}
+{%- if shown %}<span class="xchips">{% for e in shown[:3] %}<span class="ct i"{% if e.title %} title="{{ e.title | striptags }}"{% endif %}>{{ e.label }}</span>{% endfor %}{% if shown | length > 3 %}<span class="ct i">+{{ shown | length - 3 }}</span>{% endif %}</span>{% endif -%}
+{%- endmacro %}
+
+{#- small cards: across the full width, or stacked in one box under their key -#}
+{% macro small_cards(cards, wide=false, stacked=false) -%}
+<div class="fcards{{ ' wide' if wide else '' }}{{ ' stacked' if stacked else '' }}">{% for k in cards %}{{ small_card(k) }}{% endfor %}</div>
+{%- endmacro %}

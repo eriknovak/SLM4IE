@@ -1,0 +1,13 @@
+clause,qualifier,value,ci_low,ci_high,bar,margin,outcome
+H1,open,15681828,,,500000,,confirmed
+H1,open+login,15681828,,,500000,,confirmed
+H1,all,15730944,,,500000,,confirmed
+H2,open,7056,,,10000,,refuted
+H2,open+login,7056,,,10000,,refuted
+H2,all,9336,,,10000,,refuted
+H3,open,33613026,,,500000,,confirmed
+H3,open+login,5701379646,,,500000,,confirmed
+H3,all,5701379646,,,500000,,confirmed
+H4,open,147291,,,10000,,confirmed
+H4,open+login,559190,,,10000,,confirmed
+H4,all,561358,,,10000,,confirmed

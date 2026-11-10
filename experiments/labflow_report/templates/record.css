@@ -1,0 +1,565 @@
+/* the record page, scoped to it (ADR-0005); written from the record board */
+.page[data-page=record]{--fig:#fbfcfd;--spec:#a3215f;--spec-ink:#ffffff;--board:#fafaf9;--h:#5f37a8;--h-soft:#ebe4f7;--m:#0b6363;--m-soft:#d5ecec;--d:#7f4600;--d-soft:#f5e5cd;--vp-ink:#ffffff;--q:#1f252f;--o-ok:var(--ok);--o-bad:var(--bad);--o-part:var(--run);--o-inc:var(--muted);--o-run:var(--run);--o-adopt:var(--ok);--o-rej:var(--bad);--o-bet:var(--ok);--o-wor:var(--bad);--o-eq:var(--muted);--o-und:var(--line);--o-plan:var(--soft);--vp-ink:#ffffff}
+:root[data-theme=dark] .page[data-page=record]{--fig:#25262c;--fig-ink:#dcdfe5;--fig-muted:#9a9fac;--fig-line:#464852;--fig-soft:#35363e;--fig-paper:#25262c;--fig-series-dark:#e4e7ee;--spec:#ff8cc6;--spec-ink:#1c1c20;--board:#141417;--h:#c4a6ff;--h-soft:#33294a;--m:#6fd6d0;--m-soft:#183636;--d:#f2b766;--d-soft:#3b2d16;--vp-ink:#1c1c20;--q:#dcdfe5}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .page[data-page=record]{--fig:#25262c;--fig-ink:#dcdfe5;--fig-muted:#9a9fac;--fig-line:#464852;--fig-soft:#35363e;--fig-paper:#25262c;--fig-series-dark:#e4e7ee;--spec:#ff8cc6;--spec-ink:#1c1c20;--board:#141417;--h:#c4a6ff;--h-soft:#33294a;--m:#6fd6d0;--m-soft:#183636;--d:#f2b766;--d-soft:#3b2d16;--vp-ink:#1c1c20;--q:#dcdfe5}}
+/* the record page's own parts, the board's spacing, and the page shell's rules it undoes */
+.page[data-page=record] summary{font-family:inherit;font-size:inherit}
+.page[data-page=record] table.kv{display:table}
+.page[data-page=record] details.fold>summary::before{content:none;display:none}
+.page[data-page=record] .fold .step .n{min-width:0;text-align:center;padding:0;align-self:start;justify-self:start}
+/* the board's components, from the reverted builder's stylesheet */
+.page[data-page=record] a{color:var(--accent);text-decoration:none}
+.page[data-page=record] p{margin:0 0 12px}
+.page[data-page=record] .muted{color:var(--muted)}
+.page[data-page=record] .badge{display:inline-block;font-family:var(--sans);font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:5px;vertical-align:middle}
+.page[data-page=record] .b-confirmed{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .b-refuted{background:var(--bad-soft);color:var(--bad)}
+.page[data-page=record] .b-inconclusive,.page[data-page=record] .b-partial,.page[data-page=record] .b-draft{background:var(--soft);color:var(--muted)}
+.page[data-page=record] .b-running{background:var(--run-soft);color:var(--run)}
+.page[data-page=record] figure{margin:0;min-width:0}
+.page[data-page=record] .fold{border-top:1px dashed var(--line);padding:10px 0 0;margin:12px 0 0;display:flex;gap:10px;align-items:center;font-family:var(--sans);font-size:var(--t-body);font-weight:600}
+.page[data-page=record] .rows{display:grid;grid-template-columns:130px minmax(0,1fr);gap:16px;font-size:var(--t-prose);line-height:1.6}
+.page[data-page=record] .rows>b{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-top:5px}
+.page[data-page=record] .rows p,.page[data-page=record] .rows ul{margin:0 0 8px}
+.page[data-page=record] .rows ul{padding-left:18px}
+.page[data-page=record] pre{background:#16181d;color:#e7e9ee;padding:14px 16px;border-radius:10px;font-family:var(--mono);font-size:var(--t-mono);line-height:1.55;overflow:auto;margin:6px 0 0;white-space:pre}
+.page[data-page=record] .vp{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;font-family:var(--sans);font-size:11.5px;font-weight:700;line-height:1;color:var(--vp-ink);flex:none;vertical-align:-3px}
+.page[data-page=record] .vp.ok{background:var(--ok)}
+.page[data-page=record] .vp.bad{background:var(--bad)}
+.page[data-page=record] .vp.part{background:var(--run)}
+.page[data-page=record] .vp.inc{background:var(--muted)}
+.page[data-page=record] .vp.plan{background:transparent;border:1.5px dashed var(--muted);color:var(--muted)}
+.page[data-page=record] .vp svg{width:70%;height:70%;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;display:block}
+.page[data-page=record] .vp{vertical-align:middle;position:relative;top:-1px}
+.page[data-page=record] .sq{display:inline-block;width:11px;height:11px;border-radius:2px;flex:none;vertical-align:0}
+.page[data-page=record] .sq.chk{background:var(--fg)}
+.page[data-page=record] .sq.pap{border:1.5px solid var(--fg)}
+.page[data-page=record] .sq.dft{border:1.5px dashed var(--muted)}
+.page[data-page=record] .cc{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px 2px 3px;font-family:var(--mono);font-size:12px;font-weight:500;background:var(--soft);color:var(--fg);white-space:nowrap}
+.page[data-page=record] .cc.ok{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .cc.bad{background:var(--bad-soft);color:var(--bad)}
+.page[data-page=record] .cc.part{background:var(--run-soft);color:var(--run)}
+.page[data-page=record] .cc.inc{background:var(--soft);color:var(--muted)}
+.page[data-page=record] .cc.plan{background:transparent;border:1px dashed var(--muted);color:var(--muted)}
+.page[data-page=record] .cc .vp{width:16px;height:16px;font-size:10.5px}
+.page[data-page=record] .ct{display:inline-flex;align-items:center;font-family:var(--mono);font-size:11.5px;font-weight:600;border-radius:5px;padding:0 6px;line-height:18px;border:1px solid;vertical-align:1px;white-space:nowrap}
+.page[data-page=record] .ct.f{color:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
+.page[data-page=record] .ct.h{color:var(--h);background:var(--h-soft);border-color:var(--h)}
+.page[data-page=record] .ct.m{color:var(--m);background:var(--m-soft);border-color:var(--m)}
+.page[data-page=record] .ct.d{color:var(--d);background:var(--d-soft);border-color:var(--d)}
+.page[data-page=record] .ct.i{color:var(--fg);background:var(--panel);border-color:var(--line)}
+.page[data-page=record] .iss{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 10px 2px 7px;font-family:var(--sans);font-size:13px;color:var(--fg);white-space:nowrap}
+.page[data-page=record] .iss svg{width:14px;height:14px;fill:none;stroke:var(--ok);stroke-width:2}
+.page[data-page=record] .iss .n{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.page[data-page=record] a.iss:hover{border-color:var(--accent);text-decoration:none}
+.page[data-page=record] .meter{display:flex;gap:2px;height:10px;border-radius:999px;overflow:hidden;background:var(--soft)}
+.page[data-page=record] .meter i{display:block;height:100%}
+.page[data-page=record] .meter .ok{background:var(--ok)}
+.page[data-page=record] .meter .bad{background:var(--bad)}
+.page[data-page=record] .meter .part{background:var(--run)}
+.page[data-page=record] .meter .inc{background:var(--muted)}
+.page[data-page=record] .meter .plan{background:transparent;border:1px dashed var(--muted);box-sizing:border-box}
+.page[data-page=record] .mc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.page[data-page=record] .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.page[data-page=record] .stack{display:flex;flex-direction:column;gap:10px}
+.page[data-page=record] .mono{font-family:var(--mono);font-size:12px}
+.page[data-page=record] .small{font-size:13px}
+.page[data-page=record] .muted{color:var(--muted)}
+.page[data-page=record] .why{font-size:13.5px;color:var(--muted);line-height:1.45}
+.page[data-page=record] .why b{color:var(--fg);font-weight:600}
+.page[data-page=record] .pt{width:100%;border-collapse:collapse;font-size:14px}
+.page[data-page=record] .pt th{font-family:var(--sans);font-size:12px;font-weight:600;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.page[data-page=record] .pt td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+.page[data-page=record] .pt tr.plan td{color:var(--muted)}
+.page[data-page=record] .pt .cells{display:flex;flex-wrap:wrap;gap:6px}
+.page[data-page=record] .sec{margin-top:48px}
+.page[data-page=record] .sec>h2{margin:0 0 14px}
+.page[data-page=record] .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+.page[data-page=record] .fold{display:grid;grid-template-columns:minmax(0,1fr) auto 12px;column-gap:10px;align-items:start;padding:10px 14px;margin:0 0 8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-family:var(--sans);font-size:var(--t-sm);line-height:1.45;color:var(--fg)}
+.page[data-page=record] .fold::before{content:none;display:none}
+.page[data-page=record] .fold{gap:4px 12px;font-weight:400;padding:13px 16px;margin:0 0 10px}
+.page[data-page=record] .fold .chev{grid-column:-2/-1;grid-row:1;justify-self:end}
+.page[data-page=record] .fold .fb{min-width:0;display:flex;flex-direction:column;gap:2px}
+.page[data-page=record] .fold .t{font-weight:600;line-height:1.5}
+.page[data-page=record] .fold .t .ct{margin-right:8px}
+.page[data-page=record] .fold .dg2{font-size:12.5px;color:var(--muted)}
+.page[data-page=record] .fold .cnt{font-family:var(--mono);font-size:var(--t-xs);color:var(--muted);white-space:nowrap;padding:3px 0 0 8px}
+.page[data-page=record] .keynum{font-family:var(--sans);font-size:30px;font-weight:700;line-height:1.1}
+.page[data-page=record] .chap{font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:0 0 14px}
+.page[data-page=record] .fold.open{background:var(--panel)}
+.page[data-page=record] .fold .fbody{grid-column:1/-1;margin-top:10px;padding-top:14px;border-top:1px solid var(--line)}
+.page[data-page=record] .fold .rows{grid-template-columns:110px minmax(0,1fr);gap:12px 18px;font-family:var(--prose);font-size:var(--t-body);line-height:1.6}
+.page[data-page=record] .fold .rows>b{padding-top:3px}
+.page[data-page=record] .fold .rows p{margin:0 0 6px}
+.page[data-page=record] .fold .rows p:last-child,.page[data-page=record] .fold .rows ul:last-child,.page[data-page=record] .fold .rows ol:last-child{margin-bottom:0}
+.page[data-page=record] .fold .rows ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.page[data-page=record] .fold .rows code{font-family:var(--mono);font-size:12.5px;background:var(--soft);border-radius:4px;padding:0 4px}
+.page[data-page=record] .fold .io{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:14px;align-items:start}
+.page[data-page=record] .fold .io>div{background:var(--fig);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:var(--t-sm)}
+.page[data-page=record] .fold .io .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
+.page[data-page=record] .fold .io .arr{color:var(--muted);padding-top:28px}
+.page[data-page=record] .fold .steps2{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.page[data-page=record] .fold .dg2:has(.iss){display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
+.page[data-page=record] .fold .dg2 .iss{padding:0 8px 0 5px;font-size:12px;gap:4px;line-height:18px}
+.page[data-page=record] .fold .dg2 .iss svg{width:12px;height:12px}
+.page[data-page=record] .fold .steps{margin:0}
+.page[data-page=record] .fold .step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:6px 12px;margin:0 0 16px}
+.page[data-page=record] .fold .step:last-child{margin-bottom:0}
+.page[data-page=record] .fold .step .n{grid-row:1/3;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--fg);color:var(--bg);font-family:var(--sans);font-size:12px;font-weight:700}
+.page[data-page=record] .fold .step.env .n{font-size:9px;letter-spacing:.02em}
+.page[data-page=record] .fold .step .t{font-family:var(--sans);font-size:var(--t-sm);font-weight:600;line-height:1.5;padding-top:2px}
+.page[data-page=record] .fold .step .t .ct{margin-left:4px}
+.page[data-page=record] .fold .step pre{margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px}
+.page[data-page=record] .fold .rows a{color:var(--accent)}
+.page[data-page=record] .hist{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.page[data-page=record] .empty{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;color:var(--muted);font-family:var(--sans);font-size:13px;background:transparent}
+.page[data-page=record] .vp.eq{background:var(--accent)}
+.page[data-page=record] .vp.bet{background:var(--ok)}
+.page[data-page=record] .vp.wor{background:var(--bad)}
+.page[data-page=record] .vp.und{background:var(--muted)}
+.page[data-page=record] .cc.eq{background:var(--accent-soft);color:var(--accent)}
+.page[data-page=record] .cc.bet{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .cc.wor{background:var(--bad-soft);color:var(--bad)}
+.page[data-page=record] .cc.und{background:var(--soft);color:var(--muted)}
+.page[data-page=record] .cc.mix{background:var(--soft);color:var(--fg)}
+.page[data-page=record] .cc.mix .vp+.vp{margin-left:-6px;box-shadow:0 0 0 2px var(--soft)}
+.page[data-page=record] .b-adopted,.page[data-page=record] .b-better,.page[data-page=record] .b-answered{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .b-rejected,.page[data-page=record] .b-worse,.page[data-page=record] .b-unanswered{background:var(--bad-soft);color:var(--bad)}
+.page[data-page=record] .b-equivalent{background:var(--accent-soft);color:var(--accent)}
+.page[data-page=record] .b-undecided{background:var(--soft);color:var(--muted)}
+.page[data-page=record] .runs{font-family:var(--sans);font-size:12px;color:var(--muted);margin:6px 0 0;display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.page[data-page=record] .runs a{font-size:11.5px;color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
+.page[data-page=record] .tlink{display:inline-flex;gap:6px;align-items:baseline;font-family:var(--sans);font-size:13px;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--fg);text-decoration:none;margin:0 6px 6px 0}
+.page[data-page=record] .tlink .tic{color:var(--muted);font-size:12px}
+.page[data-page=record] .when{font-family:var(--sans);font-size:11px;font-weight:600;letter-spacing:.03em;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.page[data-page=record] .when.pre{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .when.post{background:var(--run-soft);color:var(--run)}
+.page[data-page=record] .refs{margin:0;padding-left:0;list-style:none;font-size:13.5px}
+.page[data-page=record] .refs li{padding:8px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px}
+.page[data-page=record] .refs .key{font-family:var(--sans);font-weight:600}
+.page[data-page=record] .cite{border-bottom:1.5px dotted var(--accent);color:inherit;text-decoration:none}
+.page[data-page=record] .cc .ow{font-family:var(--sans);font-size:11.5px;font-weight:600;margin-left:2px}
+.page[data-page=record] .byhand{display:inline-block;margin-left:8px;font-family:var(--sans);font-size:11px;font-weight:600;color:var(--run);background:var(--run-soft);border-radius:4px;padding:0 6px;vertical-align:1px}
+.page[data-page=record] .runs{gap:6px;flex-wrap:wrap}
+.page[data-page=record] .lb tr.adopt td{background:var(--ok-soft)}
+.page[data-page=record] ol.hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.page[data-page=record] .vp.bet,.page[data-page=record] .vp.adopt{background:var(--ok)}
+.page[data-page=record] .vp.wor,.page[data-page=record] .vp.rej{background:var(--bad)}
+.page[data-page=record] .vp.eq{background:var(--muted)}
+.page[data-page=record] .vp.und{background:var(--soft);color:var(--muted);box-shadow:inset 0 0 0 1.5px var(--muted)}
+.page[data-page=record] .vp.run{background:radial-gradient(circle,var(--run) 0 3px,transparent 3.5px);box-shadow:inset 0 0 0 2px var(--run)}
+.page[data-page=record] .vp.done{background:var(--accent)}
+.page[data-page=record] .vp.split{color:transparent}
+.page[data-page=record] .vp.adopt svg,.page[data-page=record] .vp.rej svg{stroke-width:2.6}
+.page[data-page=record] .b-adopted,.page[data-page=record] .b-better,.page[data-page=record] .b-answered{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .b-rejected,.page[data-page=record] .b-worse,.page[data-page=record] .b-unanswered{background:var(--bad-soft);color:var(--bad)}
+.page[data-page=record] .b-equivalent{background:var(--soft);color:var(--fg)}
+.page[data-page=record] .b-undecided{background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px var(--muted)}
+.page[data-page=record] .b-planned{background:transparent;color:var(--muted);border:1px dashed var(--muted);padding:1px 7px}
+.page[data-page=record] .b-running{background:var(--run-soft);color:var(--run)}
+.page[data-page=record] .cc.bet,.page[data-page=record] .cc.adopt{background:var(--ok-soft);color:var(--ok)}
+.page[data-page=record] .cc.wor,.page[data-page=record] .cc.rej{background:var(--bad-soft);color:var(--bad)}
+.page[data-page=record] .cc.eq{background:var(--soft);color:var(--fg)}
+.page[data-page=record] .cc.und{background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
+.page[data-page=record] .cc.run{background:var(--run-soft);color:var(--run)}
+.page[data-page=record] .cc .ow{font-family:var(--sans);font-size:11.5px;font-weight:600;margin-left:1px}
+.page[data-page=record] .cc.mix{background:var(--panel);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line);gap:8px}
+.page[data-page=record] .cc.mix .rd{display:inline-flex;align-items:center;gap:4px;font-family:var(--sans);font-size:12px;color:var(--muted)}
+.page[data-page=record] .cc.mix .rd+.rd::before{content:"·";margin-right:4px;color:var(--line)}
+.page[data-page=record] .cc.mix .rd .vp{width:14px;height:14px}
+.page[data-page=record] .cc.pill{font-family:var(--sans);text-decoration:none;color:var(--fg);background:var(--soft);max-width:260px}
+.page[data-page=record] .cc.pill .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page[data-page=record] .cc.pill.xp{background:transparent;box-shadow:inset 0 0 0 1px var(--line);border:0;opacity:.75}
+.page[data-page=record] .cc.pill.xp .pg{font-size:11px;color:var(--muted);border-left:1px solid var(--line);padding-left:6px;white-space:nowrap}
+.page[data-page=record] .meter .adopt{background:repeating-linear-gradient(135deg,var(--ok) 0 4px,color-mix(in srgb,var(--ok) 70%,transparent) 4px 7px)}
+.page[data-page=record] .meter .run{background:repeating-linear-gradient(135deg,var(--run) 0 4px,var(--run-soft) 4px 7px)}
+.page[data-page=record] .meter .bet{background:var(--ok)}
+.page[data-page=record] .meter .wor,.page[data-page=record] .meter .rej{background:var(--bad)}
+.page[data-page=record] .meter .eq{background:var(--muted)}
+.page[data-page=record] .meter .und{background:var(--line)}
+.page[data-page=record] .tlink{display:inline-flex;gap:6px;align-items:baseline;font-family:var(--sans);font-size:12.5px;padding:1px 9px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--fg);text-decoration:none;margin:0 6px 4px 0}
+.page[data-page=record] .tlink .tic{color:var(--muted)}
+.page[data-page=record] .sha{font-family:var(--mono);font-size:11.5px;color:var(--accent);background:var(--accent-soft);border-radius:4px;padding:0 5px;text-decoration:none}
+.page[data-page=record] .sha.none{color:var(--muted);background:transparent;box-shadow:inset 0 0 0 1px var(--line);font-family:var(--sans);font-style:italic}
+.page[data-page=record] .missing{font-family:var(--sans);font-size:12.5px;font-style:italic;color:var(--muted)}
+.page[data-page=record] .when{display:inline-block;font-family:var(--sans);font-size:11px;font-weight:600;letter-spacing:.02em;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.page[data-page=record] .when.pre{background:var(--soft);color:var(--muted)}
+.page[data-page=record] .when.post{background:var(--run-soft);color:var(--run)}
+.page[data-page=record] .byhand{display:inline-block;margin-left:6px;font-family:var(--sans);font-size:11px;font-weight:600;color:var(--run);background:var(--run-soft);border-radius:4px;padding:0 6px;vertical-align:1px}
+.page[data-page=record] .runs{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:baseline;margin:10px 0 0;font-family:var(--sans);font-size:12px}
+.page[data-page=record] .runs .lb{font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:10.5px}
+.page[data-page=record] .runs .rid{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
+.page[data-page=record] .srow{display:block;min-height:0}
+.page[data-page=record] .srow .track{display:block;position:relative;height:22px;margin:0 6px}
+.page[data-page=record] .srow .track i{position:absolute;display:block}
+.page[data-page=record] .srow .band{top:0;bottom:0;background:var(--soft);border-left:1px dashed var(--muted);border-right:1px dashed var(--muted)}
+.page[data-page=record] .srow .zero{top:0;bottom:0;width:0;border-left:1px solid var(--muted)}
+.page[data-page=record] .srow .barl{top:2px;bottom:2px;width:0;border-left:2px dashed var(--fg)}
+.page[data-page=record] .srow .int{top:8px;height:6px;border-radius:3px;background:var(--o-inc);opacity:.4}
+.page[data-page=record] .srow .pt{top:5px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--o-inc);box-shadow:0 0 0 2px var(--panel)}
+.page[data-page=record] .srow .int.ok,.page[data-page=record] .srow .pt.ok,.page[data-page=record] .srow .int.bet,.page[data-page=record] .srow .pt.bet{background:var(--ok)}
+.page[data-page=record] .srow .int.bad,.page[data-page=record] .srow .pt.bad,.page[data-page=record] .srow .int.wor,.page[data-page=record] .srow .pt.wor{background:var(--bad)}
+.page[data-page=record] .srow .int.part,.page[data-page=record] .srow .pt.part{background:var(--run)}
+.page[data-page=record] .srow .pt.und{background:var(--panel);box-shadow:inset 0 0 0 2px var(--muted),0 0 0 2px var(--panel)}
+.page[data-page=record] .srow.axis .track{height:18px}
+.page[data-page=record] .srow.axis .track i{top:2px;transform:translateX(-50%);font-style:normal;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.page[data-page=record] .flag{border:1px solid var(--run);background:var(--run-soft);border-radius:8px;padding:8px 12px;margin:12px 0 0;font-family:var(--sans);font-size:13px}
+.page[data-page=record] .flag .fl{display:inline-flex;align-items:center;gap:6px;color:var(--run)}
+.page[data-page=record] .flag p{margin:4px 0 0;color:var(--fg)}
+.page[data-page=record] .note{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:14px 16px;font-size:13.5px}
+.page[data-page=record] .note .nh{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-family:var(--sans)}
+.page[data-page=record] .note p{margin:0}
+.page[data-page=record] .note p.nr{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.page[data-page=record] .note.caveat{background:var(--run-soft);border-color:var(--run)}
+.page[data-page=record] .note.caveat .nh b{color:var(--run)}
+.page[data-page=record] .note.disclosure{border-left:4px solid var(--run)}
+.page[data-page=record] .note.disclosure .dico{display:inline-flex;width:18px;height:18px;border-radius:50%;background:var(--run);color:var(--panel);font-family:var(--sans);font-weight:700;font-size:12px;align-items:center;justify-content:center}
+/* later evidence: a quiet line per later record, no card */
+.page[data-page=record] .later{font-size:13px;line-height:1.5}
+.page[data-page=record] .later .lh{margin:0 0 2px;font-family:var(--sans);font-size:12px;font-weight:600;color:var(--muted)}
+.page[data-page=record] .later .lev{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;padding:2px 0}
+.page[data-page=record] .later .lg{color:var(--muted);font-family:var(--mono);line-height:1}
+.page[data-page=record] .later .lw{color:var(--muted);font-family:var(--sans)}
+.page[data-page=record] .later .ld{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.page[data-page=record] .lb td,.page[data-page=record] .lb th{white-space:nowrap}
+.page[data-page=record] .lb tr.adopt td{background:var(--ok-soft)}
+.page[data-page=record] .lb tr.adopt td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+.page[data-page=record] .lb tr.base td{color:var(--muted);font-style:italic}
+.page[data-page=record] .keycard{margin-bottom:14px}
+.page[data-page=record] .keycard .kc-head{margin-bottom:10px}
+.page[data-page=record] .keycard .kc-body{display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px}
+.page[data-page=record] .keycard .kc-body p{margin:0 0 8px}
+.page[data-page=record] .keycard .claim{font-family:var(--sans);font-size:16px;font-weight:700}
+.page[data-page=record] .keycard .runs{margin:0 0 14px}
+.page[data-page=record] :is(.keycard,.fcard) ol.hist,.page[data-page=record] #findings>.box ol.hist{font-size:13px}
+.page[data-page=record] .keynum.ok,.page[data-page=record] .keynum.bet,.page[data-page=record] .keynum.adopt{color:var(--ok)}
+.page[data-page=record] .keynum.bad,.page[data-page=record] .keynum.wor{color:var(--bad)}
+.page[data-page=record] .keynum.part,.page[data-page=record] .keynum.run{color:var(--run)}
+.page[data-page=record] .keynum.eq,.page[data-page=record] .keynum.inc,.page[data-page=record] .keynum.und{color:var(--muted)}
+.page[data-page=record] .grp{display:flex;gap:10px;align-items:baseline;font-family:var(--sans);font-size:12.5px;margin:16px 0 8px}
+.page[data-page=record] .grp:first-child{margin-top:0}
+.page[data-page=record] ol.hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.page[data-page=record] ol.hist li{display:block}
+.page[data-page=record] ol.hist li>*{margin-right:8px}
+.page[data-page=record] .kv{width:100%;border-collapse:collapse;font-size:13px}
+.page[data-page=record] .kv td{padding:6px 10px 6px 0;border-top:1px solid var(--line);vertical-align:top}
+.page[data-page=record] .kv td:first-child{font-family:var(--mono);font-size:12px;white-space:nowrap}
+.page[data-page=record] .kv td:last-child{font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap}
+.page[data-page=record] .prereq{display:grid;grid-template-columns:140px minmax(0,1fr);gap:6px 14px;font-size:13px;margin:0 0 14px}
+.page[data-page=record] .prereq b{font-family:var(--sans);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding-top:2px}
+.page[data-page=record] .inputs{display:flex;flex-direction:column;gap:8px}
+.page[data-page=record] .input{display:grid;grid-template-columns:minmax(0,1.2fr) 120px minmax(0,1.6fr) 110px;gap:4px 16px;align-items:baseline;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:13px}
+.page[data-page=record] .input .nm{font-family:var(--sans);font-weight:600}
+.page[data-page=record] .input .kind{font-family:var(--sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.page[data-page=record] .input .sz{font-family:var(--mono);font-size:12px;text-align:right}
+.page[data-page=record] .input .tb{grid-column:1/-1}
+.page[data-page=record] .docs{display:grid;grid-template-columns:fit-content(420px) minmax(0,1fr) auto;column-gap:14px;row-gap:6px}
+.page[data-page=record] .doc{display:grid;grid-column:1/-1;grid-template-columns:subgrid;gap:14px;align-items:baseline;font-size:13px;padding:8px 0;border-top:1px solid var(--line)}
+.page[data-page=record] .doc:first-child{border-top:0}
+.page[data-page=record] .doc code{font-family:var(--mono);font-size:12px}
+.page[data-page=record] .refs{margin:0;padding:0;list-style:none;font-size:13.5px}
+.page[data-page=record] .refs li{padding:8px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:170px minmax(0,1fr) auto;gap:12px;align-items:baseline}
+.page[data-page=record] .refs li.unc{color:var(--muted)}
+.page[data-page=record] .refs .key{font-family:var(--sans);font-weight:600}
+.page[data-page=record] .opened .oh{font-family:var(--sans);font-weight:600;font-size:14px;margin:0 0 10px}
+.page[data-page=record] .opened .op{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:10px;align-items:start;font-size:13.5px;line-height:1.55}
+.page[data-page=record] .opened .op+.op{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+/* centre the mark and the link on the text line: 1lh is the row's line height */
+.page[data-page=record] .opened .op>.vp{font-size:inherit;line-height:inherit;top:0;margin-top:calc((1lh - 18px) / 2)}
+.page[data-page=record] .opened .op>p{margin:0}
+.page[data-page=record] .opened .op .nw{display:inline-flex;align-items:center;column-gap:.3em;height:1lh;vertical-align:top;white-space:nowrap}
+.page[data-page=record] .opened .op .nw .vp{top:0}
+.page[data-page=record] .opened .op .nw>.iss{padding-top:0;padding-bottom:0}
+.page[data-page=record] .opened .op .missing{white-space:nowrap}
+.page[data-page=record] .opened .op .ct{margin:0 1px}
+.page[data-page=record] .fold .dg2.mt{display:block;font-family:var(--mono);font-size:var(--t-xs);margin-top:2px;overflow-wrap:anywhere}
+.page[data-page=record] .fold .t{overflow-wrap:anywhere}
+.page[data-page=record] .doc code{overflow-wrap:anywhere}
+.page[data-page=record] .fbody{overflow-wrap:break-word}
+.page[data-page=record] .doc .cells{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.page[data-page=record] pre code{background:none;padding:0;border-radius:0;font-size:inherit;color:inherit}
+.page[data-page=record] details.fold>summary{grid-column:1/-1;display:grid;grid-template-columns:subgrid;column-gap:inherit;list-style:none;cursor:pointer}
+.page[data-page=record] details.fold>summary::-webkit-details-marker{display:none}
+.page[data-page=record] details.fold::details-content{grid-column:1/-1;min-width:0}
+.page[data-page=record] details.fold>.fbody{grid-column:1/-1}
+.page[data-page=record] p .ct,.page[data-page=record] li .ct,.page[data-page=record] td .ct{margin:0 2px}
+.page[data-page=record] figure{display:flex;flex-direction:column;min-width:0;max-width:100%}
+.page[data-page=record] figure>figcaption{order:-1;margin:0 0 8px;font-family:var(--prose);font-size:13px;line-height:1.55;color:var(--fg)}
+.page[data-page=record] figure>figcaption .lbl{display:inline;margin:0 4px 0 0;font-family:var(--sans);font-size:inherit;font-weight:700;letter-spacing:0;text-transform:none;color:var(--fg)}
+.page[data-page=record] figure>.fig{background:var(--fig);border:1px solid var(--line);border-radius:8px;padding:8px;overflow:hidden;min-width:0}
+.page[data-page=record] figure>.fig svg,.page[data-page=record] figure>.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+.page[data-page=record] figure>.scroll{margin:0;max-width:100%;overflow-x:auto}
+.page[data-page=record] figure>.src{margin-top:6px;font-family:var(--sans);font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.page[data-page=record] .srow.axis .track i:last-child{transform:translateX(-100%)}
+.page[data-page=record] .srow.axis .track i:first-child{transform:none}
+.page[data-page=record] pre code{background:none;padding:0;border-radius:0;font-size:inherit;color:inherit}
+.page[data-page=record] .vp.split{display:inline-flex;gap:0;grid-template-columns:none}
+.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt{table-layout:fixed;width:100%}
+.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt th:first-child{width:36%}
+.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt:has(th:nth-child(5)) th:first-child{width:28%}
+/* four columns: the chip columns stay narrow so the So column keeps its width */
+.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt:not(:has(th:nth-child(5))) th:nth-child(2),.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt:not(:has(th:nth-child(5))) th:nth-child(3){width:14%}
+.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt:has(th:nth-child(5)) th:nth-child(2),.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt:has(th:nth-child(5)) th:nth-child(3){width:11%}
+.page[data-page=record] .cc.mix{flex-wrap:wrap;white-space:normal;max-width:100%;border-radius:12px;row-gap:2px}
+.page[data-page=record] .cc.mix .rd{min-width:0}
+.page[data-page=record] .rneeds b{margin-right:18px}
+.page[data-page=record] .rneeds>span{margin-right:18px}
+.page[data-page=record] .rneeds>span:last-child{margin-right:0}
+.page[data-page=record] .keycard ol.hist{font-size:13px}
+.page[data-page=record] .sec[id$="/answer"]{margin-top:0}
+.page[data-page=record] .kv td:first-child{white-space:normal;overflow-wrap:break-word}
+.page[data-page=record] .kv td:last-child{white-space:normal;overflow-wrap:anywhere;min-width:64px}
+.page[data-page=record] code{overflow-wrap:anywhere}
+.page[data-page=record] span.math{display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle}
+.page[data-page=record] .builds{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:10px 16px;align-items:baseline}
+.page[data-page=record] .doc .nw{white-space:nowrap}
+.page[data-page=record] .cc.inprog{font-family:var(--sans);padding:2px 9px}
+.page[data-page=record] .lede{margin-bottom:10px;font-size:14px;color:var(--muted)}
+.page[data-page=record] h1{line-height:1.25}
+.page[data-page=record] .headrow{margin-bottom:18px}
+.page[data-page=record] .headrow a.term{border-bottom:0}
+.page[data-page=record] .box.answer{padding:24px}
+.page[data-page=record] .qlabel{color:var(--muted);margin-bottom:6px}
+.page[data-page=record] .question{font-family:var(--sans);font-size:18px;line-height:1.4;margin:0 0 4px}
+.page[data-page=record] .qunder{margin:0 0 20px}
+.page[data-page=record] .vline{gap:12px;flex-wrap:nowrap;align-items:flex-start;padding-top:18px;border-top:1px solid var(--line)}
+.page[data-page=record] .vline .answer{font-family:var(--sans);font-size:20px;line-height:1.3}
+.page[data-page=record] .vunder{margin-top:4px}
+.page[data-page=record] .arms td.n,.page[data-page=record] .arms th.n{text-align:right;white-space:nowrap}
+.page[data-page=record] .arms th.armgroup{text-align:center;border-bottom:1px solid var(--line)}
+.page[data-page=record] .rule{margin:8px 0 0}
+.page[data-page=record] .note .ntag{margin-left:auto;font-family:var(--sans);font-size:11px;font-weight:600;color:var(--muted);background:var(--soft);border-radius:999px;padding:1px 8px}
+.page[data-page=record] .rneeds{margin:14px 0 0;font-family:var(--sans)}
+.page[data-page=record] .rneeds .hot{color:var(--run);font-weight:600}
+.page[data-page=record] .box.tracebox{padding:8px 16px}
+.page[data-page=record] .trace td:first-child{width:220px}
+.page[data-page=record] .trace .claimline{margin-top:4px}
+.page[data-page=record] .tnote{margin:8px 0 0}
+.page[data-page=record] .restson{margin:10px 0 0;font-family:var(--sans);display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline}
+.page[data-page=record] .stack.cards{gap:0}
+.page[data-page=record] :is(.keycard,.fcard) .so{margin:0 0 8px}
+.page[data-page=record] :is(.keycard,.fcard) .so p{display:inline;margin:0}
+.page[data-page=record] .keycard .exhibit{margin-top:10px}
+.page[data-page=record] .keycard .exhibit>p{margin:0 0 6px}
+.page[data-page=record] :is(.keycard,.fcard) .khist{margin:10px 0 0}
+.page[data-page=record] .who{font-family:var(--sans);font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 7px;white-space:nowrap}
+.page[data-page=record] .nw{white-space:nowrap}
+.page[data-page=record] ul.limits{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.page[data-page=record] .input .lq{display:block;font-weight:500;text-transform:none;letter-spacing:0}
+.page[data-page=record] .dstats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:0 0 14px}
+.page[data-page=record] .dstats>div{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--plate);font-size:12.5px}
+.page[data-page=record] .dstats b{font-family:var(--sans);font-size:20px;line-height:1.2}
+.page[data-page=record] .dfields{margin:0 0 14px;font-size:13px}
+.page[data-page=record] .dfields .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.page[data-page=record] .dfields .df{display:inline-flex;gap:6px;align-items:baseline;margin:0 16px 6px 0}
+.page[data-page=record] .docbox{padding:8px 16px}
+.page[data-page=record] ul.rounds{margin:0;padding-left:18px}
+.page[data-page=record] .sec.folds{margin-top:48px}
+.page[data-page=record] .kicker{font-family:var(--mono);margin:0}
+.page[data-page=record] .scrollx{overflow-x:auto;max-width:100%}
+.page[data-page=record] .box.answer{min-width:0}
+.page[data-page=record] .vline .vp.lg{width:26px;height:26px;top:0}
+.page[data-page=record] .fsupport{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.page[data-page=record] .fsupport>.chap,.page[data-page=record] .chap.fothers{color:var(--muted);margin:0 0 10px}
+.page[data-page=record] .chap.fothers,.page[data-page=record] :is(.cards,.fcards)+details.fold{margin-top:22px}
+.page[data-page=record] .fcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:18px;align-items:start}
+.page[data-page=record] .fcard{min-width:0}
+.page[data-page=record] .fcard .ttl{font-family:var(--sans);font-weight:600;font-size:15px;line-height:1.4}
+.page[data-page=record] .fcard .fans{gap:6px;margin-bottom:6px}
+.page[data-page=record] .fcard .fbd{margin-top:8px}
+.page[data-page=record] .fcard .fbd p.small{margin:0 0 8px}
+.page[data-page=record] .fcard .fbd>.runs{margin:0 0 8px}
+.page[data-page=record] .fcard .fbd>.exhibit{margin-top:12px}
+.page[data-page=record] .fcard figure{margin:0 0 8px}
+.page[data-page=record] .fcard .fsum{margin:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.page[data-page=record] details.fcard[open] .fsum{display:block;-webkit-line-clamp:unset;line-clamp:none;overflow:visible}
+.page[data-page=record] .dfold{border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.page[data-page=record] .dfold .input{border:0;background:transparent}
+.page[data-page=record] details.dfold{padding:0;margin:0}
+.page[data-page=record] details.dfold>summary{list-style:none;cursor:pointer;font-family:inherit;font-size:inherit}
+.page[data-page=record] details.dfold>summary::before{content:none;display:none}
+.page[data-page=record] details.dfold>summary::-webkit-details-marker{display:none}
+.page[data-page=record] .dfold .input .chev{position:absolute;right:14px;top:10px}
+.page[data-page=record] details.dfold .input{position:relative;padding-right:36px}
+.page[data-page=record] details.dfold>summary:hover .nm{color:var(--accent)}
+.page[data-page=record] .dfold .dbody{margin:0 14px 14px;padding-top:14px;border-top:1px solid var(--line);min-width:0}
+.page[data-page=record] .fcards.wide{grid-template-columns:minmax(0,1fr)}
+.page[data-page=record] details.fcard{padding:14px 16px;margin:0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.page[data-page=record] details.fcard>summary{list-style:none;cursor:pointer;font-family:inherit;font-size:inherit;display:block}
+.page[data-page=record] details.fcard>summary::-webkit-details-marker{display:none}
+.page[data-page=record] details.fcard>summary::before{content:none;display:none}
+.page[data-page=record] details.fcard>summary:hover .ttl{color:var(--accent)}
+.page[data-page=record] details.fcard>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.page[data-page=record] .kc-body>div:first-child:has(>.keynum:empty){display:none}
+.page[data-page=record] .kc-body:has(>div:first-child>.keynum:empty){grid-template-columns:minmax(0,1fr)}
+/* the answer's clauses: the claim, then its readings as a plain table on the clause's axis */
+.page[data-page=record] .clauselist{margin:18px 0 0}
+.page[data-page=record] .clauselist>.cl{display:grid;grid-template-columns:120px minmax(0,1fr);gap:0 14px;padding:20px 0;border-top:1px solid var(--line)}
+.page[data-page=record] .clauselist>.cl:first-child{border-top:0;padding-top:4px}
+.page[data-page=record] .clauselist>.cl:last-child{padding-bottom:0}
+.page[data-page=record] .clauselist>.cl.plan .claim,.page[data-page=record] .clauselist>.cl.plan .cond{color:var(--muted)}
+.page[data-page=record] .clauselist .claim{font-family:var(--sans);font-weight:600;font-size:15px;line-height:1.4}
+.page[data-page=record] .clauselist .cond{font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:3px}
+.page[data-page=record] .clauselist .ctags{font-family:var(--sans);font-size:11.5px;color:var(--muted);margin-top:3px}
+.page[data-page=record] .clauselist table.rt{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:10px}
+.page[data-page=record] .clauselist table.rt col.r{width:32%}
+.page[data-page=record] .clauselist table.rt col.v{width:200px}
+.page[data-page=record] .clauselist table.rt th{font-family:var(--sans);font-size:12px;font-weight:500;color:var(--muted);text-align:left;padding:4px 12px 5px;border-bottom:1px solid var(--line);white-space:nowrap}
+.page[data-page=record] .clauselist table.rt td{padding:4px 12px;vertical-align:middle;border-bottom:1px solid var(--soft)}
+.page[data-page=record] .clauselist table.rt th:first-child,.page[data-page=record] .clauselist table.rt td:first-child{padding-left:0}
+.page[data-page=record] .clauselist table.rt tr.ax td{border-bottom:0;padding-top:2px;padding-bottom:6px}
+.page[data-page=record] .clauselist td.q{font-size:13px;line-height:1.35}
+.page[data-page=record] .clauselist .qi{display:flex;gap:8px;align-items:flex-start}
+.page[data-page=record] .clauselist .qi .vp{margin-top:1px;top:0}
+.page[data-page=record] .clauselist .val{font-family:var(--mono);font-size:11.5px;white-space:nowrap}
+.page[data-page=record] .clauselist .val .muted,.page[data-page=record] .clauselist .legend{color:var(--muted)}
+.page[data-page=record] .clauselist .legend{font-family:var(--sans);font-size:11.5px}
+.page[data-page=record] .clauselist .ans2{margin:10px 0 0;font-size:14px;line-height:1.55}
+.page[data-page=record] .fchips{display:inline-flex;flex-wrap:wrap;gap:6px;vertical-align:baseline;margin-left:2px}
+.page[data-page=record] .fchips:empty{display:none}
+/* the arms table: each arm's clause and gain in its row, the best value of each column bold */
+.page[data-page=record] .arms{margin:18px 0 6px}
+.page[data-page=record] .arms td.n{font-family:var(--mono);font-size:12px}
+.page[data-page=record] .arms td.best{font-weight:700}
+.page[data-page=record] .arms .gain{min-width:150px;width:150px}
+.page[data-page=record] .arms tr.agrp th{border-bottom:0;padding-bottom:0}
+.page[data-page=record] .arms th.armgroup{color:var(--fg)}
+.page[data-page=record] .arms tr.ax td{border-bottom:0;padding-top:2px}
+.page[data-page=record] .arms .legend{font-family:var(--sans);font-size:11.5px;color:var(--muted);white-space:normal;margin-top:2px}
+.page[data-page=record] .anotes{margin-top:22px;gap:14px}
+/* the Decision figure beside the notes; on a narrow column the notes wrap under it */
+.page[data-page=record] .adecide{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px;align-items:start;margin-top:22px}
+.page[data-page=record] .adecide>.anotes{margin-top:0}
+.page[data-page=record] .adecide figure>.fig svg,.page[data-page=record] .adecide figure>.fig img{width:100%}
+/* supporting findings: one box on a darker ground under their key, a line between cards */
+.page[data-page=record] .fcard .fhead{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:12px;align-items:baseline;margin-bottom:4px}
+.page[data-page=record] .fcard .fhead>.ct{min-width:34px;justify-content:center}
+/* a closed card names its exhibits as passive chips between its title and caret */
+.page[data-page=record] .fcard .fhead:has(>.xchips){grid-template-columns:auto minmax(0,1fr) auto auto}
+.page[data-page=record] .fcard .xchips{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.page[data-page=record] .fcard .fsum,.page[data-page=record] .fcard .fbd{margin-left:46px}
+.page[data-page=record] details.fcard .fhead{cursor:pointer}
+.page[data-page=record] .fcards.stacked{display:grid;grid-template-columns:minmax(0,1fr);gap:0;border:1px solid var(--line);border-radius:10px;background:var(--board)}
+.page[data-page=record] .fcards.stacked>.fcard{border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;padding:14px 16px}
+.page[data-page=record] .fcards.stacked>.fcard:first-child{border-top:0}
+/* long run ids and table chips wrap inside their card */
+.page[data-page=record] ol.hist li{overflow-wrap:anywhere}
+.page[data-page=record] .tlink{max-width:100%;overflow-wrap:anywhere;border-radius:12px}
+/* phones: label columns stack over their values and side-by-side parts stack */
+@media(max-width:640px){
+.page[data-page=record] .box,.page[data-page=record] .box.answer{padding:16px}
+.page[data-page=record] .rows,.page[data-page=record] .fold .rows{grid-template-columns:minmax(0,1fr);gap:4px 0}
+.page[data-page=record] .fold .rows>b{padding-top:10px}
+.page[data-page=record] .fold .rows>b:first-child{padding-top:0}
+.page[data-page=record] .fold{grid-template-columns:minmax(0,1fr) 12px;padding:12px 14px}
+.page[data-page=record] .fold .cnt{grid-column:1;padding:2px 0 0;white-space:normal}
+.page[data-page=record] .fold .fbody{grid-column:1/-1}
+.page[data-page=record] .fold .io{grid-template-columns:minmax(0,1fr);gap:6px}
+.page[data-page=record] .fold .io .arr{padding:0;margin-left:14px;line-height:1;display:inline-block;width:fit-content;transform:rotate(90deg)}
+.page[data-page=record] .kv,.page[data-page=record] .kv tbody{display:block}
+.page[data-page=record] .kv tr{display:flex;flex-wrap:wrap;column-gap:12px;row-gap:2px;padding:6px 0;border-top:1px solid var(--line)}
+.page[data-page=record] .kv td{border:0;padding:0}
+.page[data-page=record] .kv td:first-child{flex:1 1 auto;min-width:0}
+.page[data-page=record] .kv td:nth-child(2){order:3;flex-basis:100%;color:var(--muted)}
+.page[data-page=record] .kv td:last-child{min-width:0;margin-left:auto}
+.page[data-page=record] .input,.page[data-page=record] details.dfold .input{display:flex;flex-wrap:wrap;gap:4px 12px}
+.page[data-page=record] .input .nm{flex:1 1 auto;min-width:0}
+.page[data-page=record] .input>span:not([class]),.page[data-page=record] .input .tb{flex-basis:100%;min-width:0}
+.page[data-page=record] .input .sz{text-align:left}
+.page[data-page=record] .dfold .dbody{margin:0 14px 14px}
+.page[data-page=record] .docs{grid-template-columns:minmax(0,1fr)}
+.page[data-page=record] .doc .cells{justify-content:flex-start}
+.page[data-page=record] .doc>code{grid-column:1/-1}
+.page[data-page=record] .builds{grid-template-columns:minmax(0,1fr);gap:4px 0}
+.page[data-page=record] .builds>span{margin-bottom:10px}
+.page[data-page=record] .keycard .kc-body{grid-template-columns:minmax(0,1fr);gap:8px}
+.page[data-page=record] .trace table.pt,.page[data-page=record] .sec:has(>h2[id$="/clauses"]) table.pt{min-width:640px;table-layout:auto}
+.page[data-page=record] .trace td:first-child{width:auto}
+.page[data-page=record] .clauselist>.cl{grid-template-columns:minmax(0,1fr);gap:6px 0}
+.page[data-page=record] .clauselist table.rt,.page[data-page=record] .clauselist table.rt tbody{display:block}
+.page[data-page=record] .clauselist table.rt thead{display:none}
+.page[data-page=record] .clauselist table.rt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;padding:6px 0 2px;border-bottom:1px solid var(--soft)}
+.page[data-page=record] .clauselist table.rt td{display:block;padding:0;border:0}
+.page[data-page=record] .clauselist table.rt td:nth-child(2){grid-column:1/-1;grid-row:2}
+.page[data-page=record] .clauselist table.rt tr.ax{border-bottom:0}
+.page[data-page=record] .clauselist table.rt tr.ax td:first-child{display:none}
+.page[data-page=record] .clauselist table.rt tr.ax td.legend{grid-column:1/-1;grid-row:3}
+.page[data-page=record] .clauselist .val{white-space:normal;text-align:right}
+.page[data-page=record] .clauselist .val .muted{display:block}
+.page[data-page=record] .fcard .fsum,.page[data-page=record] .fcard .fbd{margin-left:0}
+.page[data-page=record] .fcard .fhead:has(>.xchips){grid-template-columns:auto minmax(0,1fr) auto}
+.page[data-page=record] .fcard .fhead>.xchips{grid-column:2;grid-row:2;justify-content:flex-start;margin-top:4px}
+.page[data-page=record] .fcard .fhead>.chev{grid-column:3;grid-row:1}
+.page[data-page=record] .refs li{grid-template-columns:minmax(0,1fr)}
+.page[data-page=record] .prereq{grid-template-columns:minmax(0,1fr)}
+}
+/* an exhibit table: sentence-case headers, a plain first column, text columns wide enough to read */
+.page[data-page=record] table.data th{text-transform:none;letter-spacing:0;font-size:12px;font-weight:600;min-width:7ch}
+.page[data-page=record] table.data td:first-child{font-family:inherit;font-size:inherit;font-weight:400;letter-spacing:0;text-transform:none;color:var(--fg);white-space:normal;width:auto}
+.page[data-page=record] table.data.wide td:first-child,.page[data-page=record] table.data.wide th:first-child{border-right:0}
+.page[data-page=record] table.data td:not(.n){overflow-wrap:break-word}
+.page[data-page=record] table.data td.nw{white-space:nowrap}
+.page[data-page=record] table.data .pass-yes{color:var(--ok);font-weight:600}
+.page[data-page=record] table.data .pass-no{color:var(--bad);font-weight:600}
+.page[data-page=record] table.data td .missing{font-size:12px}
+/* the programme pill reads as a link */
+.page[data-page=record] .cc.inprog{color:var(--accent);background:var(--accent-soft)}
+/* exhibits one under another: a narrow figure takes half the width, alone; a wide one or a table all of it */
+.page[data-page=record] .exhibit figure+figure,.page[data-page=record] .exhibit .xpanel+.xpanel{margin-top:14px}
+.page[data-page=record] .exhibit figure>.fig svg,.page[data-page=record] .exhibit figure>.fig img{width:100%}
+.page[data-page=record] .exhibit figure.narrow{max-width:calc(50% - 9px)}
+/* several exhibits: a small chip (.ct) per exhibit as a tab, only the selected one shows once the script runs */
+.page[data-page=record] .xtabs{display:flex;flex-wrap:wrap;gap:6px 4px;margin:0 0 12px}
+.page[data-page=record] .xtab{position:relative;max-width:min(100%,24rem);cursor:pointer;text-align:left}
+.page[data-page=record] .xtab .xl{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.page[data-page=record] .xtab:hover{border-color:var(--accent)}
+.page[data-page=record] .xtab[aria-selected=true],.page[data-page=record] .xtab[aria-selected=true] b{color:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
+.page[data-page=record] .xtab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* on touch screens the hit area reaches past the small chip */
+@media(pointer:coarse){.page[data-page=record] .xtab::after{content:"";position:absolute;inset:-12px -2px}}
+:root.js .page[data-page=record] .xpanel:not(.on){display:none}
+:root.js .page[data-page=record] .xpanel+.xpanel{margin-top:0}
+:root.js .page[data-page=record].allx .xpanel{display:block!important;margin-top:14px}
+@media print{
+.page[data-page=record] .xtabs{display:none}
+:root.js .page[data-page=record] .xpanel{display:block!important;margin-top:14px}
+.page[data-page=record] .fcard .fsum{display:block;-webkit-line-clamp:unset;line-clamp:none;overflow:visible}
+}
+/* below 720px every figure takes the full width */
+@media(max-width:720px){
+.page[data-page=record] .exhibit figure.narrow{max-width:none}
+}
+
+/* survey edge cases: an empty cell is a muted dash; a URL cell links under a short label */
+.page[data-page=record] table.data .nil{color:var(--muted)}
+.page[data-page=record] table.data a.url{overflow-wrap:anywhere}
+/* a file other findings cite too names them after its caption */
+.page[data-page=record] figcaption .also{font-family:var(--sans);font-size:12px;color:var(--muted);white-space:nowrap}
+/* the Verdict's Evidence under the answer */
+.page[data-page=record] .evidence{margin:14px 0 0;font-size:14px;line-height:1.55}
+.page[data-page=record] .evidence .evh{margin:0 0 4px;font-family:var(--sans);font-size:12px;font-weight:600;color:var(--muted)}
+.page[data-page=record] .evidence .evl1{margin:0}
+.page[data-page=record] .evidence .evl{margin:4px 0 0;padding-left:1.2em}
+.page[data-page=record] .evidence .evl li+li{margin-top:2px}
+/* a clause's many readings as a list, in columns where the row is wide */
+.page[data-page=record] .clauselist .rlist{margin:0;padding-left:1.2em;columns:2 16rem;column-gap:28px}
+.page[data-page=record] .clauselist .rlist li{break-inside:avoid}
+/* a run on a local tracking server: its whole id as text, clipped to the short width so it copies whole */
+.page[data-page=record] .rid.full,.page[data-page=record] code.run.full{display:inline-block;max-width:8ch;overflow:hidden;white-space:nowrap;vertical-align:bottom;box-sizing:content-box}
+.page[data-page=record] .loc{border-bottom:1px dotted var(--line);cursor:help}
+/* files no finding cites: their exhibits stacked inside a closed fold */
+.page[data-page=record] .xmore figure+figure{margin-top:22px}
+.page[data-page=record] a.term .sq{box-sizing:border-box;margin-right:5px}
+.page[data-page=record].lgb .lgchg{background:var(--accent-soft);border-radius:4px;padding:0 6px}
+.page[data-page=record].lgb .lgchg.alg{font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif}
+.page[data-page=record].lgb .lgnote{text-decoration:underline dotted var(--muted);text-underline-offset:3px}
+/* the algorithm block's marks, drawn as on the entry page */
+.page[data-page=record].lgb .cf{font-family:var(--sans);font-size:12px;color:var(--muted);white-space:nowrap}
+.page[data-page=record].lgb .cf code,.page[data-page=record].lgb .rf code{font-family:var(--mono);font-size:11.5px;color:var(--fg);background:var(--soft);border-radius:4px;padding:1px 6px}
+.page[data-page=record].lgb .rf{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.page[data-page=record].lgb .rf code{margin-right:6px}
+.page[data-page=record].lgb .rf>span+span{margin-left:8px}
+.page[data-page=record].lgb .nt{display:inline-grid;grid-template-columns:auto minmax(0,1fr);gap:0 6px;font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:13px;line-height:1.45;color:var(--muted)}
+.page[data-page=record].lgb .nt .tri{font-size:11px;line-height:1.75}
+.page[data-page=record].lgb .nt .nk{font-family:var(--sans);font-size:11px;font-weight:600;color:var(--fg);margin-right:5px}
+.page[data-page=record].lgb .sx{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}

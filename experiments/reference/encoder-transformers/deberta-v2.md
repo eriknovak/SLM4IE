@@ -5,7 +5,7 @@ status: from-paper
 summary: DeBERTa with a 128,000-piece SentencePiece vocabulary learned on the training data, relative distances compressed onto log-spaced buckets, position projections shared with the content projections, and a convolution beside the first layer.
 variant_of: encoder-transformers/deberta
 part_of:
-couples_to: [subword-tokenizers/unigram]
+couples_to: [{entry: subword-tokenizers/unigram, as: tokenizer}]
 ---
 
 ## Description
@@ -52,13 +52,13 @@ neighbours' endings together.
 
 ## Facts
 
-- **Position encoding**: relative, bucketed; distances up to 128 keep their own row, longer ones share rows on a log scale, 512 rows in all; absolute position added before the masked-token prediction only
-- **Attention span**: every token attends to every token, as in BERT
-- **Block normalisation**: post-norm, as in BERT, with a layer norm on the relative position table
-- **Activation**: GELU, as in BERT
-- **Pretraining objective**: masked language modelling on 15% of the tokens, as in RoBERTa
-- **Tokenizer**: SentencePiece, 128,000 pieces learned on the training data
-- **Context length**: 512 tokens in training; the bucketed table reaches any distance
+- **Position encoding**: relative, bucketed — distances up to 128 keep their own row, longer ones share rows on a log scale, 512 rows in all; absolute position added before the masked-token prediction only
+- **Attention span**: every token attends to every token — as in BERT
+- **Block normalisation**: post-norm — as in BERT, with a layer norm on the relative position table
+- **Activation**: GELU — as in BERT
+- **Pretraining objective**: masked language modelling — on 15% of the tokens, as in RoBERTa
+- **Tokenizer**: SentencePiece — 128,000 pieces learned on the training data
+- **Context length**: 512 tokens — in training; the bucketed table reaches any distance
 - **Position buckets**: 256 per side; the scale is stretched so that distance 511 reaches the last bucket
 - **Projections**: the query and key matrices of the content are applied to the relative position table too
 - **Convolution**: kernel 3 over the input embeddings, GELU, added to the first layer's output and normalised; released in the XLarge and XXLarge models
@@ -100,14 +100,16 @@ neighbours' endings together.
 \Return $h^L$
 ```
 
-- **1**: As in DeBERTa, the token embedding enters alone and no position is added at the input.
-- **2**: The first layer runs as in DeBERTa. Beside it a convolution of kernel three slides over the input embeddings, so each output mixes a token with its left and right neighbour. The two results are added and normalised together. The convolution runs on the input only, so layers 2 to $L$ do not have it.
-- **3-4**: In every layer the relative position table is first normalised and then projected by the same query and key matrices the layer uses for content. The two position-only matrices of DeBERTa are gone.
-- **5**: A distance of 128 or less is its own bucket. A longer distance is mapped onto a log scale that reaches bucket 255 at distance 511, so distances from 129 to 511 share 127 buckets, with a bucket covering more distances the further out it lies. The sign is kept, so left and right neighbours never share a row.
-- **6**: The bucket is shifted by $b$ to index the table, and clamped, so a distance beyond 511 reads the outermost row rather than failing.
-- **7-8**: The attention itself is DeBERTa's three-term score with the scale $\sqrt{3d}$, and everything after it is BERT's layer.
+- **1**: As in DeBERTa, the normalised token embedding $h^0$ enters alone and no position is added at the input.
+- **2**: The first layer runs as in DeBERTa. Beside it a convolution of kernel three slides over the input embeddings, so each output mixes a token with its left and right neighbour. The two results are added and normalised together into $h^1$. The convolution runs on the input only, so layers 2 to $L$ do not have it.
+- **3-4**: In every layer the relative position table is first normalised and then projected into $Q_r$ and $K_r$ by the same query and key matrices the layer uses for content. The two position-only matrices of DeBERTa are gone.
+- **5**: A distance $r$ of $m = 128$ or less is its own bucket $\beta(r)$. A longer distance is mapped onto a log scale that reaches bucket 255 at distance 511, so distances from 129 to 511 share 127 buckets, with a bucket covering more distances the further out it lies. The sign is kept, so left and right neighbours never share a row.
+- **6**: The bucket is shifted by $b$ to the row index $\delta(i, j)$, and clamped, so a distance beyond 511 reads the outermost row rather than failing.
+- **7-8**: The attention itself is DeBERTa's three-term score with the scale $\sqrt{3d}$, and everything after it is BERT's layer, which gives $h^\ell$.
 
 ## Worked example
+
+- **Input**: seventeen query-minus-key distances from 0 to 1,000, read with V1's $k = 512$ and with V2's 256 buckets over a largest distance of 512
 
 The example script ports the bucket rule of the released code to plain Python
 and applies it to a set of distances, next to the row DeBERTa V1 would read

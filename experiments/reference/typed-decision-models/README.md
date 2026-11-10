@@ -16,7 +16,7 @@ several, a level on an ordered scale, or yes against no. It returns a
 probability for every allowed answer and never a sentence, so the output is
 valid by construction and software can branch on it. TypeSafe's Jev named the
 class "System One models" in September 2026 and published neither weights nor
-a recipe. The entries here are the closed model as reconstructed from its
+a recipe; the entries here are that closed model as reconstructed from its
 behaviour, and three open models that each build the same interface in a
 different way: a decoder with a pointer head, a bidirectional encoder with one
 marker token per option, and a pair of contrastive encoders that score a state

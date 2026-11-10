@@ -14,7 +14,7 @@ An encoder Transformer reads a whole text at once and gives every token one
 vector that reflects the tokens on both sides of it. Information extraction
 reads such vectors directly: a named entity is a span whose tokens are tagged,
 and a relation is a pair of spans. The entries here are the lineage that
-runs from BERT to the encoders released in 2024. Each one keeps most of its
+runs from BERT to the encoders released in 2024; each one keeps most of its
 predecessor and changes a few parts: how position is told to the model, how
 far a token can attend, where the normalisation sits inside a block, which
 activation the feed-forward part uses, and what the model is trained to

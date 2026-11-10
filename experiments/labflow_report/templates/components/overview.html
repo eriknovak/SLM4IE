@@ -1,0 +1,66 @@
+{#- Components board, overview: the scorecard, the outcome legend, Main results, the ledger and the shelf -#}
+{% import "components/inline.html" as inline %}
+{% import "components/words.html" as words %}
+
+{#- a programme's scorecard: meter, then latest result, what can start now and open questions as
+    label-value rows, the labels in one column so every value and wrapped pill starts at one edge -#}
+{% macro scorecard(card) -%}
+<div class="mc score">
+<div class="shead"><h3><a href="{{ card.href }}" title="{{ card.title }}">{{ card.short }}</a></h3><span class="small muted">{{ card.counts }}</span><a class="small go" href="{{ card.href }}">programme →</a></div>
+{{ words.meter_x(card.meter) }}
+<dl class="small slines">
+<dt>latest</dt><dd>{% if card.latest %}{{ words.mark(card.latest.word) }} <a href="{{ card.latest.href }}" title="{{ card.latest.title }}">{{ card.latest.name }}</a>{% if card.latest.result %}: {{ card.latest.result }}{% endif %} <span class="when-d">· {{ card.latest.date }}</span>{% else %}{{ inline.missing(card.no_latest) }}{% endif %}</dd>
+<dt>can start now</dt><dd{% if card.startable %} class="pills"{% endif %}>{% if card.startable %}{{ card.startable | join(" ") }}{% elif card.waits %}<span class="muted">{{ card.waits }}</span>{% else %}{{ inline.missing(card.nothing_planned) }}{% endif %}</dd>
+<dt>open</dt><dd>{% if card.open %}<a href="{{ card.open_href }}">{{ card.open.head }}</a>, {% if card.open.unplanned %}<span class="unplanned">{{ card.open.unplanned }}</span>{% else %}{{ card.open.rest }}{% endif %}{% else %}{{ inline.missing(card.no_open) }}{% endif %}</dd>
+</dl>
+</div>
+{%- endmacro %}
+
+{#- the outcome words the meters draw, then how to read a meter -#}
+{% macro legend_line(legend, note) -%}
+<div class="legend-line">{% for word in legend %}<span>{{ words.mark(word) }} {{ word }}</span>{% endfor %}<span class="muted">{{ note }}</span></div>
+{%- endmacro %}
+
+{#- Main results: per result its finding chips and claim, the bears-on line, the experiments it cites -#}
+{% macro main_results(results) -%}
+{% if results.rows %}
+<ul class="mainres">
+{%- for r in results.rows %}<li><span>{% for chip in r.chips %}{{ chip }} {% endfor %}<b>{{ r.claim }}</b>{% if r.bears %}<span class="bears small muted">{{ r.bears }}</span>{% endif %}</span><span class="pills">{{ r.pills | join(" ") }}</span></li>{% endfor -%}
+</ul>
+{%- else %}<div class="empty">{{ results.empty }}</div>{% endif %}
+{%- endmacro %}
+
+{#- a key finding named in a ledger cell: its title, then its chip -#}
+{% macro finding(f) -%}
+{{ f.title }} {{ f.chip }}
+{%- endmacro %}
+
+{#- a member's clauses: a line per clause a finding decides alone, a chip row per group, its key findings, or words -#}
+{% macro clause_cell(cell) -%}
+{% if cell.kind == "groups" %}
+{%- for item in cell.parts %}
+{%- if item.kind == "line" %}<div class="cl">{{ item.chip }}<span class="small"><b>{{ item.claim }}</b>{% if item.finding %} <span class="muted">— {{ finding(item.finding) }}</span>{% endif %}</span></div>
+{%- else %}<div class="cg"><div class="row cl">{{ item.chips | join("") }}</div>{% if item.findings %}<div class="small muted">{% for f in item.findings %}{{ finding(f) }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}</div>
+{%- endif %}
+{%- endfor %}
+{%- elif cell.kind == "findings" %}{% for f in cell.findings %}<div class="small cl">{{ finding(f) }}</div>{% endfor %}
+{%- else %}{{ inline.missing(cell.text) }}{% endif %}
+{%- endmacro %}
+
+{#- one ledger: a row per member, then the planned experiments -#}
+{% macro ledger(rows) -%}
+<div class="box scrollx"><table class="pt ledger"><thead><tr><th>#</th><th>Experiment and what it tested</th><th>Clauses: verdict, then why</th><th>Outcome</th></tr></thead><tbody>
+{%- for r in rows %}
+{% if r.planned %}
+<tr class="plan"><td class="num"><span class="mono muted">·</span></td><td class="exp"><b class="nm">{{ r.name }}</b><div class="small q">{{ r.question }}</div></td><td class="cls"><div class="row small">{{ r.ticket }}{% if r.opened %} opened by {% if r.opened.chips %}{{ r.opened.chips }} of {% endif %}{{ r.opened.pill }}{% elif r.parents %} builds on {{ r.parents | join(" ") }}{% endif %}</div>{% if not r.opened and not r.parents %}{{ inline.missing(r.no_clause) }}{% endif %}</td><td class="out">{{ r.badge }}</td></tr>
+{%- else %}
+<tr><td class="num">{% if r.number %}<span class="mono muted">{{ r.number }}</span>{% else %}{{ words.mark(r.word) }}{% endif %}</td><td class="exp"><a href="{{ r.href }}"{% if r.title %} title="{{ r.title }}"{% endif %}><b class="nm">{{ r.name }}</b></a><div class="small q">{{ r.question }}</div><div class="mono muted">{{ r.meta }}</div></td><td class="cls">{{ clause_cell(r.clauses) }}</td><td class="out">{{ r.badge }}{% if r.arm %}<div class="small muted">arm <span class="mono">{{ r.arm }}</span></div>{% elif r.held %}<div class="small muted">{{ r.held }}</div>{% endif %}{% for t in r.tags %}<div><a class="qual" href="{{ t.href }}">{{ words.mark(t.word) }}{{ t.text }}</a></div>{% endfor %}</td></tr>
+{%- endif %}
+{% endfor -%}
+</tbody></table></div>
+{%- endmacro %}
+
+{#- the reference shelf: one card per topic with its entry count -#}
+{% macro shelf(shelf) -%}
+<div class="shelf">{% for c in shelf.cards %}<a class="mc topic" id="{{ c.id }}" href="{{ c.href }}"{% if c.tip %} title="{{ c.tip }}"{% endif %}><b>{{ c.title }}</b><span class="mono muted">{{ c.count }}</span></a>{% endfor %}</div>
+{%- endmacro %}

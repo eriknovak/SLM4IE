@@ -1,0 +1,17 @@
+{#- the glossary page: kicker, title and lede, a sticky head holding the kind switch (a bar the scroll spy skips, its kinds in one scrolling row) with the filter box and the A–Z index, then the terms under letter heads, each labelled with its section -#}
+{% extends "page.html" %}
+{% import "components/layout.html" as layout %}
+
+{% block body %}
+{{ layout.kicker(kicker) }}<h1>Glossary</h1>
+{%- if groups %}
+<p class="lede">{{ lede }}</p>
+<div class="ghead"><div class="bar kinds"><div class="kscroll">{% for k in kinds %}<a{% if k.id %} id="{{ k.id }}"{% endif %}{% if loop.first %} class="on"{% endif %} href="{{ k.href }}" data-kind="{{ k.kind }}">{{ k.name }} <i>{{ k.n }}</i></a>{% endfor %}</div><input class="filter" type="search" placeholder="filter terms" aria-label="filter terms" title="/ focuses, Esc clears"></div>
+<nav class="az" aria-label="Terms by letter">{% for x in index %}{% if x.href %}<a href="{{ x.href }}">{{ x.letter }}</a>{% else %}<span>{{ x.letter }}</span>{% endif %}{% endfor %}</nav></div>
+{%- for g in groups %}<div class="lgrp"><h2 class="lh" id="{{ g.id }}">{{ g.letter }}</h2><dl class="gloss">
+{%- for t in g.terms %}<div class="g" data-kind="{{ t.kind }}" data-q="{{ t.q }}"><dt id="{{ t.id }}">{{ t.name }} <span class="grp">{{ t.kind }}</span>{% if t.aliases %} <span class="also">{{ t.aliases }}</span>{% endif %}</dt><dd><div class="d">{{ t.definition }}</div><button type="button" class="more" aria-expanded="false">more</button></dd></div>{% endfor -%}
+</dl></div>{% endfor %}
+{%- else %}
+<p class="lede">{{ empty.lede }}</p>{{ layout.empty(empty.text) }}
+{%- endif %}
+{% endblock %}

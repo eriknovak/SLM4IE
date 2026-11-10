@@ -1,4 +1,4 @@
-Words,GLiNER spans (width ≤ 12),GLiNER2 spans (width ≤ 8),GLiNER2.5 starts kept,GLiNER2.5 pairs proposed,GLiNER2.5 candidates scored
+words,gliner_spans_width_12,gliner2_spans_width_8,gliner2_5_starts_kept,gliner2_5_pairs_proposed,gliner2_5_candidates_scored
 8,36,36,24,576,192
 32,318,228,24,576,192
 128,1470,996,24,576,192

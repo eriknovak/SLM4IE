@@ -1,0 +1,158 @@
+{#- the legend: every mark the pages draw, drawn by the macro the pages use, with what it means.
+    The specimens sit inside a record-page scope, so the record page's own styles draw them. -#}
+{% import "components/words.html" as words %}
+{% import "components/inline.html" as inline %}
+{% import "components/evidence.html" as evidence %}
+{% import "components/findings.html" as findings %}
+
+{#- the outcome words: family, word, the clause code its chip shows ("" for none), meaning;
+    only a programme's experiments table badges a planned experiment, with a dashed draft badge -#}
+{% set outcome_words = [
+  ("claim", "confirmed", "H1", "a claim held at its bar"),
+  ("claim", "refuted", "H1", "a claim failed its bar"),
+  ("claim", "partial", "H1", "held in part, or a question answered in part"),
+  ("claim", "inconclusive", "H1", "the interval spans the bar"),
+  ("question", "answered", "Q1", "a question the findings answer"),
+  ("question", "unanswered", "Q1", "a question the findings leave open"),
+  ("comparison", "better", "C2", "the difference clears the margin upward"),
+  ("comparison", "equivalent", "C2", "the whole interval sits inside the margin"),
+  ("comparison", "worse", "C2", "the difference clears the margin downward"),
+  ("comparison", "undecided", "C2", "the interval straddles a margin edge"),
+  ("selection", "adopted", "", "the record picks a method or arm to carry forward"),
+  ("selection", "rejected", "", "the record rules a method or arm out"),
+  ("state", "running", "", "an experiment in progress: a branch or a record open"),
+  ("state", "planned", "H1", "not started: an experiment a programme names, a follow-up with no experiment yet, or a clause not read yet"),
+] %}
+
+{% macro row(meaning) -%}
+<div class="lgr"><dt>{{ caller() }}</dt><dd>{{ meaning }}</dd></div>
+{%- endmacro %}
+
+{% macro family(key, title) -%}
+<section class="lgf" aria-labelledby="legend-{{ key }}"><h3 id="legend-{{ key }}">{{ title }}</h3><dl>{{ caller() }}</dl></section>
+{%- endmacro %}
+
+<dialog class="lgd" id="legend" role="dialog" aria-modal="true" aria-labelledby="legend-title">
+<div class="lgh"><h2 id="legend-title">Legend</h2><button type="button" class="lgx" aria-label="close the legend">×</button></div>
+<div class="page lgb" data-page="record">
+
+<section class="lgf" aria-labelledby="legend-words"><h3 id="legend-words">Outcome words</h3>
+<p class="small muted">A mark is coloured by what was read, never by what was hoped for. Grey is any reading that moves no decision.</p>
+<div class="scrollx"><table class="pt lgw"><thead><tr><th>Mark</th><th>Badge</th><th>Chip</th><th>Means</th></tr></thead><tbody>
+{%- for fam, word, code, meaning in outcome_words %}
+{%- if loop.first or loop.previtem[0] != fam %}<tr class="lgfam"><th colspan="4">{{ fam }}</th></tr>{% endif %}
+<tr><td>{{ words.mark(word) }}</td><td>{% if word != "planned" %}{{ words.badge(word) }}{% endif %}</td><td>{% if code %}{{ words.chip(code, word, show_word=code.startswith("C")) }}{% endif %}</td><td>{{ meaning }}</td></tr>
+{%- endfor %}
+</tbody></table></div>
+<dl>
+{% call row("a clause read several ways (per aspect, split or arm); hover names each reading") %}{{ words.split_chip("C2", [("better", "bias"), ("equivalent", "factuality")]) }}{% endcall %}
+{% call row("a draft: planned work, or a reference entry not yet checked") %}{{ words.badge("draft") }}{% endcall %}
+{% call row("a planned experiment in a programme's experiments table") %}<span class="badge b-draft" style="background:transparent;border:1px dashed var(--muted);padding:1px 7px">planned</span>{% endcall %}
+{% call row("an experiment stopped before its verdict") %}{{ words.badge("abandoned") }}{% endcall %}
+{% call row("a clause a later round replaced") %}{{ words.badge("superseded") }}{% endcall %}
+{% call row("on a topic or programme page, whether its question is still open or closed") %}<span class="badge b-running">open</span> <span class="badge b-draft">closed</span>{% endcall %}
+</dl>
+</section>
+
+{% call family("codes", "Codes") -%}
+{% call row("a clause: H a claim read against a bar, C a comparison against a margin, Q a question answered in words") %}{{ inline.ct("h", "H1") }}{{ inline.ct("h", "C2") }}{{ inline.ct("h", "Q1") }}{% endcall %}
+{% call row("a finding of the record") %}{{ inline.ct("f", "F2") }}{% endcall %}
+{% call row("a decision: a choice the record made, with when and why") %}{{ inline.ct("d", "D5") }}{% endcall %}
+{% call row("a method: a step that turns its input into its output") %}{{ inline.ct("m", "M5") }}{% endcall %}
+{% call row("lines of an algorithm in a reference entry") %}{{ inline.ct("i", "Alg 2 · 7–8") }}{% endcall %}
+{% call row("in a programme, a finding of one of its experiments: 2·F1 is finding F1 of experiment 2; hover shows it") %}{{ inline.ct("f", "2·F1") }}{% endcall %}
+{% call row("an id in a ledger, a thread or a list: a finding, a clause or an idea") %}<span class="tag">F1</span><span class="tag">#23</span>{% endcall %}
+{% call row("a key finding's headline number, coloured by the outcome it supports, plain when it supports none") %}<span class="keynum ok">0.71</span><span class="keynum">0.42</span>{% endcall %}
+{% endcall %}
+<p class="small muted lgn">A code links to its item; hover shows its summary.</p>
+
+{% call family("readings", "Readings") -%}
+{% call row("a reading: its value and 95% interval, in the colour of its outcome mark") %}<span class="srow lgs"><span class="track"><i class="int ok" style="left: 30%; width: 40%"></i><i class="pt ok" style="left: 50%"></i></span></span>{% endcall %}
+{% call row("the bar a claim must clear") %}<span class="srow lgs"><span class="track"><i class="barl" style="left: 50%"></i></span></span>{% endcall %}
+{% call row("the ±margin a comparison reads against") %}<span class="srow lgs"><span class="track"><i class="band" style="left: 30%; width: 40%"></i></span></span>{% endcall %}
+{% call row("no difference between the arms") %}<span class="srow lgs"><span class="track"><i class="zero" style="left: 50%"></i></span></span>{% endcall %}
+{% endcall %}
+
+{% call family("experiments", "Experiments, issues and PRs") -%}
+{% call row("an experiment by its short name, with its outcome mark; hover gives the full title") %}{{ inline.pill("adopted", "Label models, pilot", "Which label model to carry forward, on a pilot sample") }}{% endcall %}
+{% call row("in an overview ledger, a later experiment that cites one of this one's findings: qualified, overturned, supported or cited by its finding F<n>") %}<span class="qual" style="display:inline-flex;align-items:center;gap:6px;font-family:var(--sans);font-size:12px;color:var(--muted);background:var(--soft);border-radius:999px;padding:1px 9px 1px 4px">{{ words.mark("inconclusive") }}qualified by Reference anchoring check F1</span>{% endcall %}
+{% call row("an overview scorecard's meter: one segment per experiment, oldest first, in its outcome's colour; adopted striped green, running striped amber, planned dashed") %}<span class="lgt" style="display:inline-flex;gap:2px;height:10px;width:96px;border-radius:999px;overflow:hidden;vertical-align:middle;background:var(--soft)"><i style="display:block;width:22px;height:100%;box-sizing:border-box;background:var(--ok)"></i><i style="display:block;width:22px;height:100%;box-sizing:border-box;background:repeating-linear-gradient(135deg,var(--ok) 0 4px,color-mix(in srgb,var(--ok) 70%,transparent) 4px 7px)"></i><i style="display:block;width:22px;height:100%;box-sizing:border-box;background:repeating-linear-gradient(135deg,var(--run) 0 4px,var(--run-soft) 4px 7px)"></i><i style="display:block;width:22px;height:100%;box-sizing:border-box;border:1px dashed var(--muted)"></i></span>{% endcall %}
+{% call row("the programme the record belongs to") %}<span class="cc inprog">Source ratings as article labels</span>{% endcall %}
+{% call row("on a programme map, an experiment's card and the one line from the earliest experiment it builds on; dashed and amber into a planned experiment's dashed card, faded for a parent from another programme") %}<span class="lgt"><svg width="64" height="12" viewBox="0 0 64 12" aria-hidden="true" style="vertical-align:middle"><path d="M2 6H28M23 2L28 6L23 10" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M36 6H62M57 2L62 6L57 10" fill="none" stroke="var(--run)" stroke-width="1.6" stroke-dasharray="4 3"/></svg></span>{% endcall %}
+{% call row("on a programme map card, its other parents: 4·D5 is decision D5 of experiment 4; hover or tap the card to draw those links, dashed") %}<span class="lgt"><svg width="34" height="12" viewBox="0 0 34 12" aria-hidden="true" style="vertical-align:middle"><path d="M2 6H32" fill="none" stroke="var(--accent)" stroke-width="1.75" stroke-dasharray="5 4"/></svg></span> {{ inline.ct("d", "4·D5") }}{% endcall %}
+{% call row("in a programme's threads, a run of clauses an experiment settled with one outcome, shown as one range") %}{{ words.chip("H1–H5", "inconclusive") }}{% endcall %}
+{% call row("in a programme's threads, a clause a later round replaced, dimmed; hover names the clause that replaced it") %}<span class="sup" title="superseded by H3" style="opacity:.5">{{ words.chip("H2", "confirmed") }}</span>{% endcall %}
+{% call row("in a programme's threads, a thread a planned experiment will settle") %}{{ words.chip("?", "planned") }}{% endcall %}
+{% call row("an open question no experiment takes on yet") %}<span class="nyp" style="display:inline-block;border-radius:999px;padding:1px 9px;background:var(--run-soft);color:var(--run);font-family:var(--sans);font-size:12px;font-weight:600">not yet planned</span>{% endcall %}
+{% call row("on the Research page, a programme's Open questions no experiment answers yet, and how many; it opens that programme's Open list") %}<span class="lnopen" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:1px 10px;font-family:var(--sans);font-size:12.5px;color:var(--fg)">Source ratings as article labels<span style="font-family:var(--mono);font-size:11.5px;color:var(--run)">9</span></span>{% endcall %}
+{% call row("on the Research page, an experiment's category: data, methods or validation") %}<span class="ln-kind" style="display:inline-block;font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--soft);border-radius:5px;padding:1px 7px">methods</span>{% endcall %}
+{% call row("a GitHub issue: its number and title") %}{{ inline.iss(20, "English prototype dataset") }}{% endcall %}
+{% call row("the pull request that holds the work") %}<a href="#">PR #7</a>{% endcall %}
+{% call row("a follow-up already done, in a commit or an experiment") %}{{ words.mark("done") }}{% endcall %}
+{% endcall %}
+
+{% call family("exhibits", "Figures and tables") -%}
+{% call row("a closed finding's figures and tables, up to three, then +n") %}{{ findings.exhibit_chips([{"label": "Figure 3", "title": "", "missing": false}, {"label": "Table 4", "title": "", "missing": false}]) }}{% endcall %}
+{% call row("chip tabs: click one to show that figure or table") %}<span class="xtabs"><span class="xtab ct i" aria-selected="true"><span class="xl"><b>Figure 1</b></span></span><span class="xtab ct i" aria-selected="false"><span class="xl"><b>Table 2</b></span></span></span>{% endcall %}
+{% call row("on a topic page, the fact switch: pick one fact, and the entries group by their value of it") %}<span class="lgt"><span class="fsw" aria-selected="true" style="font-family:var(--sans);font-size:var(--t-sm);border:1px solid var(--line);border-radius:8px;padding:5px 10px;background:var(--fg);color:var(--bg);border-color:var(--fg)">Base unit</span> <span class="fsw" aria-selected="false" style="font-family:var(--sans);font-size:var(--t-sm);border:1px solid var(--line);border-radius:8px;padding:5px 10px;background:var(--panel);color:var(--muted)">Encoding</span></span>{% endcall %}
+{% call row("a table (▦) or a figure (◩) that opens on demand") %}{{ inline.tbl("tables/verdict-by-arm.csv", "Verdict by arm") }}{{ inline.tbl("figures/gain.svg", "Gain by clause") }}{% endcall %}
+{% call row("the exhibit shows in these findings too; in the glossary, other names for the term") %}<span class="also">also in {{ inline.ct("f", "F7") }}</span>{% endcall %}
+{% call row("in the glossary, the section a term sits under: Metrics, a term group or Other") %}<span class="grp">Metrics</span>{% endcall %}
+{% call row("an empty table cell: no value") %}{{ EMPTY_CELL | safe }}{% endcall %}
+{% call row("on a topic page's coupling grid, the entry in the row couples with the entry in the column (●), or does not (·)") %}<span class="lgt"><span class="y" style="color:var(--accent);font-weight:700">●</span> <span class="muted">·</span></span>{% endcall %}
+{% call row("whether a row clears the bar") %}<span class="lgt"><span class="pass-yes">yes</span> <span class="pass-no">no</span></span>{% endcall %}
+{% call row("a figure's expand button: opens it full screen, as a click anywhere on the figure does") %}<span class="fzb" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"></path></svg></span>{% endcall %}
+{% call row("the box scrolls: sideways, or down past the rows shown") %}<span class="sh on">→ scrolls sideways · ↓ scrolls down</span>{% endcall %}
+{% endcall %}
+
+{% call family("runs", "Runs, commits and files") -%}
+{% call row("a finding's MLflow runs, links when the record names a tracking server, then the rest counted") %}{{ evidence.runs_line({"ids": [("f42d4a7d", "#", ""), ("19b26621", "#", "")], "more": 8, "lost": [], "more_lost": 0, "commits": [], "addressed": true, "replaced": []}) }}{% endcall %}
+{% call row("a run on a tracking server on the author's machine, its id shown whole") %}{{ evidence.runs_line({"ids": [("", "", "9efe54ca35334b5c8eb6f81892e77908")], "more": 0, "lost": [], "more_lost": 0, "commits": [], "addressed": true, "replaced": []}) }}{% endcall %}
+{% call row("a run whose tracking server is gone, by the prefix the record kept; never a link") %}{{ evidence.runs_line({"ids": [], "more": 0, "lost": [("5a6c943e", "5a6c943e")], "more_lost": 0, "commits": [], "addressed": false, "replaced": []}) }}{% endcall %}
+{% call row("a run named in the text") %}<code class="run">5959a088</code>{% endcall %}
+{% call row("the analysis commit, or a step with no commit; a link to it on GitHub when the repo is known") %}{{ inline.commit("024330f") }}{{ inline.commit() }}{% endcall %}
+{% call row("a commit named in the text") %}<code class="commit">024330f</code>{% endcall %}
+{% call row("an address that opens only on the author's machine; hover gives it") %}{{ inline.local("MLflow · local", "http://localhost:5000") }}{% endcall %}
+{% call row("a file in the repo; a function follows ::") %}<code class="file">src/<wbr>taxmaker/<wbr>label_dataset.py::<wbr>node_paths</code>{% endcall %}
+{% call row("in a reference entry, an algorithm line the entry changes from its predecessor") %}<span class="lgchg alg">3: join the pair inside each piece</span>{% endcall %}
+{% call row("in a reference entry's step table, the entry's own form of a step it changes; the column before it is the predecessor's") %}<span class="lgchg">marked pieces</span>{% endcall %}
+{% call row("in a reference entry, a fact or paper with more on hover: the note, or what the entry takes from the paper") %}<span class="lgnote">whole word</span>{% endcall %}
+{% call row("in a reference entry's algorithm, the code file its lines cite, named once; hover gives the full path") %}<span class="cf">lines in <code title="src/tokenizers/hf_bpe.py">hf_bpe.py</code></span>{% endcall %}
+{% call row("the code lines that run an algorithm line, in that file; a line citing another file names it first") %}<span class="rf"><span title="src/tokenizers/hf_bpe.py, lines 39–40">39–40</span><span title="src/tokenizers/base.py, line 12"><code>base.py</code>12</span></span>{% endcall %}
+{% call row("a note under an algorithm line, labelled by how it is known: observed, inferred or published") %}<span class="nt"><span class="tri">▷</span><span><span class="nk">observed</span>tokens are billed once for the state</span></span>{% endcall %}
+{% call row("an algorithm wider than its box: its lines scroll sideways, their numbers stay") %}<span class="sx">scrolls sideways →</span>{% endcall %}
+{% endcall %}
+
+{% call family("prose", "In the text") -%}
+{% call row("a citation of the record's bibliography; it opens References") %}{{ inline.cite("Lin et al. 2023", "#") }}{% endcall %}
+{% call row("a finding cited from another record; hover shows it") %}<a class="ref" href="#" data-tip="F1 — a finding in another record&#10;Hover shows its title and summary.">[F1]</a>{% endcall %}
+{% call row("a reference entry named in the text; hover gives its summary") %}<a class="term" href="#" data-tip="BPE tokenizer&#10;Merges the most frequent symbol pairs into a fixed vocabulary.">BPE tokenizer</a>{% endcall %}
+{% call row("after a row of entry chips, the entries not shown, counted; hover names them") %}<span class="more" title="MorphBPE, WordPiece" style="font-family:var(--mono);font-size:var(--t-xs);color:var(--muted);cursor:help">+2</span>{% endcall %}
+{% call row("a decision set before any run") %}{{ inline.when("before") }}{% endcall %}
+{% call row("a decision set after runs began but before any finding") %}{{ inline.when("runs") }}{% endcall %}
+{% call row("a decision set after results: weigh how far its reading can be trusted") %}{{ inline.when("results") }}{% endcall %}
+{% call row("a step a person does; no command restores it") %}{{ inline.byhand() }}{% endcall %}
+{% call row("a slot the record leaves empty, said in words, never a blank") %}{{ inline.missing() }}{% endcall %}
+{% call row("a need that limits who can rerun the work") %}<span class="rneeds"><span class="hot">licensed</span></span>{% endcall %}
+{% endcall %}
+
+{% call family("rail", "Rail and folds") -%}
+{% call row("a new result: concluded in the two weeks before the newest one") %}<span class="nd" title="new result"></span>{% endcall %}
+{% call row("a reference entry checked against code") %}<span class="sq chk"></span>{% endcall %}
+{% call row("a reference entry taken from its paper") %}<span class="sq pap"></span>{% endcall %}
+{% call row("a draft reference entry") %}<span class="sq dft"></span>{% endcall %}
+{% call row("a fold: ▸ closed, ▾ open; click its title row") %}<span class="hd shut"><span class="chev"></span></span><span class="hd"><span class="chev"></span></span>{% endcall %}
+{% endcall %}
+
+{% call family("keys", "Keys") -%}
+{% call row("open or close this legend; Esc closes it") %}<kbd>?</kbd>{% endcall %}
+{% call row("open the glossary, and back") %}<kbd>g</kbd>{% endcall %}
+{% call row("filter the rail") %}<kbd>/</kbd>{% endcall %}
+{% call row("the previous or next experiment") %}<kbd>[</kbd><kbd>]</kbd>{% endcall %}
+{% call row("the next or previous section") %}<kbd>j</kbd><kbd>k</kbd>{% endcall %}
+{% call row("open or close every fold on the page") %}<kbd>e</kbd>{% endcall %}
+{% call row("the overview, the rail, the theme") %}<kbd>o</kbd><kbd>n</kbd><kbd>t</kbd>{% endcall %}
+{% endcall %}
+
+</div>
+</dialog>

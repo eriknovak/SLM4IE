@@ -1,0 +1,37 @@
+{#- Components board 1, section 01: outcome words -#}
+
+{% macro mark(word, big=false) -%}
+{% set kind = OUTCOME.get(word, word) %}
+<span class="vp {{ kind }}{{ ' lg' if big else '' }}" title="{{ word }}">
+{%- if GLYPHS[kind] %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="{{ GLYPHS[kind] }}"/></svg>{% endif -%}
+</span>
+{%- endmacro %}
+
+{% macro badge(word) -%}
+<span class="badge b-{{ word }}">{{ word }}</span>
+{%- endmacro %}
+
+{#- a chip with an href is a link to the clause it names -#}
+{% macro chip(code, word, show_word=false, href="") -%}
+{% set tag = "a" if href else "span" %}
+<{{ tag }} class="cc {{ OUTCOME.get(word, word) }}"{% if href %} href="{{ href }}"{% endif %}>{{ mark(word) }}{{ code }}
+{%- if show_word %}<span class="ow">{{ word }}</span>{% endif -%}
+</{{ tag }}>
+{%- endmacro %}
+
+{% macro split_mark(words) -%}
+{% set cuts = words | length %}
+<span class="vp split" style="background: conic-gradient(from 180deg, {% for word in words %}{% if not loop.first %}, {% endif %}var(--o-{{ OUTCOME.get(word, word) }}) {{ '%.0f' | format(loop.index0 * 100 / cuts) }}% {{ '%.0f' | format(loop.index * 100 / cuts) }}%{% endfor %})" title="{{ words | join(' · ') }}"></span>
+{%- endmacro %}
+
+{#- a clause read several ways: the cut circle and its code; hover names each reading -#}
+{% macro split_chip(code, readings, href="") -%}
+{% set tag = "a" if href else "span" %}
+<{{ tag }} class="cc mix"{% if href %} href="{{ href }}"{% endif %} title="{% for word, qualifier in readings %}{{ word }}{% if qualifier %}: {{ qualifier }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}">{{ split_mark(readings | map('first') | list) }}{{ code }}</{{ tag }}>
+{%- endmacro %}
+
+{% macro meter_x(parts) -%}
+<div class="meter">
+{%- for kind, n in parts %}<i class="{{ OUTCOME.get(kind, kind) }}" style="flex: {{ n }} 1 0"></i>{% endfor -%}
+</div>
+{%- endmacro %}

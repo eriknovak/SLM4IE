@@ -1,0 +1,13 @@
+/* the shared layout macros (components/layout.html): the section bar, for every page that draws it */
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) .bar{display:flex;flex-wrap:wrap;gap:0 2px;border-bottom:1px solid var(--line);margin:48px 0 0;font-family:var(--sans);font-size:var(--t-sm)}
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) .bar a{padding:8px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;text-decoration:none;white-space:nowrap}
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) .bar a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) .bar a i{font-style:normal;font-family:var(--mono);font-size:var(--t-xs);color:var(--muted);margin-left:2px}
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) .bar a.on i{color:var(--accent)}
+.page:is([data-page=record],[data-page=entry]) .bar+.sec{margin-top:28px}
+/* a jump lands its target just under the sticky section bar; the page script sets --bar-h */
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) [id]{scroll-margin-top:calc(var(--bar-h,44px) + 14px)}
+/* tablets and phones: the section bar is one row that scrolls sideways */
+@media(max-width:800px){
+.page:is([data-page=record],[data-page=entry],[data-page=topic],[data-page=programme]) .bar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+}

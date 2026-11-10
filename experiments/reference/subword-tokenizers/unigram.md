@@ -48,10 +48,10 @@ toward morpheme boundaries.
 
 ## Facts
 
-- **Base unit**: Unicode characters after compatibility normalisation, with `▁` for the space before a word
-- **Chunk while training**: whole word with the space before it; a piece also never crosses between letters and digits or between two writing systems
-- **Picks next token by**: nothing is joined; the pieces whose removal costs the corpus likelihood least are dropped, a quarter of them per round
-- **Encoding**: the most probable sequence of pieces under the piece probabilities, no lexicon
+- **Base unit**: Unicode characters — after compatibility normalisation, with `▁` for the space before a word
+- **Chunk while training**: whole word — with the space before it; a piece also never crosses between letters and digits or between two writing systems
+- **Picks next token by**: nothing is joined — the pieces whose removal costs the corpus likelihood least are dropped, a quarter of them per round
+- **Encoding**: the most probable sequence of pieces — under the piece probabilities, no lexicon
 - **Needs lexicon**: no
 - **Setting**: vocabulary size, which includes the three control pieces and the special tokens; the model may hold fewer pieces than asked, since a piece the corpus does not use is dropped
 - **Longest piece**: 16 characters
@@ -99,10 +99,10 @@ toward morpheme boundaries.
 ```
 
 - **1**: The text is normalised and the space before a word becomes part of it. The trainer reads the sentences from memory, and every sentence is used.
-- **2**: The seed is large on purpose. Every character is in it so that any text of the corpus can be spelled, and the substrings are the candidates the pruning will choose among.
+- **2**: The seed vocabulary $V$ is large on purpose. Every character is in it so that any text of the corpus can be spelled, and the substrings are the candidates the pruning will choose among.
 - **3**: Rounds continue until the vocabulary is within ten percent of the target. The final trim on line 9 removes the rest.
-- **4-6**: Two rounds of expectation-maximisation refit the probabilities to the current vocabulary. Line 5 sums, over all ways to cut each sentence, how often each piece is used, weighting each way by its probability. Line 6 turns the counts into log probabilities with the digamma function $\psi$, which behaves like the logarithm for large counts and discounts small ones. A piece the corpus has stopped using is dropped here.
-- **7-8**: Each piece is scored by how much the corpus likelihood would fall without it. Characters are never removed, so every text stays spellable. The quarter of pieces that matter least go.
+- **4-6**: Two rounds of expectation-maximisation refit the probabilities to the current vocabulary. Line 5 sums, over all ways to cut each sentence, how often each piece is used, $c(x)$, weighting each way by its probability. Line 6 turns the counts into log probabilities $\log p(x)$ with the digamma function $\psi$, which behaves like the logarithm for large counts and discounts small ones. A piece the corpus has stopped using is dropped here.
+- **7-8**: Each piece is scored by how much the corpus likelihood would fall without it, $\ell(x)$. Characters are never removed, so every text stays spellable. The quarter of pieces that matter least go.
 - **9**: The vocabulary is cut to size, characters first. The control pieces are the unknown, start and end pieces, and $S$ holds the sweep's other special tokens.
 - **10**: The model is the pieces and their log probabilities. No merges exist.
 
@@ -118,11 +118,13 @@ toward morpheme boundaries.
 ```
 
 - **1**: The text is prepared exactly as in training, so a word at the start of a text is spelled like one inside it.
-- **2-3**: Every way to cut the text is a path through the lattice, and the best path is found by dynamic programming. These lines run inside the SentencePiece library and cite no project code.
+- **2-3**: Every way to cut the text is a path through the lattice, and the best path $s$ is found by dynamic programming. These lines run inside the SentencePiece library and cite no project code.
 - **4**: An unseen character cannot be spelled. Its run is one token with the unknown id, but the characters are kept, so the output still covers the text.
 - **5**: Each piece also reports which characters it spells. The project aligns the pieces to the text left to right after removing the `▁` marker, which is what the morpheme metrics read. A lone `▁` spells nothing and gets an empty span.
 
 ## Worked example
+
+- **Input**: six forms of `hiša` and `miza` with counts 5, 4, 3, 4, 3 and 2, a vocabulary of 21 asked, the forms `mize` and `hišami` to segment, and `hiša`, `mize`, `hišami`, `mizami`, `hišaq`, `hiš` and `Hiša...` to encode
 
 The corpus holds six forms of two nouns: `hiša` (house) five times, `hiše`
 four, `hišo` three, `miza` (table) four, `mize` three, `mizo` twice. The

@@ -58,16 +58,16 @@ and the language's own labelled rows added on top.
 
 ## Facts
 
-- **Question types**: choice over described options; Noul as two described options, true first, with a context-free bias subtracted when no descriptions are given; score over levels, returning the expected level
-- **Backbone**: ModernBERT-large, 395 million parameters, every weight fine-tuned; a multilingual sibling, Laya, uses mmBERT-base, and the repository's guide trains a fresh head on other masked-language encoders
-- **Where an option is read**: the hidden state of the mask token placed before the option's text, through a normalised two-layer head to one logit
-- **Options per question**: bounded by the 8,192-token sequence; the authors recommend few
-- **Isolation between questions**: complete, one encoder pass per question; within a question an option attends only to the prefix and itself, with its positions reset, so the scores are order-invariant
-- **Training objective**: cross-entropy plus half the Brier score against the target distribution over the options, accepting a soft target
-- **Calibration**: temperature $T = \theta_0 + \theta_1 \hat{H} + \theta_2 \log_{10}(\text{state tokens})/4 + \theta_3 K/8$, with $\hat{H}$ the normalised entropy of the raw distribution and $K$ the option count, clamped to $[0.3, 12]$ and fitted by likelihood on labelled items; confidence as the vendor adapter's formula; a yes-or-no probability is pushed out of a band around one half before it is returned
-- **Training data**: about 290,000 balanced decision items across operational, security, moderation, semantic, triage and adversarial families, the semantic part including the ANLI and WANLI entailment sets as yes-or-no questions; 40,000 long-context items and 40,000 synthetic two-hop and numeric items; no item of the JevBench benchmark
-- **Context length**: 8,192 tokens; a longer state is cut in the middle
-- **Weights**: Apache-2.0 on Hugging Face as wfzyx/von, about three gigabytes
+- **Question types**: choice, Noul and score — choice over described options; Noul as two described options, true first, with a context-free bias subtracted when no descriptions are given; score over levels, returning the expected level
+- **Backbone**: ModernBERT-large — 395 million parameters, every weight fine-tuned; a multilingual sibling, Laya, uses mmBERT-base, and the repository's guide trains a fresh head on other masked-language encoders
+- **Where an option is read**: the mask token before the option's text — its hidden state, through a normalised two-layer head to one logit
+- **Options per question**: as many as fit 8,192 tokens with the state — bounded by the 8,192-token sequence; the authors recommend few
+- **Isolation between questions**: complete — one encoder pass per question; within a question an option attends only to the prefix and itself, with its positions reset, so the scores are order-invariant
+- **Training objective**: cross-entropy plus half the Brier score — against the target distribution over the options, accepting a soft target
+- **Calibration**: fitted temperature formula — temperature $T = \theta_0 + \theta_1 \hat{H} + \theta_2 \log_{10}(\text{state tokens})/4 + \theta_3 K/8$, with $\hat{H}$ the normalised entropy of the raw distribution and $K$ the option count, clamped to $[0.3, 12]$ and fitted by likelihood on labelled items; confidence as the vendor adapter's formula; a yes-or-no probability is pushed out of a band around one half before it is returned
+- **Training data**: balanced decision items, long-context and synthetic items — about 290,000 balanced decision items across operational, security, moderation, semantic, triage and adversarial families, the semantic part including the ANLI and WANLI entailment sets as yes-or-no questions; 40,000 long-context items and 40,000 synthetic two-hop and numeric items; no item of the JevBench benchmark
+- **Context length**: 8,192 tokens — a longer state is cut in the middle
+- **Weights**: Apache-2.0 — on Hugging Face as wfzyx/von, about three gigabytes
 
 ## Sources
 
@@ -94,23 +94,23 @@ and the language's own labelled rows added on top.
 \Return $\arg\max z$, $p$, $c$; for a score question also $\sum_k (k - 1)\, p_k$
 ```
 
-- **1**: The whole question is one string. The prefix is instructions then
+- **1**: The whole question is one string $s$. The prefix is instructions then
   state, and each option follows a mask token. Digits are split so that the
   same number tokenises the same way wherever it appears. A literal mask or
   separator string in user text is broken, so a document cannot add a
   phantom option.
-- **2** and **3**: The mask and the positions together make each option's
+- **2–3**: The mask and the positions together make each option's
   computation independent of the other options. Blocking attention alone is
   not enough, because rotary positions encode distance and an option's
   distance from the prefix would still depend on how many option tokens sit
   before it.
-- **4** and **5**: One pass gives every token a state. The head reads the
+- **4–5**: One pass gives every token a state in $H$. The head reads the
   mask token in front of each option, the position a masked language model
-  learned to fill from context, and returns one score per option.
-- **6**: The temperature is computed from the request itself. A flat raw
+  learned to fill from context, and returns one score $z_k$ per option.
+- **6**: The temperature $T$ is computed from the request itself. A flat raw
   distribution, a long state and many options each raise it, so the model
   claims less than its raw scores suggest where it tends to be wrong.
-- **7**: The scaled scores become probabilities and the confidence is the
+- **7**: The scaled scores become probabilities $p$ and the confidence $c$ is the
   top probability rescaled by the option count. The temperature is monotone,
   so the chosen option is the argmax of the raw scores either way.
 - **8**: The chosen option, the distribution and the confidence are returned.
@@ -129,23 +129,25 @@ and the language's own labelled rows added on top.
 \Return encoder, head, $\theta$
 ```
 
-- **1** and **2**: Training packs and scores exactly as serving does, at a
-  temperature of one. The target is the labelled option, or a whole
+- **1–2**: Training packs and scores $z$ exactly as serving does, at a
+  temperature of one, with probabilities $p$. The target $d$ is the labelled option, or a whole
   distribution when the item was built with one.
-- **3**: The loss adds a Brier term, the squared distance between the
+- **3**: The loss $\ell$ adds a Brier term, the squared distance between the
   predicted and the target distribution, to the cross-entropy. The Brier
   score is a proper scoring rule, which rewards reporting the frequency one
   actually observes, and it penalises a confident wrong answer more than the
   cross-entropy alone does near certainty.
 - **4**: The encoder is not frozen. The released weights are a full retrain
   from the previous release with the independent-options mask on.
-- **5**: The temperature map is fitted afterwards on labelled items, by the
+- **5**: The temperature map $\theta$ is fitted afterwards on labelled items, by the
   likelihood of the correct option, with a scalar temperature fitted beside it
   and the better one under cross-validation kept.
 - **6**: The checkpoint holds the encoder, the head and the map, and the map
   can be refitted on a deployer's labels without touching the weights.
 
 ## Worked example
+
+- **Input**: raw scores 2.0, 0.5 and −0.5 for three options under the Von 1.2 calibration map, with the state at 40, 400 and 4,000 tokens
 
 The example script runs the released calibration module with the map shipped
 in the Von 1.2 checkpoint on one set of raw scores for three options, with

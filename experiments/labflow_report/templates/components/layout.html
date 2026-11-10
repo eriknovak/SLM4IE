@@ -1,0 +1,58 @@
+{#- shared page furniture: chapters, folds, label rows, the section bar and the needs line -#}
+{% import "components/inline.html" as inline %}
+
+{#- the answer card leads its page without a heading -#}
+{% macro section(page_id, key, title, color, n=0) -%}
+{% if key == "answer" %}
+<div class="sec" id="{{ page_id }}/answer">{{ caller() }}</div>
+{%- else %}
+<div class="sec"><h2 class="chap" id="{{ page_id }}/{{ key }}" style="color: var(--{{ color }})">{{ title }}{% if n %} · {{ n }}{% endif %}</h2>{{ caller() }}</div>
+{%- endif %}
+{%- endmacro %}
+
+{#- the line above a page title: the file the page is built from -#}
+{% macro kicker(path) -%}
+<p class="kicker" data-nolink>{{ path }}</p>
+{%- endmacro %}
+
+{#- a section row: title with a digest under it, a short meta, then the chevron at the right end;
+    a long meta moves under the title; with a body it starts closed and opens to show it -#}
+{% macro fold(title, meta="", digest="", id="", has_body=true) -%}
+{% set long = (meta | striptags | length) > 36 %}
+{% set inner -%}
+<span class="fb"><span class="t">{{ title }}</span>
+{%- if digest %}<span class="dg2">{{ digest }}</span>{% endif -%}
+{%- if long %}<span class="dg2 mt">{{ meta }}</span>{% endif -%}
+</span><span class="cnt">{{ "" if long else meta }}</span><span class="chev"></span>
+{%- endset %}
+{% if has_body %}
+<details class="fold"{% if id %} id="{{ id }}"{% endif %}><summary>{{ inner }}</summary><div class="fbody">{{ caller() }}</div></details>
+{%- else %}
+<div class="fold"{% if id %} id="{{ id }}"{% endif %}>{{ inner }}</div>
+{%- endif %}
+{%- endmacro %}
+
+{#- label-value rows inside an open fold -#}
+{% macro rows(pairs) -%}
+<div class="rows">{% for label, value in pairs %}<b>{{ label }}</b><div>{{ value }}</div>{% endfor %}</div>
+{%- endmacro %}
+
+{#- a page's section bar: every section below it, with its count when it has one -#}
+{% macro section_bar(entries) -%}
+<nav class="bar" aria-label="Sections">
+{%- for e in entries %}<a{{ ' class="on"' | safe if loop.first else "" }} href="{{ e.href }}">{{ e.name }}{% if e.n is defined and e.n %} <i>{{ e.n }}</i>{% endif %}</a>{% endfor -%}
+</nav>
+{%- endmacro %}
+
+{#- People, Compute, Data and External in a few words each; a heavy need in amber -#}
+{% macro needs(items) -%}
+<p class="small rneeds"><b>Needs</b>
+{%- for need in items %}<span>{{ need.name }} {% if not need.text %}{{ inline.missing() }}{% elif need.hot %}<span class="hot">{{ need.text }}</span>{% else %}{{ need.text }}{% endif %}</span>{% endfor -%}
+</p>
+{%- endmacro %}
+
+{#- what a section says before anything is written in it -#}
+{% macro empty(text) -%}
+<div class="empty">{{ text }}</div>
+{%- endmacro %}
+

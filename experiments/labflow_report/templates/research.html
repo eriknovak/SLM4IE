@@ -1,0 +1,50 @@
+{#- the Research landing page (board ResearchLanding): kicker and title, the counts, the outcome tally,
+    what runs now and the latest conclusion, the Open questions not yet planned, the show filter and
+    the order switch, then one section per programme and one for the records none lists -#}
+{% extends "page.html" %}
+{% import "components/layout.html" as layout %}
+{% import "components/words.html" as words %}
+
+{#- a row: its mark, short and Question, category chip, badge and concluded date; data-* drive the filter and order -#}
+{% macro row(r) -%}
+<tr{% if r.planned %} class="plan"{% endif %} data-word="{{ r.word }}" data-pos="{{ r.position }}" data-date="{{ r.date }}">
+<td>{% if r.mark %}{{ words.mark(r.word) }}{% else %}<span class="ph"></span>{% endif %}</td>
+<td class="exp">{% if r.href %}<a class="ln-tl" href="{{ r.href }}" title="{{ r.title }}">{{ r.short }}</a>{% else %}<span class="ln-tl" title="{{ r.title }}">{{ r.short }}</span>{% endif %}<p class="ln-q">{{ r.question }}</p></td>
+<td class="cat">{% if r.has_category %}<span class="ln-kind">{{ r.category }}</span>{% else %}{{ r.category }}{% endif %}</td>
+<td class="out">{{ r.badge }}</td>
+<td class="ln-d">{{ r.when or EMPTY_CELL | safe }}</td>
+</tr>
+{%- endmacro %}
+
+{% block body %}
+{{ layout.kicker(kicker) }}<h1>{{ page.title }}</h1>
+<p class="book">{{ intro }}</p>
+{% if not groups %}{{ layout.empty(no_experiments) }}{% else %}
+<div class="ln-stats">{% for n, label in stats %}<div class="mc ln-stat{{ ' zero' if not n else '' }}"><span class="n">{{ n }}</span><span class="l">{{ label }}</span></div>{% endfor %}</div>
+{% if tally %}<div class="legend-line">{% for word, n in tally %}<span>{{ words.mark(word) }}{{ n }} {{ word }}</span>{% endfor %}</div>{% endif %}
+<div class="ln-nowsec" id="research/now"><h2 class="ln-h-sm">Running now</h2>
+<div class="ln-run"><span class="ln-say">{{ now.say }}</span>{% for pill in now.pills %}{{ pill }}{% endfor %}
+{%- if now.latest %}<span class="muted">latest conclusion</span>{{ now.latest.pill }} <span class="mono muted">{{ now.latest.date }}</span>{% endif %}</div>
+{% if open %}<p class="ln-open"><span>{{ open.text }}</span>{% for p in open.programmes %}<a href="{{ p.href }}">{{ p.label }}<span class="c">{{ p.n }}</span></a>{% endfor %}</p>{% endif %}
+</div>
+<div class="ln-tools">
+<div class="ln-shows" role="group" aria-label="Show experiments by outcome"><span class="lbl">Show</span>
+{%- for key, label, n in filters %}<button type="button" class="ln-show" data-show="{{ key }}" aria-pressed="{{ 'true' if loop.first else 'false' }}"{% if not n %} disabled{% endif %}>{{ label }}<span class="c">{{ n }}</span></button>{% endfor -%}
+</div>
+<label class="ln-sort ln-pick"><span>Show</span><select name="show">{% for key, label, n in filters %}<option value="{{ key }}"{% if not n %} disabled{% endif %}>{{ label }} · {{ n }}</option>{% endfor %}</select></label>
+<label class="ln-sort"><span>Order</span><select name="order">{% for key, label in orders %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+</div>
+{% for g in groups %}
+<div class="ln-group" id="research/{{ g.key }}">
+<div class="ln-ch"><h2>{% if g.href %}<a href="{{ g.href }}">{{ g.title }}</a>{% else %}{{ g.title }}{% endif %}</h2>{% if g.path %}<span class="mono muted">{{ g.path }}</span>{% endif %}{% if g.summary %}<span class="m">{{ g.summary }}</span>{% endif %}</div>
+{% if g.full_title %}<p class="ln-pq">{{ g.full_title }}</p>{% endif %}
+{% if g.rows %}
+<p class="ln-none" data-none="{{ filter_none }}" hidden></p>
+<div class="box scrollx ln-box"><table class="pt ln-t">
+<thead><tr><th scope="col"><span class="sr">Outcome mark</span></th><th scope="col">Experiment and its question</th><th scope="col">Category</th><th scope="col">Outcome</th><th scope="col">Concluded</th></tr></thead>
+<tbody>{% for r in g.rows %}{{ row(r) }}{% endfor %}</tbody></table></div>
+{% else %}<p class="ln-none">{{ g.empty }}</p>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

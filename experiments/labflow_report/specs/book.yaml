@@ -1,0 +1,87 @@
+# The book: experiments/README.md (ADR-0005).
+#
+# The skeleton of report/references/book-template.md follows this file: the
+# `# Findings` title, the intro under it, then `## Main results` first, one
+# chapter per record category (data, methods, validation, the values of the
+# record's `category`), and `## Notes for maintainers` last.
+# test_labflow_report_book.py fails when the two disagree.
+#
+# The book has no frontmatter and no stage, so every rule holds at every
+# check. labflow:init copies the template and writes the intro; Main results
+# and the chapters stay empty until the first conclusion, and Notes for
+# maintainers is optional, so no section is required.
+#
+# The Overview page reads three parts of the book: the intro (the paragraph
+# under the title, before the first `##`), Main results and Notes for
+# maintainers. The intro sits under no `##` heading, so no built-in check
+# reaches it and the spec declares no part for it. A Main results bullet is
+# `- **<claim>** <support citing [<slug>:F<n>]> — bears on: <one clause>`; the
+# rows form holds its bold lead, and checks/book.py its count of three to
+# six, its `— bears on:` tail and citations, only as `[<slug>:F<n>]`, that
+# name a concluded finding (user, step 45 Q2).
+#
+# The chapters hold one line per key finding, written at conclusion b. The
+# page reads none of them: its scorecards and ledgers come from the
+# programmes and records, so, like the glossary's term groups, a chapter has
+# no entry here, and checks/book.py reads the title, the intro, the headings
+# and the chapter lines from the file. The book reads no table and draws no
+# figure, so it cites none (BOK-019); the ledgers read each member's
+# clause-readings.csv and verdict-by-arm.csv, whose rules sit with the record
+# (tables.md Overview tables).
+
+document: book
+path: README.md
+
+# ===============================
+# Sections
+# ===============================
+
+sections:
+  - heading: Main results
+    # rows: each result opens with its bold claim, which the page shows beside its finding chip
+    form: rows
+    shows: the Main results list above the ledgers, one finding chip, claim, bears-on line and experiment pill per bullet
+    writer: labflow:report conclusion b
+  - heading: Notes for maintainers
+    form: prose
+    shows: the closed fold at the foot of the overview, its first line the fold's summary
+    writer: labflow:init step 2
+
+# ===============================
+# Tables and figures
+# ===============================
+
+artifacts: []
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  - {id: BOK-001, check: form, target: section.Main results, message: "Main results is rows, each opening with its bold claim, `- **<claim>** … — bears on: …`"}
+  - {id: BOK-002, check: guidance, target: section.Main results, message: template guidance left in a section}
+  - {id: BOK-003, check: form, target: section.Notes for maintainers, message: "Notes for maintainers is prose: a one-line summary, then paragraphs"}
+  - {id: BOK-004, check: guidance, target: section.Notes for maintainers, message: template guidance left in a section}
+
+  # checks/book.py: the title, the intro and the headings
+  - {id: BOK-005, check: book-title, target: document, message: "the book opens with `# Findings`"}
+  - {id: BOK-006, check: book-intro, target: document, message: "a written intro paragraph sits under `# Findings`, before the first `##`"}
+  - {id: BOK-007, check: intro-paragraph, target: document, message: "the intro is one paragraph: what else a maintainer needs goes under ## Notes for maintainers"}
+  - {id: BOK-008, check: intro-glossary, target: document, message: "the intro links GLOSSARY.md"}
+  - {id: BOK-009, check: book-headings, target: document, message: "the `##` headings are Main results, the chapters data, methods and validation, and Notes for maintainers, each once and in that order"}
+
+  # checks/book.py: Main results
+  - {id: BOK-010, check: results-due, target: section.Main results, message: "Main results is written once a record concludes"}
+  - {id: BOK-011, check: results-count, target: section.Main results, message: "Main results holds three to six results, fewer only while the concluded records hold fewer key findings"}
+  - {id: BOK-012, check: bears-on, target: section.Main results, message: "a result ends `— bears on: <one clause>`"}
+  - {id: BOK-013, check: results-findings, target: section.Main results, message: "a result cites a finding a concluded record holds"}
+
+  # checks/book.py: the chapters
+  - {id: BOK-014, check: chapter-lines, target: document, message: "a chapter holds chapter lines only, `- **[F<n>](<category>/<slug>/#<anchor>) — <title>.** <Summary>`"}
+  - {id: BOK-015, check: chapter-findings, target: document, message: "a chapter line links a finding of a record in that chapter's category"}
+  - {id: BOK-016, check: chapter-key, target: document, message: "a chapter line links a key finding: supporting and minor findings never enter the book"}
+  - {id: BOK-017, check: chapter-coverage, target: document, message: "every key finding of a concluded or abandoned record has one chapter line"}
+  - {id: BOK-018, check: results-cite, target: section.Main results, message: "a result cites the findings that carry it, only as `[<slug>:F<n>]`, never through a link"}
+
+  # checks/book.py: tables and figures (tables.md Overview tables)
+  - {id: BOK-019, check: book-assets, target: document, message: "the book cites no table or figure: a result or chapter line cites the finding whose record holds it"}

@@ -1,4 +1,4 @@
-Model,Task,Input sequence
+model,task,input_sequence
 GLiNER,entities,"<<ENT>> person <<ENT>> organisation <<SEP>> Ana Novak vodi Krko , Lek pa vodi Maja Kos ."
 GLiNER2,entities,"( [P] entities ( [E] person [E] organisation ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."
 GLiNER2,classification,"( [P] sentiment ( [L] positive [L] negative ) ) [SEP_TEXT] ana novak vodi krko , lek pa vodi maja kos ."

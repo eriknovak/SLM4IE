@@ -1,0 +1,4 @@
+{#- the page shell every page template extends; the body block holds its sections -#}
+<section class="page" id="{{ page.id }}" data-page="{{ page.kind }}" data-title="{{ page.title }}">
+{%- block body %}{% endblock -%}
+</section>

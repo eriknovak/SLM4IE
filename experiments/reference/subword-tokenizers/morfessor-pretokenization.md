@@ -65,11 +65,11 @@ most in boundary precision, which makes Slovenian a likely case.
 
 ## Facts
 
-- **Base unit**: Unicode characters; Morfessor cuts characters, and the inner tokenizer may start from characters or bytes
-- **Chunk while training**: a Morfessor morph, for every word
-- **Picks next token by**: the inner tokenizer's rule inside each morph, highest pair count for BPE or likelihood for Unigram
-- **Encoding**: Morfessor's most probable cut of the word, then the inner tokenizer inside each morph; or the distilled bigram model alone
-- **Needs lexicon**: no; Morfessor learns from the distinct words of the corpus
+- **Base unit**: Unicode characters — Morfessor cuts characters, and the inner tokenizer may start from characters or bytes
+- **Chunk while training**: a Morfessor morph — for every word
+- **Picks next token by**: the inner tokenizer's rule — inside each morph, highest pair count for BPE or likelihood for Unigram
+- **Encoding**: Morfessor's cut, then the inner tokenizer — Morfessor's most probable cut of the word, then the inner tokenizer inside each morph; or the distilled bigram model alone
+- **Needs lexicon**: no — Morfessor learns from the distinct words of the corpus
 - **Setting**: Morfessor's corpus weight, which trades fewer and longer morphs against more and shorter ones; how word counts are dampened, the paper keeps the defaults; the inner vocabulary size
 - **Repeatable**: only with a fixed seed; Morfessor visits the words in a random order each pass
 - **Export**: no standard file; a Morfessor model plus the inner tokenizer, or the bigram model after distillation
@@ -118,7 +118,7 @@ write and so yields fewer, longer morphs.
 \Return $\Lambda$ and the cuts
 ```
 
-- **1**: Training starts from whole words, so a word stays whole unless cutting it makes the list cheaper to write.
+- **1**: Training starts from a lexicon $\Lambda$ of whole words, so a word stays whole unless cutting it makes the list cheaper to write.
 - **2**: A pass visits every word once. Passes stop when the cost no longer falls, a few thousandths of the word count being the paper's default margin.
 - **3-5**: For one word, every binary cut is tried against leaving it whole. A cut pays off when the two halves are already in the lexicon or recur elsewhere, so the lexicon cost falls more than the corpus cost rises.
 - **6-7**: A winning cut is applied and each half is treated as a word of its own. This recursion gives a word with several morphs.

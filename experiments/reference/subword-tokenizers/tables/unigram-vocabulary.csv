@@ -1,4 +1,4 @@
-Piece,Log probability,Count in the corpus,Digamma of count minus digamma of total
+piece,log_probability,count_in_the_corpus,digamma_of_count_minus_digamma_of_total
 ▁hiš,-1.283,12,-1.283
 a,-1.585,9,-1.585
 ▁miz,-1.585,9,-1.585

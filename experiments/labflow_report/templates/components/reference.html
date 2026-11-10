@@ -1,0 +1,152 @@
+{#- Components board, reference: how a page names entries, and the blocks of an entry page -#}
+{% import "components/inline.html" as inline %}
+{% import "components/evidence.html" as evidence %}
+
+{#- another entry by its title with its status square, its summary on hover; an unknown one stays text -#}
+{% macro entry_link(e) -%}
+{% if e.href %}<a class="term" href="{{ e.href }}" data-tip="{{ e.tip }}"><span class="sq {{ e.square }}" title="{{ e.word }}"></span>{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% if e.role %} <span class="muted">as {{ e.role }}</span>{% endif %}
+{%- endmacro %}
+
+{#- a table an entry cites: its caption as a lead line, the table in a box -#}
+{% macro entry_table(x) -%}
+{% if x.missing %}<p class="small">{{ x.missing }}</p>{% else %}<figure id="{{ x.anchor }}">{% if x.caption %}<figcaption class="small muted">{{ x.caption }}</figcaption>{% endif %}<div class="box">{{ x.html }}</div></figure>{% endif %}
+{%- endmacro %}
+
+{#- the step table: each step that differs, the predecessor's form, this entry's shaded, and where it runs -#}
+{% macro difference(d) -%}
+<p class="small muted lead">{% if d.change %}{{ d.change }} {% endif %}Shaded cells are what {{ d.title }} changes{% if d.has_where %}; the last column names the algorithm lines that carry each change{% endif %}.</p>
+{%- if d.steps %}<div class="box steps"><div class="scroll"><table class="data steps"><thead><tr>{% if d.has_step %}<th>Step</th>{% endif %}<th>{{ d.head[0] }}</th><th>{{ d.head[1] }}</th>{% if d.has_where %}<th>Where in the algorithms</th>{% endif %}</tr></thead><tbody>
+{%- for s in d.steps %}<tr>{% if d.has_step %}<td class="step">{{ s.step }}</td>{% endif %}<td>{{ s.before or EMPTY_CELL | safe }}</td><td class="chg">{{ s.after or EMPTY_CELL | safe }}</td>{% if d.has_where %}<td>{% if s.where.code %}{{ inline.ct("i", s.where.code, s.where.href) }}{% else %}{{ s.where.text }}{% endif %}</td>{% endif %}</tr>{% endfor -%}
+</tbody></table></div></div>{% endif %}
+{%- if d.same %}{{ entry_table(d.same) }}{% endif %}
+{%- if d.effect %}<p class="small effect"><b>Effect.</b> {{ d.effect }}</p>{% endif %}
+{%- endmacro %}
+
+{#- the definition box: equation, symbols, then the sentence that uses them -#}
+{% macro definition(d) -%}
+<div class="defn">{{ d.before }}{% if d.symbols %}<dl class="syms">{% for s in d.symbols %}<dt>{{ s.symbol }}</dt><dd>{{ s.meaning }}</dd>{% endfor %}</dl>{% endif %}{{ d.after }}</div>
+{%- endmacro %}
+
+{#- one algorithm as a fold: caption, digest on one line and line count on its head; inside, the
+    ruled block (caption with the cited file, Require/Ensure, the rule carrying the scroll hint, the
+    numbered lines with their line ranges and notes) beside its Reading -#}
+{% macro algorithm(a) -%}
+<details class="fold algf" id="{{ a.id }}"><summary><span class="fb"><span class="t">Algorithm {{ a.number }} · {{ a.caption }}</span>
+{%- if a.digest or a.file %}<span class="dg2 one" title="{{ a.digest_tip }}">{% for d in a.digest %}{% if d.href %}{{ d.text }} {{ inline.iss(d.number, "", d.href) }}{% else %}{{ d.text }}{% endif %}{% if not loop.last or a.file %} · {% endif %}{% endfor %}{% if a.file %}lines in <code>{{ a.file.name }}</code>{% endif %}</span>{% endif -%}
+</span><span class="cnt">{{ a.size }}</span><span class="chev"></span></summary><div class="fbody"><div class="algrow"><figure class="algb{{ ' notes' if a.has_notes else '' }}"><div class="ah"><p class="cap"><b>Algorithm {{ a.number }}.</b> {{ a.caption }}</p>
+{%- if a.file %}<span class="cf">lines in <code title="{{ a.file.path }}">{{ a.file.name }}</code></span>{% endif %}</div>
+{%- if a.require or a.ensure %}<p class="rq">{% if a.require %}<b>Require:</b><span>{{ a.require }}</span>{% endif %}{% if a.ensure %}<b>Ensure:</b><span>{{ a.ensure }}</span>{% endif %}</p>{% endif -%}
+<div class="mid"><span class="sx">scrolls sideways →</span></div><div class="scrollx bd"><ol>
+{%- for s in a.steps %}{% set cls = [("i" ~ s.depth) if s.depth else "", "hl" if s.changed else "", "lib" if s.library else ""] | select | join(" ") %}<li{% if cls %} class="{{ cls }}"{% endif %}><span class="no">{{ loop.index }}</span><span class="tx">{% if s.before %}<b>{{ s.before }}</b> {% endif %}{{ s.html }}{% if s.after %} <b>{{ s.after }}</b>{% endif %}
+{%- for n in s.notes %}<span class="nt"><span class="tri">▷</span><span>{% if n.kind %}<span class="nk">{{ n.kind }}</span>{% endif %}{{ n.html }}</span></span>{% endfor -%}
+</span><span class="rf">{% for r in s.refs %}<span title="{{ r.title }}">{% if r.file %}<code>{{ r.file }}</code>{% endif %}{{ r.lines }}</span>{% endfor %}</span></li>{% endfor -%}
+</ol></div></figure>
+{%- if a.reading %}<div class="reading"><p class="k">Reading Algorithm {{ a.number }}</p><div class="walk">{% for r in a.reading %}<b>{{ r.label }}</b><span>{{ r.html }}</span>{% endfor %}</div></div>{% endif -%}
+</div>{% if a.shaded %}<p class="small muted shaded">{{ a.shaded }}</p>{% endif %}</div></details>
+{%- endmacro %}
+
+{#- the worked example: the input line, then prose and tables in place, its figure after them -#}
+{% macro worked_example(w) -%}
+{% if w.input %}<p class="small muted lead">{{ w.input }}</p>{% endif %}
+{%- for b in w.blocks %}{% if b.figure %}{{ evidence.exhibit(b.figure) }}{% elif b.table %}{{ entry_table(b.table) }}{% else %}<div class="prose">{{ b.html }}</div>{% endif %}{% endfor %}
+{%- endmacro %}
+
+{#- where a component sits: the steps of the larger process, its own lifted, then the prose -#}
+{% macro where_it_sits(s) -%}
+{% if s.steps %}<p class="sits">{% for x in s.steps %}<span{% if x.here %} class="here"{% endif %}>{{ x.html }}</span>{% if not loop.last %}<span class="ar">→</span>{% endif %}{% endfor %}</p>{% endif %}
+{%- if s.html %}<div class="prose small muted">{{ s.html }}</div>{% endif %}
+{%- endmacro %}
+
+{#- the evidence: key findings of the records that vary the entry, else the records that use it -#}
+{% macro entry_evidence(e) -%}
+{% for g in e.groups %}<h3 class="ev">{{ g.name }}</h3><p class="small muted">{{ g.note }}</p><div class="box"><div class="scroll"><table class="data wide"><thead><tr><th>Finding</th><th>Experiment</th><th>Measured on</th><th>Held fixed</th></tr></thead><tbody>
+{%- for r in g.rows %}<tr><td>{{ inline.ct("f", r.id, r.href, r.tip) }} {{ r.title }}</td><td>{{ r.record }}</td><td>{% if r.measured_on %}{{ entry_link(r.measured_on) }}{% else %}{{ EMPTY_CELL | safe }}{% endif %}</td><td>{% for h in r.held %}{{ entry_link(h) }}{% if not loop.last %}, {% endif %}{% else %}{{ EMPTY_CELL | safe }}{% endfor %}</td></tr>{% endfor -%}
+</tbody></table></div></div>{% endfor %}
+{%- if e.used %}<div class="used small">No experiment varies {{ e.title }} yet. It is used in {% for p in e.used %}{{ p }}{% if not loop.last %} {% endif %}{% endfor %}.</div>{% endif %}
+{%- endmacro %}
+
+{#- the limits: one row each, its question, and its idea issue or a link to file one -#}
+{% macro limits(rows) -%}
+<div class="lims">{% for c in rows %}<div class="lim"><b class="small">{{ c.title }}</b>{% if c.html %}<div class="small">{{ c.html }}</div>{% endif %}
+{%- if c.question %}<p class="small q">{{ c.question }}</p>{% endif %}
+{%- if c.issue %}<p class="small">{{ inline.iss(c.issue.number, "", c.issue.href) }}</p>{% elif c.file %}<a class="file small" href="{{ c.file }}">File as issue</a>{% endif %}</div>{% endfor %}</div>
+{%- endmacro %}
+
+{#- the relations on one line: each kind of relation, lowercase, then its entries -#}
+{% macro related(lines) -%}
+<p class="row small rels">{% for l in lines %}<span><span class="muted">{{ l.label | lower }}</span> {% for e in l.entries %}{{ entry_link(e) }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endfor %}</p>
+{%- endmacro %}
+
+{#- the sources: each paper on its line (its role on hover), the code files on one line by name
+    (the path on hover), any other row, then the Paper vs code card -#}
+{% macro sources(s) -%}
+<div class="srcs">
+{%- if s.papers %}<b>{{ "Papers" if s.papers | length > 1 else "Paper" }}</b><div class="sls">{% for p in s.papers %}<div class="sl"{% if p.note %} title="{{ p.note }}"{% endif %}>{{ p.html }}</div>{% endfor %}</div>{% endif %}
+{%- if s.code %}<b>Code</b><div class="sl code">{% for c in s.code %}<code title="{{ c.path }}">{{ c.name }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+{%- for o in s.other %}<b>{{ o.label }}</b><div class="sl">{{ o.html }}</div>{% endfor -%}
+</div>
+{%- if s.card %}<div class="pvc small"><b>Paper vs code</b> — {{ s.card.first }}{% if s.card.rest %}<details><summary>{{ s.card.rest | length }} more</summary>{% for r in s.card.rest %}<p>{{ r }}</p>{% endfor %}</details>{% endif %}</div>{% endif %}
+{%- endmacro %}
+
+{#- a row of entries as chips, each by its title with its status square; past three, the rest as a count -#}
+{% macro chips(entries, more=0, more_tip="") -%}
+<span class="chips">{% for e in entries %}{{ entry_link(e) }}{% endfor %}{% if more %}<span class="more muted" title="{{ more_tip }}">+{{ more }}</span>{% endif %}</span>
+{%- endmacro %}
+
+{#- a map node: title, status square and kind, summary, and what a variant changes -#}
+{% macro topic_node(n) -%}
+<a class="node{{ ' n-planned' if n.planned else '' }}" href="{{ n.href }}"><div class="t">{{ n.title }}</div><div class="m"><span class="sq {{ n.square }}" title="{{ n.word }}"></span>{{ n.kind }}</div><div class="f">{% if n.summary %}{{ n.summary }}{% else %}{{ inline.missing("no summary yet") }}{% endif %}</div>{% if n.change %}<div class="from"><b>Changes:</b> {{ n.change }}</div>{% endif %}</a>
+{%- endmacro %}
+
+{#- the topic map: each variant tree left to right, the entries in no tree in a grid, then the note -#}
+{% macro topic_map(m, note) -%}
+<div class="box scrollx tmap">{% for t in m.trees %}<div class="vtree">
+{%- for n in [t] recursive %}{% if loop.depth > 1 %}<li>{% endif %}<div class="tn">{{ topic_node(n) }}{% if n.children %}<ul>{{ loop(n.children) }}</ul>{% endif %}</div>{% if loop.depth > 1 %}</li>{% endif %}{% endfor -%}
+</div>{% endfor %}
+{%- if m.loose %}<p class="chap loose" style="color: var(--muted)">Not a variant of another entry</p><div class="vgrid">{% for n in m.loose %}{{ topic_node(n) }}{% endfor %}</div>{% endif -%}
+<p class="small muted note">{{ note }}</p></div>
+{%- endmacro %}
+
+{#- compare one fact at a time: one tab per compare label, a panel of value groups per label -#}
+{% macro compare(panels, lede) -%}
+<p class="lede small">{{ lede }}</p>
+<div class="fsws" role="tablist" aria-label="Fact to compare">
+{%- for p in panels %}<button type="button" class="fsw xtab" role="tab" id="{{ p.id }}-tab" aria-controls="{{ p.id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ 0 if loop.first else -1 }}">{{ p.label }}</button>{% endfor -%}
+</div>
+{%- for p in panels %}<div class="xpanel{{ ' on' if loop.first else '' }}" role="tabpanel" id="{{ p.id }}" aria-labelledby="{{ p.id }}-tab"><p class="chap pl" style="color: var(--muted)">{{ p.label }}</p>
+{%- if p.groups %}<div class="grps">{% for g in p.groups %}<div class="fgrp"><div class="gtop"><b>{{ g.value }}</b><span class="gc">{{ g.entries | length }}</span></div>{{ chips(g.entries) }}
+{%- for n in g.notes %}<p class="small muted gn"><b>{{ n.title }}</b>: {{ n.html }}</p>{% endfor %}</div>{% endfor %}</div>{% endif %}
+{%- if p.lacking %}<p class="small muted nw">Not written yet: {% for e in p.lacking %}{{ entry_link(e) }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}</div>{% endfor %}
+{%- endmacro %}
+
+{#- where the parts are used: this topic's entries against the entries of other topics they couple with -#}
+{% macro coupling(c) -%}
+<p class="lede small">{{ c.lede }}</p>
+<div class="box"><div class="scroll"><table class="data xgrid"><thead><tr><th>Entry</th>{% for col in c.columns %}<th><a href="{{ col.href }}" title="in {{ col.topic }}">{{ col.title }}</a></th>{% endfor %}</tr></thead><tbody>
+{%- for r in c.rows %}<tr><td>{{ entry_link(r.entry) }}</td>{% for cell in r.cells %}<td>{% if cell.on %}<span class="y"{% if cell.tip %} title="{{ cell.tip }}"{% endif %}>●</span>{% else %}<span class="muted">·</span>{% endif %}</td>{% endfor %}</tr>{% endfor -%}
+</tbody></table></div></div>
+{%- endmacro %}
+
+{#- an open idea: its issue, the entries it touches by relation, the experiment it became, the records testing it -#}
+{% macro idea_card(i) -%}
+<div class="idea" id="{{ i.id }}"><div class="row">{{ inline.iss(i.number, i.title, i.href) }}</div>
+{%- for l in i.lines %}<div class="row small"><span class="muted">{{ l.label }}</span>{{ chips(l.entries, l.more, l.more_tip) }}</div>{% endfor %}
+{%- if i.planned %}<div class="row small planned"><span class="muted">planned as</span> {% for p in i.planned %}{{ p }}{% if not loop.last %} {% endif %}{% endfor %}</div>{% endif %}
+{%- if i.tested %}<div class="row small"><span class="muted">tested in</span> {% for p in i.tested %}{{ p }}{% if not loop.last %} {% endif %}{% endfor %}</div>{% endif -%}
+</div>
+{%- endmacro %}
+
+{#- the records that vary or use the topic's entries, one line each -#}
+{% macro used_by(lines) -%}
+{% for l in lines %}<div class="row small ub">{{ l.record }}{% if l.varies %}<span class="muted">varies</span>{{ chips(l.varies) }}{% endif %}{% if l.uses %}<span class="muted">uses</span>{{ chips(l.uses) }}{% endif %}</div>{% endfor %}
+{%- endmacro %}
+
+{#- the topic's entries: square and title, kind, status, then code, paper and open ideas while any row has one -#}
+{% macro entries_table(t) -%}
+<div class="box"><div class="scroll"><table class="data ents"><thead><tr><th>Entry</th><th>Kind</th><th>Status</th>{% if t.has_code %}<th>Code</th>{% endif %}{% if t.has_paper %}<th>Paper</th>{% endif %}{% if t.has_ideas %}<th>Open ideas</th>{% endif %}</tr></thead><tbody>
+{%- for r in t.rows %}<tr><td>{{ entry_link(r.entry) }}</td><td class="small">{{ r.kind }}</td><td class="small muted">{{ r.word }}</td>
+{%- if t.has_code %}<td class="mono">{% for c in r.code %}<code title="{{ c.path }}">{{ c.name }}</code>{% if not loop.last %} · {% endif %}{% else %}{{ inline.missing(t.no_code) }}{% endfor %}</td>{% endif %}
+{%- if t.has_paper %}<td class="small">{% if r.paper %}{{ r.paper.html }}{% if r.more %} <span class="more muted" title="{{ r.more_tip }}">+{{ r.more }}</span>{% endif %}{% else %}{{ inline.missing(t.no_paper) }}{% endif %}</td>{% endif %}
+{%- if t.has_ideas %}<td><span class="cells">{% for i in r.ideas %}{{ inline.iss(i.number, "", i.href) }}{% else %}{{ inline.missing(t.no_idea) }}{% endfor %}</span></td>{% endif %}</tr>{% endfor -%}
+</tbody></table></div></div>
+{%- endmacro %}

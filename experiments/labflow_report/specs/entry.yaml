@@ -1,0 +1,290 @@
+# The reference entry: experiments/reference/<topic>/<entry>.md (ADR-0005).
+#
+# The skeleton of reference/references/entry-template.md follows this file:
+# its frontmatter keys, the values each key's comment lists, its `##`
+# headings and the `- **Label**:` rows each section declares (Sources,
+# Difference from predecessor, the Algorithm and Worked example Figure), in
+# this order. Facts labels come from the topic's `compare` list and Reading
+# labels are algorithm line numbers, so the spec declares neither.
+# test_labflow_report_entry.py fails when the two disagree.
+#
+# Stages follow `status`: a draft is held only to the frontmatter and the
+# forms; `from-paper` (written from the source) needs the summary, the four
+# required blocks, the Paper vs code row and no `<…>` guidance left in any
+# section; `checked` (pseudocode compared with the code) adds a Code row.
+# "What the paper adds" and "What the source adds" are alternatives: an
+# entry keeps the one that fits its source and deletes the other.
+#
+# checks/entry.py adds the blocks each kind needs (an algorithm needs
+# Algorithm, a component Where it sits, a dataset or benchmark neither),
+# `couples_to` items as `<topic>/<entry>` or `{entry, as}`, Difference
+# needing `variant_of`, cited code paths and line ranges, the algorithm
+# parse with its Reading, the symbols a Reading row names in the
+# algorithm's notation, and the tables an entry cites: each exists, is
+# named for an entry of its topic, a variant table names the entry and its
+# predecessor and heads its columns with them, and a Worked example that
+# cites a table opens with its Input row. An entry draws a figure only in
+# the Figure row of Algorithm or Worked example (ENT-051); checks/figures.py
+# holds that row to one figure that exists, with a caption, a chart
+# save_figure stamped or a diagram SVG with its source beside it.
+#
+# Rows whose label is a pattern are read by the page, not declared here:
+# Facts `- **<Label>**: <short value> — <note>`, Difference step rows
+# `- **<step>**: <predecessor> | <this entry> | Alg. <n>, line <m>` and
+# Definition symbol rows `- **$<symbol>$**: <meaning>`. The declared rows
+# In short, Steps, Question and Issue carry no rule yet.
+
+document: entry
+root: reference
+# an entry name is kebab-case, so a lowercase or digit start leaves out the
+# topic's README.md
+path: "*/[a-z0-9]*.md"
+stage_key: status
+stages: [draft, from-paper, checked]
+
+# ===============================
+# Frontmatter
+# ===============================
+
+frontmatter:
+  - key: title
+    type: str
+    shows: the page title, the topic map node and every link to the entry
+    writer: labflow:reference step 3
+  - key: kind
+    values: [algorithm, component, dataset, benchmark]
+    shows: the kind word in the status line, the topic map node and the Entries table
+    writer: labflow:reference step 3
+  - key: status
+    values: [draft, from-paper, checked]
+    shows: the status badge, and the stage the checker holds the entry to
+    writer: labflow:reference step 8
+  - key: summary
+    type: str
+    shows: the line under the title and every hover card
+    writer: labflow:reference step 4
+  - key: variant_of
+    type: str
+    links_to: entry
+    shows: the status line, the topic map tree, Related and the Difference title
+    writer: labflow:reference step 4
+  - key: part_of
+    type: str
+    links_to: entry
+    shows: "'part of' in the status line, and Part of and Contains in Related"
+    writer: labflow:reference step 5
+  - key: couples_to
+    type: list
+    links_to: entry
+    shows: Couples to and Coupled from in Related, a mutual pair once
+    writer: labflow:reference step 5
+
+# ===============================
+# Sections
+# ===============================
+
+sections:
+  - heading: Description
+    shows: the entry's opening block, or its empty state on a draft
+    writer: labflow:reference step 4
+  - heading: What the paper adds
+    shows: a fold under the description
+    writer: labflow:reference step 5
+    rows:
+      - label: In short
+        shows: the digest on the closed fold; without it, the first sentence
+        writer: labflow:reference step 5
+  - heading: What the source adds
+    shows: the same fold, for a source that is no paper
+    writer: labflow:reference step 5
+    rows:
+      - label: In short
+        shows: the digest on the closed fold; without it, the first sentence
+        writer: labflow:reference step 5
+  - heading: Why it matters here
+    shows: a block under the description
+    writer: labflow:reference step 5
+  - heading: Facts
+    form: rows
+    shows: the facts rail, and the topic's Compared table by its compare labels
+    writer: labflow:reference step 4
+  - heading: Sources
+    form: rows
+    shows: the papers and code files in the rail, and the Paper vs code card
+    writer: labflow:reference step 4
+    rows:
+      - label: Paper
+        shows: one paper per row, its arXiv or doi id a link
+        writer: labflow:reference step 4
+      - label: Code
+        shows: the file names in the rail, the full path on hover
+        writer: labflow:reference step 4
+      - label: Paper vs code
+        shows: the Paper vs code card
+        writer: labflow:reference step 7
+  - heading: Difference from predecessor
+    form: rows
+    shows: the Difference block, and the Change line on the topic map
+    writer: labflow:reference step 5
+    rows:
+      - label: Line
+        writer: labflow:reference step 5
+      - label: Predecessor
+        writer: labflow:reference step 5
+      - label: Here
+        writer: labflow:reference step 5
+      - label: Change
+        shows: the change on the topic map edge
+        writer: labflow:reference step 5
+      - label: Effect
+        writer: labflow:reference step 5
+      - label: Same forms
+        shows: the variant table under the Difference block
+        writer: labflow:reference step 6
+  - heading: Definition
+    shows: the definition box
+    writer: labflow:reference step 5
+  - heading: Algorithm
+    shows: one fold per algorithm block, with its Reading
+    writer: labflow:reference step 4
+    rows:
+      - label: Figure
+        shows: the algorithm's figure below the folds, full width and always visible
+        writer: labflow:reference step 6
+  - heading: Worked example
+    shows: the worked example with its numbered tables
+    writer: labflow:reference step 6
+    rows:
+      - label: Input
+        shows: the caption line naming the toy input above the tables
+        writer: labflow:reference step 6
+      - label: Figure
+        shows: the worked example's chart or diagram
+        writer: labflow:reference step 6
+  - heading: Where it sits
+    shows: what surrounds a component
+    writer: labflow:reference step 5
+    rows:
+      - label: Steps
+        shows: the chain of the larger process, this entry's step lifted
+        writer: labflow:reference step 5
+  - heading: Limits
+    form: entries
+    shows: one card per limit
+    writer: labflow:reference step 5
+    rows:
+      - label: Question
+        shows: the question under the limit, with a File as issue link
+        writer: labflow:reference step 5
+      - label: Issue
+        shows: the idea issue chip in place of the File as issue link
+        writer: labflow:reference Ideas step 1
+
+# ===============================
+# Tables and figures
+# ===============================
+
+# an entry's worked examples and variant table are CSVs (tables.md Entry
+# tables, TAB-070..072); its one figure per Figure row is a chart its
+# topic's examples.py draws or a diagram SVG beside its source file
+artifacts:
+  - name: worked-example-table
+    kind: table
+    pattern: tables/*-*.csv
+    generator: examples.py
+    writer: labflow:reference step 6
+  - name: variant-table
+    kind: table
+    pattern: tables/*-vs-*.csv
+    columns: [form]
+    generator: examples.py
+    writer: labflow:reference step 6
+  - name: entry-figure
+    kind: figure
+    pattern: figures/*.svg
+    generator: examples.py, or a diagram tool from the source beside it
+    writer: labflow:reference step 6
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  # frontmatter
+  - {id: ENT-001, check: required, target: frontmatter.title, message: the entry has no title}
+  - {id: ENT-002, check: type, target: frontmatter.title, message: title is text}
+  - {id: ENT-003, check: required, target: frontmatter.kind, message: the entry has no kind}
+  - {id: ENT-004, check: values, target: frontmatter.kind, message: unknown kind}
+  - {id: ENT-005, check: required, target: frontmatter.status, message: the entry has no status}
+  - {id: ENT-006, check: values, target: frontmatter.status, message: unknown status}
+  - {id: ENT-007, check: type, target: frontmatter.summary, message: summary is text}
+  - {id: ENT-008, check: required, target: frontmatter.summary, at: from-paper, message: "the entry has no summary: one sentence"}
+  - {id: ENT-009, check: type, target: frontmatter.variant_of, message: "variant_of is one <topic>/<entry>"}
+  - {id: ENT-010, check: link, target: frontmatter.variant_of, message: variant_of names an entry that does not exist}
+  - {id: ENT-011, check: type, target: frontmatter.part_of, message: "part_of is one <topic>/<entry>"}
+  - {id: ENT-012, check: link, target: frontmatter.part_of, message: part_of names an entry that does not exist}
+  - {id: ENT-013, check: type, target: frontmatter.couples_to, message: "couples_to is a list of <topic>/<entry> or {entry: <topic>/<entry>, as: <role>}"}
+  - {id: ENT-014, check: link, target: frontmatter.couples_to, message: couples_to names an entry that does not exist}
+
+  # required blocks and their forms
+  - {id: ENT-015, check: required, target: section.Description, at: from-paper, message: the entry has no Description}
+  - {id: ENT-016, check: required, target: section.Facts, at: from-paper, message: the entry has no Facts}
+  - {id: ENT-017, check: form, target: section.Facts, message: "Facts is rows only, `- **Label**: value`"}
+  - {id: ENT-018, check: required, target: section.Sources, at: from-paper, message: the entry has no Sources}
+  - {id: ENT-019, check: form, target: section.Sources, message: "Sources is rows only, sub-bullets indented under a row"}
+  - {id: ENT-020, check: required, target: section.Sources.Paper vs code, at: from-paper, message: "Sources has no Paper vs code row; write no difference found when there is none"}
+  - {id: ENT-021, check: required, target: section.Sources.Code, at: checked, message: a checked entry names no Code row}
+  - {id: ENT-022, check: form, target: section.Difference from predecessor, message: Difference from predecessor is rows only}
+  - {id: ENT-023, check: required, target: section.Difference from predecessor.Change, at: from-paper, message: Difference from predecessor has no Change row}
+  - {id: ENT-024, check: kind-required, target: section.Algorithm, at: from-paper, message: an algorithm entry has no Algorithm}
+  - {id: ENT-025, check: form, target: section.Limits, message: "Limits holds only `### <title>` entries"}
+
+  # template guidance left in a section
+  - {id: ENT-026, check: guidance, target: section.Description, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-027, check: guidance, target: section.What the paper adds, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-028, check: guidance, target: section.What the source adds, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-029, check: guidance, target: section.Why it matters here, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-030, check: guidance, target: section.Facts, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-031, check: guidance, target: section.Sources, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-032, check: guidance, target: section.Difference from predecessor, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-033, check: guidance, target: section.Definition, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-034, check: guidance, target: section.Algorithm, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-035, check: guidance, target: section.Worked example, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-036, check: guidance, target: section.Where it sits, at: from-paper, message: template guidance left in a section}
+  - {id: ENT-037, check: guidance, target: section.Limits, at: from-paper, message: template guidance left in a section}
+
+  # checks/entry.py: blocks per kind, couples_to items, Difference and variant_of
+  - {id: ENT-038, check: kind-required, target: section.Where it sits, at: from-paper, message: a component entry has no Where it sits}
+  - {id: ENT-039, check: couples-form, target: frontmatter.couples_to, message: "a couples_to item is <topic>/<entry> or {entry: <topic>/<entry>, as: <role>}"}
+  - {id: ENT-040, check: difference-variant, target: section.Difference from predecessor, message: "Difference from predecessor needs `variant_of` in the frontmatter"}
+  - {id: ENT-057, check: variant-difference, target: section.Difference from predecessor, at: from-paper, message: "an entry with `variant_of` has no Difference from predecessor"}
+
+  # checks/entry.py: cited code paths and lines
+  - {id: ENT-041, check: source-paths, target: section.Sources, message: "Sources cites a path that does not exist, or a line outside the file"}
+  - {id: ENT-042, check: comment-paths, target: section.Algorithm, message: "an algorithm \\Comment cites a path that does not exist, or a line outside the file"}
+  - {id: ENT-043, check: code-row-path, target: section.Sources.Code, at: checked, message: "a checked entry's Code row cites no `path/from/repo/root.py`"}
+  - {id: ENT-044, check: checked-comment, target: section.Algorithm, at: checked, message: "a checked entry cites no code in an algorithm \\Comment"}
+
+  # checks/entry.py: the algorithm blocks and their Reading
+  - {id: ENT-045, check: algorithm-blocks, target: section.Algorithm, at: from-paper, message: "Algorithm holds no ```algorithm block"}
+  - {id: ENT-046, check: algorithm-parse, target: section.Algorithm, message: an algorithm line is outside the supported commands}
+  - {id: ENT-047, check: algorithm-caption, target: section.Algorithm, message: "an algorithm block has no \\caption{…}"}
+  - {id: ENT-048, check: algorithm-reading, target: section.Algorithm, at: from-paper, message: "an algorithm block has no Reading: `- **<line or range>**: text` rows after it"}
+  - {id: ENT-049, check: reading-lines, target: section.Algorithm, message: "a Reading row names no line of its algorithm, or splits its label with **"}
+  - {id: ENT-056, check: reading-symbols, target: section.Algorithm, at: from-paper, message: "a Reading row does not name, as inline `$…$` math, each symbol its lines assign with \\gets"}
+
+  # checks/entry.py: the tables an entry cites (tables.md Entry tables)
+  - {id: ENT-050, check: table-files, target: document, message: "an entry cites a table that does not exist"}
+  - {id: ENT-051, check: entry-figures, target: document, message: "an entry draws a figure only in the Figure row of Algorithm or Worked example; elsewhere cite a `tables/<entry>-<what>.csv` its topic's examples.py writes"}
+  - {id: ENT-052, check: table-names, target: document, message: "a cited table is `tables/<entry>-<what>.csv` in the topic folder, named for an entry of the topic"}
+  - {id: ENT-053, check: variant-table, target: document, message: "a variant table is `tables/<entry>-vs-<predecessor>.csv`, this entry and its variant_of, cited in the Same forms row of Difference from predecessor"}
+  - {id: ENT-054, check: variant-columns, target: artifact.variant-table, message: "a variant table's columns are form, <predecessor>, <entry>, why, the two entry names in snake case"}
+  - {id: ENT-055, check: input-row, target: section.Worked example.Input, at: from-paper, message: "a Worked example that cites a table opens with `- **Input**: <the toy input in one line>`"}
+
+  # checks/figures.py: the Figure rows of Algorithm and Worked example (figures.md, Figure rows)
+  - {id: ENT-058, check: figure-row-file, target: section.Algorithm.Figure, message: "the Algorithm's Figure row links one figure, `![<caption>](figures/<name>.svg)`, a file that exists"}
+  - {id: ENT-059, check: figure-row-caption, target: section.Algorithm.Figure, message: "the Algorithm's Figure has no caption inside its `![<caption>](…)`"}
+  - {id: ENT-060, check: figure-row-source, target: section.Algorithm.Figure, message: "the Algorithm's Figure is a chart save_figure stamped, or a diagram SVG with its source file beside it (`.mmd`, `.dot`, `.d2`, `.puml`, `.drawio`, `.excalidraw`, `.tex`)"}
+  - {id: ENT-061, check: figure-row-file, target: section.Worked example.Figure, message: "the Worked example's Figure row links one figure, `![<caption>](figures/<name>.svg)`, a file that exists"}
+  - {id: ENT-062, check: figure-row-caption, target: section.Worked example.Figure, message: "the Worked example's Figure has no caption inside its `![<caption>](…)`"}
+  - {id: ENT-063, check: figure-row-source, target: section.Worked example.Figure, message: "the Worked example's Figure is a chart save_figure stamped, or a diagram SVG with its source file beside it (`.mmd`, `.dot`, `.d2`, `.puml`, `.drawio`, `.excalidraw`, `.tex`)"}

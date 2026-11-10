@@ -1,0 +1,42 @@
+/* the glossary page, scoped to it (ADR-0005): the sticky head, letter heads, one row per term */
+/* the kind switch and the A–Z index stick together under the top bar, as the section bar does */
+.page[data-page=glossary] .ghead{position:sticky;top:calc(-1 * var(--main-top));z-index:5;background:var(--bg);margin:22px 0 0;border-bottom:1px solid var(--line)}
+/* every kind stays on one row: the row scrolls sideways under a thin bar, the filter box stays put */
+.page[data-page=glossary] .ghead .bar.kinds{position:static;flex-wrap:nowrap;align-items:center;margin:0}
+.page[data-page=glossary] .bar.kinds .kscroll{display:flex;flex:1 1 auto;min-width:0;gap:2px;overflow:auto hidden;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding-right:24px;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent)}
+.page[data-page=glossary] .bar.kinds .kscroll::-webkit-scrollbar{height:4px}
+.page[data-page=glossary] .bar.kinds .kscroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+.page[data-page=glossary] .bar.kinds .kscroll a{flex:none;white-space:nowrap;margin-bottom:0}
+.page[data-page=glossary] .bar.kinds .filter{flex:none;margin-left:8px}
+.page[data-page=glossary] .az{display:flex;gap:2px;padding:6px 24px 6px 0;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent);font-family:var(--mono);font-size:var(--t-xs)}
+.page[data-page=glossary] .az::-webkit-scrollbar{display:none}
+.page[data-page=glossary] .az a,.page[data-page=glossary] .az span{flex:none;min-width:20px;padding:2px 4px;text-align:center;border-radius:4px}
+.page[data-page=glossary] .az a{color:var(--accent);text-decoration:none}
+.page[data-page=glossary] .az a:hover{background:var(--soft)}
+.page[data-page=glossary] .az span,.page[data-page=glossary] .az a.off{color:var(--muted);opacity:.45;pointer-events:none}
+/* a jump lands under the sticky head: --bar-h is the kind bar, the A–Z row adds the rest */
+.page[data-page=glossary] h2.lh{font-family:var(--mono);font-size:var(--t-sm);font-weight:600;color:var(--muted);margin:22px 0 0;padding:0 0 4px;scroll-margin-top:calc(var(--bar-h,40px) + 48px)}
+.page[data-page=glossary] .lgrp.off,.page[data-page=glossary] .gloss .g.off{display:none}
+.page[data-page=glossary] dl.gloss{margin:0}
+.page[data-page=glossary] .gloss .g{display:grid;grid-template-columns:minmax(160px,260px) minmax(0,1fr);gap:0 24px;align-items:baseline;padding:10px 0;border-top:1px solid var(--line)}
+.page[data-page=glossary] dl.gloss dt{font-weight:600;scroll-margin-top:calc(var(--bar-h,40px) + 48px)}
+/* the row's section label, one unbroken line: beside the name when it fits, else whole
+   on the next; a picked kind makes it the same on every row, so it hides */
+.page[data-page=glossary] dl.gloss dt .grp{display:inline-block;white-space:nowrap;margin-left:6px;font-weight:400;font-size:var(--t-xs);color:var(--muted);font-family:var(--mono)}
+.page[data-page=glossary].bykind dl.gloss dt .grp{display:none}
+.page[data-page=glossary] dl.gloss dt .also{display:block;font-weight:400;font-size:var(--t-mono);color:var(--muted);font-family:var(--mono);margin-top:2px}
+.page[data-page=glossary] dl.gloss dd{margin:0;color:var(--fg)}
+/* a definition shows two lines until its row opens; without the script it shows whole */
+.js .page[data-page=glossary] .g:not(.open) .d{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.page[data-page=glossary] .more{display:none;margin:2px 0 0;padding:0;border:0;background:none;color:var(--accent);font:inherit;font-family:var(--sans);font-size:var(--t-xs);cursor:pointer}
+.js .page[data-page=glossary] .g.long .more{display:inline}
+.page[data-page=glossary] .empty{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;color:var(--muted);font-family:var(--sans);font-size:13px;background:transparent}
+@media print{.page[data-page=glossary] .g .d{display:block!important;overflow:visible}.page[data-page=glossary] .more,.page[data-page=glossary] .ghead{display:none!important}}
+/* phones: the kinds keep their one scrolling row and a narrower filter box sits beside it */
+@media(max-width:800px){
+.page[data-page=glossary] .bar.kinds{overflow:visible;-webkit-mask-image:none;mask-image:none}
+.page[data-page=glossary] .bar.kinds .filter{width:120px}
+}
+@container (max-width:560px){
+.page[data-page=glossary] .gloss .g{grid-template-columns:minmax(0,1fr);gap:2px 0}
+}

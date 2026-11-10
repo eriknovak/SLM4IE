@@ -1,0 +1,31 @@
+{#- the Overview: kicker, title, the book's intro line, the scorecards and their legend, Main results,
+    one ledger per programme and one for the records none lists, the reference shelf, the notes fold -#}
+{% extends "page.html" %}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/overview.html" as overview %}
+
+{% block body %}
+{% if kicker %}{{ layout.kicker(kicker) }}{% endif %}<h1>{{ page.title }}</h1>
+{% if intro %}<p class="book">{{ intro }}</p>{% endif %}
+{% if cards %}
+<div class="scores" id="overview/programmes">{% for card in cards %}{{ overview.scorecard(card) }}{% endfor %}</div>
+{{ overview.legend_line(legend, legend_note) }}
+{% elif not ledgers %}{{ layout.empty(no_experiments) }}
+{% endif %}
+{% if results %}
+<div class="sec"><h2 id="overview/main-results">Main results</h2>{{ overview.main_results(results) }}</div>
+{% endif %}
+{% for l in ledgers %}
+<div class="sec"><h2 id="{{ l.id }}"{% if l.full_title is defined and l.full_title != l.title %} title="{{ l.full_title }}"{% endif %}>{{ l.title }}</h2>
+{% if l.goal %}<p class="lede"><b>Goal</b> — {{ l.goal }}</p>{% endif %}
+{% if l.lede %}<p class="small muted skel">{{ l.lede }}</p>{% endif %}
+{{ overview.ledger(l.rows) }}</div>
+{% endfor %}
+{% if shelf %}
+<div class="sec"><h2 id="overview/topics">Reference</h2><p class="lede">{{ shelf.lede }}</p>{{ overview.shelf(shelf) }}</div>
+{% endif %}
+{% if notes %}
+<div class="sec notes">{% call layout.fold(notes.title, "", notes.summary, "overview/notes", notes.body | length > 0) %}<div class="prose">{{ notes.body }}</div>{% endcall %}</div>
+{% endif %}
+{% endblock %}

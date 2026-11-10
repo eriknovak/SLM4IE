@@ -1,0 +1,31 @@
+{#- the topic page: kicker, title, meta line, question and introduction, the sticky section bar, then
+    the map, compare, where the parts are used, open ideas, used by and the entries table -#}
+{% extends "page.html" %}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/reference.html" as ref %}
+
+{% block body %}
+{{ layout.kicker(kicker) }}<h1>{{ page.title }}</h1>
+<p class="row small meta"><span><span class="badge b-{{ badge }}">{{ status }}</span></span>{% for m in meta %}<span>{{ m }}</span>{% endfor %}</p>
+<div class="question">{% if question %}{{ question }}{% else %}{{ inline.missing(no_question) }}{% endif %}</div>
+{% if introduction %}<div class="lede">{{ introduction }}</div>{% else %}<p class="lede">{{ inline.missing(no_introduction) }}</p>{% endif %}
+{{ layout.section_bar(bar) }}
+
+{#- the sections, each with its empty state when there is nothing to draw; only the question and
+    the introduction link the entries they mention, every other part names them itself -#}
+<div class="secs" data-nolink>
+{% for s in sections %}
+{% call layout.section(page.id, s.key, s.title, s.color) -%}
+{% if not s.data %}{{ layout.empty(s.empty) }}
+{%- elif s.key == "map" %}{{ ref.topic_map(s.data, map_note) }}
+{%- elif s.key == "compare" %}{{ ref.compare(s.data, compare_lede) }}
+{%- elif s.key == "used" %}{{ ref.coupling(s.data) }}
+{%- elif s.key == "ideas" %}<p class="lede small">{{ ideas_lede }}</p><div class="ideas">{% for i in s.data %}{{ ref.idea_card(i) }}{% endfor %}</div>
+{%- elif s.key == "used-by" %}{{ ref.used_by(s.data) }}
+{%- elif s.key == "entries" %}{{ ref.entries_table(s.data) }}
+{%- endif %}
+{%- endcall %}
+{% endfor %}
+</div>
+{% endblock %}

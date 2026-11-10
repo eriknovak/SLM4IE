@@ -1,4 +1,4 @@
-Form,In the corpus,Tokens,Ids,Token count,Cuts seen by the morph metrics
+form,in_the_corpus,tokens,ids,token_count,cuts_seen_by_the_morph_metrics
 hiša,yes,▁hiš a,3 4,2,hiš a
 mize,yes,▁miz e,5 6,2,miz e
 hišami,no,▁hiš a m i,3 4 8 12,4,hiš a m i

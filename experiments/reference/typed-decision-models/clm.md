@@ -57,16 +57,16 @@ sets expectations for a smaller language.
 
 ## Facts
 
-- **Question types**: choice over described options; Noul as the two candidates false and true, with the statement itself as the default description; score over levels, returning the expected level; and free ranking of candidate texts
-- **Backbone**: a frozen Qwen3-8B with last-token pooling, giving a 4,096-dimensional vector, and two trainable projection heads of about twenty million parameters each, mapping to 512 dimensions
-- **Where an option is read**: as its own text through the action head, never in the same sequence as the state; the score is the learned scale times the cosine between the projected state and the projected option
-- **Options per question**: unbounded; each candidate is embedded once and cached
-- **Isolation between questions**: complete; each question embeds the state followed by a blank line and its instructions as one text, and no option ever sees the state
-- **Training objective**: InfoNCE in both directions over a batch of matched state and action pairs, states against actions and actions against states, with pairs that share the same action masked out; hard negatives join the denominator in the second stage
-- **Calibration**: none beyond the learned scale, capped at 100; the server accepts a temperature; confidence as the vendor adapter's formula
-- **Training data**: about 60 million question-answer pairs from Nemotron DQA, each question a state and its answer the action; then about 30 million synthetic hard negatives written by Gemini 2.5 Flash-Lite as plausible wrong answers to the same questions; then about one million agent trajectory steps from the Agent Data Protocol set and two terminal-trace sets, mixed with 40 percent replay of the first stage
-- **Context length**: 2,048 tokens per text by default, longer when the embedding server and the engine are both raised
-- **Weights**: Apache-2.0 heads on Hugging Face as Contrastive-LM/CLM-v0.1-8B, 75 megabytes; the embedder is the public Qwen3-8B
+- **Question types**: choice, Noul, score and ranking — choice over described options; Noul as the two candidates false and true, with the statement itself as the default description; score over levels, returning the expected level; and free ranking of candidate texts
+- **Backbone**: a frozen Qwen3-8B — with last-token pooling, giving a 4,096-dimensional vector, and two trainable projection heads of about twenty million parameters each, mapping to 512 dimensions
+- **Where an option is read**: as its own text — through the action head, never in the same sequence as the state; the score is the learned scale times the cosine between the projected state and the projected option
+- **Options per question**: unbounded — each candidate is embedded once and cached
+- **Isolation between questions**: complete — each question embeds the state followed by a blank line and its instructions as one text, and no option ever sees the state
+- **Training objective**: InfoNCE — in both directions over a batch of matched state and action pairs, states against actions and actions against states, with pairs that share the same action masked out; hard negatives join the denominator in the second stage
+- **Calibration**: none beyond the learned scale — capped at 100; the server accepts a temperature; confidence as the vendor adapter's formula
+- **Training data**: question-answer pairs, hard negatives and agent steps — about 60 million question-answer pairs from Nemotron DQA, each question a state and its answer the action; then about 30 million synthetic hard negatives written by Gemini 2.5 Flash-Lite as plausible wrong answers to the same questions; then about one million agent trajectory steps from the Agent Data Protocol set and two terminal-trace sets, mixed with 40 percent replay of the first stage
+- **Context length**: 2,048 tokens per text — by default, longer when the embedding server and the engine are both raised
+- **Weights**: Apache-2.0 — heads on Hugging Face as Contrastive-LM/CLM-v0.1-8B, 75 megabytes; the embedder is the public Qwen3-8B
 
 ## Sources
 
@@ -94,17 +94,17 @@ sets expectations for a smaller language.
 \Return $p_1, \dots, p_Q$; a Noul answer is $p_k(\text{true})$ and a score answer is $\sum_j (j - 1)\, p_{k,j}$
 ```
 
-- **1** and **2**: Each question gets its own state text, the state followed
+- **1–2**: Each question gets its own state text, the state followed
   by the instructions, embedded by the frozen model and projected by the
-  state head to a unit vector. Putting the instructions in the state text is
+  state head to a unit vector $u_k$. Putting the instructions in the state text is
   the layout the heads were trained on.
-- **3** and **4**: Every option's description is embedded and projected by
+- **3–4**: Every option's description is embedded and projected into $v_o$ by
   the action head on its own. An option never sees the state, so its vector
   is reused across states and across questions.
-- **5**: The score is the cosine between the two unit vectors times the
+- **5**: The score $z_{k,o}$ is the cosine between the two unit vectors times the
   learned scale. This is the same quantity the training loss normalises
   over, so the softmax at serving time is the trained distribution.
-- **6**: A softmax over the question's options gives its distribution. The
+- **6**: A softmax over the question's options gives its distribution $p_k$. The
   served temperature defaults to one.
 - **7**: The typed answer is read off the distribution: the argmax for a
   choice, the probability of true for a yes-or-no question, the expected
@@ -124,17 +124,17 @@ sets expectations for a smaller language.
 \Return $f_s$, $f_a$, $\sigma$
 ```
 
-- **1** and **2**: The embedder is run once per text and frozen; only the
-  two heads and the scale learn. In practice the embeddings are computed
+- **1–2**: The embedder is run once per text and frozen; only the
+  two heads, which give the unit vectors $u_i$ and $v_j$, and the scale learn. In practice the embeddings are computed
   ahead of training and the heads train on cached vectors.
-- **3**: Every state is scored against every action in the batch. Two
+- **3**: Every state is scored against every action in the batch, in $Z_{ij}$. Two
   states that happen to share an answer would wrongly push each other away,
   so such off-diagonal pairs are removed from the denominator.
 - **4**: The second stage adds, for each state, wrong answers written to
   look right. The source reports that adding them after a plain first stage
   beats training with them from the start at the same budget, because they
   refine a representation rather than form it.
-- **5**: The loss is the mean of two cross-entropies, one picking the right
+- **5**: The loss $\ell$ is the mean of two cross-entropies, one picking the right
   action for each state and one picking the right state for each action.
   The row direction is what serving uses; the column direction keeps the
   action space from collapsing.
@@ -146,6 +146,8 @@ sets expectations for a smaller language.
   trained against.
 
 ## Worked example
+
+- **Input**: unit vectors in a plane, the state at angle zero and each option at an angle for how well it matches, their cosine scaled by 100, for three typed questions, and a batch of three states and their actions at temperatures 1, 0.1 and 0.01
 
 The example script runs the released readout on toy geometry: unit vectors in
 a plane, the state at angle zero and each option at an angle that stands for

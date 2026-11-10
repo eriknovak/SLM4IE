@@ -1,0 +1,184 @@
+# The research programme: experiments/programmes/<slug>.md (ADR-0005).
+#
+# The skeleton of start/references/programme-template.md follows this file:
+# its frontmatter keys, the values the status comment lists and its `##`
+# headings, in this order. Belief and Threads lines are `- **<Claim>**:` and
+# `- **<Thread name>**:` patterns, so the spec declares no row for them; the
+# one row it declares is a belief's optional Figure, written under the
+# belief it shows (checks/figures.py: one figure, a file, a caption).
+# test_labflow_report_programme.py fails when the two disagree.
+#
+# A programme has no stage: `status` says whether its question is still
+# open, not how far the file is written, so every rule holds at every check.
+# A programme planned before its first record (the skeleton) holds only its
+# frontmatter, its Question and `planned` entries, with Threads rows that
+# cite no clause yet; What we now believe and Open stay empty until a member
+# concludes. So only the Question is required outright; What we now believe,
+# Threads and Open are due once a member concludes (checks/programme.py).
+#
+# `members` are record folders relative to programmes/, so the built-in link
+# check resolves each to a record. Each `planned` item is a map: slug, short,
+# title (the question it will ask), category, ticket, builds_on (record or
+# planned slugs) and threads (Threads row names). A built-in check reads no
+# key inside a list item, so those keys, the Open endings (`— answered by
+# <slug>` or `— not yet planned[: <note>]`), the `[<slug>:F<n>]` and
+# `[<slug>:H<n>]` citations, every member clause in a thread, the
+# `**Caveat:**` belief sitting last, `members` in conclusion order and a
+# closed programme's empty Open and `planned` are checks/programme.py's.
+#
+# The page's other parts come from the members' records (the map cards and
+# edges, the thread cells, the Needs table, the Experiments table), so this
+# file declares none of them, and the programme cites no table or figure
+# outside a belief's Figure row (PRG-041). The thread cells read each
+# member's clause-readings.csv, whose rules sit with the record (tables.md
+# Record tables, TAB-040..044).
+
+document: programme
+root: programmes
+path: "*.md"
+
+# ===============================
+# Frontmatter
+# ===============================
+
+frontmatter:
+  - key: title
+    type: str
+    shows: the page title, and the hover on the short title
+    writer: labflow:start step 4
+  - key: slug
+    type: str
+    shows: the page anchor `programme-<slug>`; the file name when absent
+    writer: labflow:start step 4
+  - key: short
+    type: str
+    words: [2, 5]
+    shows: the title in the head, the sidebar, the overview ledger and every programme pill
+    writer: labflow:start step 4
+  - key: why
+    type: str
+    words: 30
+    shows: the sentence after the question on the goal line; nothing when absent
+    writer: labflow:start step 4
+  - key: status
+    values: [open, closed]
+    shows: the open or closed badge in the head
+    writer: labflow:start step 4
+  - key: members
+    type: list
+    links_to: record
+    shows: the map cards, the thread columns, the Needs and Experiments tables, and the sidebar order
+    writer: labflow:start step 4
+  - key: planned
+    type: list
+    shows: the dashed map cards and edges, the planned rows of the Experiments table, the overview ledger, the sidebar, and the Research landing page's planned rows with their category chip
+    writer: labflow:report conclusion b
+
+# ===============================
+# Sections
+# ===============================
+
+sections:
+  - heading: Question
+    form: prose
+    shows: the goal line under the title, its first sentence on the overview
+    writer: labflow:start step 4
+  - heading: What we now believe
+    # rows: each belief opens with its bold claim, which the page folds to
+    form: rows
+    shows: one fold per belief, its bold claim closed and its findings open
+    writer: labflow:report conclusion b
+    rows:
+      - label: Figure
+        shows: the belief's figure under its reasoning, 480 px wide or its own width up to the full column
+        writer: labflow:report conclusion b
+  - heading: Threads
+    form: rows
+    shows: the threads matrix, one row per thread and one column per experiment
+    writer: labflow:start step 4
+  - heading: Open
+    form: bullets
+    shows: the open questions table with the planned experiments that answer each
+    writer: labflow:report conclusion b
+
+# ===============================
+# Tables and figures
+# ===============================
+
+# the programme page reads no table of its own: its map, threads matrix,
+# beliefs, Open table, Needs and Experiments table are drawn from the
+# members' records and `planned` (tables.md Programme tables). Its one file
+# is a belief's figure, a member's by its path or one programme_figures.py
+# draws from the members' clause-readings.csv into programmes/<slug>/figures/,
+# cited in the belief's Figure row and nowhere else (PRG-041)
+artifacts:
+  - name: belief-figure
+    kind: figure
+    pattern: "*/figures/*-by-*.svg"
+    generator: programme_figures.py
+    writer: labflow:report conclusion b
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  # frontmatter
+  - {id: PRG-001, check: required, target: frontmatter.title, message: the programme has no title}
+  - {id: PRG-002, check: type, target: frontmatter.title, message: title is text}
+  - {id: PRG-003, check: type, target: frontmatter.slug, message: slug is text}
+  - {id: PRG-004, check: required, target: frontmatter.short, message: the programme has no short title}
+  - {id: PRG-005, check: type, target: frontmatter.short, message: short is text}
+  - {id: PRG-006, check: words, target: frontmatter.short, message: short is 2 to 5 plain words}
+  - {id: PRG-007, check: type, target: frontmatter.why, message: why is text}
+  - {id: PRG-008, check: words, target: frontmatter.why, message: "why is one sentence of at most 30 words"}
+  - {id: PRG-009, check: required, target: frontmatter.status, message: the programme has no status}
+  - {id: PRG-010, check: values, target: frontmatter.status, message: "unknown status: open or closed"}
+  - {id: PRG-011, check: type, target: frontmatter.members, message: "members is a list of record folders, ../<category>/<slug>/"}
+  - {id: PRG-012, check: link, target: frontmatter.members, message: members names a record that does not exist}
+  - {id: PRG-013, check: type, target: frontmatter.planned, message: "planned is a list of experiments, each a map with slug, short and title"}
+
+  # sections, their forms and template guidance
+  - {id: PRG-014, check: required, target: section.Question, message: "the programme has no ## Question"}
+  - {id: PRG-015, check: form, target: section.Question, message: "the Question is prose, not a list"}
+  - {id: PRG-016, check: guidance, target: section.Question, message: template guidance left in a section}
+  - {id: PRG-017, check: form, target: section.What we now believe, message: "What we now believe is rows, each opening with its bold claim, `- **<Claim>**: …`"}
+  - {id: PRG-018, check: guidance, target: section.What we now believe, message: template guidance left in a section}
+  - {id: PRG-019, check: form, target: section.Threads, message: "Threads is rows, `- **<Thread name>**: …`"}
+  - {id: PRG-020, check: guidance, target: section.Threads, message: template guidance left in a section}
+  - {id: PRG-021, check: form, target: section.Open, message: "Open is bullets, each ending `— answered by <slug>` or `— not yet planned`"}
+  - {id: PRG-022, check: guidance, target: section.Open, message: template guidance left in a section}
+
+  # sections due once a member concludes
+  - {id: PRG-023, check: due-once-concluded, target: section.What we now believe, message: "the programme has no ## What we now believe, due once a member concludes"}
+  - {id: PRG-024, check: due-once-concluded, target: section.Threads, message: "the programme has no ## Threads, due once a member concludes"}
+  - {id: PRG-025, check: due-once-concluded, target: section.Open, message: "the open programme has no ## Open, due once a member concludes; close it when nothing stays open"}
+
+  # citations and threads
+  - {id: PRG-026, check: member-citations, target: document, message: "a citation names no member, or no finding or clause the member holds"}
+  - {id: PRG-027, check: threads-cover-members, target: section.Threads, message: "every member clause sits in a thread; a member without clauses, each key finding"}
+  - {id: PRG-028, check: caveat-last, target: section.What we now believe, message: "a `**Caveat:**` belief sits last"}
+
+  # Open endings
+  - {id: PRG-029, check: open-ending, target: section.Open, message: "an Open bullet ends `— answered by <slug>` or `— not yet planned[: <note>]`"}
+  - {id: PRG-030, check: answered-by, target: section.Open, message: "answered by names no record or planned experiment"}
+
+  # planned items
+  - {id: PRG-031, check: planned-keys, target: frontmatter.planned, message: "a planned item is a map with slug, short and title"}
+  - {id: PRG-032, check: planned-short, target: frontmatter.planned, message: "a planned short is 2 to 5 plain words"}
+  - {id: PRG-033, check: planned-question, target: frontmatter.planned, message: "a planned title is the question it will ask, ending in '?'"}
+  - {id: PRG-034, check: planned-category, target: frontmatter.planned, message: "a planned category is data, methods or validation"}
+  - {id: PRG-042, check: planned-category-required, target: frontmatter.planned, message: "a planned item states its category: data, methods or validation"}
+  - {id: PRG-035, check: planned-ticket, target: frontmatter.planned, message: "a planned ticket is quoted \"#<n>\", a URL or a path, or empty for no ticket"}
+  - {id: PRG-036, check: planned-builds-on, target: frontmatter.planned, message: "a planned builds_on lists record or planned slugs"}
+  - {id: PRG-037, check: planned-threads, target: frontmatter.planned, message: "a planned threads lists names of ## Threads rows"}
+  - {id: PRG-038, check: planned-slugs, target: frontmatter.planned, message: "a planned slug is listed once and is no member"}
+
+  # members and status
+  - {id: PRG-039, check: members-order, target: frontmatter.members, message: "members run in conclusion order, unconcluded ones last"}
+  - {id: PRG-040, check: closed-programme, target: frontmatter.status, message: "a closed programme has no Open bullet and no planned experiment"}
+
+  # checks/programme.py and checks/figures.py: tables and figures
+  - {id: PRG-041, check: programme-assets, target: document, message: "a programme cites no table or figure outside a belief's Figure row, and that row cites a member's figure or one in programmes/<slug>/figures/"}
+  - {id: PRG-043, check: figure-row-file, target: section.What we now believe.Figure, message: "a belief's Figure row links one figure, `![<caption>](<path>)`, a file that exists"}
+  - {id: PRG-044, check: figure-row-caption, target: section.What we now believe.Figure, message: "a belief's Figure has no caption inside its `![<caption>](…)`"}

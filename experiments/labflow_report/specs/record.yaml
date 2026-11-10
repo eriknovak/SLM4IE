@@ -1,0 +1,650 @@
+# The experiment record: experiments/<category>/<slug>/README.md (ADR-0005).
+#
+# The skeleton of start/references/record-template.md follows this file:
+# its frontmatter keys, the values each key's comment lists, its `##`
+# headings and the `- **Label**:` rows of each section, in this order.
+# test_labflow_report_record.py fails when the two disagree.
+#
+# Stages: a rule with no `at` holds from the plan on, at every stage and for
+# an abandoned record too; `at: running` from the first tracked run;
+# `at: reporting` once Findings holds a written `### F<n>` entry;
+# `at: concluded` at the verdict. No frontmatter names `reporting`: a running
+# record reaches it when labflow:report writes its first finding, so the
+# TL;DR and Findings rules wait for that write. A section a later skill
+# writes (TL;DR, Datasets, Methods, Findings, Verdict) has its rules at that
+# skill's stage.
+# A plan-stage record passes the plan-stage check once labflow:start fills
+# its Hypothesis, Rounds, Design and Decisions rows; a raw copy of the
+# template reports those rows, since a row of only `<…>` guidance is empty.
+# Guidance left anywhere in a section is a breach from the section's stage
+# (REC-104..113): running for what start, data and code write, reporting
+# for TL;DR and Findings, concluded for Verdict and Reproduce. An abandoned
+# record writes no Verdict and no Reproduce (report/references/abandon.md),
+# so it never reaches those. A template placeholder alone in inline code
+# (`` `<parent-slug>` ``, `` `<file>.py::<function>` ``) counts as guidance,
+# and REC-158 holds a section the template lacks to the same, from running.
+#
+# REC-114..157 check one part against another (checks/record.py): a citation
+# against the entry it names, a clause's round against Rounds, a Code row
+# against its file, a Next item against the form the programme reads. Such a
+# check waits while its text still holds `<…>` guidance, which the guidance
+# rule reports. claude/scripts/tests/fixtures/record holds a good record and
+# a bad case for every rule.
+#
+# REC-160 runs the clause readings rules (TAB-040..044) on a written
+# tables/clause-readings.csv through check_table of labflow:analyze's own
+# table_rules.py (standard library only, the rules save_table runs), never a
+# repo's copy; REC-161 runs the arm and verdict table rules (TAB-050..054) on
+# a written tables/verdict-by-arm.csv the same way. REC-162 holds a record
+# whose Outcome is adopted to exactly one `adopted` = `yes` row in that table,
+# the arm the overview ledger names.
+#
+# REC-165..174 hold the record's own figures to the figure rules of
+# figures.md (FIG-020..025, checks/figures.py): each finding's Result figure
+# from reporting, the Verdict's Decision figure at concluded. The Decision
+# figure's caption is REC-164, and no finding cites its clause, so it takes
+# no FIG-023 or FIG-024 rule. A rule that reads the file skips a missing one,
+# which REC-185 (a Result figure) or REC-163 (the Decision figure) reports.
+# REC-186 holds a key finding's Result figure to a claim in its stamp; a
+# supporting or minor finding's figure may carry none.
+#
+# REC-175..181 hold what the page shows as a heading or a line: a decision or
+# method title of at least four words (the fold heading), a split of decisive
+# clauses read `partial`, a finding that cites no ticket, is no fix and whose
+# Result caption renders, and the TL;DR key-finding line. REC-182..184 hold
+# `varies` and `uses` to the reference entries: once reference/ holds a
+# document, each names one that exists, and a concluded record names what it
+# varies once reference/ holds a topic.
+# These, with every rule above, are the record's writing rules; the page
+# builder (build_report.py) checks none of them.
+
+document: record
+# the category folders data, methods and validation; a glob has no alternation,
+# and `*/*/README.md` would also take reference/<topic>/README.md
+path: "[dmv]*/*/README.md"
+stage_key: status
+stages: [draft, running, reporting, concluded]
+side_stages: [abandoned]
+derived_stages: {reporting: Findings}
+# a gate is a point where a skill runs `check --gate <name>`: the rules on the
+# parts listed hold at every stage then; labflow:data runs `--gate data` at its
+# data-ready gate, so a draft record's Datasets rows are checked before runs
+gates: {data: [section.Datasets]}
+
+# ===============================
+# Frontmatter
+# ===============================
+
+frontmatter:
+  - key: title
+    type: str
+    shows: the page title, and the hover on the short title
+    writer: labflow:start step 4
+  - key: slug
+    type: str
+    shows: the page anchor, the MLflow experiment name and the target of `[<slug>:F<n>]`
+    writer: labflow:start step 4
+  - key: short
+    type: str
+    words: [2, 5]
+    shows: the title in pills, map cards, the sidebar, lists and the breadcrumb
+    writer: labflow:start step 4
+  - key: category
+    values: [data, methods, validation]
+    shows: the kicker path above the title
+    writer: labflow:start step 4
+  - key: branch
+    type: str
+    shows: nothing on the page; labflow:run and labflow:report read it
+    writer: labflow:start step 4
+  - key: base_commit
+    shows: nothing on the page; the commit the experiment branched from
+    writer: labflow:start step 4
+  - key: status
+    values: [draft, running, concluded, abandoned]
+    shows: the stage the checker holds the record to, and the planned state
+    writer: labflow:start step 4
+  - key: ticket
+    type: str
+    shows: the issue pill in the header, or 'no ticket'
+    writer: labflow:start step 4
+  - key: pr
+    type: str
+    shows: the PR pill in the header
+    writer: labflow:report conclusion e
+  - key: mlflow
+    type: str
+    shows: the MLflow pill in the header, and the link behind every run id
+    writer: labflow:run first tracked launch
+  - key: builds_on
+    type: list
+    links_to: record
+    shows: the builds-on pills in the header, and 'Builds on this' on each parent
+    writer: labflow:start step 4
+  - key: varies
+    type: list
+    links_to: entry
+    shows: the varies row under the header, with a reference/ folder
+    writer: labflow:start step 4
+  - key: uses
+    type: list
+    links_to: entry
+    shows: the uses row under the header, with a reference/ folder
+    writer: labflow:start step 4
+  - key: tests
+    type: list
+    shows: nothing on this page; the idea and topic pages read it
+    writer: labflow:start step 4
+  - key: evidence
+    type: map
+    shows: nothing on this page; the topic pages read it
+    writer: labflow:report intermediate
+  - key: types
+    type: list
+    shows: the run types in the head row
+    writer: labflow:start step 4
+  - key: concluded
+    type: date
+    shows: the concluded date in the header
+    writer: labflow:report conclusion a
+
+# ===============================
+# Sections
+# ===============================
+
+sections:
+  - heading: TL;DR
+    form: bullets
+    shows: the lead of the record in the book and the PR body
+    writer: labflow:report intermediate
+    rows:
+      - label: Hypothesis
+        shows: the status and the one-sentence answer on the programme map
+        writer: labflow:report intermediate
+      - label: Next
+        shows: what runs or code comes next
+        writer: labflow:report intermediate
+  - heading: Hypothesis
+    form: rows
+    shows: the answer card and the question and setup fold
+    writer: labflow:start step 4
+    rows:
+      - label: Question
+        shows: the question that opens the answer card
+        writer: labflow:start step 4
+      - label: Decision it informs
+        shows: what changes on each answer, under the question
+        writer: labflow:start step 4
+      - label: Builds on
+        shows: the label on each parent's edge on the programme map
+        writer: labflow:start step 4
+      - label: Disclosure
+        values: [earlier runs, pilot, numbers seen]
+        shows: the disclosure card beside the verdict, tagged with its kind
+        writer: labflow:start step 4
+      - label: Statement
+        shows: the expectation in the question and setup fold
+        writer: labflow:start step 4
+      - label: Rationale
+        shows: the reasons in the question and setup fold
+        writer: labflow:start step 4
+      - label: Predictions
+        shows: the clause list, the clause trace and the amended-rule flag
+        writer: labflow:start step 4
+      - label: Outcome
+        words: 1
+        values: [open, confirmed, refuted, inconclusive, adopted, rejected, answered, partial, unanswered]
+        shows: the outcome badge
+        writer: labflow:report conclusion a
+  - heading: Rounds
+    form: entries
+    shows: the rounds of the record, each with its clauses and how it closed
+    writer: labflow:start step 4
+    rows:
+      - label: Opened
+        writer: labflow:start step 4
+      - label: Motivated by
+        writer: labflow:start new round
+      - label: Tests
+        writer: labflow:start step 4
+      - label: Clauses
+        writer: labflow:start step 4
+      - label: Budget
+        writer: labflow:start step 4
+      - label: Pre-registered at
+        writer: labflow:run first tracked launch, or labflow:analyze before an analysis-only round's first pass
+      - label: Earlier decisive
+        writer: labflow:start new round
+      - label: Closed
+        writer: labflow:report intermediate
+  - heading: Design
+    form: rows
+    shows: the needs line and the question and setup fold
+    writer: labflow:start step 4
+    rows:
+      - label: Inputs
+        words: 120
+        writer: labflow:start step 4
+      - label: Method / factors
+        words: 200
+        writer: labflow:start step 4
+      - label: Metrics
+        words: 120
+        writer: labflow:start step 4
+      - label: Protocol
+        words: 120
+        writer: labflow:start step 4
+      - label: Compute
+        words: 120
+        shows: the needs line, by its short value
+        writer: labflow:start step 4
+      - label: People
+        words: 120
+        shows: the needs line, by its short value
+        writer: labflow:start step 4
+      - label: Data access
+        words: 120
+        shows: the needs line, by its short value
+        writer: labflow:start step 4
+      - label: External dependency
+        words: 120
+        shows: the needs line, by its short value
+        writer: labflow:start step 4
+  - heading: Datasets
+    form: rows
+    shows: one dataset row per input, with its size, stats grid, fields and bars
+    writer: labflow:data dataset statistics
+  - heading: Methods
+    form: entries
+    shows: one method fold per step, with its code and settings
+    writer: labflow:code method
+    rows:
+      - label: Input
+        writer: labflow:code method
+      - label: Output
+        writer: labflow:code method
+      - label: How
+        words: 240
+        writer: labflow:code method
+      - label: Code
+        shows: the code per step
+        writer: labflow:code method
+      - label: Settings
+        shows: the settings table
+        writer: labflow:code method
+  - heading: Decisions
+    form: entries
+    shows: one decision fold per choice, grouped past six
+    writer: labflow:start step 4
+    rows:
+      - label: Decision
+        words: 60
+        writer: labflow:start step 4
+      - label: Why
+        words: 60
+        writer: labflow:start step 4
+      - label: Alternatives
+        writer: labflow:start step 4
+      - label: History
+        shows: when it was set, how often it changed and whose call it was
+        writer: labflow:start step 4
+  - heading: Findings
+    form: entries
+    shows: key finding cards, supporting lines and minor rows
+    writer: labflow:report intermediate
+    rows:
+      - label: Summary
+        words: 25
+        writer: labflow:report intermediate
+      - label: Key number
+        shows: the number on the key finding card
+        writer: labflow:report intermediate
+      - label: Runs
+        shows: the runs line, linked through `mlflow`
+        writer: labflow:report intermediate
+      - label: Result
+        shows: the finding's figure or table
+        writer: labflow:report intermediate
+      - label: Reading
+        words: 240
+        writer: labflow:report intermediate
+      - label: Implication
+        words: 50
+        shows: the So column of the clause trace
+        writer: labflow:report intermediate
+      - label: History
+        shows: the replaced runs under the finding
+        writer: labflow:report intermediate
+  - heading: Verdict
+    form: rows
+    shows: the answer card's verdict, the discussion folds and what it opened
+    writer: labflow:report conclusion a
+    rows:
+      - label: Outcome
+        values: [confirmed, refuted, inconclusive, adopted, rejected, answered, partial, unanswered]
+        shows: the outcome reading under the badge
+        writer: labflow:report conclusion a
+      - label: Evidence
+        shows: the deciding key findings, whose figure the answer card shows
+        writer: labflow:report conclusion a
+      - label: Decision figure
+        shows: Figure 1 in the answer card, in place of the evidence figure, which stays in its finding's card
+        writer: labflow:report conclusion a
+      - label: Discussion
+        words: 200
+        shows: the verdict line and the discussion folds
+        writer: labflow:report conclusion a
+      - label: Adoption candidate
+        shows: the adoption candidate fold
+        writer: labflow:report conclusion a
+      - label: Caveat
+        shows: the caveat card beside the verdict
+        writer: labflow:report conclusion a
+      - label: Next
+        shows: what it opened, as planned, issue or not-yet-planned pills
+        writer: labflow:report conclusion a
+      - label: Limitations
+        shows: the limitations list and the rests-on row
+        writer: labflow:report conclusion a
+  - heading: Reproduce
+    shows: the reproduce fold, its prerequisites and its numbered steps
+    writer: labflow:report conclusion a
+    rows:
+      - label: Prerequisites
+        writer: labflow:report conclusion a
+
+# ===============================
+# Tables and figures
+# ===============================
+
+artifacts:
+  - name: clause-readings
+    kind: table
+    pattern: tables/clause-readings.csv
+    columns: [clause, qualifier, value, ci_low, ci_high, bar, margin, outcome]
+    generator: analysis.py
+    writer: labflow:analyze clause readings
+  - name: verdict-by-arm
+    kind: table
+    pattern: tables/verdict-by-arm.csv
+    columns: [arm, clause, role, adopted]
+    generator: analysis.py
+    writer: labflow:analyze clause readings
+  - name: arm-table
+    kind: table
+    pattern: tables/*-by-arm.csv
+    columns: [arm]
+    generator: analysis.py
+    writer: labflow:analyze outputs
+  - name: finding-figure
+    kind: figure
+    pattern: figures/*-by-*.svg
+    generator: analysis.py
+    writer: labflow:analyze outputs
+  - name: finding-table
+    kind: table
+    pattern: tables/*-by-*.csv
+    generator: analysis.py
+    writer: labflow:analyze outputs
+  - name: dataset-statistics
+    kind: table
+    pattern: tables/dataset-*-statistics.csv
+    generator: analysis.py
+    writer: labflow:data dataset statistics
+  - name: dataset-summary
+    kind: table
+    pattern: tables/dataset-*-summary.csv
+    columns: [statistic, value, note]
+    generator: analysis.py
+    writer: labflow:data dataset statistics
+  - name: dataset-fields
+    kind: table
+    pattern: tables/dataset-*-fields.csv
+    columns: [field, type, distinct, values]
+    generator: analysis.py
+    writer: labflow:data dataset statistics
+  - name: dataset-figure
+    kind: figure
+    pattern: figures/dataset-*-*-by-*.svg
+    generator: analysis.py
+    writer: labflow:data dataset statistics
+  - name: scoping
+    kind: table
+    pattern: tables/scoping-*.csv
+    generator: a scratchpad script
+    writer: labflow:start step 1
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  # frontmatter
+  - {id: REC-001, check: required, target: frontmatter.title, message: the record has no title}
+  - {id: REC-002, check: type, target: frontmatter.title, message: title is text}
+  - {id: REC-003, check: required, target: frontmatter.slug, message: the record has no slug}
+  - {id: REC-004, check: type, target: frontmatter.slug, message: slug is text}
+  - {id: REC-005, check: required, target: frontmatter.short, message: the record has no short title}
+  - {id: REC-006, check: type, target: frontmatter.short, message: short is text}
+  - {id: REC-007, check: words, target: frontmatter.short, message: short is 2 to 5 plain words}
+  - {id: REC-008, check: required, target: frontmatter.category, message: the record has no category}
+  - {id: REC-009, check: values, target: frontmatter.category, message: unknown category}
+  - {id: REC-010, check: required, target: frontmatter.branch, message: the record names no branch}
+  - {id: REC-011, check: type, target: frontmatter.branch, message: branch is text}
+  - {id: REC-012, check: required, target: frontmatter.base_commit, message: the record names no base commit}
+  - {id: REC-013, check: required, target: frontmatter.status, message: the record has no status}
+  - {id: REC-014, check: values, target: frontmatter.status, message: unknown status}
+  - {id: REC-015, check: type, target: frontmatter.ticket, message: "ticket is text: quote \"#42\", or give a URL or a path"}
+  - {id: REC-016, check: type, target: frontmatter.pr, message: "pr is text, the PR's URL"}
+  - {id: REC-017, check: type, target: frontmatter.mlflow, message: "mlflow is text, the experiment's MLflow URL"}
+  - {id: REC-018, check: type, target: frontmatter.builds_on, message: builds_on is a list of record paths}
+  - {id: REC-019, check: link, target: frontmatter.builds_on, message: builds_on names a record that does not exist}
+  - {id: REC-020, check: type, target: frontmatter.varies, message: varies is a list of reference entries}
+  - {id: REC-021, check: type, target: frontmatter.uses, message: uses is a list of reference entries}
+  - {id: REC-182, check: link, target: frontmatter.varies, message: varies names an entry that does not exist}
+  - {id: REC-183, check: link, target: frontmatter.uses, message: uses names an entry that does not exist}
+  - {id: REC-184, check: varies-due, target: frontmatter.varies, at: concluded, message: "a concluded methods or validation record names no entry under `varies`, though experiments/reference/ holds the topics"}
+  - {id: REC-022, check: type, target: frontmatter.tests, message: tests is a list of idea issue numbers}
+  - {id: REC-023, check: type, target: frontmatter.evidence, message: evidence is a map from finding to its kind}
+  - {id: REC-024, check: type, target: frontmatter.types, message: types is a list of run type tags}
+  - {id: REC-025, check: type, target: frontmatter.concluded, message: concluded is a date}
+  - {id: REC-026, check: required, target: frontmatter.concluded, at: concluded, message: a concluded record has no concluded date}
+
+  # TL;DR
+  - {id: REC-027, check: required, target: section.TL;DR, at: concluded, message: a concluded record has no TL;DR}
+  - {id: REC-028, check: form, target: section.TL;DR, at: reporting, message: TL;DR is bullets only}
+  - {id: REC-029, check: required, target: section.TL;DR.Hypothesis, at: concluded, message: the TL;DR has no Hypothesis line}
+  - {id: REC-030, check: required, target: section.TL;DR.Next, at: concluded, message: the TL;DR has no Next line}
+  - {id: REC-181, check: tldr-key-line, target: section.TL;DR, at: reporting, message: "a TL;DR line that is no row reads `**F<n> — <title>.** <Summary>`"}
+
+  # Hypothesis
+  - {id: REC-031, check: required, target: section.Hypothesis, message: the record has no Hypothesis}
+  - {id: REC-032, check: form, target: section.Hypothesis, message: Hypothesis is rows only}
+  - {id: REC-033, check: required, target: section.Hypothesis.Question, message: the Hypothesis has no Question}
+  - {id: REC-034, check: required, target: section.Hypothesis.Decision it informs, message: the Hypothesis has no Decision it informs}
+  - {id: REC-035, check: values, target: section.Hypothesis.Disclosure, message: "Disclosure opens with its kind, then a colon"}
+  - {id: REC-036, check: required, target: section.Hypothesis.Statement, message: the Hypothesis has no Statement}
+  - {id: REC-037, check: required, target: section.Hypothesis.Rationale, message: the Hypothesis has no Rationale}
+  - {id: REC-038, check: required, target: section.Hypothesis.Predictions, message: the Hypothesis has no Predictions}
+  - {id: REC-039, check: required, target: section.Hypothesis.Outcome, message: the Hypothesis has no Outcome}
+  - {id: REC-040, check: values, target: section.Hypothesis.Outcome, message: unknown Hypothesis outcome}
+  - {id: REC-041, check: words, target: section.Hypothesis.Outcome, at: concluded, message: the Hypothesis Outcome is the word alone; its reading goes in the Verdict}
+
+  # Rounds
+  - {id: REC-042, check: form, target: section.Rounds, message: "Rounds holds only ### R<n> entries"}
+  - {id: REC-043, check: required, target: section.Rounds.Opened, message: a round has no Opened date}
+  - {id: REC-044, check: required, target: section.Rounds.Tests, message: a round says nothing it Tests}
+  - {id: REC-045, check: required, target: section.Rounds.Clauses, message: a round names no Clauses}
+  - {id: REC-046, check: required, target: section.Rounds.Budget, message: a round has no Budget}
+  - {id: REC-047, check: required, target: section.Rounds.Pre-registered at, at: running, message: a running round has no pre-registration sha}
+
+  # Design
+  - {id: REC-048, check: required, target: section.Design, message: the record has no Design}
+  - {id: REC-049, check: form, target: section.Design, message: Design is rows only}
+  - {id: REC-050, check: required, target: section.Design.Inputs, message: the Design has no Inputs row}
+  - {id: REC-051, check: words, target: section.Design.Inputs, message: Inputs row length}
+  - {id: REC-052, check: required, target: section.Design.Method / factors, message: the Design has no Method / factors row}
+  - {id: REC-053, check: words, target: section.Design.Method / factors, message: Method / factors row length}
+  - {id: REC-054, check: required, target: section.Design.Metrics, message: the Design has no Metrics row}
+  - {id: REC-055, check: words, target: section.Design.Metrics, message: Metrics row length}
+  - {id: REC-159, check: metric-defined, target: section.Design.Metrics, at: reporting, message: "the primary metric has no line in experiments/GLOSSARY.md"}
+  - {id: REC-056, check: required, target: section.Design.Protocol, message: the Design has no Protocol row}
+  - {id: REC-057, check: words, target: section.Design.Protocol, message: Protocol row length}
+  - {id: REC-058, check: required, target: section.Design.Compute, message: the Design has no Compute row}
+  - {id: REC-059, check: words, target: section.Design.Compute, message: Compute row length}
+  - {id: REC-060, check: required, target: section.Design.People, message: the Design has no People row}
+  - {id: REC-061, check: words, target: section.Design.People, message: People row length}
+  - {id: REC-062, check: required, target: section.Design.Data access, message: the Design has no Data access row}
+  - {id: REC-063, check: words, target: section.Design.Data access, message: Data access row length}
+  - {id: REC-064, check: required, target: section.Design.External dependency, message: the Design has no External dependency row}
+  - {id: REC-065, check: words, target: section.Design.External dependency, message: External dependency row length}
+
+  # Datasets
+  - {id: REC-066, check: required, target: section.Datasets, at: concluded, message: the record has no Datasets}
+  - {id: REC-067, check: form, target: section.Datasets, at: running, message: Datasets is rows only}
+  - {id: REC-103, check: dataset-row, target: section.Datasets, at: running, message: "a Datasets row opens `- **<name>** (<kind>; <gold|silver|none> labels): one item is`"}
+
+  # Methods
+  - {id: REC-068, check: required, target: section.Methods, at: concluded, message: a concluded record has no Methods}
+  - {id: REC-069, check: form, target: section.Methods, at: running, message: "Methods holds only ### M<n> entries"}
+  - {id: REC-070, check: required, target: section.Methods.Input, at: running, message: a method has no Input}
+  - {id: REC-071, check: required, target: section.Methods.Output, at: running, message: a method has no Output}
+  - {id: REC-072, check: required, target: section.Methods.How, at: running, message: a method has no How}
+  - {id: REC-073, check: words, target: section.Methods.How, at: running, message: How length}
+  - {id: REC-074, check: required, target: section.Methods.Code, at: running, message: a method names no Code}
+  - {id: REC-075, check: required, target: section.Methods.Settings, at: running, message: "a method has no Settings; write none when it has none"}
+
+  # Decisions
+  - {id: REC-076, check: form, target: section.Decisions, message: "Decisions holds only ### D<n> entries"}
+  - {id: REC-077, check: required, target: section.Decisions.Decision, message: a decision has no Decision row}
+  - {id: REC-078, check: words, target: section.Decisions.Decision, message: Decision length}
+  - {id: REC-079, check: required, target: section.Decisions.Why, message: a decision has no Why}
+  - {id: REC-080, check: words, target: section.Decisions.Why, message: Why length}
+  - {id: REC-081, check: required, target: section.Decisions.History, message: a decision has no History}
+
+  # Findings
+  - {id: REC-082, check: required, target: section.Findings, at: concluded, message: a concluded record has no Findings}
+  - {id: REC-083, check: form, target: section.Findings, at: reporting, message: "Findings holds only ### F<n> entries"}
+  - {id: REC-084, check: required, target: section.Findings.Summary, at: reporting, message: a finding has no Summary}
+  - {id: REC-085, check: words, target: section.Findings.Summary, at: reporting, message: Summary length}
+  - {id: REC-086, check: required, target: section.Findings.Runs, at: reporting, message: a finding names no Runs}
+  - {id: REC-087, check: required, target: section.Findings.Result, at: reporting, message: a finding has no Result}
+  - {id: REC-088, check: required, target: section.Findings.Reading, at: reporting, message: a finding has no Reading}
+  - {id: REC-089, check: words, target: section.Findings.Reading, at: reporting, message: Reading length}
+  - {id: REC-090, check: words, target: section.Findings.Implication, at: reporting, message: Implication length}
+  - {id: REC-091, check: required, target: section.Findings.History, at: reporting, message: a finding has no History}
+
+  # each finding's Result figure, against the builder rules of figures.md
+  - {id: REC-165, check: figure-stamp, target: section.Findings.Result, at: reporting, message: "a Result figure carries no stamp at the current check version; draw it again with save_figure (FIG-020)"}
+  - {id: REC-166, check: figure-text, target: section.Findings.Result, at: reporting, message: "a Result figure keeps its text as text, never glyph outlines (FIG-021)"}
+  - {id: REC-167, check: figure-name, target: section.Findings.Result, at: reporting, message: "a Result figure is `figures/<stem>-<quantity>-by-<dimension>.svg` (FIG-022)"}
+  - {id: REC-168, check: figure-caption, target: section.Findings.Result, at: reporting, message: "a Result figure has no caption inside its `![<caption>](…)` (FIG-023)"}
+  - {id: REC-169, check: figure-clause, target: section.Findings.Result, at: reporting, message: "a finding cites no `[<clause>]` the claim in its figure's stamp names (FIG-024)"}
+  - {id: REC-170, check: figure-arms, target: section.Findings.Result, at: reporting, message: "an arm in a Result figure's claim is no `arm` value of `tables/<same stem>.csv` (FIG-025)"}
+  - {id: REC-185, check: figure-file, target: section.Findings.Result, at: reporting, message: "a Result cites a figure file that does not exist; draw it with save_figure"}
+  - {id: REC-186, check: figure-claim, target: section.Findings.Result, at: reporting, message: "a key finding's Result figure carries no claim in its stamp; draw it again with save_figure and the claim it shows"}
+
+  # Verdict
+  - {id: REC-092, check: required, target: section.Verdict, at: concluded, message: a concluded record has no Verdict}
+  - {id: REC-093, check: form, target: section.Verdict, at: concluded, message: Verdict is rows only}
+  - {id: REC-094, check: required, target: section.Verdict.Outcome, at: concluded, message: the Verdict has no Outcome}
+  - {id: REC-095, check: values, target: section.Verdict.Outcome, at: concluded, message: unknown Verdict outcome}
+  - {id: REC-096, check: required, target: section.Verdict.Evidence, at: concluded, message: the Verdict cites no Evidence}
+  - {id: REC-097, check: required, target: section.Verdict.Discussion, at: concluded, message: the Verdict has no Discussion}
+  - {id: REC-098, check: words, target: section.Verdict.Discussion, at: concluded, message: Discussion length}
+  - {id: REC-099, check: required, target: section.Verdict.Adoption candidate, at: concluded, message: "the Verdict has no Adoption candidate; write none when there is none"}
+  - {id: REC-100, check: required, target: section.Verdict.Next, at: concluded, message: the Verdict has no Next}
+  - {id: REC-101, check: required, target: section.Verdict.Limitations, at: concluded, message: the Verdict has no Limitations}
+
+  # Reproduce
+  - {id: REC-102, check: required, target: section.Reproduce, at: concluded, message: a concluded record has no Reproduce}
+
+  # template guidance left in a section
+  - {id: REC-104, check: template-guidance, target: section.TL;DR, at: reporting, message: template guidance left in a section}
+  - {id: REC-105, check: template-guidance, target: section.Hypothesis, at: running, message: template guidance left in a section}
+  - {id: REC-106, check: template-guidance, target: section.Rounds, at: running, message: template guidance left in a section}
+  - {id: REC-107, check: template-guidance, target: section.Design, at: running, message: template guidance left in a section}
+  - {id: REC-108, check: template-guidance, target: section.Datasets, at: running, message: template guidance left in a section}
+  - {id: REC-109, check: template-guidance, target: section.Methods, at: running, message: template guidance left in a section}
+  - {id: REC-110, check: template-guidance, target: section.Decisions, at: running, message: template guidance left in a section}
+  - {id: REC-111, check: template-guidance, target: section.Findings, at: reporting, message: template guidance left in a section}
+  - {id: REC-112, check: template-guidance, target: section.Verdict, at: concluded, message: template guidance left in a section}
+  - {id: REC-113, check: template-guidance, target: section.Reproduce, at: concluded, message: template guidance left in a section}
+  - {id: REC-158, check: added-section-guidance, target: document, at: running, message: template guidance left in a section the template lacks}
+
+  # citations inside the record, to another record and to the literature
+  - {id: REC-114, check: cited-decision, target: document, message: a citation names a decision the record lacks}
+  - {id: REC-115, check: cited-clause, target: document, message: a citation names a clause Predictions lacks}
+  - {id: REC-116, check: cited-finding, target: document, at: running, message: a citation names a finding the record lacks}
+  - {id: REC-117, check: cited-method, target: document, at: concluded, message: a citation names a method the record lacks}
+  - {id: REC-118, check: cited-record, target: document, message: "a `[<slug>:F<n>]` names no record or no entry in it"}
+  - {id: REC-119, check: relation-word, target: section.Findings, at: reporting, message: "a `[<slug>:F<n>]` follows qualifies, supports or overturns"}
+  - {id: REC-120, check: bibliography, target: document, message: "a `[@key]` has no entry in references.bib"}
+
+  # frontmatter against the body
+  - {id: REC-121, check: mlflow-for-runs, target: frontmatter.mlflow, at: running, message: findings cite run ids but mlflow names no experiment}
+  - {id: REC-122, check: builds-on, target: section.Hypothesis.Builds on, message: "Builds on holds one bullet per builds_on parent, opening with its slug in backticks"}
+
+  # Hypothesis
+  - {id: REC-123, check: question-mark, target: section.Hypothesis.Question, message: the Question ends in a question mark}
+  - {id: REC-124, check: clause-lines, target: section.Hypothesis.Predictions, message: "Predictions has no `- **<id> — <claim>**:` clause line"}
+  - {id: REC-125, check: verdict-rule, target: section.Hypothesis.Predictions, message: "several decisive clauses but no `- **Verdict rule**:` line"}
+  - {id: REC-126, check: clause-trace, target: section.Hypothesis.Predictions, message: "a clause line does not end `([D<n>]; measured by [M<n>])`, or its `[<slug> D<n>]` names no decision of that record"}
+  - {id: REC-127, check: note-added, target: section.Hypothesis, message: "a dated change reads `Note added YYYY-MM-DD:`"}
+  - {id: REC-128, check: lead-blocks, target: section.Hypothesis.Rationale, message: Rationale past 60 words is bold-lead blocks}
+  - {id: REC-129, check: outcome-agrees, target: section.Hypothesis.Outcome, at: concluded, message: the Hypothesis Outcome is not the Verdict Outcome's word}
+  - {id: REC-177, check: split-outcome, target: section.Hypothesis.Outcome, at: concluded, message: "decisive clauses split between yes and no, so the Outcome reads `partial`, with the Verdict rule naming the reading, unless the Verdict rule gives the Outcome word when any one clause does"}
+
+  # Rounds
+  - {id: REC-130, check: entry-heading, target: section.Rounds, message: "a round heading reads `### R<n> — <what it tests>`"}
+  - {id: REC-131, check: clause-round, target: section.Rounds, message: a clause belongs to a round Rounds does not list}
+  - {id: REC-132, check: motivated-by, target: section.Rounds, message: "a round after the first names no `[F<k>]` it is Motivated by"}
+  - {id: REC-133, check: earlier-decisive, target: section.Rounds, message: "Earlier decisive labels each earlier decisive clause `stands` or `superseded by <clause>`"}
+  - {id: REC-134, check: required, target: section.Rounds.Closed, at: concluded, message: a concluded record leaves a round open}
+
+  # Design and Methods
+  - {id: REC-135, check: needs-row, target: section.Design, message: "a needs row opens with a short value, then ` — ` and a sentence"}
+  - {id: REC-136, check: entry-heading, target: section.Methods, at: running, message: "a method heading reads `### M<n> — <what the step does>`"}
+  - {id: REC-176, check: title-words, target: section.Methods, message: "a method title names a topic, not what the step does: write at least four words"}
+  - {id: REC-137, check: known-rows, target: section.Methods, at: running, message: a method holds a row the template lacks}
+  - {id: REC-138, check: numbered-steps, target: section.Methods.How, at: running, message: How past 60 words is numbered steps}
+  - {id: REC-139, check: code-row, target: section.Methods.Code, at: running, message: "Code names a `<file>.py[::<symbol>]` that exists and defines the symbol"}
+  - {id: REC-140, check: settings-gloss, target: section.Methods.Settings, at: running, message: "a Settings key carries no gloss: write `key` (what it steers, value)"}
+
+  # Decisions
+  - {id: REC-141, check: entry-heading, target: section.Decisions, message: "a decision heading reads `### D<n> — <the choice made>`"}
+  - {id: REC-175, check: title-words, target: section.Decisions, message: "a decision title names a topic, not the choice made: write at least four words"}
+  - {id: REC-142, check: known-rows, target: section.Decisions, message: a decision holds a row the template lacks}
+  - {id: REC-143, check: history-timing, target: section.Decisions.History, message: "a History line carries no `(before runs)`, `(after runs)` or `(after [F<n>])`"}
+
+  # Findings
+  - {id: REC-144, check: entry-heading, target: section.Findings, at: reporting, message: "a finding heading reads `### F<n> — <title> · key | supporting F<k> | minor`"}
+  - {id: REC-145, check: supporting-target, target: section.Findings, at: reporting, message: a supporting finding names no key finding}
+  - {id: REC-146, check: minor-rows, target: section.Findings, at: reporting, message: "a minor finding holds only Summary, Runs, Result, Reading and History"}
+  - {id: REC-147, check: lead-blocks, target: section.Findings.Reading, at: reporting, message: Reading past 60 words is bold-lead blocks}
+  - {id: REC-148, check: key-reading, target: section.Findings, at: reporting, message: "a key finding's Reading names the clause it decides with its outcome word"}
+  - {id: REC-149, check: run-ids, target: section.Findings.Runs, at: reporting, message: "Runs names full 32-character run ids, `at <sha>`, or `run <prefix> (server lost)`"}
+  - {id: REC-178, check: finding-ticket, target: section.Findings, at: reporting, message: "a finding's Summary, Reading or Implication cites a ticket; findings read cold"}
+  - {id: REC-179, check: caption-bracket, target: section.Findings.Result, at: reporting, message: "a Result image's caption holds a `[`, so the image does not render"}
+  - {id: REC-180, check: fix-words, target: section.Findings, at: reporting, message: "a finding reads as a fix: revise the F<n> it corrects instead"}
+  - {id: REC-150, check: clauses-read, target: section.Hypothesis.Predictions, at: concluded, message: a clause still standing is read by no key finding (a diagnostic one by no key or supporting finding)}
+
+  # Verdict and Reproduce
+  - {id: REC-151, check: lead-blocks, target: section.Verdict.Discussion, at: concluded, message: Discussion past 60 words is bold-lead blocks}
+  - {id: REC-152, check: adoption-rows, target: section.Verdict.Adoption candidate, at: concluded, message: "an Adoption candidate other than none carries `Carries` and `Stays out` rows"}
+  - {id: REC-153, check: caveat-cites, target: section.Verdict.Caveat, at: concluded, message: "the Caveat cites the [D<n>] or [F<n>] it rests on"}
+  - {id: REC-154, check: next-items, target: section.Verdict.Next, at: concluded, message: "a Next item ends `— planned as <slug>`, `(issue #<n>)`, `— not yet planned` or `— done in <sha or slug>`"}
+  - {id: REC-163, check: figure-row-file, target: section.Verdict.Decision figure, at: concluded, message: "the Decision figure links one figure, `![<caption>](figures/<name>.svg)`, a file that exists"}
+  - {id: REC-164, check: figure-row-caption, target: section.Verdict.Decision figure, at: concluded, message: "the Decision figure has no caption inside its `![<caption>](…)`"}
+  - {id: REC-171, check: figure-stamp, target: section.Verdict.Decision figure, at: concluded, message: "the Decision figure carries no stamp at the current check version; draw it again with save_figure (FIG-020)"}
+  - {id: REC-172, check: figure-text, target: section.Verdict.Decision figure, at: concluded, message: "the Decision figure keeps its text as text, never glyph outlines (FIG-021)"}
+  - {id: REC-173, check: figure-name, target: section.Verdict.Decision figure, at: concluded, message: "the Decision figure is `figures/<stem>-<quantity>-by-<dimension>.svg` (FIG-022)"}
+  - {id: REC-174, check: figure-arms, target: section.Verdict.Decision figure, at: concluded, message: "an arm in the Decision figure's claim is no `arm` value of `tables/<same stem>.csv` (FIG-025)"}
+  - {id: REC-155, check: prerequisite-kind, target: section.Reproduce.Prerequisites, at: concluded, message: "a prerequisite opens with its kind: **Secret**, **Login**, **Data**, **Service** or **Frozen**"}
+  - {id: REC-156, check: step-commit, target: section.Reproduce, at: concluded, message: "a step's `(commit <sha>)` is not a sha"}
+  - {id: REC-157, check: side-files-named, target: document, at: concluded, message: a file under configs/ or prompts/ is named nowhere in the record}
+
+  # tables: the record's written tables against the rules save_table runs
+  - {id: REC-160, check: clause-readings-table, target: artifact.clause-readings, at: concluded, message: "tables/clause-readings.csv breaks a clause readings rule of tables.md (TAB-040..044)"}
+  - {id: REC-161, check: verdict-by-arm-table, target: artifact.verdict-by-arm, at: concluded, message: "tables/verdict-by-arm.csv breaks an arm or verdict table rule of tables.md (TAB-050..054)"}
+  - {id: REC-162, check: adopted-arm, target: artifact.verdict-by-arm, at: concluded, message: "an adopted record marks exactly one arm `adopted` = `yes` in tables/verdict-by-arm.csv"}
