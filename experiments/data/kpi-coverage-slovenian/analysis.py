@@ -11,8 +11,12 @@ verdicts, the gap attribution and the figures.
 Run it with:
 
     uv run --group analysis python experiments/data/kpi-coverage-slovenian/analysis.py
+
+`--figures-only` redraws the figures from the committed tables alone, without
+the builds, as the full run does once its tables are written.
 """
 
+import argparse
 import csv
 import hashlib
 import json
@@ -29,11 +33,11 @@ from typing import Any, NamedTuple
 import sklearn
 import yaml
 from datachart.charts import BarChart, DumbbellChart, LineChart
-from datachart.constants import AXIS_SCALE, BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
+from datachart.constants import AXIS_SCALE, BAR_MODE, LEGEND_LOCATION, ORIENTATION, SORT
 
 # make the shared figure helper importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402
+from create_assets import HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402
 
 from slm4ie.data.curate.inspect.domains import DecisionRule, DomainLexicons, assign_domain, load_lexicons, score_text
 from slm4ie.data.curate.inspect.judge import DOMAINS
@@ -139,6 +143,13 @@ CORPUS_CLASSIFIER_SHA256 = "1ca0684142cd5113e1cdeb83971965138e7684613bd307fa75a1
 CORPUS_TOKEN_TARGET = 5_000_000_000
 DOMAIN_TOKEN_TARGET = 500_000
 DOMAIN_DOCUMENT_TARGET = 10_000
+#: Documents per thousand, the unit of the per-source figure's axis.
+THOUSAND = 1_000
+#: The claims F1's and F2's figures show; each figure's data table sits beside it under its name.
+KPI_FIGURE = "kpi-target-multiple-by-rule"
+KPI_CLAIM = Claim("H3", "count as a multiple of its target", threshold=1.0)
+FUNNEL_FIGURE = "funnel-medical-documents-by-stage"
+FUNNEL_CLAIM = Claim("Q1", "medical source documents", threshold=DOMAIN_DOCUMENT_TARGET)
 #: The domains the per-domain targets are read for, science folded (D2).
 TARGET_DOMAINS: tuple[str, ...] = ("science", "medical")
 #: What a count counts: words read as two tokens each, words read as one token each, and documents.
@@ -1562,46 +1573,66 @@ def kpi_figure_rows(kpi: list[dict[str, Any]], build: str) -> list[dict[str, Any
 def draw_kpi_figure(kpi: list[dict[str, Any]]) -> None:
     """Draw every target's count as a multiple of it, under source and document labels, per build.
 
+    The figure carries H3's claim, so its data table is written first.
+
     Args:
         kpi: Rows from `kpi_rows`.
     """
+    multiples = [
+        {
+            "build": build,
+            "count": record["label"],
+            "multiple_source_labels": record["start"],
+            "multiple_document_labels": record["end"],
+        }
+        for build in BUILDS
+        for record in kpi_figure_rows(kpi, build)
+    ]
+    save_table(multiples, TABLES_DIR / f"{KPI_FIGURE}.csv")
     save_figure(
         lambda: DumbbellChart(
             [kpi_figure_rows(kpi, build) for build in BUILDS],
             title="Data targets per labelling rule",
-            xlabel="count as a multiple of its target",
+            xlabel="count (multiple of its target)",
             ylabel="target",
             subtitle=[f"{build} build" for build in BUILDS],
             start_name="source labels",
             end_name="document labels",
             scaley=AXIS_SCALE.LOG,
             vlines=[{"x": 1, "label": "target"}],
-            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
-            figsize=FIG_SIZE.FULL_TALL,
+            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": 3},
+            # one column: the target names need the width a half column lacks
+            figsize=ONE_COLUMN,
         ),
-        FIGURES_DIR / "kpi-target-multiple-by-rule.svg",
+        FIGURES_DIR / f"{KPI_FIGURE}.svg",
+        claim=KPI_CLAIM,
     )
 
 
 def draw_medical_funnel_figure(funnel: list[dict[str, Any]]) -> None:
     """Draw the medical source's documents after every curation stage, per build.
 
+    The figure carries Q1's claim, so its data table is written first.
+
     Args:
         funnel: Rows from `funnel_source_rows`, both builds.
     """
-    series = [
+    counts = {build: domain_stage_counts(funnel, build, "medical", open_only=False) for build in BUILDS}
+    save_table(
         [
-            {"x": index, "y": count}
-            for index, count in enumerate(domain_stage_counts(funnel, build, "medical", open_only=False).values())
-        ]
-        for build in BUILDS
-    ]
+            {"build": build, "stage": stage, "documents": documents}
+            for build in BUILDS
+            for stage, documents in counts[build].items()
+        ],
+        TABLES_DIR / f"{FUNNEL_FIGURE}.csv",
+    )
+    series = [[{"x": index, "y": count} for index, count in enumerate(counts[build].values())] for build in BUILDS]
     save_figure(
         lambda: LineChart(
             series,
             title="Medical source documents per stage",
             xlabel="curation stage",
-            ylabel="documents",
+            ylabel="documents (count)",
             subtitle=[f"{build} build" for build in BUILDS],
             scaley=AXIS_SCALE.LOG,
             xticks=list(range(len(STAGE_COLUMNS))),
@@ -1610,9 +1641,10 @@ def draw_medical_funnel_figure(funnel: list[dict[str, Any]]) -> None:
             hlines=[{"y": DOMAIN_DOCUMENT_TARGET, "label": "examples target"}],
             show_legend=True,
             legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
-            figsize=FIG_SIZE.FULL_MEDIUM,
+            figsize=ONE_COLUMN,
         ),
-        FIGURES_DIR / "funnel-medical-documents-by-stage.svg",
+        FIGURES_DIR / f"{FUNNEL_FIGURE}.svg",
+        claim=FUNNEL_CLAIM,
     )
 
 
@@ -1629,19 +1661,55 @@ def draw_medical_sources_figure(by_source: list[dict[str, Any]]) -> None:
     names = sorted({source for _, source in medical}, key=lambda source: medical.get(("loosened", source), 0))
     save_figure(
         lambda: BarChart(
-            [[{"label": source, "y": medical.get((build, source), 0)} for source in names] for build in BUILDS],
+            [
+                [{"label": source, "y": medical.get((build, source), 0) / THOUSAND} for source in names]
+                for build in BUILDS
+            ],
             title="Medical documents per source",
-            xlabel="documents labelled medical",
+            # thousands keep the tick labels apart in a half-width figure
+            xlabel="documents labelled medical (thousands)",
             ylabel="source",
             subtitle=[f"{build} build" for build in BUILDS],
             orientation=ORIENTATION.HORIZONTAL,
             show_legend=True,
             legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
             xmin=0,
-            figsize=FIG_SIZE.FULL_TALL,
+            figsize=HALF_TALL,
         ),
         FIGURES_DIR / "corpus-medical-documents-by-source.svg",
     )
+
+
+def draw_figures_from_tables() -> None:
+    """Draw the three Result figures from the committed tables alone."""
+    draw_kpi_figure(read_csv(TABLES_DIR / "kpi-pass-by-rule.csv"))
+    draw_medical_funnel_figure(read_csv(TABLES_DIR / "funnel-documents-by-source.csv"))
+    draw_medical_sources_figure(read_csv(TABLES_DIR / "corpus-documents-by-source.csv"))
+
+
+def read_csv(path: Path) -> list[dict[str, Any]]:
+    """Read a table `write_csv` wrote, turning its numbers and booleans back into values.
+
+    Args:
+        path: The CSV file.
+
+    Returns:
+        One dict per row; an empty cell stays an empty string.
+    """
+    with path.open(encoding="utf-8", newline="") as handle:
+        return [{key: _parse_cell(cell) for key, cell in row.items()} for row in csv.DictReader(handle)]
+
+
+def _parse_cell(cell: str) -> Any:
+    """The value `csv.DictWriter` wrote as this cell: a bool, an int, a float or the text itself."""
+    if cell in ("True", "False"):
+        return cell == "True"
+    for kind in (int, float):
+        try:
+            return kind(cell)
+        except ValueError:
+            continue
+    return cell
 
 
 def draw_gold_figure(rows: list[dict[str, Any]]) -> None:
@@ -1667,7 +1735,7 @@ def draw_gold_figure(rows: list[dict[str, Any]]) -> None:
             show_legend=True,
             legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
             xmin=0,
-            figsize=FIG_SIZE.FULL_MEDIUM,
+            figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / "dataset-gold-documents-by-domain.svg",
     )
@@ -1681,6 +1749,15 @@ def draw_gold_figure(rows: list[dict[str, Any]]) -> None:
 def main() -> None:
     """Write the dataset statistics, the funnel, the gates, the per-target verdicts and the figures."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--figures-only", action="store_true", help="redraw the Result figures from the committed tables and stop"
+    )
+    args = parser.parse_args()
+
+    if args.figures_only:
+        draw_figures_from_tables()
+        return
 
     # tabulate the final size of every source in each build
     sources = read_sources(EXTRACT_CONFIG)
@@ -1792,10 +1869,8 @@ def main() -> None:
     print(f"gaps: {len(gaps)} missed targets, {sum(gap['cause'] == 'curation loss' for gap in gaps)} curation losses")
     write_csv(TABLES_DIR / "catalogue-ie-examples-by-domain.csv", ie_example_rows(catalogue))
 
-    # draw the figures
-    draw_kpi_figure(kpi)
-    draw_medical_funnel_figure(funnel)
-    draw_medical_sources_figure(by_source)
+    # draw the figures from the tables just written, as --figures-only does
+    draw_figures_from_tables()
 
 
 if __name__ == "__main__":

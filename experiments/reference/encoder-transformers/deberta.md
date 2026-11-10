@@ -5,7 +5,7 @@ status: from-paper
 summary: RoBERTa's recipe with attention that scores content and relative position separately, no position at the input, and absolute position added only in the last layers before the masked-token prediction.
 variant_of: encoder-transformers/roberta
 part_of:
-couples_to: [subword-tokenizers/byte-level-bpe]
+couples_to: [{entry: subword-tokenizers/byte-level-bpe, as: tokenizer}]
 ---
 
 ## Description
@@ -54,12 +54,12 @@ tokenizer finding carries over.
 
 ## Facts
 
-- **Position encoding**: relative, a shared table with one row per signed distance up to 512, read inside every layer; no position at the input; absolute position added before the masked-token prediction only
-- **Attention span**: every token attends to every token, as in BERT
-- **Block normalisation**: post-norm, as in BERT
-- **Activation**: GELU, as in BERT
-- **Pretraining objective**: masked language modelling on 15% of the tokens, as in RoBERTa
-- **Tokenizer**: byte-level BPE, 50,000 pieces, the GPT-2 vocabulary RoBERTa uses
+- **Position encoding**: relative — a shared table with one row per signed distance up to 512, read inside every layer; no position at the input; absolute position added before the masked-token prediction only
+- **Attention span**: every token attends to every token — as in BERT
+- **Block normalisation**: post-norm — as in BERT
+- **Activation**: GELU — as in BERT
+- **Pretraining objective**: masked language modelling — on 15% of the tokens, as in RoBERTa
+- **Tokenizer**: byte-level BPE — 50,000 pieces, the GPT-2 vocabulary RoBERTa uses
 - **Context length**: 512 tokens
 - **Attention score**: content-to-content plus content-to-position plus position-to-content, divided by $\sqrt{3d}$ with $d$ the head width
 - **Relative position table**: $2k$ rows of width $d$ with $k = 512$, shared by all layers, projected by their own query and key matrices
@@ -99,11 +99,11 @@ tokenizer finding carries over.
 \Return $H_o$
 ```
 
-- **1**: The content side is BERT's attention: a query, a key and a value for every token, from its content vector alone.
+- **1**: The content side is BERT's attention: a query $Q_c$, a key $K_c$ and a value $V_c$ for every token, from its content vector alone.
 - **2**: The position side projects the shared table once per layer. Row $r$ of $Q_r$ and $K_r$ stands for the signed distance $r - k$, so the table holds every distance from $-k$ to $k - 1$. It is one table for the whole model, and each layer applies its own projections to it.
-- **3**: The signed distance from token $i$ to token $j$ is turned into a row index. Distances beyond $k$ either way share the two outer rows.
-- **4**: Three scores are added. The first asks how well the content of $j$ answers the content of $i$. The second asks how well the distance to $j$ answers the content of $i$. The third asks how well the content of $j$ answers the distance from $j$ back to $i$, which is why its index is $\delta(j, i)$. The fourth possible term, position against position, is left out because a distance compared with itself carries nothing.
-- **5**: The sum of three dot products has three times the spread of one, so the scale is $\sqrt{3d}$ rather than BERT's $\sqrt{d}$. The paper reports this factor matters for stable training of large models.
+- **3**: The signed distance from token $i$ to token $j$ is turned into a row index $\delta(i, j)$. Distances beyond $k$ either way share the two outer rows.
+- **4**: Three scores are added into $\tilde A_{ij}$. The first asks how well the content of $j$ answers the content of $i$. The second asks how well the distance to $j$ answers the content of $i$. The third asks how well the content of $j$ answers the distance from $j$ back to $i$, which is why its index is $\delta(j, i)$. The fourth possible term, position against position, is left out because a distance compared with itself carries nothing.
+- **5**: The sum of three dot products has three times the spread of one, so the scale is $\sqrt{3d}$ rather than BERT's $\sqrt{d}$. The softmax weights then mix the values into the output $H_o$. The paper reports this factor matters for stable training of large models.
 - **6**: The output has the same shape as BERT's and feeds the same residual, norm and feed-forward steps.
 
 ```algorithm
@@ -120,10 +120,10 @@ tokenizer finding carries over.
 \Return $L_{MLM}$
 ```
 
-- **1-2**: The encoder runs with content only. Through layer $L - 1$ the model knows distances between tokens and nothing about where in the sentence they stand.
-- **3**: The absolute position vectors are added once, to the output of the second-to-last layer. The paper's example is "a new store opened beside the new mall" with both nouns masked: both follow "new" at the same distance, and only the absolute place tells the subject from the object.
-- **4-5**: The last layer is applied twice. The query comes from the position-aware sum, the keys and values from the position-free states, and the second pass reads the first pass's output as its query. The weights of the two passes are the last layer's.
-- **6-7**: The head and the loss are BERT's, on the decoder's output. In fine-tuning the decoder is dropped and the encoder's own last layer is used, so a downstream model never sees absolute position.
+- **1-2**: The encoder runs with content only, from the normalised token embeddings $h^0$ to $h^{L-1}$. Through layer $L - 1$ the model knows distances between tokens and nothing about where in the sentence they stand.
+- **3**: The absolute position vectors are added once, to the output of the second-to-last layer, giving $z$. The paper's example is "a new store opened beside the new mall" with both nouns masked: both follow "new" at the same distance, and only the absolute place tells the subject from the object.
+- **4-5**: The last layer is applied twice. The query comes from the position-aware sum, the keys and values from the position-free states, and the second pass reads the first pass's output $z$ as its query. The weights of the two passes are the last layer's.
+- **6-7**: The head and the loss $L_{MLM}$ are BERT's, on the decoder's output. In fine-tuning the decoder is dropped and the encoder's own last layer is used, so a downstream model never sees absolute position.
 
 ## Worked example
 

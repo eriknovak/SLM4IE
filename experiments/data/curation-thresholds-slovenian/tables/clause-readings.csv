@@ -1,0 +1,9 @@
+clause,qualifier,value,ci_low,ci_high,bar,margin,outcome
+H1,pooled over sources,0.3844,0.3364,0.4348,0.6,,inconclusive
+H2,pooled over sources,0.5679,0.5093,0.6246,0.6,,inconclusive
+H3,pooled over sources,0.2177,0.1878,0.2508,0.6,,inconclusive
+H4,pooled over sources,0.0317,0.0208,0.048,0.6,,inconclusive
+H5,"spam filter, pooled over sources",0.5964,0.538,0.6522,0.6,,inconclusive
+H5,"quality filter, pooled over sources",0.2861,0.2529,0.3219,0.6,,inconclusive
+H5,"repetition filter, pooled over sources",0.1239,0.1009,0.1512,0.6,,inconclusive
+Q1,loosened build against the baseline,0.0299,-0.0189,0.0788,0.02,,answered

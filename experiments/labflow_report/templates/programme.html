@@ -1,0 +1,30 @@
+{#- the programme page: kicker, short title, meta line, goal, the sticky section bar, then the map
+    with the experiments table, the threads matrix, the beliefs, the open questions and the needs -#}
+{% extends "page.html" %}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/programme.html" as programme %}
+
+{% block body %}
+{{ layout.kicker(kicker) }}<h1 title="{{ full_title }}">{{ page.title }}</h1>
+<p class="row small meta"><span><span class="badge b-{{ badge }}">{{ status }}</span></span>{% for m in meta %}<span>{{ m }}</span>{% endfor %}</p>
+<p class="goal"><b>Goal</b> — {% if goal %}{{ goal }}{% else %}{{ inline.missing(no_goal) }}{% endif %}</p>
+{{ layout.section_bar(bar) }}
+
+{#- the sections, each with its empty state when there is nothing to draw -#}
+<div class="secs" data-nolink>
+{% for s in sections %}
+{% call layout.section(page.id, s.key, s.title, "fg") -%}
+{% if s.lede %}<p class="lede{{ ' wide' if s.tree_lede else '' }}">{{ s.lede }}</p>{% endif %}
+{%- if s.tree_lede %}<p class="lede narrow">{{ s.tree_lede }}</p>{% endif %}
+{% if not s.data %}{{ layout.empty(s.empty) }}
+{%- elif s.key == "map" %}{{ programme.map(s.data, page.id) }}{{ programme.experiments(s.data.table, page.id ~ "/experiments", page.id) }}
+{%- elif s.key == "threads" %}{{ programme.threads(s.data) }}
+{%- elif s.key == "believe" %}{{ programme.beliefs(s.data) }}
+{%- elif s.key == "open" %}{{ programme.open_questions(s.data) }}
+{%- elif s.key == "needs" %}{{ programme.needs(s.data, needs_note) }}
+{%- endif %}
+{%- endcall %}
+{% endfor %}
+</div>
+{% endblock %}

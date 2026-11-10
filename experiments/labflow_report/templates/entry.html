@@ -1,0 +1,41 @@
+{#- the entry page: kicker, title, status line, summary, the sticky section bar, the lead (the
+    description closed by its facts table), then the kind's sections, Evidence, Limits, Related and Sources -#}
+{% extends "page.html" %}
+{% import "components/inline.html" as inline %}
+{% import "components/layout.html" as layout %}
+{% import "components/reference.html" as ref %}
+{% import "components/evidence.html" as evidence %}
+
+{% block body %}
+{{ layout.kicker(kicker) }}<h1>{{ page.title }}</h1>
+<p class="row small status"><span class="sq {{ status.square }}"></span>{{ status.word }}
+{%- for e in variant_of %} <span class="muted">·</span> variant of {{ ref.entry_link(e) }}{% endfor %}
+{%- for e in part_of %} <span class="muted">·</span> part of {{ ref.entry_link(e) }}{% endfor %} <span class="muted">·</span> in <a href="{{ topic.href }}">{{ topic.title }}</a>
+{%- for r in roles %} <span class="muted">·</span> the {{ r.role }} of {{ ref.entry_link(r.entry) }}{% endfor %}</p>
+<p class="lede">{% if summary %}{{ summary }}{% else %}{{ inline.missing(no_summary) }}{% endif %}</p>
+{{ layout.section_bar(bar) }}
+
+{#- the lead: the description closed by its facts table, the folded paper notes, why it matters -#}
+{% call layout.section(page.id, "description", "Description", "accent") %}{% if description %}<div class="prose">{{ description }}</div>{% else %}{{ layout.empty(not_written) }}{% endif %}
+{%- if facts %}<table class="facts"><tbody>{% for f in facts %}<tr><td class="muted">{{ f.label }}</td><td>{% if f.missing %}{{ inline.missing(f.missing) }}{% elif f.note %}<span class="note" title="{{ f.note }}">{{ f.html }}</span>{% else %}{{ f.html }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="small nofacts">{{ inline.missing(no_facts) }}</p>{% endif %}{% endcall %}
+{%- if adds %}{% call layout.fold(adds.title, "", adds.digest) %}<div class="prose">{{ adds.html }}</div>{% endcall %}{% endif %}
+{%- if why or is_draft %}<p class="chap why" style="color: var(--muted)">Why it matters here</p>{% if why %}<div class="prose">{{ why }}</div>{% else %}{{ layout.empty(not_written) }}{% endif %}{% endif %}
+
+{#- the sections, each with its empty state when nothing is written; the Algorithm's figure below its folds -#}
+{% for s in sections %}
+{% call layout.section(page.id, s.key, s.title, s.color) -%}
+{% if not s.data %}{{ layout.empty(s.empty) }}
+{%- elif s.key == "difference" %}{{ ref.difference(s.data) }}
+{%- elif s.key == "definition" %}{{ ref.definition(s.data) }}
+{%- elif s.key == "algorithm" %}{% for a in s.data %}{{ ref.algorithm(a) }}{% endfor %}
+{%- elif s.key == "worked-example" %}{{ ref.worked_example(s.data) }}
+{%- elif s.key == "where-it-sits" %}{{ ref.where_it_sits(s.data) }}
+{%- elif s.key == "evidence" %}{{ ref.entry_evidence(s.data) }}
+{%- elif s.key == "limits" %}{{ ref.limits(s.data) }}
+{%- elif s.key == "related" %}{{ ref.related(s.data) }}
+{%- elif s.key == "sources" %}{{ ref.sources(s.data) }}
+{%- endif %}
+{%- if s.figure %}<div class="afig">{{ evidence.exhibit(s.figure) }}</div>{% endif %}
+{%- endcall %}
+{% endfor %}
+{% endblock %}

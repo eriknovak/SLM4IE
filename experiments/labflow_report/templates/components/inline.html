@@ -1,0 +1,65 @@
+{#- Components board, inline: the chips and tags that sit inside a line of prose -#}
+{% import "components/words.html" as words %}
+
+{#- a zoomable figure: a click anywhere on it, or its expand button, opens it full screen;
+    the figure stays the first child, which the viewer sizes -#}
+{% macro zoom(label, html) -%}
+<div class="fig zoom" role="button" tabindex="0" aria-label="Open {{ label }} full screen">{{ html }}<button type="button" class="fzb" aria-label="open {{ label }} full screen" title="open full screen"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"></path></svg></button></div>
+{%- endmacro %}
+
+{#- an entry's code chip: D, F, M or a clause; with a tip it carries a hover card -#}
+{% macro ct(kind, code, href="", tip="") -%}
+{% if href %}
+<a class="ct {{ kind }}{{ ' ref' if tip else '' }}" href="{{ href }}"{% if tip %} data-tip="{{ tip }}"{% endif %}>{{ code }}</a>
+{%- else %}
+<span class="ct {{ kind }}">{{ code }}</span>
+{%- endif %}
+{%- endmacro %}
+
+{#- an experiment as a pill: its mark and short name, the full title on hover -#}
+{% macro pill(word, name, full="", href="") -%}
+{% set tag = "a" if href else "span" %}
+<{{ tag }} class="cc pill"{% if href %} href="{{ href }}"{% endif %}{% if full %} title="{{ full }}"{% endif %}>{{ words.mark(word) }}<span class="nm">{{ name }}</span></{{ tag }}>
+{%- endmacro %}
+
+{% macro iss(number, title="", href="") -%}
+{% set tag = "a" if href else "span" %}
+<{{ tag }} class="iss"{% if href %} href="{{ href }}"{% endif %}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><circle cx="8" cy="8" r="1.2"></circle></svg><span class="n">#{{ number }}</span>{{ title }}</{{ tag }}>
+{%- endmacro %}
+
+{#- a chip for a table or figure the reader can open -#}
+{% macro tbl(path, label="", href="#") -%}
+<a href="{{ href }}" class="tlink"><span class="tic">{{ "▦" if path.endswith(".csv") else "◩" }}</span>{{ label or path }}</a>
+{%- endmacro %}
+
+{#- a commit: linked to its GitHub page when the repo is known -#}
+{% macro commit(sha="", href="") -%}
+{% if sha and href %}<a href="{{ href }}"><span class="sha">{{ sha }}</span></a>{% elif sha %}<span class="sha">{{ sha }}</span>{% else %}<span class="sha none">commit not recorded</span>{% endif %}
+{%- endmacro %}
+
+{% macro cite(label, href) -%}
+<a href="{{ href }}" class="cite">{{ label }}</a>
+{%- endmacro %}
+
+{#- a value the record does not hold, said in words, never a blank or a dash -#}
+{% macro missing(text="not recorded") -%}
+<span class="missing">{{ text }}</span>
+{%- endmacro %}
+
+{% macro when(kind) -%}
+{% if kind == "results" %}<span class="when post">after results</span>{% elif kind == "runs" %}<span class="when post">after runs</span>{% else %}<span class="when pre">before any run</span>{% endif %}
+{%- endmacro %}
+
+{% macro byhand(text="by hand") -%}
+<span class="byhand">{{ text }}</span>
+{%- endmacro %}
+
+{% macro link(text, href) -%}
+<a href="{{ href }}">{{ text }}</a>
+{%- endmacro %}
+
+{#- an address that opens only on the author's machine: text, the address on hover -#}
+{% macro local(text, address) -%}
+<span class="loc" title="{{ address }} — opens only where that server runs">{{ text }}</span>
+{%- endmacro %}
+

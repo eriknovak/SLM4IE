@@ -1,0 +1,24 @@
+{#- the Reference landing page (board ReferenceLanding): kicker and title, the topic and entry counts,
+    the entries by status square and the open ideas, then one card per topic, two to a row -#}
+{% extends "page.html" %}
+{% import "components/layout.html" as layout %}
+
+{% block body %}
+{{ layout.kicker(kicker) }}<h1>{{ page.title }}</h1>
+<p class="book">{{ lede }}</p>
+<div class="ln-sqs">{% for square, n, word in squares %}<span><span class="sq {{ square }}" aria-hidden="true"></span><b>{{ n }}</b> {{ word }}</span>{% endfor %}
+{%- if ideas is not none %}<span><b>{{ ideas }}</b> open idea{{ '' if ideas == 1 else 's' }}</span>{% endif %}</div>
+<div class="ln-topics{{ ' one' if cards | length == 1 else '' }}">
+{%- for t in cards %}
+<article class="mc ln-topic" id="{{ t.id }}">
+<div class="ln-th"><h2>{% if t.href %}<a href="{{ t.href }}">{{ t.title }}</a>{% else %}{{ t.title }}{% endif %}</h2><span class="badge b-{{ t.badge }}">{{ t.status }}</span></div>
+<p class="ln-tm mono muted">{{ t.meta }}</p>
+<p class="ln-tq">{{ t.question }}</p>
+{% if t.entries %}<ul class="ln-ents" aria-label="Entries in {{ t.title }}">{% for e in t.entries %}<li><a class="ln-ent" href="{{ e.href }}" title="{{ e.tip }}"><span class="sq {{ e.square }}" aria-hidden="true"></span><span class="sr">{{ e.word }}: </span>{{ e.title }}</a></li>{% endfor %}</ul>
+{% else %}<p class="ln-none">{{ t.none }}</p>{% endif %}
+<div class="ln-tf">{% if t.compare %}<a href="{{ t.compare_href }}">{{ t.compare }}</a>{% else %}<span class="muted">{{ t.no_compare }}</span>{% endif %}
+{%- if t.ideas %}<span class="ln-ideas"><span class="muted">open ideas</span>{% for i in t.ideas %}<a class="iss" href="{{ i.href }}" title="{{ i.title }}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><circle cx="8" cy="8" r="1.2"></circle></svg><span class="n">#{{ i.number }}</span></a>{% endfor %}</span>{% endif %}</div>
+</article>
+{%- endfor %}
+</div>
+{% endblock %}

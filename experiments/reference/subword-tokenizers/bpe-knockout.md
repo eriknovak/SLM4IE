@@ -67,11 +67,11 @@ morphology, at the cost of a short continued pretraining.
 
 ## Facts
 
-- **Base unit**: UTF-8 bytes, each shown as one printable character, as in the predecessor
-- **Chunk while training**: whole word, with the space before it, as in the predecessor
-- **Picks next token by**: highest pair count, followed by a pruning pass that removes every merge whose blame ratio is at least one half
-- **Encoding**: the pruned merges replayed in their original priority, a merge joining all its parts at once; no lexicon
-- **Needs lexicon**: once, after training, a word list cut at morpheme boundaries
+- **Base unit**: UTF-8 bytes — each shown as one printable character, as in the predecessor
+- **Chunk while training**: whole word — with the space before it, as in the predecessor
+- **Picks next token by**: highest pair count — followed by a pruning pass that removes every merge whose blame ratio is at least one half
+- **Encoding**: the pruned merges — replayed in their original priority, a merge joining all its parts at once; no lexicon
+- **Needs lexicon**: once, after training — a word list cut at morpheme boundaries
 - **Setting**: the blame threshold, one half in the paper; whether blame counts each reference word once or weights it by frequency, once in the paper
 - **Vocabulary**: the predecessor's size less the knocked-out tokens, about 9 to 11% fewer in the paper
 - **Round trip**: as the predecessor, since the byte symbols and the decoder are unchanged
@@ -124,10 +124,10 @@ the paper keeps fixed.
 \Return $K \gets \{m : B(m) / N(m) \ge 1/2\}$
 ```
 
-- **1**: Every merge starts with a clean record.
+- **1**: Every merge starts with a clean record: its use count $N(m)$ and its blame count $B(m)$ are zero.
 - **2-3**: The tokenizer runs as usual over each reference word. Each space deleted between two characters was deleted by exactly one merge, so blame has one owner.
-- **4-7**: A merge is counted every time it fires, and blamed when it fired across a boundary. It is enough that the merge glued one character of each morpheme; once a boundary is gone no later merge can restore it.
-- **8**: The ratio compares harm to use. Each word counts once, so rare words weigh as much as common ones.
+- **4-7**: A merge is counted in $N(m)$ every time it fires, and blamed in $B(m)$ when it fired across a boundary. It is enough that the merge glued one character of each morpheme; once a boundary is gone no later merge can restore it.
+- **8**: The ratio compares harm to use; a merge blamed in at least half its uses joins $K$. Each word counts once, so rare words weigh as much as common ones.
 
 ```algorithm
 \caption{Knockout: removing one token from the merge graph}
@@ -151,7 +151,7 @@ the paper keeps fixed.
 ```
 
 - **1-2**: A byte symbol was never merged into being, so it cannot be knocked out.
-- **3-5**: The merge that made $t$ is cut loose from its parents.
+- **3-5**: The merge that made $t$, $m_{old}$, is cut loose from its parents.
 - **6-9**: Every merge that needed $t$ now needs the parts of $t$ instead, at the same priority. This is the step that stops the removal from cascading: a merge above $t$ keeps working, only with more parts.
 - **10-11**: The token is gone. Its parts and its consumers stay.
 

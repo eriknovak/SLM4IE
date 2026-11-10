@@ -10,14 +10,14 @@ ticket: "#32"
 pr: "#33"
 mlflow: http://localhost:5555/#/experiments/16
 builds_on: []
-varies: []
-uses:
+varies:
   - subword-tokenizers/byte-level-bpe
   - subword-tokenizers/character-bpe
   - subword-tokenizers/wordpiece
   - subword-tokenizers/unigram
   - subword-tokenizers/morphbpe
   - subword-tokenizers/morphpiece
+uses: []
 tests: []
 evidence: {}
 types: [metric-validity]
@@ -36,6 +36,8 @@ concluded: 2026-10-25
 
 ## Hypothesis
 
+- **Question**: Does the Sloleks 3.2 stem-ending split rank Slovene tokenizers on morpheme-boundary F1 as the corrected lemma-alignment gold does?
+- **Decision it informs**: Which gold the later tokenizer experiments score their morph metrics on, and whether on all forms or on the manually checked forms first. A refuted first clause makes the authors' split the only gold; a refuted second makes the manual-only score primary.
 - **Statement**: the tokenizers rank the same on morpheme-boundary F1 whether the gold is the project's lemma-alignment heuristic, with its word-class tags corrected, or the stem-ending split that the Sloleks 3.2 authors released. Scoring on the manually checked forms alone gives the same ranking as scoring on all forms.
 - **Rationale**:
   - **The morph metrics so far rest on a heuristic gold.** The heuristic aligns each inflected form to its lemma (dictionary form) and cuts where they first differ, with rules for the usual stem changes. The June sweep notes call it silver gold and read its scores only as relative comparators between tokenizers.
@@ -44,10 +46,10 @@ concluded: 2026-10-25
   - **The two golds cut differently even where the heuristic does cut.** The heuristic stops at the first difference from the lemma, so a fleeting vowel or an augment moves the cut: the heuristic gives *binokularn·a*, Sloleks 3.2 gives *binokular·na*. If such cuts reorder the tokenizers, the June morph conclusions do not hold.
   - **The data can carry the bars, by the counts on disk.** Sloleks 3.2 holds 2.89 million distinct forms in nouns, adjectives, verbs and adverbs, 0.86 million of them on manually checked lexemes. Of the 2.80 million forms both golds cover, the uncorrected heuristic agrees on the cut in 23%, mostly verbs and adjectives, and leaves 91% of nouns unsplit. Holding out a fifth of the lexemes leaves about half a million scored forms. Counts in [forms per word class and checking status](tables/scoping-gold-by-pos.csv).
 - **Predictions**: every clause is read on the 24 tokenizers (six algorithms at 16k, 32k, 64k and 128k vocabulary), trained on the training side of the corpus split ([D2], [D3]). Each is scored on the same held-out forms under each gold, from lexemes no morpheme table saw ([D1], [D4]). Rank agreement is Kendall's τ over the 24 tokenizers on morpheme-boundary F1, with a 95% bootstrap interval over lexemes ([D6]).
-  - **H1 — The heuristic gold and the Sloleks 3.2 gold rank the tokenizers alike**: confirmed if τ between the two rankings is at least 0.8; refuted if it is below 0.8 — the heuristic's cut placement then decides which tokenizer looks morphologically best, and only the authors' split can serve as gold.
-  - **H2 — The manually checked forms rank the tokenizers as all forms do**: confirmed if τ between the manual-only and the all-forms ranking under Sloleks 3.2 is at least 0.9; refuted if it is below 0.9 — errors in the automatic rows then move the ranking, and the manual-only score becomes the primary one.
-  - **Q1 — Which metrics still improve as the vocabulary grows, and which have levelled off by 128k?**: read on the curves of every metric against vocabulary size per algorithm (fertility, compression, Rényi efficiency, and the three morph metrics under Sloleks 3.2). A metric has levelled off for an algorithm when its gain from 64k to 128k is under a quarter of its gain from 16k to 32k. Robust if each morph metric's reading is the same on the manual-only and the all-forms score — the answer sets the vocabulary sizes the later tokenizer experiments train.
-  - **Verdict rule**: confirmed when H1 and H2 both hold; refuted when H1 is refuted; inconclusive when an interval of τ straddles its bar. H2 refuted with H1 confirmed is the automatic-rows reading: the golds agree, but the score is reported on manual forms first. Q1 is read beside that outcome and does not change it. — Note added 2026-10-25 at conclusion: the automatic-rows reading takes the outcome word partial, since the rule named the reading without a word and a split of the bars takes neither side's word.
+  - **H1 — The heuristic gold and the Sloleks 3.2 gold rank the tokenizers alike**: confirmed if τ between the two rankings is at least 0.8; refuted if it is below 0.8 — the heuristic's cut placement then decides which tokenizer looks morphologically best, and only the authors' split can serve as gold ([D6]; measured by [M8]).
+  - **H2 — The manually checked forms rank the tokenizers as all forms do**: confirmed if τ between the manual-only and the all-forms ranking under Sloleks 3.2 is at least 0.9; refuted if it is below 0.9 — errors in the automatic rows then move the ranking, and the manual-only score becomes the primary one ([D6], [D1]; measured by [M8]).
+  - **Q1 — Which metrics still improve as the vocabulary grows, and which have levelled off by 128k?**: read on the curves of every metric against vocabulary size per algorithm (fertility, compression, Rényi efficiency, and the three morph metrics under Sloleks 3.2). A metric has levelled off for an algorithm when its gain from 64k to 128k is under a quarter of its gain from 16k to 32k. Robust if each morph metric's reading is the same on the manual-only and the all-forms score — the answer sets the vocabulary sizes the later tokenizer experiments train ([D15]; measured by [M8]).
+  - **Verdict rule**: confirmed when H1 and H2 both hold; refuted when H1 is refuted; inconclusive when an interval of τ straddles its bar. H2 refuted with H1 confirmed is the automatic-rows reading: the golds agree, but the score is reported on manual forms first. Q1 is read beside that outcome and does not change it. — Note added 2026-10-25: at conclusion, the automatic-rows reading takes the outcome word partial, since the rule named the reading without a word and a split of the bars takes neither side's word.
   - **Read beside the clauses, not as clauses**: forms scored per gold and slice; τ for H1 and H2 on the 16 tokenizers that train without a morpheme table ([D5]); morpheme-boundary F1 on multi-token forms only ([D7]), without forms that have no ending ([D8]) and weighted by corpus frequency ([D9]); τ against the MorphScore v2 Slovene ranking ([D10]); the share of each vocabulary that occurs rarely in the training and evaluation samples ([D12]); the uncorrected June heuristic's scores, as the size of the tag bug; training time and peak memory of the 128k tokenizers.
 - **Outcome**: partial
 
@@ -65,22 +67,22 @@ concluded: 2026-10-25
   - Factors: the gold (corrected heuristic, Sloleks 3.2) and the slice (manual, all) are scientific. The algorithm and the vocabulary size span the population being ranked. The training sample and the morpheme table are fixed ([D2]).
 - **Metrics**: primary Kendall's τ between tokenizer rankings on morpheme-boundary F1; secondary Morph-Edit-Distance, Morph-Consistency, fertility, compression and Rényi efficiency — each defined in `experiments/GLOSSARY.md`.
 - **Protocol**: training each of the 24 tokenizers is one tracked run. Scoring is deterministic and recomputed by `analysis.py` from the tokenizer files, the golds and the evaluation sample, with no further runs.
-- **Compute**: local CPU, four workers at most. One streaming pass over the corpus fixes the split and its statistics. Five algorithms train in minutes to an hour at 64k. MorphBPE's single-threaded merge loop took 31 hours at 128k, which bounds the sweep: all 24 tokenizers trained in 31 hours on four workers.
-- **People**: none.
-- **Data access**: Sloleks 3.2 is an unreleased file the lexicon's author shared directly; it is cited as Sloleks 3.1 (hdl.handle.net/11356/2080), as the author asked.
-- **External dependency**: none.
+- **Compute**: local CPU, four workers at most — one streaming pass over the corpus fixes the split and its statistics. Five algorithms train in minutes to an hour at 64k. MorphBPE's single-threaded merge loop took 31 hours at 128k, which bounds the sweep: all 24 tokenizers trained in 31 hours on four workers.
+- **People**: none — the experiment needs no annotation or review hours.
+- **Data access**: Sloleks 3.2 — an unreleased file the lexicon's author shared directly; it is cited as Sloleks 3.1 (hdl.handle.net/11356/2080), as the author asked.
+- **External dependency**: none — the runs call no hosted model, API or service.
 
 ## Datasets
 
-- **Sloleks stem-ending split**: one item is one lexeme of the Sloleks authors' release `DSBS__inflect_morph_seg__2026-07.tsv`, with its manual or automatic status and each inflected form cut into the paradigm stem and the ending. The authors shared it from the CJVT Nextcloud in July 2026; it is cited as Sloleks 3.1. It is converted to the shared `tokenization/sloleks_inflection.jsonl.gz` and cut into the Sloleks gold by [D1]. [Forms per gold, slice and word class, before and after the cut to shared forms](tables/dataset-morph-golds-statistics.csv)
-- **Sloleks 3.1 lexicon**: one item is one lemma of Sloleks 3.1 (CLARIN.SI 11356/2080) with its inflected forms and tags, converted to the shared `tokenization/sloleks.jsonl.gz` in June 2026. The corrected heuristic gold is aligned from it; its rows sit in the same table as the Sloleks gold's.
-- **June gold**: the heuristic gold the June sweep saved before the tag fix (`tokenizers/morph_lexicon_infl.jsonl.gz`), read beside the clauses only. The shared sweep registry now builds the corrected gold, so this file is the only copy of the June one. Its rows sit in the same table.
-- **Scored-form golds**: the Sloleks, heuristic and June golds cut to the held-out forms all three cover ([D4]), frozen as `final/morph-golds-heldout-forms/` under the experiment's data folder; every tokenizer is scored on these forms. Each form carries the held-out lexeme it is resampled under ([D6]); the lexeme counts sit in the gold table.
-- **Held-out form counts**: one item is one scored form with its count in the evaluation sample ([D9]), frozen as `final/heldout-form-counts/`. A form holding a digit or hyphen (`a380`, `APZ-ja`) never matches a run of letters, so it keeps only the weight of one that every form gets before its count is added ([D9]). The forms seen, the forms that can never be counted and the occurrences per word class sit in the gold table.
-- **Curated corpus split**: one item is one document of the shared corpus after sentence dedup (`pretrain/06_sentence_dedup`, 18 sources, built 2026-10-08). Each source's documents are split 80/20 into a training and an evaluation side ([D3]), and a sample is drawn from each side. A word here is a whitespace-separated token, so the totals exceed the statistics stage's word counts. [Documents, words and bytes per source and side, for the split and the samples](tables/dataset-corpus-split-statistics.csv)
-- **Lexeme split**: the Sloleks 3.2 lexemes split 80/20 within each word class and checking status ([D4]); the morpheme table is built from the training side and the clauses are scored on the held-out forms. [Lexemes and forms per side, word class and status](tables/dataset-lexeme-split-statistics.csv)
-- **Sloleks word relations**: one item is one derived lemma of the Sloleks 2.0 word relations (CLARIN.SI 11356/1986) cut into morphemes, converted to the shared `tokenization/sloleks_relations.jsonl.gz`; it joins the morpheme table only.
-- **MorphScore v2 Slovene set**: one item is one word form from the Slovene UD treebank SSJ, cut into stem and affixes by its longest substring shared with the lemma (Arnett, Hudspeth & O'Connor 2025, arXiv:2507.06378). It is downloaded from the authors' Hugging Face dataset at the revision of 2025-07-10 (CC BY-SA 4.0) and converted to the shared `tokenization/morphscore_slovenian.jsonl.gz`. MorphScore v2's default filters keep the first occurrence of each item, with its stem equal to its lemma and no digit in the form. The result is frozen as `final/morphscore-slovene-items/` and scores the 16 tokenizers without a morpheme table as an outside gold ([D10]). [Items through each filter and per part of speech](tables/dataset-morphscore-statistics.csv)
+- **Sloleks stem-ending split** (external; silver labels): one item is one lexeme of the Sloleks authors' release `DSBS__inflect_morph_seg__2026-07.tsv`, with its manual or automatic status and each inflected form cut into the paradigm stem and the ending. The authors shared it from the CJVT Nextcloud in July 2026; it is cited as Sloleks 3.1. It is converted to the shared `tokenization/sloleks_inflection.jsonl.gz` and cut into the Sloleks gold by [D1]. [Forms per gold, slice and word class, before and after the cut to shared forms](tables/dataset-morph-golds-statistics.csv)
+- **Sloleks 3.1 lexicon** (external; none labels): one item is one lemma of Sloleks 3.1 (CLARIN.SI 11356/2080) with its inflected forms and tags, converted to the shared `tokenization/sloleks.jsonl.gz` in June 2026. The corrected heuristic gold is aligned from it; its rows sit in the same table as the Sloleks gold's.
+- **June gold** (own; silver labels): one item is one inflected form with the cut the June heuristic gave it. It is the heuristic gold the June sweep saved before the tag fix (`tokenizers/morph_lexicon_infl.jsonl.gz`), read beside the clauses only. The shared sweep registry now builds the corrected gold, so this file is the only copy of the June one. Its rows sit in the same table.
+- **Scored-form golds** (derived from Sloleks stem-ending split, Sloleks 3.1 lexicon and June gold; silver labels): one item is one held-out form with its cut under the Sloleks, heuristic and June golds, the forms all three cover ([D4]). They are frozen as `final/morph-golds-heldout-forms/` under the experiment's data folder; every tokenizer is scored on these forms. Each form carries the held-out lexeme it is resampled under ([D6]); the lexeme counts sit in the gold table.
+- **Held-out form counts** (derived from Curated corpus split; none labels): one item is one scored form with its count in the evaluation sample ([D9]), frozen as `final/heldout-form-counts/`. A form holding a digit or hyphen (`a380`, `APZ-ja`) never matches a run of letters, so it keeps only the weight of one that every form gets before its count is added ([D9]). The forms seen, the forms that can never be counted and the occurrences per word class sit in the gold table.
+- **Curated corpus split** (own; none labels): one item is one document of the shared corpus after sentence dedup (`pretrain/06_sentence_dedup`, 18 sources, built 2026-10-08). Each source's documents are split 80/20 into a training and an evaluation side ([D3]), and a sample is drawn from each side. A word here is a whitespace-separated token, so the totals exceed the statistics stage's word counts. [Documents, words and bytes per source and side, for the split and the samples](tables/dataset-corpus-split-statistics.csv)
+- **Lexeme split** (split of Sloleks stem-ending split; silver labels): one item is one Sloleks 3.2 lexeme, split 80/20 within each word class and checking status ([D4]); the morpheme table is built from the training side and the clauses are scored on the held-out forms. [Lexemes and forms per side, word class and status](tables/dataset-lexeme-split-statistics.csv)
+- **Sloleks word relations** (external; silver labels): one item is one derived lemma of the Sloleks 2.0 word relations (CLARIN.SI 11356/1986) cut into morphemes, converted to the shared `tokenization/sloleks_relations.jsonl.gz`; it joins the morpheme table only.
+- **MorphScore v2 Slovene set** (benchmark; silver labels): one item is one word form from the Slovene UD treebank SSJ, cut into stem and affixes by its longest substring shared with the lemma (Arnett, Hudspeth & O'Connor 2025, arXiv:2507.06378). It is downloaded from the authors' Hugging Face dataset at the revision of 2025-07-10 (CC BY-SA 4.0) and converted to the shared `tokenization/morphscore_slovenian.jsonl.gz`. MorphScore v2's default filters keep the first occurrence of each item, with its stem equal to its lemma and no digit in the form. The result is frozen as `final/morphscore-slovene-items/` and scores the 16 tokenizers without a morpheme table as an outside gold ([D10]). [Items through each filter and per part of speech](tables/dataset-morphscore-statistics.csv)
 
 ## Methods
 
@@ -176,7 +178,7 @@ concluded: 2026-10-25
 - **Output**: the seven `tables/sweep-*.csv` tables and the five `figures/sweep-*.svg` figures the findings cite; the figures are also attached to the sweep's parent run in MLflow.
 - **How**:
   1. Only forms every tokenizer tiles, meaning its tokens joined give the form back exactly, are scored ([D7]). A reading is a gold, a mask over the forms (all, manual, multi-token, with an ending, without unknown tokens, or one word class) and a per-form weight: one, or the evaluation-sample count plus one ([D9]).
-  2. Per reading and tokenizer, the shared, predicted and gold boundary counts are summed per lexeme. Morpheme-boundary F1 is $F_1 = 2\,\mathrm{TP} / (P + G)$, where $\mathrm{TP}$, $P$ and $G$ are the summed shared, predicted and gold boundaries.
+  2. Per reading and tokenizer, the shared, predicted and gold boundary counts are summed per lexeme. Morpheme-boundary F1 is $F_1=2\,\mathrm{TP}/(P+G)$, where $\mathrm{TP}$, $P$ and $G$ are the summed shared, predicted and gold boundaries.
   3. Each of `stats.n_resamples` bootstrap draws resamples the lexemes with replacement, so a lexeme's weight is how many times it was drawn, and recomputes F1 ([D6]). The MorphScore items carry no lexeme, so they are resampled as items. Readings over the same lexemes share the draws, so both rankings of one pair come from the same resampled lexemes.
   4. Kendall's τ between two rankings is computed on the point F1 and on every paired draw; the interval is the central `stats.ci_level` of the draws. The 16-tokenizer readings drop the two table-trained algorithms ([D5]).
   5. Q1's rule takes, per metric, slice and algorithm, the gain from 16k to 32k and from 64k to 128k in the metric's better direction. The metric has levelled off when the late gain is under `scoring.levelled_ratio` of the early one, falls when it is negative, and has no early gain when the early one is not positive.
@@ -190,7 +192,7 @@ concluded: 2026-10-25
 - **Decision**: Sloleks 3.2 repeats a form once per morphosyntactic tag; each (lexeme, form) pair is kept once. A form that two lexemes split differently is dropped from both golds. A form with no ending stays in, as a form that should not be split. A form is manual when every lexeme carrying it is manually checked.
 - **Why**: a form counted once per tag would weight long paradigms; a form with two gold cuts has no single right answer. The 74,000 forms split two ways are 2.6% of the lexicon.
 - **History**:
-  - 2026-10-22 set at the start, from the scoping counts.
+  - 2026-10-22 (before runs) set at the start, from the scoping counts.
 
 ### D2 — Retrain all 24 tokenizers on one new sample, with a morpheme table from the corrected heuristic
 
@@ -200,9 +202,9 @@ concluded: 2026-10-25
   - Reuse the 18 June tokenizers and train only 128k: they were trained on an older corpus.
   - Build the table from the Sloleks split: favours the Sloleks gold by construction.
 - **History**:
-  - 2026-10-22 set at the start: train only 128k on the June sample and the June table.
-  - 2026-10-22 changed before any run: the corpus was rebuilt since June, so the whole sweep is retrained on a new sample with a held-out evaluation side.
-  - 2026-10-23 worded as built before any run: the table removes the scored forms, not whole lexemes, so it keeps Sloleks 3.1 forms that 3.2 lacks.
+  - 2026-10-22 (before runs) set at the start: train only 128k on the June sample and the June table.
+  - 2026-10-22 (before runs) changed before any run: the corpus was rebuilt since June, so the whole sweep is retrained on a new sample with a held-out evaluation side.
+  - 2026-10-23 (after runs) worded as built: the table removes the scored forms, not whole lexemes, so it keeps Sloleks 3.1 forms that 3.2 lacks.
 
 ### D3 — Split the corpus 80/20 by document within each source, and sample each side in proportion to its sources
 
@@ -212,8 +214,8 @@ concluded: 2026-10-25
   - Split one 2.5 GB sample: the evaluation side would be one small draw, not reusable.
   - Weight sources equally, as the June sampler did: a 367-document source would weigh as much as the largest web crawl.
 - **History**:
-  - 2026-10-22 set with the user before any run.
-  - 2026-10-23 worded as built before any run: the source shares are by bytes, as the sampler draws them.
+  - 2026-10-22 (before runs) set with the user before any run.
+  - 2026-10-23 (after runs) worded as built: the source shares are by bytes, as the sampler draws them.
 
 ### D4 — Split the lexemes 80/20 within each word class and status, and score only held-out forms
 
@@ -222,16 +224,16 @@ concluded: 2026-10-25
 - **Alternatives**:
   - Split by form, as SIGMORPHON 2022 and MorphBPE do: forms of one paradigm land on both sides.
 - **History**:
-  - 2026-10-22 set with the user before any run, after the data review found the table covered every scored form.
-  - 2026-10-22 precedent added after a literature comparison: only BPE-knockout's lemma holdout and DagoBERT's held-out bases split above the form.
-  - 2026-10-22 table rule worded as built, before any run: the table keeps shared forms, which are never scored.
+  - 2026-10-22 (after runs) set with the user, after the data review found the table covered every scored form.
+  - 2026-10-22 (after runs) precedent added after a literature comparison: only BPE-knockout's lemma holdout and DagoBERT's held-out bases split above the form.
+  - 2026-10-22 (after runs) table rule worded as built: the table keeps shared forms, which are never scored.
 
 ### D5 — Report the rank agreements also without the two algorithms that train on a morpheme table
 
 - **Decision**: beside H1 and H2 on all 24 tokenizers, τ is reported on the 16 tokenizers of BPE, character BPE, WordPiece and Unigram.
 - **Why**: with held-out lexemes no form is memorised, but the table still teaches heuristic-style endings, which may favour the heuristic gold. If the two readings differ, the table explains the difference rather than the gold.
 - **History**:
-  - 2026-10-22 set with the user before any run.
+  - 2026-10-22 (after runs) set with the user.
 
 ### D6 — Resample lexemes, not forms, for every bootstrap interval on the morph metrics
 
@@ -240,7 +242,7 @@ concluded: 2026-10-25
 - **Alternatives**:
   - Resample forms, as the code did: treats correlated forms as independent and overstates certainty.
 - **History**:
-  - 2026-10-22 set with the user before any run, after a literature comparison.
+  - 2026-10-22 (after runs) set with the user, after a literature comparison.
 
 ### D7 — Score every tokenizer on all held-out forms, including those it keeps as one token
 
@@ -250,7 +252,7 @@ concluded: 2026-10-25
   - Exclude one-token forms, as MorphScore v1 does: each tokenizer is then scored on its own subset.
   - Keep only forms whose gold pieces are vocabulary entries, as Uzan et al. and FLOTA do: also per-tokenizer subsets.
 - **History**:
-  - 2026-10-22 set with the user before any run, after a literature comparison.
+  - 2026-10-22 (after runs) set with the user, after a literature comparison.
 
 ### D8 — Keep forms with no ending, and read the score without them beside the clauses
 
@@ -259,7 +261,7 @@ concluded: 2026-10-25
 - **Alternatives**:
   - Drop them, as MorphScore v2 and Bostrom & Durrett do: precision would then ignore over-splitting.
 - **History**:
-  - 2026-10-22 set with the user before any run, after a literature comparison.
+  - 2026-10-22 (after runs) set with the user, after a literature comparison.
 
 ### D9 — Read a frequency-weighted morpheme-boundary F1 beside the type-level clauses
 
@@ -268,7 +270,7 @@ concluded: 2026-10-25
 - **Alternatives**:
   - Read H1 on the weighted score too: doubles the verdict surface for a score dominated by short frequent forms.
 - **History**:
-  - 2026-10-22 set with the user before any run, after a literature comparison.
+  - 2026-10-22 (after runs) set with the user, after a literature comparison.
 
 ### D10 — Score the tokenizers without a morpheme table on the MorphScore v2 Slovene set as an outside gold
 
@@ -277,7 +279,7 @@ concluded: 2026-10-25
 - **Alternatives**:
   - Score all 24 on the items whose lemma is a held-out lexeme: keeps every algorithm, leaves about a fifth of the items.
 - **History**:
-  - 2026-10-22 set with the user before any run, after a literature comparison.
+  - 2026-10-22 (after runs) set with the user, after a literature comparison.
 
 ### D11 — Draw Morph-Consistency pairs from each shared morpheme, at most 200 pairs per morpheme
 
@@ -287,7 +289,7 @@ concluded: 2026-10-25
   - MorphBPE's k-means sampling, 50 pairs per cluster: its clusters have no clear meaning on a two-morpheme gold.
   - Separate stem and ending consistency: one more metric for a secondary reading.
 - **History**:
-  - 2026-10-22 set with the user before any run, after a literature comparison.
+  - 2026-10-22 (after runs) set with the user, after a literature comparison.
 
 ### D12 — Count how often each vocabulary token occurs in both samples, and read the rare share beside Q1
 
@@ -297,7 +299,7 @@ concluded: 2026-10-25
   - A bar on the rare share: no level can be set before the counts exist, so it stays a reading.
   - Count on the whole training side of the corpus: ten times the encoding cost for counts the per-million scale already gives.
 - **History**:
-  - 2026-10-23 set with the user before any run.
+  - 2026-10-23 (after runs) set with the user.
 
 ### D13 — Cut each document into pieces SentencePiece accepts before Unigram trains on it
 
@@ -306,7 +308,7 @@ concluded: 2026-10-25
 - **Alternatives**:
   - Raise SentencePiece's line limit: long lines strain its memory, and a cut at a space loses only cross-piece pairs.
 - **History**:
-  - 2026-10-23 set before any run, after the pre-launch review measured the loss.
+  - 2026-10-23 (after runs) set after the pre-launch review measured the loss.
 
 ### D14 — Give the character-level algorithms only the characters that cover 99.99% of the sample
 
@@ -317,13 +319,21 @@ concluded: 2026-10-25
   - Cover 99.95%: drops letters of names the gold scores.
   - Clean the corpus first: a curation rebuild of several days, planned on its own.
 - **History**:
-  - 2026-10-23 set with the user before any tracked run, after the smoke run counted the single-character pieces. 99.99% was chosen over the proposed 99.95% after counting the forms each drops.
+  - 2026-10-23 (after runs) set with the user, after the smoke run counted the single-character pieces. 99.99% was chosen over the proposed 99.95% after counting the forms each drops.
+
+### D15 — Read a metric as levelled off when its last size step gains under a quarter of its first
+
+- **Decision**: Q1 reads a metric as levelled off for an algorithm when its gain from 64k to 128k is under a quarter of its gain from 16k to 32k. It falls when that late gain is negative, and the rule does not apply when there was no early gain. The share is `scoring.levelled_ratio` (0.25).
+- **Why**: the bar is stated in issue #32, in its Q1 clause and in requirement 13 as the quarter-gain rule, and in the `experiments/GLOSSARY.md` entry Quarter rule. [M8] reads the share from `configs/analysis.yaml`.
+- **History**:
+  - 2026-10-22 (before runs) set in issue #32 when the record was created; this entry was written on 2026-11-06 from the issue and the glossary.
 
 ## Findings
 
 ### F1 — The heuristic gold and the Sloleks gold rank the tokenizers alike · key
 
 - **Summary**: The two golds rank the tokenizers with a Kendall's τ of 0.86, and the whole bootstrap interval sits above the 0.8 bar.
+- **Key number**: 0.86 — Kendall's τ between the heuristic-gold and Sloleks-gold rankings of the 24 tokenizers
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee (the sweep's parent run, 24 child runs), scored by `analysis.py` at 8f408e8 on the scored-form golds
 - **Result**: ![Morpheme-boundary F1 of every tokenizer under the heuristic gold against the Sloleks gold, one series per algorithm](figures/sweep-boundary-f1-by-gold.svg)
 - **Reading**:
@@ -337,6 +347,7 @@ concluded: 2026-10-25
 ### F2 — The manually checked forms rank the tokenizers differently from all forms · key
 
 - **Summary**: Ranking the tokenizers on the manually checked forms alone agrees with the all-forms ranking at τ 0.69, below the 0.9 bar.
+- **Key number**: 0.69 — Kendall's τ between the manual-forms and all-forms rankings of the 24 tokenizers
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee, scored by `analysis.py` at 8f408e8 on the scored-form golds
 - **Result**: ![Kendall's τ with its bootstrap interval and its bar for every pair of tokenizer rankings](figures/sweep-rank-agreement-by-ranking-pair.svg)
 - **Reading**:
@@ -350,6 +361,7 @@ concluded: 2026-10-25
 ### F3 — On all forms only Unigram's morpheme-boundary F1 still rises at the largest vocabulary, while compression and Morph-Edit-Distance keep improving for every algorithm · key
 
 - **Summary**: From 64k to 128k every algorithm still gains on fertility and Morph-Edit-Distance, but on all forms morpheme-boundary F1 rises for Unigram alone.
+- **Key number**: 0.93 — Unigram's morpheme-boundary F1 gain from 64k to 128k as a share of its 16k-to-32k gain, on all forms
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee, scored by `analysis.py` at 8f408e8 on the scored-form golds and the evaluation sample
 - **Result**: ![Morpheme-boundary F1, Morph-Edit-Distance and Morph-Consistency against vocabulary size per algorithm, on all forms and on manual forms](figures/sweep-morph-metrics-by-vocab.svg)
 - **Reading**:
@@ -399,12 +411,14 @@ concluded: 2026-10-25
   - **The Sloleks 3.2 split ranks the tokenizers as the corrected heuristic does, but which forms are scored matters more than which gold cuts them.** The two golds put the same algorithms in the same order and only swap vocabulary sizes within an algorithm ([F1]). Scoring the manually checked forms alone reorders the tokenizers ([F2]), so the first bar holds and the second fails: the automatic-rows reading the Verdict rule named.
   - **The reordering is a word-class effect the design did not anticipate.** The manual slice holds about half the share of nouns that all forms hold, and the word classes rank the tokenizers apart ([F4]). A pooled morph score therefore follows the class mix of the scored set, and is only comparable between sets with the same mix.
   - **The verdict rule named this split without an outcome word, and the levelling rule reads noise as movement.** The split takes the word partial, added to the rule at conclusion: yes for the gold, no for the slice. Q1's quarter rule turns morpheme-boundary F1 changes narrower than their intervals into falls or gains ([F3]). A follow-up inherits the Sloleks gold, the manual-first score and a band rule for levelling.
-- **Adoption candidate**: the project's shared tokenizer sweep, `scripts/sweep_tokenizers.py`, scores on the Sloleks 3.2 gold with the manual-forms score first. The pieces to lift are the Sloleks gold builder and the lexeme holdout in `slm4ie/tokenizers/morphology.py`, and the Slovene word-class fix in the heuristic gold. The capped alphabet and the Unigram document cut in `slm4ie/tokenizers/train.py` and the lexeme bootstrap of `analysis.py` go with them.
+- **Adoption candidate**: the project's shared tokenizer sweep, `scripts/sweep_tokenizers.py`, scores on the Sloleks 3.2 gold with the manual-forms score first.
+  - **Carries**: the Sloleks gold builder and the lexeme holdout in `slm4ie/tokenizers/morphology.py`, and the Slovene word-class fix in the heuristic gold. The capped alphabet and the Unigram document cut in `slm4ie/tokenizers/train.py` and the lexeme bootstrap of `analysis.py` go with them.
+  - **Stays out**: the rest of `analysis.py`.
 - **Next**:
-  - The next experiment, on new morph metrics, reports every morph score on the manual forms first and per word class beside the pooled score. It reads levelling with a band from the bootstrap intervals rather than the quarter rule ([Q1]).
-  - A retrain of MorphBPE and MorphPiece with a morpheme table built from the Sloleks split, as its own experiment. MorphBPE at 128k trains for more than a day on one core.
-  - An audit of the automatic noun rows of Sloleks 3.2, the class where the manual and the all-forms rankings agree least ([F4]).
-  - A curation fix for the NUL characters, byte zero, left in the corpus where a letter was lost upstream; delivery work.
+  - The next experiment, on new morph metrics, reports every morph score on the manual forms first and per word class beside the pooled score. It reads levelling with a band from the bootstrap intervals rather than the quarter rule ([Q1]) — planned as morph-metrics-slovenian.
+  - A retrain of MorphBPE and MorphPiece with a morpheme table built from the Sloleks split, as its own experiment. MorphBPE at 128k trains for more than a day on one core — planned as morph-table-slovenian.
+  - An audit of the automatic noun rows of Sloleks 3.2, the class where the manual and the all-forms rankings agree least ([F4]) — not yet planned.
+  - A curation fix for the NUL characters, byte zero, left in the corpus where a letter was lost upstream; delivery work — not yet planned.
 - **Limitations**:
   - Both golds cover inflection only; derivation and compounding are unscored, so a tokenizer that cuts prefixes well gets no credit.
   - Rank agreement is over 24 tokenizers, so τ moves in steps of about 0.007 and its point estimate can sit at the edge of its bootstrap interval.

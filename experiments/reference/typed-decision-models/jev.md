@@ -58,16 +58,16 @@ how the probabilities are calibrated.
 
 ## Facts
 
-- **Question types**: choice over named options, score over ordered levels, Noul as a yes-or-no probability
-- **Backbone**: unpublished; a sparse mixture-of-experts decoder is inferred from latency, and the tokenizer behind the token counts matches none of 192 public tokenizers tried
-- **Where an option is read**: unpublished; options are processed jointly, since adding an option shifts the odds between the others
-- **Options per question**: up to 255 named options
-- **Isolation between questions**: complete; text in a sibling question has no effect on an answer
-- **Training objective**: unpublished; the vendor names reinforcement learning for calibrated decisions, which the essay reads as training against a proper scoring rule on outcomes
-- **Calibration**: the published adapter reports confidence as $(p_{\max} - 1/K)/(1 - 1/K)$ for $K$ options, which is zero at chance and one at certainty, not a probability of being right
-- **Training data**: unpublished; the vendor speaks of synthetic data
-- **Context length**: 32,768 tokens of text; no images
-- **Weights**: closed, served through an API
+- **Question types**: choice, Noul and score — choice over named options, score over ordered levels, Noul as a yes-or-no probability
+- **Backbone**: unpublished — a sparse mixture-of-experts decoder is inferred from latency, and the tokenizer behind the token counts matches none of 192 public tokenizers tried
+- **Where an option is read**: unpublished — options are processed jointly, since adding an option shifts the odds between the others
+- **Options per question**: up to 255 — named options
+- **Isolation between questions**: complete — text in a sibling question has no effect on an answer
+- **Training objective**: unpublished — the vendor names reinforcement learning for calibrated decisions, which the essay reads as training against a proper scoring rule on outcomes
+- **Calibration**: the adapter's confidence formula — the published adapter reports confidence as $(p_{\max} - 1/K)/(1 - 1/K)$ for $K$ options, which is zero at chance and one at certainty, not a probability of being right
+- **Training data**: unpublished — the vendor speaks of synthetic data
+- **Context length**: 32,768 tokens — of text; no images
+- **Weights**: closed — served through an API
 
 ## Sources
 
@@ -98,18 +98,18 @@ how the probabilities are calibrated.
 - **1**: The state is the expensive part of a request and is read once. The
   billed tokens of a request are the state's count plus a small count per
   question, which is what a shared prefix produces.
-- **2** and **3**: Every question becomes a branch on top of the same state.
+- **2–3**: Every question becomes a branch on top of the same state.
   A branch cannot see another branch, which the isolation test shows: moving
   a code word from a sibling question into the state raises its probability
   from zero to about nine in ten.
-- **4**: Some head turns the branch into one score per allowed answer. The
+- **4**: Some head turns the branch into one score per allowed answer, $z_k$. The
   essay cannot tell a classifier over a fixed final position from a pointer
   that compares the answer's own representation with the question's, and
   neither can the probes. The open entries of this topic each pick one.
-- **5**: The scores are normalised together. If each answer had its own
+- **5**: The scores are normalised together into $p_k$. If each answer had its own
   independent score, adding an answer would leave the odds between the old
   ones unchanged. They change, so the answers are read as one list.
-- **6**: The confidence is a rescaled top probability. It says how far above
+- **6**: The confidence $c_k$ is a rescaled top probability. It says how far above
   chance the top answer sits, and the worked example shows that the same top
   probability earns more confidence when more options share the rest.
 - **7**: Nothing is generated. The returned object is the set of
@@ -117,10 +117,12 @@ how the probabilities are calibrated.
 
 ## Worked example
 
+- **Input**: top probabilities 0.5, 0.8 and 0.95, the rest shared evenly over 2, 3, 5 or 10 options
+
 The example script runs the confidence formula, as the released CLM package
 ports it, on a top probability shared out evenly over the remaining options.
 
-![Confidence for one top probability across option counts](tables/confidence-by-options.csv)
+![Confidence for one top probability across option counts](tables/jev-confidence-by-options.csv)
 
 A top probability of one half is chance with two options and earns no
 confidence. With ten options the same one half is far above the chance level

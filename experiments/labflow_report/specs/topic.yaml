@@ -1,0 +1,97 @@
+# The reference topic: experiments/reference/<topic>/README.md (ADR-0005).
+#
+# The skeleton of reference/references/topic-template.md follows this file:
+# its frontmatter keys, the values the status comment lists and its `##`
+# headings, in this order. test_labflow_report_topic.py fails when the two
+# disagree.
+#
+# A topic has no stage: `status` says whether its Question is still open,
+# not how far the README is written, so every rule holds at every check.
+# labflow:reference step 2 writes the title, the status, the compare labels
+# and the Question when it creates the topic. The Introduction comes once
+# two entries have a Description; until then the section is left out and
+# the page shows its empty state.
+#
+# The page's other parts come from the topic's entries (the variant map,
+# the compare groups, the coupling grid, the Entries table), from
+# reference/ideas.yaml (the open ideas) and from the records' `varies` and
+# `uses`, so this file declares none of them, and the README cites no
+# table or figure (TOP-017). Each `compare` label names a Facts row each
+# entry past draft writes (`- **<Label>**: <short value> — <note>`), which
+# TOP-015 checks from the topic.
+
+document: topic
+root: reference
+path: "*/README.md"
+
+# ===============================
+# Frontmatter
+# ===============================
+
+frontmatter:
+  - key: title
+    type: str
+    shows: the page title, the breadcrumb and every link to the topic
+    writer: labflow:reference step 2
+  - key: status
+    values: [open, closed]
+    shows: the open or closed badge; closed once the Question is answered and no open idea touches the topic
+    writer: labflow:reference step 2
+  - key: compare
+    type: list
+    shows: one button per label in Compare one fact at a time, in this order
+    writer: labflow:reference step 2
+
+# ===============================
+# Sections
+# ===============================
+
+sections:
+  - heading: Question
+    form: prose
+    shows: the one question the topic's entries answer together, under the title
+    writer: labflow:reference step 2
+  - heading: Introduction
+    form: prose
+    shows: what the entries share and where they differ, or its empty state when left out
+    writer: labflow:reference step 2
+
+# ===============================
+# Tables and figures
+# ===============================
+
+# the topic page reads no table and draws no figure of its own: its map,
+# compare groups, coupling grid, idea cards, Entries table and Used by are
+# drawn from the entries, ideas.yaml and the records (tables.md Topic
+# tables), so the README cites none (TOP-017)
+artifacts: []
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  # frontmatter
+  - {id: TOP-001, check: required, target: frontmatter.title, message: the topic has no title}
+  - {id: TOP-002, check: type, target: frontmatter.title, message: title is text}
+  - {id: TOP-003, check: required, target: frontmatter.status, message: the topic has no status}
+  - {id: TOP-004, check: values, target: frontmatter.status, message: "unknown status: open or closed"}
+  - {id: TOP-005, check: type, target: frontmatter.compare, message: "compare is a list of Facts labels, [<Label>, …]"}
+
+  # sections, their forms and template guidance
+  - {id: TOP-006, check: required, target: section.Question, message: "the topic has no ## Question"}
+  - {id: TOP-007, check: form, target: section.Question, message: "the Question is prose, not a list"}
+  - {id: TOP-008, check: guidance, target: section.Question, message: template guidance left in a section}
+  - {id: TOP-009, check: form, target: section.Introduction, message: the Introduction is prose}
+  - {id: TOP-010, check: guidance, target: section.Introduction, message: "template guidance left in a section; write the Introduction or leave the section out"}
+
+  # checks/topic.py: sentence counts, the Introduction's due point, compare rows, closing
+  - {id: TOP-011, check: sentences, target: section.Question, message: the Question is one sentence}
+  - {id: TOP-012, check: question-end, target: section.Question, message: the Question ends with a question mark}
+  - {id: TOP-013, check: sentences, target: section.Introduction, message: the Introduction is two to four sentences}
+  - {id: TOP-014, check: introduction-due, target: section.Introduction, message: "two entries have a Description, so the topic writes its ## Introduction"}
+  - {id: TOP-015, check: compare-rows, target: frontmatter.compare, message: "an entry past draft writes a Facts row for every compare label"}
+  - {id: TOP-016, check: closed-ideas, target: frontmatter.status, message: "a closed topic has no open idea in reference/ideas.yaml touching its entries"}
+
+  # checks/topic.py: tables and figures
+  - {id: TOP-017, check: topic-assets, target: document, message: "a topic cites no table or figure: its page draws every part from the entries"}

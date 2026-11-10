@@ -5,7 +5,7 @@ status: from-paper
 summary: RoBERTa's objective on an encoder rebuilt with rotary position, pre-norm blocks without bias, a gated GELU feed-forward, and attention that alternates every third layer between the whole text and a 128-token window, trained on two trillion tokens to a context of 8,192.
 variant_of: encoder-transformers/roberta
 part_of:
-couples_to: [subword-tokenizers/byte-level-bpe]
+couples_to: [{entry: subword-tokenizers/byte-level-bpe, as: tokenizer}]
 ---
 
 ## Description
@@ -62,12 +62,12 @@ be the first thing to swap.
 
 ## Facts
 
-- **Position encoding**: rotary, applied to queries and keys in every layer; base 160,000 in global layers, 10,000 in local layers; no position at the input
-- **Attention span**: every third layer, counting from the first, over the whole input; the others over a window of 64 tokens to each side
-- **Block normalisation**: pre-norm, a layer norm before the attention and before the feed-forward part, without bias; a norm after the embedding and after the last layer; the first layer's attention norm removed
-- **Activation**: gated GELU, two halves of width 1,152 in base and 2,624 in large
-- **Pretraining objective**: masked language modelling on 30% of the tokens, no next-sentence prediction
-- **Tokenizer**: byte-level BPE, 50,368 pieces, a modified OLMo vocabulary with 83 unused slots
+- **Position encoding**: rotary — applied to queries and keys in every layer; base 160,000 in global layers, 10,000 in local layers; no position at the input
+- **Attention span**: every third layer over the whole input — counting from the first; the others over a window of 64 tokens to each side
+- **Block normalisation**: pre-norm — a layer norm before the attention and before the feed-forward part, without bias; a norm after the embedding and after the last layer; the first layer's attention norm removed
+- **Activation**: gated GELU — two halves of width 1,152 in base and 2,624 in large
+- **Pretraining objective**: masked language modelling — on 30% of the tokens, no next-sentence prediction
+- **Tokenizer**: byte-level BPE — 50,368 pieces, a modified OLMo vocabulary with 83 unused slots
 - **Context length**: 8,192 tokens
 - **Bias**: none in linear layers or norms, except the decoder of the prediction head
 - **Sizes**: base 22 layers, width 768, 12 heads, 149M parameters; large 28 layers, width 1024, 16 heads, 395M parameters
@@ -115,16 +115,18 @@ be the first thing to swap.
 \Changed \Return $\mathrm{LN}(h^L)$
 ```
 
-- **1**: The input is the token embedding alone, normalised once. Nothing says where a token stands; that enters through the rotation in every layer.
-- **2**: Layers 1, 4, 7 and so on are global, eight of the 22 in base. The rest are local.
-- **3**: Pre-norm: the layer norm is applied to the input of the attention, not to its output. The first layer skips it because the embedding was just normalised.
-- **4**: Queries, keys and values come from one projection without bias. The rotation turns each pair of coordinates of $q_i$ and $k_i$ by an angle proportional to $i$, with a frequency per pair set by the base. Because a rotation by $i$ followed by one by $-j$ is a rotation by $i - j$, the dot product of a rotated query and key depends on their distance only. The larger base of the global layers makes the angles grow more slowly, so distances up to 8,192 stay apart.
-- **5**: A global layer compares every token with every token, at quadratic cost in the length. A local layer compares a token with its 64 neighbours on each side, at linear cost. A token's view widens by 64 to each side per local layer and covers the text at every global one.
-- **6**: The attention output is added to the layer input. No norm follows.
-- **7**: The feed-forward part is gated. One projection produces two halves; GELU of the first half multiplies the second, and a projection narrows the product back. The halves are 1,152 wide in base, so the part has about as many parameters as BERT's feed-forward at inner width 3,072 would at a smaller depth.
-- **8**: A final norm closes the stack, which pre-norm blocks need because no norm follows the last residual addition.
+- **1**: The input $h^0$ is the token embedding alone, normalised once. Nothing says where a token stands; that enters through the rotation in every layer.
+- **2–3**: Layers 1, 4, 7 and so on are global, marked by $g$, eight of the 22 in base. The rest are local.
+- **4**: Pre-norm: the layer norm is applied to the input of the attention, $u$, not to its output. The first layer skips it because the embedding was just normalised.
+- **5**: Queries $q$, keys $k$ and values $v$ come from one projection without bias. The rotation turns each pair of coordinates of $q_i$ and $k_i$ by an angle proportional to $i$, with a frequency per pair set by the base. Because a rotation by $i$ followed by one by $-j$ is a rotation by $i - j$, the dot product of a rotated query and key depends on their distance only. The larger base of the global layers makes the angles grow more slowly, so distances up to 8,192 stay apart.
+- **6**: Each token's output $a_i$ is its attention over the others. A global layer compares every token with every token, at quadratic cost in the length. A local layer compares a token with its 64 neighbours on each side, at linear cost. A token's view widens by 64 to each side per local layer and covers the text at every global one.
+- **7**: The attention output is added to the layer input, giving $h$. No norm follows.
+- **8**: The feed-forward part is gated. One projection produces two halves $p$ and $z$; GELU of $p$ multiplies $z$, and a projection narrows the product back and adds it to $h$ as $h^\ell$. The halves are 1,152 wide in base, so the part has about as many parameters as BERT's feed-forward at inner width 3,072 would at a smaller depth.
+- **9**: A final norm closes the stack, which pre-norm blocks need because no norm follows the last residual addition.
 
 ## Worked example
+
+- **Input**: the 22 layers of ModernBERT-base, global attention every third layer and a 128-token local window, at a sequence length of 8,192
 
 The example script lists every layer of the base model with the rule the
 released code applies: a layer whose index from zero is divisible by three

@@ -1,0 +1,38 @@
+{#- the rail (Components board, Rail): the top bar, the tab strip and one list per tab; rail.py builds the values -#}
+{% import "components/words.html" as words %}
+
+{#- an item's mark: an entry's status square, an outcome mark, or an empty slot -#}
+{% macro mark(word="", square="") -%}
+{% if square %}<span class="sq {{ square }}"></span>{% elif word %}{{ words.mark(word) }}{% else %}<span class="ph"></span>{% endif %}
+{%- endmacro %}
+
+{#- a list's first head, linking the tab's landing page; a group's head, its chevron opening and closing the group; a link -#}
+{% macro entry(x) -%}
+{% if x.kind == "landing" -%}
+<a class="hd" href="#{{ x.href }}"><span class="hl">{{ x.label }}</span></a>
+{%- elif x.kind == "group" -%}
+{% set inner %}<span class="hl">{{ x.label }}</span><span class="hc chev" role="button" aria-label="open or close"></span>{% endset %}
+{% if x.href %}<a class="hd{{ ' shut' if x.shut else '' }}" href="#{{ x.href }}" data-group="{{ x.group }}" title="{{ x.title }}">{{ inner }}</a>
+{%- else %}<p class="hd{{ ' shut' if x.shut else '' }}" data-group="{{ x.group }}" title="{{ x.title }}">{{ inner }}</p>{% endif %}
+{%- else -%}
+<a class="item nest" href="#{{ x.href }}" title="{{ x.title }}"{% if x.group %} data-in="{{ x.group }}"{% endif %}{% if x.experiment %} data-exp=""{% endif %}>{{ mark(x.word, x.square) }}<span class="lab">{{ x.label }}</span>{% if x.new %}<span class="nd" title="new result"></span>{% endif %}</a>
+{%- endif %}
+{%- endmacro %}
+
+{#- the rail: each tab opens its landing page; the script opens the tab, group and item of the page -#}
+{% macro rail(panels) -%}
+<div class="rail"><nav class="rstrip" aria-label="Sections">
+{%- for p in panels %}<button type="button" class="rb" data-tab="{{ p.tab }}" data-landing="{{ p.landing }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="{{ p.icon }}"></path></svg><span>{{ p.title }}</span></button>{% endfor -%}
+</nav>
+{%- for p in panels %}<nav class="rpanel{{ '' if loop.first else ' off' }}" data-tab="{{ p.tab }}" aria-label="{{ p.title }}"><p class="ttl">{{ p.title }}</p><label class="rfilter"><input type="search" placeholder="Filter {{ p.filter }}" aria-label="Filter {{ p.filter }}"><kbd>/</kbd></label>
+{%- for x in p.links %}{{ entry(x) }}{% endfor %}</nav>{% endfor -%}
+</div><div class="rkeys pkeys"><span><kbd>?</kbd> legend</span><span><kbd>g</kbd> glossary</span><span><kbd>[</kbd><kbd>]</kbd> experiments</span><span><kbd>t</kbd> theme</span></div>
+{%- endmacro %}
+
+{#- the top bar: the rail toggle, the brand (a link to the repo when known), the crumb the script fills, legend and theme -#}
+{% macro top_bar(brand, repo_url="") -%}
+<div class="top"><div class="lhs"><button class="nav" type="button" title="toggle the rail">☰</button>
+{%- if repo_url %}<a class="brand" href="{{ repo_url }}" target="_blank" rel="noopener" title="{{ brand }} on GitHub">{{ brand }}</a>
+{%- else %}<span class="brand" title="{{ brand }}">{{ brand }}</span>{% endif -%}
+<span class="rpt">report</span></div><span class="crumb"></span><button class="legend" type="button" aria-haspopup="dialog" aria-controls="legend" title="what each mark means (?)">Legend</button><button class="theme" type="button">theme: system</button></div>
+{%- endmacro %}

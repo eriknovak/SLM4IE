@@ -1,0 +1,57 @@
+{#- Components board, evidence: figures and tables, runs and dated history -#}
+{% import "components/inline.html" as inline %}
+
+{#- a figure or table: numbered caption, the drawing on its plate, the file under it;
+    a figure's shape (narrow or wide) sets how much of the row it takes, a width
+    the most it is drawn; a file other findings cite too names them; a figure's
+    plate opens it full screen -#}
+{% macro exhibit(e) -%}
+{% if e.missing %}<p>{{ e.missing }}</p>
+{%- else %}
+<figure{% if e.anchor %} id="{{ e.anchor }}"{% endif %}{% if e.shape %} class="{{ e.shape }}"{% endif %}{% if e.width %} style="max-width: {{ e.width }}"{% endif %}>{% if e.kind == "Table" or not e.src %}{{ e.html }}{% else %}{{ inline.zoom(e.label, e.html) }}{% endif %}
+{%- if e.src %}<div class="src">{{ e.src }}</div>{% endif -%}
+<figcaption><b class="lbl">{{ e.label }}</b> {{ e.caption }}{% if e.also %} <span class="also">also in {{ e.also }}</span>{% endif %}</figcaption></figure>
+{%- endif %}
+{%- endmacro %}
+
+{#- a finding's exhibits: one shows whole; several get a chip each as a tab, the
+    first selected; with JS off, in print and on expand-all every one shows -#}
+{% macro exhibits(items, owner) -%}
+{% set shown = items | rejectattr("missing") | list %}
+{% if items %}<div class="exhibit{{ ' xset' if shown | length > 1 else '' }}">
+{%- for e in items if e.missing %}<p>{{ e.missing }}</p>{% endfor -%}
+{%- if shown | length > 1 %}<div class="xtabs" role="tablist" aria-label="Figures and tables">
+{%- for e in shown %}<button type="button" class="xtab ct i" role="tab" id="{{ owner }}/xt{{ loop.index }}" aria-controls="{{ owner }}/xp{{ loop.index }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ 0 if loop.first else -1 }}"{% if e.title %} title="{{ e.title | striptags }}"{% endif %}><span class="xl"><b>{{ e.label }}</b>{% if e.title %} {{ e.title | striptags }}{% endif %}</span></button>{% endfor -%}
+</div>
+{%- for e in shown %}<div class="xpanel{{ ' on' if loop.first else '' }}" role="tabpanel" id="{{ owner }}/xp{{ loop.index }}" aria-labelledby="{{ owner }}/xt{{ loop.index }}">{{ exhibit(e) }}</div>{% endfor -%}
+{%- elif shown %}{{ exhibit(shown[0]) }}{% endif -%}
+</div>{% endif %}
+{%- endmacro %}
+
+{#- a run id: linked through MLflow, else text; on a local server the whole id, clipped by the style so it copies whole -#}
+{% macro run_id(short, href="", full="") -%}
+{% if href %}<a href="{{ href }}" class="rid">{{ short }}</a>{% elif full %}<span class="rid full" title="{{ full }}">{{ full }}</span>{% else %}<span class="rid">{{ short }}</span>{% endif %}
+{%- endmacro %}
+
+{#- run ids under a finding, linked through the record's MLflow address, runs whose server is lost
+    as text, the analysis commit and replaced runs -#}
+{% macro runs_line(runs) -%}
+<div class="runs"><span class="lb">Runs</span>
+{%- for short, href, full in runs.ids %}{{ run_id(short, href, full) }}{% endfor -%}
+{%- if runs.more %}<span class="muted">+{{ runs.more }} more</span>{% endif -%}
+{%- for short, full in runs.lost %}<span class="rid" title="{{ full }}">{{ short }}</span>{% endfor -%}
+{%- if runs.more_lost %}<span class="muted">+{{ runs.more_lost }} more</span>{% endif -%}
+{%- if runs.lost %}<span class="muted">· server lost, ids not linked</span>{% endif -%}
+{%- if not runs.ids and not runs.lost %}{{ inline.missing("no run" if runs.commits else "no run recorded") }}{% endif -%}
+{%- if runs.commits %}<span class="muted">· analysis</span>{% for sha in runs.commits %}{{ inline.commit(sha) }}{% endfor %}{% if runs.more_commits %}<span class="muted">+{{ runs.more_commits }} more</span>{% endif %}{% endif -%}
+{%- if runs.ids and not runs.addressed %}<span class="muted">· no MLflow address, ids not linked</span>{% endif -%}
+</div>
+{%- if runs.replaced %}<div class="runs"><span class="lb">Replaces</span>{% for short, href, full in runs.replaced %}{{ run_id(short, href, full) }}{% endfor %}<span class="muted">· superseded runs, kept in MLflow</span></div>{% endif -%}
+{%- endmacro %}
+
+{#- a dated history: date, timing tag, whose call, text -#}
+{% macro hist(entries) -%}
+<ol class="hist">
+{%- for h in entries %}<li><span class="mono muted">{{ h.date }}</span>{% if h.when %}{{ inline.when(h.when) }}{% endif %}{% if h.user %}<span class="who">user's call</span>{% endif %}<span>{{ h.text }}</span></li>{% endfor -%}
+</ol>
+{%- endmacro %}

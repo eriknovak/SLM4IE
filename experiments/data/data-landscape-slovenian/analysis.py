@@ -11,6 +11,9 @@ Run it from anywhere; `--mlflow` also records the pass as a lineage run in the
 experiment's MLflow experiment, with the tables and figures as artifacts:
 
     uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py [--mlflow]
+
+`--figures-only` redraws the figures from the committed tables alone, without
+the raw evidence files, as the full run does once its tables are written.
 """
 
 import argparse
@@ -24,10 +27,10 @@ from pathlib import Path
 
 import yaml
 from datachart.charts import BarChart
-from datachart.constants import BAR_MODE, EMPHASIS, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, SORT
+from datachart.constants import BAR_MODE, EMPHASIS, LEGEND_LOCATION, ORIENTATION, SORT
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  # path set above so the vendored helper resolves
+from create_assets import ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  # path set above
 
 from slm4ie.utils import mlflow as ml  # noqa: E402
 
@@ -139,6 +142,10 @@ TOKENS_PER_WORD = 2.0  # D6: an estimate until the project tokenizer exists
 KPI2_EXAMPLES = 10_000
 KPI4_TOKENS = 500_000
 PERCENT = 100
+
+# F1's figure reads H2 off each domain's native share; its data table sits beside it
+NATIVE_SHARE_FIGURE = "documents-by-domain-and-provenance"
+NATIVE_SHARE_CLAIM = Claim("H2", "share of open documents written in Slovene")
 
 CATALOGUE_COLUMNS: list[str] = [
     "name",
@@ -711,27 +718,36 @@ def clause_supply(rows: list[dict[str, str]]) -> list[dict[str, object]]:
     return lines
 
 
-def draw_figures(summary: list[dict[str, object]]) -> None:
+def draw_figures(summary: list[dict[str, str]]) -> None:
     """Draws the share of each domain's open documents written in Slovene, the figure F1 links.
 
+    The figure carries H2's claim, so its data table is written first.
+
     Args:
-        summary: The per-domain summary.
+        summary: The per-domain summary, as `supply-by-domain-and-access.csv` holds it.
     """
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     opened = {r["domain"]: r for r in summary if r["access_filter"] == "open"}
+    shares = []
+    for d in DOMAINS:
+        documents, native = int(opened[d]["documents"]), int(opened[d]["documents_native"])
+        share = PERCENT * native / documents if documents else 0
+        shares.append({"domain": d, "documents": documents, "documents_native": native, "native_share_percent": share})
+    save_table(shares, TABLES_DIR / f"{NATIVE_SHARE_FIGURE}.csv")
+
     # medicine is the subject of F1, so its bar is outlined; the rest keep their value labels
     native_share = [
         {
-            "label": f"{d}  ({opened[d]['documents']:,} docs)",
-            "y": PERCENT * opened[d]["documents_native"] / opened[d]["documents"] if opened[d]["documents"] else 0,
-            "emphasis": EMPHASIS.HIGHLIGHT if d == "medical" else None,
+            "label": f"{r['domain']}  ({r['documents']:,} docs)",
+            "y": r["native_share_percent"],
+            "emphasis": EMPHASIS.HIGHLIGHT if r["domain"] == "medical" else None,
         }
-        for d in DOMAINS
+        for r in shares
     ]
     save_figure(
         BarChart(
             native_share,
-            title="Share of documents written in Slovene",
+            title="Slovene share by domain",
             xlabel="documents written in Slovene (%)",
             ylabel="domain (open documents)",
             orientation=ORIENTATION.HORIZONTAL,
@@ -740,13 +756,14 @@ def draw_figures(summary: list[dict[str, object]]) -> None:
             value_format="{x:.0f}%",
             xmin=0,
             xmax=100,
-            figsize=FIG_SIZE.FULL_MEDIUM,
+            figsize=ONE_COLUMN,
         ),
-        FIGURES_DIR / "documents-by-domain-and-provenance.svg",
+        FIGURES_DIR / f"{NATIVE_SHARE_FIGURE}.svg",
+        claim=NATIVE_SHARE_CLAIM,
     )
 
 
-def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, object]]) -> None:
+def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, str]]) -> None:
     """Draws the two provenance-check figures the record links.
 
     The first splits the checked rows by class into medical and other domains,
@@ -754,8 +771,8 @@ def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, 
     machine-translated datasets behind each named translation system.
 
     Args:
-        rows: The annotated Slovene catalogue.
-        systems: One line per translation system, from `provenance_summary`.
+        rows: The annotated Slovene catalogue, as `catalogue.csv` holds it.
+        systems: One line per translation system, as `translation-systems.csv` holds it.
     """
     legend_out = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM}
     checked = [r for r in rows if r["provenance_checked"] == "yes"]
@@ -772,7 +789,7 @@ def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, 
         BarChart(
             [split["medical"], split["other"]],
             title="Checked datasets by provenance class",
-            xlabel="datasets",
+            xlabel="datasets (count)",
             ylabel="provenance class",
             subtitle=["medical", "other domains"],
             bar_mode=BAR_MODE.STACK,
@@ -781,7 +798,7 @@ def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, 
             show_legend=True,
             legend=legend_out,
             xmin=0,
-            figsize=FIG_SIZE.FULL_MEDIUM,
+            figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / "datasets-by-provenance-class.svg",
     )
@@ -794,18 +811,39 @@ def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, 
                 }
                 for line in systems
             ],
-            title="Datasets involving machine translation, by system",
-            xlabel="datasets",
+            title="Machine-translated datasets by system",
+            xlabel="datasets (count)",
             ylabel="translation system",
             orientation=ORIENTATION.HORIZONTAL,
             sort=SORT.ASCENDING,
             show_values=True,
             value_format="{x:.0f}",
             xmin=0,
-            figsize=FIG_SIZE.FULL_MEDIUM,
+            figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / "datasets-by-translation-system.svg",
     )
+
+
+def draw_figures_from_tables() -> None:
+    """Draws every figure the record links from the committed tables alone."""
+    draw_figures(read_table(TABLES_DIR / "supply-by-domain-and-access.csv"))
+    draw_provenance_figures(
+        read_table(TABLES_DIR / "catalogue.csv"), read_table(TABLES_DIR / "translation-systems.csv")
+    )
+
+
+def read_table(path: Path) -> list[dict[str, str]]:
+    """Reads one committed results table, every cell as text.
+
+    Args:
+        path: The CSV file.
+
+    Returns:
+        One dict per row, keyed by column name.
+    """
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
 
 
 def git_output(*args: str) -> str:
@@ -878,7 +916,15 @@ def main() -> None:
     """Builds every table and figure the record links, and optionally logs the pass."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--mlflow", action="store_true", help="also record this pass as an MLflow lineage run")
+    parser.add_argument(
+        "--figures-only", action="store_true", help="redraw the figures from the committed tables and stop"
+    )
     args = parser.parse_args()
+
+    if args.figures_only:
+        draw_figures_from_tables()
+        print(f"figures -> {FIGURES_DIR}")
+        return
 
     # build the catalogue
     raw = load_rows()
@@ -900,8 +946,7 @@ def main() -> None:
     write_table(TABLES_DIR / "translation-systems.csv", list(systems[0].keys()), systems)
     write_table(TABLES_DIR / "supply-by-clause.csv", list(clauses[0].keys()), clauses)
     write_table(TABLES_DIR / "supply-by-domain-and-access.csv", list(summary[0].keys()), summary)
-    draw_figures(summary)
-    draw_provenance_figures(slovene, systems)
+    draw_figures_from_tables()
 
     # report and optionally log the pass
     print(f"catalogue: {len(slovene)} Slovene rows, {len(fallback)} medical rows in other languages")

@@ -1,0 +1,61 @@
+# The glossary: experiments/GLOSSARY.md (ADR-0005).
+#
+# The skeleton of report/references/glossary.md follows this file: `## Metrics`
+# first, then sample term groups, then `## Other` last, and every list line
+# under them a term line `- **Term** (alias, alias): definition`. Metrics is
+# the one required section and stays one flat list. Every other `##` heading
+# is a term group the project names for itself by what its terms cover;
+# `## Other` holds the terms no group takes. Groups and Other are optional,
+# so a glossary of Metrics alone is valid. labflow:init copies the template
+# to experiments/GLOSSARY.md; labflow:report adds a line for each term a
+# finding needs, from labflow:analyze's drafts.
+# test_labflow_report_glossary.py fails when the template and this file
+# disagree.
+#
+# The glossary has no frontmatter and no stage, so every rule holds at every
+# build. The `rows` form holds each top-level line of Metrics (GLO-002) and of
+# every group and Other (GLO-004) to an opening `- **`; checks/glossary.py
+# adds the retired `## Terms` heading (GLO-003), the full term line (GLO-005),
+# one term per name or alias (GLO-006), the 40-word definition (GLO-007),
+# and no term above the first heading and no heading used twice (GLO-008).
+# The record's REC-159 reads the terms too.
+
+document: glossary
+path: GLOSSARY.md
+
+# ===============================
+# Sections
+# ===============================
+
+# a term group is any other `##` heading, so it has no entry here; GLO-004
+# holds every group and Other to term lines, so Other declares no form
+sections:
+  - heading: Metrics
+    form: rows
+    shows: the Metrics filter link and its terms on the Glossary page
+    writer: labflow:report intermediate
+  - heading: Other
+    shows: the Other filter link, last, and its terms on the Glossary page
+    writer: labflow:report intermediate
+
+# ===============================
+# Tables and figures
+# ===============================
+
+# the page reads no table and draws no figure: its term list and filter links
+# come from GLOSSARY.md alone
+artifacts: []
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  - {id: GLO-001, check: required, target: section.Metrics, message: the glossary has no Metrics section}
+  - {id: GLO-002, check: form, target: section.Metrics, message: "Metrics holds term lines only, `- **Term** (alias): definition`"}
+  - {id: GLO-003, check: retired-terms, target: document, message: "`## Terms` is now `## Other`: move each term to the group it fits, else to Other"}
+  - {id: GLO-004, check: group-form, target: document, message: "a term group or Other holds term lines only, `- **Term** (alias): definition`"}
+  - {id: GLO-005, check: term-lines, target: document, message: "a list line under a heading is not a term line, `- **Term** (alias): definition`"}
+  - {id: GLO-006, check: shared-forms, target: document, message: a name or alias belongs to two terms}
+  - {id: GLO-007, check: definition-words, target: document, message: a definition is over its word cap}
+  - {id: GLO-008, check: term-sections, target: document, message: "a term sits above the first heading, or under a heading used twice"}

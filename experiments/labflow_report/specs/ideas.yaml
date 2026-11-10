@@ -1,0 +1,27 @@
+# The idea cache: experiments/reference/ideas.yaml (ADR-0005).
+#
+# An idea is a tracker issue labelled `idea` (labflow:reference,
+# references/idea-template.md). The builder copies the issues into this
+# file, so a build without tracker access shows the same ideas; the author
+# writes the issue, never the file. Each issue body's `## Touches` section
+# has one line per entry it touches:
+#   - <topic>/<entry> | <relation> | <place> | <what changes> | <expected effect>
+# An idea shows on the page of every topic that holds an entry it touches,
+# so the rules hold each idea to one Touches line at least, each line to a
+# relation the topic page reads and an entry that exists (checks/ideas.py).
+# A breach names the line of the issue's `number:` key: fix the issue in the
+# tracker, then rebuild to refresh the cache. The file has no stage, so every
+# rule holds always.
+
+document: ideas
+root: reference
+path: ideas.yaml
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  - {id: IDE-001, check: idea-touches, target: document, message: "an idea has no `## Touches` line, so it shows on no topic page"}
+  - {id: IDE-002, check: idea-relation, target: document, message: "a Touches line's relation is changes, already has or does not apply"}
+  - {id: IDE-003, check: idea-entry, target: document, message: "a Touches line names a `<topic>/<entry>` that does not exist"}

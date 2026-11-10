@@ -1,0 +1,180 @@
+/* the reference entry page, scoped to it (ADR-0005), drawn to the Entry and SkelEntry boards */
+.page[data-page=entry]{--fig:#fbfcfd;--h:#5f37a8;--h-soft:#ebe4f7;--vp-ink:#ffffff}
+:root[data-theme=dark] .page[data-page=entry]{--fig:#25262c;--h:#c4a6ff;--h-soft:#33294a;--vp-ink:#1c1c20}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .page[data-page=entry]{--fig:#25262c;--h:#c4a6ff;--h-soft:#33294a;--vp-ink:#1c1c20}}
+.page[data-page=entry] .kicker{font-family:var(--mono);margin:0}
+.page[data-page=entry] h1{line-height:1.25}
+.page[data-page=entry] .status{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:6px 0 16px}
+.page[data-page=entry] .sq{display:inline-block;width:11px;height:11px;border-radius:2px;flex:none;box-sizing:border-box;vertical-align:0;margin-right:5px}
+.page[data-page=entry] .sq.chk{background:var(--fg)}
+.page[data-page=entry] .sq.pap{border:1.5px solid var(--fg)}
+.page[data-page=entry] .sq.dft{border:1.5px dashed var(--muted)}
+.page[data-page=entry] .lede{margin:0 0 8px;font-size:18px;line-height:1.5;color:var(--fg)}
+.page[data-page=entry] .missing{font-family:var(--sans);font-size:12.5px;font-style:italic;color:var(--muted)}
+.page[data-page=entry] .lede .missing{font-size:inherit}
+.page[data-page=entry] .sec{margin-top:44px}
+.page[data-page=entry] .chap{font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin:0 0 14px}
+.page[data-page=entry] .empty{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;color:var(--muted);font-family:var(--sans);font-size:13px}
+.page[data-page=entry] .prose{font-size:var(--t-prose);line-height:1.6}
+.page[data-page=entry] .prose p{margin:0 0 10px}
+.page[data-page=entry] .small{font-size:var(--t-sm)}
+.page[data-page=entry] .lead{margin:0 0 8px}
+.page[data-page=entry] .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 16px;overflow-x:auto}
+.page[data-page=entry] .box table.data{margin:0}
+.page[data-page=entry] .box .scroll{margin:0}
+/* the facts table closes the description: label beside value, a long value wraps in its row */
+.page[data-page=entry] .chap.why{margin-top:22px}
+.page[data-page=entry] table.facts{width:100%;table-layout:fixed;border-collapse:collapse;margin:18px 0 0;font-size:var(--t-sm);line-height:1.5}
+.page[data-page=entry] table.facts td{padding:6px 0;vertical-align:top;border:0;border-top:1px solid var(--line);overflow-wrap:anywhere}
+.page[data-page=entry] table.facts tr:last-child td{border-bottom:1px solid var(--line)}
+/* a long equation scrolls inside its value cell, never widens the page */
+.page[data-page=entry] table.facts .math{display:inline-block;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:4px 0;margin:-4px 0;vertical-align:top}
+.page[data-page=entry] table.facts td.muted{width:200px;padding-right:18px;color:var(--muted);overflow-wrap:normal}
+.page[data-page=entry] .nofacts{margin:14px 0 0}
+@media(max-width:640px){.page[data-page=entry] table.facts td.muted{width:38%;padding-right:12px}}
+.page[data-page=entry] .note,.page[data-page=entry] .sl[title]{text-decoration:underline dotted var(--muted);text-underline-offset:3px;cursor:help}
+/* the sources: a label beside each kind of source, then the Paper vs code card */
+.page[data-page=entry] .srcs{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 18px;font-size:var(--t-sm);line-height:1.5}
+.page[data-page=entry] .srcs>b{font-family:var(--sans);font-weight:600;color:var(--muted)}
+.page[data-page=entry] .srcs .sls{display:flex;flex-direction:column;gap:6px}
+.page[data-page=entry] .srcs code{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.page[data-page=entry] .srcs .sl{overflow-wrap:anywhere}
+.page[data-page=entry] .pvc{margin-top:14px;padding:10px 12px;border:1px solid var(--run);border-radius:10px;background:var(--run-soft)}
+.page[data-page=entry] .pvc p{margin:4px 0 0}
+.page[data-page=entry] .pvc details{margin-top:4px}
+/* the record pills Evidence and Facts name, drawn as on the record page */
+.page[data-page=entry] .vp{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;font-family:var(--sans);font-size:11.5px;font-weight:700;line-height:1;color:var(--vp-ink);flex:none;vertical-align:-3px}
+.page[data-page=entry] .vp.ok{background:var(--ok)}
+.page[data-page=entry] .vp.bad{background:var(--bad)}
+.page[data-page=entry] .vp.part{background:var(--run)}
+.page[data-page=entry] .vp.inc{background:var(--muted)}
+.page[data-page=entry] .vp.plan{background:transparent;border:1.5px dashed var(--muted);color:var(--muted)}
+.page[data-page=entry] .vp svg{width:70%;height:70%;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;display:block}
+.page[data-page=entry] .vp{vertical-align:middle;position:relative;top:-1px}
+.page[data-page=entry] .cc{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px 2px 3px;font-family:var(--mono);font-size:12px;font-weight:500;background:var(--soft);color:var(--fg);white-space:nowrap}
+.page[data-page=entry] .cc .vp{width:16px;height:16px;font-size:10.5px}
+.page[data-page=entry] .vp.bet,.page[data-page=entry] .vp.adopt{background:var(--ok)}
+.page[data-page=entry] .vp.wor,.page[data-page=entry] .vp.rej{background:var(--bad)}
+.page[data-page=entry] .vp.eq{background:var(--muted)}
+.page[data-page=entry] .vp.und{background:var(--soft);color:var(--muted);box-shadow:inset 0 0 0 1.5px var(--muted)}
+.page[data-page=entry] .vp.run{background:radial-gradient(circle,var(--run) 0 3px,transparent 3.5px);box-shadow:inset 0 0 0 2px var(--run)}
+.page[data-page=entry] .vp.done{background:var(--accent)}
+.page[data-page=entry] .cc.pill{font-family:var(--sans);text-decoration:none;color:var(--fg);background:var(--soft);max-width:260px}
+.page[data-page=entry] .cc.pill .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* folds: the paper notes and each algorithm, caret at the right end */
+.page[data-page=entry] details.fold>summary::before{content:none;display:none}
+.page[data-page=entry] .fold{display:block;margin:0 0 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-family:var(--sans);font-size:var(--t-sm);line-height:1.45}
+.page[data-page=entry] .fold>summary{display:grid;grid-template-columns:minmax(0,1fr) auto 12px;gap:4px 12px;align-items:start;padding:13px 16px;cursor:pointer;list-style:none}
+.page[data-page=entry] .fold>summary::-webkit-details-marker{display:none}
+.page[data-page=entry] .fold .fb{min-width:0;display:flex;flex-direction:column;gap:2px}
+.page[data-page=entry] .fold .t{font-weight:600;line-height:1.5}
+.page[data-page=entry] .fold .dg2{font-size:12.5px;color:var(--muted)}
+.page[data-page=entry] .fold .dg2:has(.iss){display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
+/* a closed algorithm's digest keeps to one line, cut with an ellipsis; the full text on hover */
+.page[data-page=entry] .fold .dg2.one,.page[data-page=entry] .fold .dg2.one:has(.iss){display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page[data-page=entry] .fold .dg2.one code{font-family:var(--mono);font-size:11.5px;background:var(--soft);border-radius:4px;padding:0 5px}
+/* every chip in the digest line sits centred on its text: the line is as tall as an idea chip */
+.page[data-page=entry] .fold .dg2.one{line-height:20px}
+.page[data-page=entry] .fold .dg2.one .iss,.page[data-page=entry] .fold .dg2.one code{vertical-align:middle;margin:0}
+.page[data-page=entry] .fold .cnt{font-family:var(--mono);font-size:var(--t-xs);color:var(--muted);white-space:nowrap;padding-top:3px}
+.page[data-page=entry] .fold .chev{color:var(--muted);font-size:12px;justify-self:end}
+.page[data-page=entry] .fold .fbody{margin:0 16px;padding:14px 0 16px;border-top:1px solid var(--line);font-family:var(--prose);font-size:var(--t-prose)}
+.page[data-page=entry] .iss{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:0 8px 0 5px;font-family:var(--sans);font-size:12px;line-height:18px;color:var(--fg);white-space:nowrap}
+.page[data-page=entry] .iss svg{width:12px;height:12px;fill:none;stroke:var(--ok);stroke-width:2}
+.page[data-page=entry] .iss .n{font-family:var(--mono);color:var(--muted)}
+/* the step table, its changed cells shaded, and the tables an entry cites */
+.page[data-page=entry] table.steps td{font-size:var(--t-sm)}
+.page[data-page=entry] table.steps td.step{font-weight:600}
+.page[data-page=entry] table.steps td.chg{background:var(--accent-soft)}
+.page[data-page=entry] .box.steps{margin-bottom:18px}
+.page[data-page=entry] figure{margin:0 0 12px;min-width:0}
+.page[data-page=entry] figure>figcaption{margin:0 0 8px}
+.page[data-page=entry] .effect{margin:0}
+.page[data-page=entry] .ct{display:inline-flex;align-items:center;font-family:var(--mono);font-size:11.5px;font-weight:500;border-radius:5px;padding:0 6px;line-height:18px;border:1px solid var(--line);background:var(--panel);color:var(--fg);white-space:nowrap;text-decoration:none}
+/* the definition box */
+.page[data-page=entry] .defn{border:1px solid var(--line);border-radius:10px;background:var(--fig);padding:14px 18px}
+.page[data-page=entry] .defn p{margin:0}
+.page[data-page=entry] dl.syms{display:grid;grid-template-columns:70px minmax(0,1fr);gap:4px 12px;margin:8px 0 10px;font-size:13px}
+.page[data-page=entry] dl.syms dd{margin:0}
+/* the ruled algorithm block (Components 7) and its Reading beside it */
+.page[data-page=entry] .algrow{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,8fr);gap:0 24px;align-items:start}
+.page[data-page=entry] .algb{margin:0;min-width:0;font-family:"STIX Two Text","Latin Modern Roman",Georgia,serif;font-size:15px;line-height:1.6;color:var(--fg);background:var(--fig);border-top:2px solid var(--fg);border-bottom:2px solid var(--fg);padding:0 14px 6px;font-style:normal}
+.page[data-page=entry] .algb p{margin:0}
+.page[data-page=entry] .algb code{font-family:var(--mono);font-size:11.5px}
+/* the head: caption on the left, the cited code file once on the right */
+.page[data-page=entry] .algb .ah{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 16px;padding:5px 0;border-bottom:1px solid var(--fg)}
+.page[data-page=entry] .algb .cf{font-family:var(--sans);font-size:12px;color:var(--muted);white-space:nowrap}
+.page[data-page=entry] .algb .cf code,.page[data-page=entry] .algb .rf code{color:var(--fg);background:var(--soft);border-radius:4px;padding:1px 6px}
+.page[data-page=entry] .algb .cf code{cursor:help}
+/* Require and Ensure as a label column, each side one cell */
+.page[data-page=entry] .algb .rq{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 8px;margin:6px 0 0}
+.page[data-page=entry] .algb .rq b{font-weight:600;text-align:left}
+/* the rule after Ensure runs the full width; an overflowing body sets the hint into its right end */
+.page[data-page=entry] .algb .mid{display:flex;align-items:center;margin:6px 0 4px;min-height:11px}
+.page[data-page=entry] .algb .mid::before{content:"";flex:1 1 auto;border-top:1px solid var(--fg)}
+.page[data-page=entry] .algb .mid .sx{display:none;margin-left:8px;font-family:var(--mono);font-size:11px;line-height:1;color:var(--muted);white-space:nowrap}
+/* the page script marks the overflow with the hint it puts before the body; the rule carries it */
+.page[data-page=entry] .algb .mid:has(+.sh.x) .sx{display:inline-block}
+.page[data-page=entry] .algb>.sh{display:none}
+/* the body never scrolls down: lines wrap down to 30ch (an unbreakable formula widens its column),
+   then the body scrolls sideways (the bottom padding keeps a last formula's overhang);
+   the number and the gutter fill their row, so scrolled text never shows beside them */
+.page[data-page=entry] .algb .bd{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+/* bottom room: a tall formula in the last line must not be clipped */
+.page[data-page=entry] .algb ol{list-style:none;margin:0;padding:0 0 10px;display:grid;grid-template-columns:34px minmax(min-content,54ch) minmax(0,1fr) auto;row-gap:3px;width:100%;min-width:min-content;line-height:22px}
+.page[data-page=entry] .algb li{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:baseline;background:var(--fig)}
+.page[data-page=entry] .algb li.hl{background:var(--accent-soft)}
+.page[data-page=entry] .algb .no{grid-column:1;position:sticky;left:0;z-index:1;background:inherit;padding-right:10px;text-align:right;font-family:var(--mono);font-size:12px;align-self:stretch;color:var(--muted);font-variant-numeric:tabular-nums}
+.page[data-page=entry] .algb .tx{grid-column:2;min-width:30ch}
+/* a phone body is narrower than 30ch plus the numbers: wrap to the box, scroll only for real ink */
+@media(max-width:720px){.page[data-page=entry] .algb .tx{min-width:0}}
+/* a hairline guide per nesting level */
+.page[data-page=entry] .algb li.i1 .tx{padding-left:22px;background:linear-gradient(var(--line),var(--line)) 6px 0/1px 100% no-repeat}
+.page[data-page=entry] .algb li.i2 .tx{padding-left:44px;background:linear-gradient(var(--line),var(--line)) 6px 0/1px 100% no-repeat,linear-gradient(var(--line),var(--line)) 28px 0/1px 100% no-repeat}
+.page[data-page=entry] .algb li.i3 .tx{padding-left:66px;background:linear-gradient(var(--line),var(--line)) 6px 0/1px 100% no-repeat,linear-gradient(var(--line),var(--line)) 28px 0/1px 100% no-repeat,linear-gradient(var(--line),var(--line)) 50px 0/1px 100% no-repeat}
+.page[data-page=entry] .algb li.i4 .tx{padding-left:88px;background:linear-gradient(var(--line),var(--line)) 6px 0/1px 100% no-repeat,linear-gradient(var(--line),var(--line)) 28px 0/1px 100% no-repeat,linear-gradient(var(--line),var(--line)) 50px 0/1px 100% no-repeat,linear-gradient(var(--line),var(--line)) 72px 0/1px 100% no-repeat}
+/* the code reference: the line range only, in a quiet right gutter pinned to the box edge */
+.page[data-page=entry] .algb .rf{grid-column:4;position:sticky;right:0;z-index:1;background:inherit;align-self:stretch;padding-left:12px;text-align:right;white-space:nowrap;font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.page[data-page=entry] .algb .rf:empty{padding:0}
+.page[data-page=entry] .algb .rf code{margin-right:6px}
+.page[data-page=entry] .algb .rf>span+span{margin-left:8px}
+/* a phone row wraps its text to the box: the gutter scrolls with it rather than cover the text */
+@media(max-width:720px){.page[data-page=entry] .algb .rf{position:static}}
+/* a prose note: inside its line's row, under the line's text, upright, the triangle kept */
+.page[data-page=entry] .algb.notes li{padding:1px 0}
+.page[data-page=entry] .algb .nt{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 6px;margin:1px 0 4px;font-size:13px;line-height:1.45;color:var(--muted);font-style:normal}
+.page[data-page=entry] .algb .tri{font-style:normal;font-size:11px;line-height:1.75}
+.page[data-page=entry] .algb .nk{font-family:var(--sans);font-size:11px;font-weight:600;color:var(--fg);margin-right:5px}
+.page[data-page=entry] .reading .k{font-family:var(--sans);font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.page[data-page=entry] .walk{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;font-size:var(--t-sm);line-height:1.55}
+.page[data-page=entry] .walk>b{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.page[data-page=entry] .shaded{margin:10px 0 0}
+/* where it sits, evidence, limits and relations */
+.page[data-page=entry] .sits{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--sans);font-size:13px;margin:0 0 10px}
+.page[data-page=entry] .sits span{padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.page[data-page=entry] .sits span.here{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600}
+.page[data-page=entry] .sits .ar{border:0;background:transparent;padding:0;color:var(--muted)}
+.page[data-page=entry] h3.ev{margin:18px 0 2px;font-size:var(--t-body)}
+.page[data-page=entry] .used{border:1px dashed var(--line);border-radius:10px;padding:14px 16px}
+.page[data-page=entry] .lim{padding:10px 0;border-top:1px solid var(--line)}
+.page[data-page=entry] .lim>b{font-family:var(--sans)}
+.page[data-page=entry] .lim p,.page[data-page=entry] .lim div p{margin:6px 0}
+.page[data-page=entry] .lim .q{padding:6px 8px;border-radius:8px;background:var(--h-soft);color:var(--h)}
+.page[data-page=entry] .lim .file{display:inline-block;padding:3px 8px;border:1px solid var(--line);border-radius:6px;font-family:var(--sans);font-size:12px;color:var(--fg);text-decoration:none}
+.page[data-page=entry] .rels{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0}
+.page[data-page=entry] a.term{white-space:nowrap}
+@media print{.page[data-page=entry] .fold .fbody{display:block!important}}
+@container (max-width:860px){
+.page[data-page=entry] .algrow{grid-template-columns:minmax(0,1fr)}
+}
+.page[data-page=entry] .sec+.fold{margin-top:14px}
+/* a Figure row: the caption, the drawing on its plate, the file under it; dark light boxes mix toward the panel */
+:root[data-theme=dark] .page[data-page=entry] figure.frow{--fig-tint:30%;--fig-ink:#dcdfe5;--fig-muted:#9a9fac;--fig-line:#464852;--fig-soft:#35363e;--fig-paper:#25262c;--fig-series-dark:#e4e7ee}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .page[data-page=entry] figure.frow{--fig-tint:30%;--fig-ink:#dcdfe5;--fig-muted:#9a9fac;--fig-line:#464852;--fig-soft:#35363e;--fig-paper:#25262c;--fig-series-dark:#e4e7ee}}
+.page[data-page=entry] figure.frow{display:flex;flex-direction:column;width:100%;min-width:0;margin:4px 0 18px}
+.page[data-page=entry] figure.frow>figcaption{order:-1;margin:0 0 8px;font-family:var(--prose);font-size:13px;line-height:1.55;color:var(--fg)}
+.page[data-page=entry] figure.frow>figcaption .lbl{margin:0 4px 0 0;font-family:var(--sans);font-weight:700;color:var(--fg)}
+.page[data-page=entry] figure.frow>.fig{background:var(--fig);border:1px solid var(--line);border-radius:8px;padding:8px;overflow:hidden;min-width:0}
+.page[data-page=entry] figure.frow>.fig svg,.page[data-page=entry] figure.frow>.fig img{display:block;width:100%;height:auto}
+.page[data-page=entry] figure.frow>.src{margin-top:6px;font-family:var(--mono);font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.page[data-page=entry] .afig{margin-top:18px}

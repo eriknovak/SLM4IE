@@ -341,7 +341,7 @@ checks structure but not semantic agreement with the code.
   worker code to stay silent.
 - Annotated extractors should keep text and annotations split (see Data
   layout). Don't add a "merged" output without a strong reason.
-- Every figure is drawn through `experiments/report_figures.py`: an
+- Every figure is drawn through `experiments/create_assets.py`: an
   `analysis.py` imports it before building any chart and writes each figure
   with its `save_figure` (a figure or a zero-argument builder). The `slm4ie`
   datachart theme lives in the private `datachart-themes` repo
@@ -349,8 +349,8 @@ checks structure but not semantic agreement with the code.
   `pyproject.toml` names it in the `datachart.default_theme` entry-point
   group, so datachart starts every session in it and no `set_theme` call is
   made anywhere. Change the palette only in that repo, never switch a chart
-  to another theme, and never overwrite `report_figures.py` from the labflow
-  skill; `tests/experiments/test_report_figures.py` guards the default and
+  to another theme, and never overwrite `create_assets.py` from the labflow
+  skill; `tests/experiments/test_create_assets.py` guards the default and
   the colour-blindness gate.
 - Tests mirror the package: `slm4ie/<path>/<module>.py` is tested by
   `tests/<path>/test_<module>.py`, and a package's `__init__` by

@@ -27,16 +27,18 @@ concluded: 2026-09-28
 
 ## Hypothesis
 
+- **Question**: Do open Slovene text sources hold enough native medical and scientific text and documents to meet KPI 2 and KPI 4 without synthetic data?
+- **Decision it informs**: Whether a domain's shortfall can be filled from open native sources, or medical pretraining needs the multilingual fallback or synthetic data and medical examples have to be built. The KPI coverage verdict reads the answer to say whether a gap is fillable.
 - **Statement**: Open-access Slovene text sources, catalogued by domain, size, annotation and document length, contain enough medical and scientific material to meet KPI 2 and KPI 4 without synthetic data.
 - **Rationale**: Nobody had written down what Slovene text exists openly beyond what the project already downloads.
   - **The project downloads 22 Slovene sources and knows little else.** Nobody has recorded what else exists openly, under what licence, in what domain, and whether it is annotated.
   - **Earlier survey work left an intuition that medicine is the gap, and no notes.** The project's pretraining corpus build, the pipeline that downloads, filters and deduplicates its sources and counts words per source, makes it concrete. Medicine finished at 352 documents and 808,176 words, a hundred times smaller than the next smallest domain.
   - **Only a search outside the repo can tell the two readings apart.** The gap is either a fact about Slovene or a fact about which sources were picked.
 - **Predictions**: Each clause counts openly downloadable Slovene datasets outside the download registry, written in Slovene rather than translated or machine-generated ([D11]), with tokens estimated at two per word ([D6]). An example is one document.
-  - **H1 — Medicine has enough native text to pretrain on**: confirmed if it reaches 500,000 estimated tokens (KPI 4); refuted if it falls short under every access filter — medical pretraining then needs the multilingual fallback or synthetic data.
-  - **H2 — Medicine has enough native examples**: confirmed if it reaches 10,000 documents (KPI 2); refuted if it falls short under every access filter — medical examples then have to be built or synthesised.
-  - **H3 — Science has enough native text to pretrain on**: confirmed if scientific plus academic datasets reach 500,000 estimated tokens; refuted if they fall short under every access filter.
-  - **H4 — Science has enough native examples**: confirmed if scientific plus academic datasets reach 10,000 documents; refuted if they fall short under every access filter.
+  - **H1 — Medicine has enough native text to pretrain on**: confirmed if it reaches 500,000 estimated tokens (KPI 4); refuted if it falls short under every access filter — medical pretraining then needs the multilingual fallback or synthetic data ([D6], [D11]; measured by [M5]).
+  - **H2 — Medicine has enough native examples**: confirmed if it reaches 10,000 documents (KPI 2); refuted if it falls short under every access filter — medical examples then have to be built or synthesised ([D7], [D11]; measured by [M5]).
+  - **H3 — Science has enough native text to pretrain on**: confirmed if scientific plus academic datasets reach 500,000 estimated tokens; refuted if they fall short under every access filter ([D6], [D11]; measured by [M5]).
+  - **H4 — Science has enough native examples**: confirmed if scientific plus academic datasets reach 10,000 documents; refuted if they fall short under every access filter ([D7], [D11]; measured by [M5]).
   - **Verdict rule**: confirmed when H1 to H4 all hold; refuted when any of them falls short under every access filter; inconclusive otherwise.
   - **Read beside the clauses, not as clauses**: annotated information-extraction examples per domain, the second reading of KPI 2 ([D7]), are reported but decide no clause.
 - **Outcome**: refuted
@@ -53,15 +55,15 @@ concluded: 2026-09-28
   - Total each domain under three access filters and read each total against its KPI ([M5]).
 - **Metrics**: primary estimated tokens per domain against KPI 4; secondary documents per domain, native documents per domain, and annotated examples per domain against KPI 2.
 - **Protocol**: A size counts only when read from official statistics or counted over downloaded text ([D6]). A total short of a threshold while datasets report no size is `unknown`, not a miss ([D9]). Search dates and families are recorded so a refresh knows what to re-check.
-- **Compute**: Web search, polite per-item fetching for the four medical sources, and one MLflow lineage run logging the tables and figures.
-- **People**: none
-- **Data access**: none; every counted source is openly reachable, and the three gated `texdata` sets stayed out of reach.
-- **External dependency**: the Hugging Face, Wikipedia and journal harvesting interfaces the sizing pass calls ([M6]), and the language-model agents that searched the sources and checked provenance ([M1], [M7]).
+- **Compute**: web search and fetching — web search, polite per-item fetching for the four medical sources, and one MLflow lineage run logging the tables and figures.
+- **People**: none — the survey needs no annotation or review hours.
+- **Data access**: none — every counted source is openly reachable, and the three gated `texdata` sets stayed out of reach.
+- **External dependency**: harvesting interfaces and search agents — the Hugging Face, Wikipedia and journal harvesting interfaces the sizing pass calls ([M6]), and the language-model agents that searched the sources and checked provenance ([M1], [M7]).
 
 ## Datasets
 
-- **Survey rows**: One row per dataset a searched source family returned, on the catalogue schema ([D4]), kept as JSON per family under `data/experiments/data/data-landscape-slovenian/raw/`, beside the provenance check of each non-native row ([M7]). [Rows each family returned, kept after merging, and already downloaded](tables/dataset-survey-rows-statistics.csv)
-- **Fetched native medical text**: One item per case report, Wikipedia article, journal article or guideline PDF, fetched under `data/experiments/data/data-landscape-slovenian/interim/<source>/` for counting only. [Items and words per fetched source](tables/native-medical-sizes.csv)
+- **Survey rows** (own; none labels): one item is one dataset a searched source family returned, on the catalogue schema ([D4]). The rows are kept as JSON per family under `data/experiments/data/data-landscape-slovenian/raw/`, beside the provenance check of each non-native row ([M7]). [Rows each family returned, kept after merging, and already downloaded](tables/dataset-survey-rows-statistics.csv)
+- **Fetched native medical text** (own; none labels): one item is one case report, Wikipedia article, journal article or guideline PDF, fetched under `data/experiments/data/data-landscape-slovenian/interim/<source>/` for counting only. [Items and words per fetched source](tables/native-medical-sizes.csv)
 
 ## Methods
 
@@ -163,79 +165,79 @@ concluded: 2026-09-28
 - **Decision**: Slovene across all domains, with a medical-only side table for other European languages.
 - **Why**: The project is Slovene-first, but if open Slovene medicine falls short, the fallback is medical text in a related or larger language. Sizing that fallback costs little while the search is already running.
 - **History**:
-  - 2026-09-14 first version, design interview, question 6
+  - 2026-09-14 (before runs) first version, design interview, question 6
 
 ### D2 — Search eight source families, from CLARIN.SI to Slovene medical publishers
 
 - **Decision**: CLARIN.SI, HuggingFace Hub, Zenodo, ELG, LINDAT, OPUS (with parallel medical sets such as EMEA), and Common Crawl derivatives. Also Slovene medical publishers and institutions (Zdravniški vestnik, NIJZ, ZZZS, JAZMP, Wikipedia medical categories), plus synthetic and translated medical sets. Every hit is verified against its landing page.
 - **Why**: These are where Slovene text is actually published. Naming them fixes the survey's scope, so the record can say what was covered and a refresh knows what to re-check.
 - **History**:
-  - 2026-09-14 first version, design interview, question 20
-  - 2026-09-17 searched by four parallel agents, one per family, each required to return the URL it read for every row and to leave a field empty rather than guess
-  - 2026-09-19 the Hugging Face family was searched a second time [M2]. Two corpora the project already downloads, FinePDFs and Legal-mC4, were missing although the harvest held both. The harvest is now kept as evidence, so a third pass re-reads it instead of re-searching the Hub
+  - 2026-09-14 (before runs) first version, design interview, question 20
+  - 2026-09-17 (after runs) searched by four parallel agents, one per family, each required to return the URL it read for every row and to leave a field empty rather than guess
+  - 2026-09-19 (after runs) the Hugging Face family was searched a second time [M2]. Two corpora the project already downloads, FinePDFs and Legal-mC4, were missing although the harvest held both. The harvest is now kept as evidence, so a third pass re-reads it instead of re-searching the Hub
 
 ### D3 — Catalogue every dataset found, whatever its access
 
 - **Decision**: Every dataset found is a row, regardless of access. An `access` column (open / login / gated / not downloadable) decides what counts toward the verdict.
 - **Why**: A source that exists but is not packaged — a journal archive of individual PDFs, say — is not supply today but is the answer to "what would close the gap". Excluding it would lose the most actionable finding.
 - **History**:
-  - 2026-09-14 first version, design interview, question 20
+  - 2026-09-14 (before runs) first version, design interview, question 20
 
 ### D4 — One catalogue row per dataset, one column per question the KPIs ask
 
 - **Decision**: One row per dataset. Its columns are name, source handle or URL, licence, access, languages, domains, reported document count, and reported word or token count. The rest are size verified, annotation type, document-length class, format, already in the download registry, and KPI fit.
 - **Why**: Each column answers a question the KPIs ask. Annotation type separates pretraining supply from IE fine-tuning supply; document-length class separates a sentence bank from a document corpus, which matters for pretraining.
 - **History**:
-  - 2026-09-14 first version, design interview, question 19
-  - 2026-09-19 the single `KPI fit` column became `kpi2_fit` and `kpi4_fit`, because most rows report a document count but not a word count. `tokens_estimated`, `family` and `mirrors` added in the same pass
-  - 2026-09-21 `registry_key`, `words_corpus`, `documents_corpus` and `words_basis` added, so a size taken from the project's own build is distinguishable from one the source reported [D6]
+  - 2026-09-14 (before runs) first version, design interview, question 19
+  - 2026-09-19 (after runs) the single `KPI fit` column became `kpi2_fit` and `kpi4_fit`, because most rows report a document count but not a word count. `tokens_estimated`, `family` and `mirrors` added in the same pass
+  - 2026-09-21 (after [F1]) `registry_key`, `words_corpus`, `documents_corpus` and `words_basis` added, so a size taken from the project's own build is distinguishable from one the source reported [D6]
 
 ### D5 — Eleven shared domains, with science as scientific plus academic
 
 - **Decision**: medical, scientific, legal, news, parliamentary, academic, encyclopedic, forum/social, general-web, finance, other. A dataset may carry several. The headline science figure is scientific plus academic.
 - **Why**: Shared with the project's other data experiments, so their records can be read against each other.
 - **History**:
-  - 2026-09-14 first version, design interview, question 12
+  - 2026-09-14 (before runs) first version, design interview, question 12
 
 ### D6 — Count words, estimate two tokens per word, trust only counted sizes
 
 - **Decision**: Sizes are recorded as the words the source reports, with about 2 subword tokens per word applied for KPI comparisons. A size counts as verified only when read from a downloaded sample or an official statistics page; a publisher's prose claim is unverified.
 - **Why**: Published corpus sizes are frequently rounded, stale, or measured differently from what the project would ingest. Marking the provenance of each number keeps an unverified claim from silently becoming a KPI verdict. The token factor stays an estimate until the project tokenizer exists.
 - **History**:
-  - 2026-09-14 first version, design interview, question 3/Q14
-  - 2026-09-21 a registry source whose publisher reports no size takes the word count the corpus build measured, marked `words_basis: corpus`; that is a count over downloaded text, the stronger verification this decision admits
-  - 2026-09-22 a source this experiment fetched and counted itself takes that count ahead of the corpus fallback, marked `counted`, `partial` (a lower bound) or `sampled` (extrapolated from a fixed-seed sample) [M6]
+  - 2026-09-14 (before runs) first version, design interview, question 3/Q14
+  - 2026-09-21 (after [F1]) a registry source whose publisher reports no size takes the word count the corpus build measured, marked `words_basis: corpus`; that is a count over downloaded text, the stronger verification this decision admits
+  - 2026-09-22 (after [F1]) a source this experiment fetched and counted itself takes that count ahead of the corpus fallback, marked `counted`, `partial` (a lower bound) or `sampled` (extrapolated from a fixed-seed sample) [M6]
 
 ### D7 — Report KPI 2 as documents and as annotated extraction examples
 
 - **Decision**: KPI 2 is reported twice: once as pretraining documents, once as annotated IE examples.
 - **Why**: "10k examples" means different things for pretraining and for information extraction, and the proposal commits to both. Reporting one number would hide which commitment is met.
 - **History**:
-  - 2026-09-14 first version, design interview, question 10
+  - 2026-09-14 (before runs) first version, design interview, question 10
 
 ### D8 — Report every total under three access filters
 
 - **Decision**: The catalogue CSV and per-domain summary tables under `tables/`, figures via datachart, produced by `analysis.py`. Per-domain totals are reported under three access filters: open only, open plus login, and all. No MLflow runs beyond a lineage run logging the catalogue as an artifact.
 - **Why**: The three filters are the honest way to state supply: what anyone can download, what a registered researcher can, and what exists at all. A single total would conflate them.
 - **History**:
-  - 2026-09-14 first version
-  - 2026-09-19 a third figure, `reported-sizes-by-domain`, added, because the token figure cannot draw a domain whose datasets nobody sized, and medicine was that domain
-  - 2026-09-29 the two access dumbbells and `reported-sizes-by-domain` removed: no finding rests on them, and the tables carry their numbers
+  - 2026-09-14 (before runs) first version
+  - 2026-09-19 (after runs) a third figure, `reported-sizes-by-domain`, added, because the token figure cannot draw a domain whose datasets nobody sized, and medicine was that domain
+  - 2026-09-29 (after [F1]) the two access dumbbells and `reported-sizes-by-domain` removed: no finding rests on them, and the tables carry their numbers
 
 ### D9 — Read a shortfall behind unsized datasets as unknown, not a miss
 
 - **Decision**: A domain total that falls short of a KPI threshold while the domain still holds datasets nobody sized is reported as `unknown`, not as a miss. A total that clears the threshold is `yes` whatever is missing, since the missing datasets could only raise it. Every table carries the count of datasets behind each verdict that reported no size.
 - **Why**: An unreported size is not a verified zero, as the token unit and verification rule holds ([D6]). Reporting a medical domain nobody sized as a KPI 4 miss would turn a gap in the evidence into a finding about Slovene.
 - **History**:
-  - 2026-09-19 first version
+  - 2026-09-19 (after runs) first version
 
 ### D10 — Keep the publisher's row when a dataset is catalogued twice
 
 - **Decision**: Rows are merged on the dataset name, normalised. The publisher's row wins over an aggregator's row mirroring it. The duplicates only fill fields the winner left empty, and their addresses are kept in a `mirrors` column.
 - **Why**: ELG re-lists CLARIN.SI holdings, so 13 datasets arrived twice and would have been double-counted in every per-domain total. Keeping the publisher's record keeps the licence and size as the publisher states them; the mirrors stay reachable.
 - **History**:
-  - 2026-09-19 first version
-  - 2026-09-28 Why corrected: every merged duplicate came through ELG; LINDAT's rows matched no CLARIN.SI name
+  - 2026-09-19 (after runs) first version
+  - 2026-09-28 (after [F1]) Why corrected: every merged duplicate came through ELG; LINDAT's rows matched no CLARIN.SI name
 
 ### D11 — Separate native Slovene from translated and machine-made text
 
@@ -245,8 +247,8 @@ concluded: 2026-09-28
   - Check every row by hand, native ones included — rejected: the non-native rows are where a misreading changes what the Predictions count.
   - Keep the keyword reading alone — rejected: it counted dictionaries and human translation memories as translated text and named no translation system.
 - **History**:
-  - 2026-09-19 first version
-  - 2026-09-28 non-native rows checked against their sources into six classes, stored as evidence so the reading still reruns ([M7]); five rows moved to native
+  - 2026-09-19 (after [F1]) first version
+  - 2026-09-28 (after [F1]) non-native rows checked against their sources into six classes, stored as evidence so the reading still reruns ([M7]); five rows moved to native
 
 ### D12 — Fetch only medical sources that offer an API or harvesting endpoint
 
@@ -255,13 +257,14 @@ concluded: 2026-09-28
 - **Alternatives**:
   - Estimate from document counts alone — rejected: half the rows have none, and the units differ (a case-report row is a sentence).
 - **History**:
-  - 2026-09-21 first version, approved by the project lead before anything was fetched
+  - 2026-09-21 (after [F1]; user) first version, approved by the project lead before anything was fetched
 
 ## Findings
 
 ### F1 — Open Slovene medicine is mostly not written in Slovene · key
 
 - **Summary**: Medicine holds 3.04M open documents, of which 24,757 were written in Slovene; the rest is translation and machine output.
+- **Key number**: 24,757 — open medical documents written in Slovene, of 3.04M open medical documents
 - **Runs**: 2a6651164b83452f9dddcb00b72a6038
 - **Result**: ![Share of each domain's openly downloadable documents that were written in Slovene, with the domain's document total beside its name and medicine's row bolded. Most domains sit at or near full native share; other, legal and academic sit near half, weighed down by translation memories and instruction sets; medicine sits near zero.](figures/documents-by-domain-and-provenance.svg)
 - **Reading**:
@@ -278,6 +281,7 @@ concluded: 2026-09-28
 ### F2 — Medicine's new native supply is large in words and small in documents · key
 
 - **Summary**: The four new native medical sources counted by this experiment hold about 7.9M words, thirty times KPI 4, in under four thousand documents.
+- **Key number**: 7.9M — words in the four new native medical sources this experiment counted
 - **Runs**: 2a6651164b83452f9dddcb00b72a6038
 - **Result**: [Items and words counted for each new native medical source](tables/native-medical-sizes.csv)
 - **Reading**:
@@ -294,6 +298,7 @@ concluded: 2026-09-28
 ### F3 — Science clears both KPIs on native prose alone · key
 
 - **Summary**: Native science outside the download registry reaches 147,291 open documents and 33.6M estimated tokens, both far past their thresholds.
+- **Key number**: 147,291 — open native science documents outside the download registry
 - **Runs**: 2a6651164b83452f9dddcb00b72a6038
 - **Result**: [Native supply outside the download registry, per Prediction domain and access filter](tables/supply-by-clause.csv)
 - **Reading**:
@@ -359,13 +364,15 @@ concluded: 2026-09-28
   - **Open native Slovene text covers science on both KPIs and medicine on tokens, but not medicine on examples.** Medicine has plenty of native words and too few native documents to count as examples.
   - **The medical gap was one of documents, not of words.** The project's corpus build suggested medicine lacked text. Once the national medical journal and Wikipedia were counted, text was plentiful; what is scarce is many separate native medical documents.
   - **The survey measures what is catalogued, not what is written.** Sources outside the eight families, and sources whose repositories forbid bulk access, were not counted. A follow-up that builds medical examples inherits the question of which unit counts as an example.
-- **Adoption candidate**: Add Zdravniški vestnik and the Wikipedia medicine category to the download registry, with the new scientific and academic rows ([F4]). The pieces to lift are the journal harvester and the Wikipedia category walk in `size_medical_sources.py`.
+- **Adoption candidate**: Add Zdravniški vestnik and the Wikipedia medicine category to the download registry, with the new scientific and academic rows ([F4]).
+  - **Carries**: the journal harvester and the Wikipedia category walk in `size_medical_sources.py`.
+  - **Stays out**: `analysis.py` and the rest of `size_medical_sources.py`.
 - **Next**:
-  - Build medical information-extraction examples; open supply cannot provide ten thousand native medical documents.
-  - Settle why PoVeJMo-VeMo-Med reports far more documents than the corpus build kept, in the curation-quality experiment (`curation-quality-slovenian`), which tests how much good text the corpus build's filters discard.
-  - Decide in a KPI-coverage follow-up whether scientific extraction examples are built or found; none are annotated today.
-  - Retry the three gated `texdata` sets if access is ever granted; the request of 2026-09-22 is unanswered.
-  - Size Zdravniški vestnik from a larger sample before ingesting it.
+  - Build medical information-extraction examples; open supply cannot provide ten thousand native medical documents — planned as medical-ie-slovenian.
+  - Settle why PoVeJMo-VeMo-Med reports far more documents than the corpus build kept, in the curation-quality experiment (`curation-quality-slovenian`), which tests how much good text the corpus build's filters discard — planned as curation-quality-slovenian #2.
+  - Decide in a KPI-coverage follow-up whether scientific extraction examples are built or found; none are annotated today — planned as kpi-coverage-slovenian #3.
+  - Retry the three gated `texdata` sets if access is ever granted; the request of 2026-09-22 is unanswered — not yet planned.
+  - Size Zdravniški vestnik from a larger sample before ingesting it — not yet planned.
 - **Limitations**:
   - Under open access, medicine's document total reads `unknown` by the missing-size rule ([D9]) only because of one sentence collection with no document unit. The verdict reads it as a miss.
   - Tokens are estimated at two per word until the project tokenizer exists.
@@ -377,6 +384,8 @@ concluded: 2026-09-28
 ## Reproduce
 
 The searched rows under `data/experiments/data/data-landscape-slovenian/raw/` are the survey's evidence and are not regenerated. The corpus build's statistics must be in place under `data/pretrain/07_statistics/`.
+
+Note added 2026-11-06: the shared corpus under `data/pretrain/` was rebuilt after this record concluded, so rerunning `analysis.py` no longer reproduces three of its tables. On main, the lock file `configs/data/curate.lock.yaml` records rebuilds on 2026-10-08 (8357955), 2026-10-28 (8856e2a) and 2026-11-01 (612512c). The current `data/pretrain/07_statistics/` files date from 2026-10-31. `catalogue.csv` keeps its 295 rows, but its words go from 83,204,144,177 to 82,767,029,246. Its corpus-measured words go from 6,859,746,358 to 6,166,376,882, and its corpus-measured documents from 26,740,611 to 20,402,208. `provenance-by-class.csv` changes in words only: 83,204,144,177 become 82,767,029,246, and the native class's 80,985,853,460 become 80,548,738,529. In `supply-by-domain-and-access.csv`, words under the all-access filter go from 83,222,103,320 to 82,784,988,389, and estimated tokens from 166,444,206,640 to 165,569,976,778. The changed rows are medical, legal and general-web. Legal also loses its one corpus-sized dataset, which becomes a dataset without a word count. Every KPI column in that table is unchanged. Every number in this record is from the committed tables of 2026-09-28.
 
 ```bash
 export MLFLOW_TRACKING_URI=http://localhost:5555

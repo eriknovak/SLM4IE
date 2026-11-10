@@ -2,6 +2,7 @@
 title: Slovene training data — a dataset for tokenizers, models and information extraction
 slug: slovene-training-data
 short: Slovene training data
+why: The project needs the answer because every later experiment trains or evaluates on it, and the proposal behind the project commits to minimum amounts of text and examples per domain.
 status: open
 members:
   - ../data/data-landscape-slovenian/
@@ -11,22 +12,26 @@ members:
 planned:
   - slug: silver-ner-slovenian
     short: Silver NER examples
-    title: whether LLM annotation of real Slovene text, with generated text only for rare labels, matches the human gold of SUK closely enough to train on
+    title: Does LLM annotation of real Slovene text, with generated text only for rare labels, match the human gold of SUK closely enough to train on?
+    category: data
     ticket: "#43"
     builds_on: [kpi-coverage-slovenian, ie-benchmark-slovenian]
   - slug: medical-ie-slovenian
     short: Medical extraction examples
-    title: whether silver examples labelled with the OMOP data model's domains, on native Slovene medical text, agree with a double-annotated gold set
+    title: Do silver examples labelled with the OMOP data model's domains, on native Slovene medical text, agree with a double-annotated gold set?
+    category: data
     ticket: "#46"
     builds_on: [data-landscape-slovenian, silver-ner-slovenian]
   - slug: science-ie-slovenian
     short: Scientific extraction examples
-    title: whether silver examples labelled with methods, datasets, metrics, parameters and results, on native Slovene scientific text, agree with a double-annotated gold set
+    title: Do silver examples labelled with methods, datasets, metrics, parameters and results, on native Slovene scientific text, agree with a double-annotated gold set?
+    category: data
     ticket: "#47"
     builds_on: [kpi-coverage-slovenian, silver-ner-slovenian]
   - slug: quality-classifier-slovenian
     short: Learned quality filter
-    title: whether a classifier trained on the judge's verdicts removes the web junk that the rule-based filters cannot separate from good text
+    title: Does a classifier trained on the judge's verdicts remove the web junk that the rule-based filters cannot separate from good text?
+    category: data
     builds_on: [curation-thresholds-slovenian]
 ---
 
@@ -40,16 +45,20 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 
 - **Open Slovene text is enough to pretrain on in medicine and science, before curation**: the survey of open datasets found medicine's new native sources far past the token target ([data-landscape-slovenian:F2]) and science past both targets on text written in Slovene ([data-landscape-slovenian:F3]).
 - **The curation pipeline cannot yet be trusted with that domain text**: what it keeps is clean ([curation-quality-slovenian:F3]), but every content filter drops mostly good text ([curation-quality-slovenian:F1]), how well a filter decides swings with the source ([curation-quality-slovenian:F2]), and the quality filter removes most of the medical source ([curation-quality-slovenian:F7]).
+- **Figure**: ![Share of bad text among the documents each stage drops and keeps, at the lenient bar](../data/curation-quality-slovenian/figures/judge-rubric-drop-precision-by-stage.svg)
 - **Per-source filter settings win back good text without a measurable rise in bad text**: the loosened routes keep about a quarter more good documents than the baseline, with a rise in bad text the draws cannot place above two points ([curation-thresholds-slovenian:F12]), and the gain matched its estimate on every route ([curation-thresholds-slovenian:F10]). Whether each filter now drops what it targets stays uncalled, since the judge never reached the agreement gate ([curation-thresholds-slovenian:F9]).
+- **Figure**: ![Share of the documents each build keeps after the repetition filter that the judge calls bad text, weighted by source volume, against the bar of the baseline's rate plus two points](../data/curation-thresholds-slovenian/figures/residual-bad-rate-by-build.svg)
 - **The curated corpus meets every data target once documents carry their own domain**: the loosened build clears the corpus, per-domain token and per-domain document targets, and medicine clears the document target only through the medical pages inside the web crawls ([kpi-coverage-slovenian:F1]). Under source labels medicine falls short because its one source never held ten thousand distinct texts ([kpi-coverage-slovenian:F2]).
+- **Figure**: ![Each data target's count as a multiple of its target, under source labels and under document-level labels, per build, with the target itself as the vertical line](../data/kpi-coverage-slovenian/figures/kpi-target-multiple-by-rule.svg)
 - **Medical extraction examples have to be built**: almost all of medicine's open documents are translation or machine output ([data-landscape-slovenian:F1]), and the machine-written sets gather in medicine rather than across the catalogue ([data-landscape-slovenian:F6]). Medical documents exist in the corpus, but none carries extraction annotation in native Slovene ([kpi-coverage-slovenian:F5]).
+- **Figure**: ![Share of each domain's openly downloadable documents that were written in Slovene; medicine sits near zero](../data/data-landscape-slovenian/figures/documents-by-domain-and-provenance.svg)
 
 ## Threads
 
 - **Pretraining text per domain**: whether open native text is enough to train tokenizers and models in each domain — [data-landscape-slovenian:H1], [data-landscape-slovenian:H3], [kpi-coverage-slovenian:H1], [kpi-coverage-slovenian:H2]
 - **Information-extraction examples**: whether native examples exist to fine-tune and evaluate extraction in each domain — [data-landscape-slovenian:H2], [data-landscape-slovenian:H4], [kpi-coverage-slovenian:H3], [kpi-coverage-slovenian:H4]
 - **Curation of the corpus**: whether the pipeline removes bad text while keeping good domain text, per stage and per source — [curation-quality-slovenian:H1], [curation-quality-slovenian:H2], [curation-quality-slovenian:H3], [curation-quality-slovenian:H4], [kpi-coverage-slovenian:Q1]
-- **Filter tuning per source**: whether settings chosen per source let each content filter drop what it targets, and mostly bad text — [curation-thresholds-slovenian:H1], [curation-thresholds-slovenian:H2], [curation-thresholds-slovenian:H3], [curation-thresholds-slovenian:H4], [curation-thresholds-slovenian:H5]
+- **Filter tuning per source**: whether settings chosen per source let each content filter drop what it targets, and mostly bad text — [curation-thresholds-slovenian:H1], [curation-thresholds-slovenian:H2], [curation-thresholds-slovenian:H3], [curation-thresholds-slovenian:H4], [curation-thresholds-slovenian:H5], [curation-thresholds-slovenian:Q1]
 - **Provenance of the text**: how much of the supply was written in Slovene rather than translated or generated — [data-landscape-slovenian:F1], [data-landscape-slovenian:F6]
 
 ## Open

@@ -1,0 +1,85 @@
+# The rail: the sidebar and top bar every report page shares (ADR-0005).
+#
+# The rail stores almost nothing of its own. Each part reads keys that other
+# specs declare, cited below by the rules that hold them; this file restates
+# none of those rules, and test_labflow_report_rail.py fails when a cited id
+# leaves its key.
+#
+#   brand          the top bar's short repo name and the word "report":
+#                  `brand:` under `## labflow` in the repo's CLAUDE.md (the
+#                  one part declared here), else the folder name; it links
+#                  the GitHub repo when the origin remote is on GitHub
+#   breadcrumb     the open page's tab, then its title: a record's short
+#                  (REC-005..007), a programme's short (PRG-004..006), a
+#                  topic's title (TOP-001..002), an entry's title
+#                  (ENT-001..002); the overview shows its title alone, and
+#                  the Glossary page reads "Glossary" alone
+#   tab strip      Overview, Research, Reference and Glossary; Reference only
+#                  when experiments/reference/ exists, the root of the topic
+#                  and entry specs
+#   Overview tab   each programme's short (PRG-004..006), its title on hover
+#                  (PRG-001..002), linking its page; then "Changed since": the
+#                  records concluded within the window, by `concluded:`
+#                  (REC-025..026)
+#   Research tab   a head per programme short (PRG-004..006); under it the
+#                  members in `members:` order (PRG-011..012, PRG-039), each
+#                  a record's short (REC-005..007) with its title on hover
+#                  (REC-001..002); then the planned items, each a short with
+#                  its title on hover (PRG-013, PRG-031..033); records no
+#                  `members:` lists sit under their own head
+#   Reference tab  a head per topic title (TOP-001..002); under the open
+#                  page's topic its entries, each a title (ENT-001..002) with
+#                  its summary on hover (ENT-007..008)
+#   Glossary tab   the Glossary head, then GLOSSARY.md's `##` sections
+#                  (GLO-001..008)
+#   marks          an experiment's outcome mark from its Hypothesis Outcome
+#                  (REC-039..040), else from its status (REC-013..014); the
+#                  planned mark from `planned` (PRG-013); an entry's square
+#                  from its status (ENT-005..006): filled checked, outlined
+#                  from-paper, dashed draft
+#   new dot        a dot after an Overview or Research item whose record
+#                  concluded within the window, by `concluded:` (REC-025..026)
+#
+# The "Changed since" window (14 days before the newest conclusion), the
+# source of the running mark and the key hints are the page port's (plan
+# step 53), so no part names them.
+#
+# The one document this spec reads is the repo's CLAUDE.md, beside the
+# experiments folder (root `..`). Its `## labflow` section holds the lines
+# labflow:init writes there: `archetype:`, and `brand:` when the folder name
+# is longer than ten characters. They are `key: value` lines, neither
+# frontmatter nor `- **Label**:` rows, so the spec declares the section and
+# the brand rules read the line from its body (checks/rail.py):
+#   RAL-001  a folder name longer than ten characters needs `brand:`
+#   RAL-002  a brand is at most ten characters
+# The folder name is the repo folder holding experiments/; a linked worktree
+# goes by its main checkout's folder, the name its top bar shows.
+
+document: claude
+root: ".."
+path: CLAUDE.md
+
+# ===============================
+# Sections
+# ===============================
+
+# the section also holds prose and lines the skills read, so it declares no form
+sections:
+  - heading: labflow
+    shows: the brand at the top left of every page, from the section's `brand:` line, else the folder name
+    writer: labflow:init step 2
+
+# ===============================
+# Tables and figures
+# ===============================
+
+artifacts: []
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  # checks/rail.py: the brand
+  - {id: RAL-001, check: brand-needed, target: section.labflow, message: "a folder name longer than ten characters needs `brand:` in the `## labflow` section"}
+  - {id: RAL-002, check: brand-length, target: section.labflow, message: "a brand is at most ten characters"}

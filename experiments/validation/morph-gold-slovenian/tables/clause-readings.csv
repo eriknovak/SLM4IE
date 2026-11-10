@@ -1,0 +1,4 @@
+clause,qualifier,value,ci_low,ci_high,bar,margin,outcome
+H1,,0.8623,0.8188,0.8696,0.8,,confirmed
+H2,,0.6884,0.6812,0.7246,0.9,,refuted
+Q1,,,,,,,partial

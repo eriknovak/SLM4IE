@@ -1,0 +1,15 @@
+build,stage,documents
+loosened,convert,23542
+loosened,language,23530
+loosened,spam,23530
+loosened,quality,23181
+loosened,repetition,23181
+loosened,exact_dedup,7891
+loosened,sentence_dedup,5941
+baseline,convert,23542
+baseline,language,23530
+baseline,spam,23142
+baseline,quality,3599
+baseline,repetition,1155
+baseline,exact_dedup,454
+baseline,sentence_dedup,367

@@ -9,7 +9,7 @@ base_commit: a0b3306
 status: concluded
 ticket: "#2"
 pr: "#11"
-mlflow:
+mlflow: http://localhost:5555/#/experiments/11
 builds_on: []
 varies: []
 uses: []
@@ -32,16 +32,18 @@ concluded: 2026-09-30
 
 ## Hypothesis
 
+- **Question**: Does the eight-stage curation pipeline remove low-quality Slovene text without discarding valid domain-specific text?
+- **Decision it informs**: Whether model training can trust the curated corpus as the pipeline builds it. If not, the stages that drop good text are repaired and retuned per source in a follow-up threshold experiment.
 - **Statement**: The eight-stage curation pipeline removes low-quality records without discarding valid domain-specific text; each stage's drop rate is explained by its intended filter, not by domain or source artefacts.
 - **Rationale**: the pipeline's filters were built for English web text, and nobody had checked its drops against labels.
   - **The stages were tuned on English web crawls.** They are Gopher-style heuristics and cross-corpus dedup, both designed for English web text.
   - **An earlier build already lost most of its documents.** The first build lost 30 M of 54 M documents in sentence dedup alone. The quality filter's cap on lines ending in an ellipsis dropped Slovene news articles wholesale, showing one default already misfiring on Slovene prose.
   - **No label had checked the drops.** Whether the rest of the drops are correct had only been judged by intuition.
 - **Predictions**: each clause is tested on the stratified sample against the calibrated judge. The thresholds are unchanged since first written.
-  - **H1 — Each stage mostly drops bad text**: confirmed if every stage's precision of drops is at least 0.8; refuted if any stage drops mostly good text (precision below 0.6 overall) — the filters would be removing what they should keep.
-  - **H2 — No source is mistreated by a stage**: confirmed if no source has a stage precision below 0.6; refuted otherwise — the filters would suit some sources and not others.
-  - **H3 — What survives is clean**: confirmed if the residual bad rate among kept documents is below 0.1 on every judged dimension; refuted otherwise — bad text would pass the filters.
-  - **H4 — Curated domain text survives**: confirmed if no curated domain source (medical, scientific, legal) loses more than half its documents to a stage whose drops the judge does not confirm; refuted otherwise — domain text would be lost to filters not built for it.
+  - **H1 — Each stage mostly drops bad text**: confirmed if every stage's precision of drops is at least 0.8; refuted if any stage drops mostly good text (precision below 0.6 overall) — the filters would be removing what they should keep ([D8]; measured by [M5]).
+  - **H2 — No source is mistreated by a stage**: confirmed if no source has a stage precision below 0.6; refuted otherwise — the filters would suit some sources and not others ([D8]; measured by [M5]).
+  - **H3 — What survives is clean**: confirmed if the residual bad rate among kept documents is below 0.1 on every judged dimension; refuted otherwise — bad text would pass the filters ([D8]; measured by [M5]).
+  - **H4 — Curated domain text survives**: confirmed if no curated domain source (medical, scientific, legal) loses more than half its documents to a stage whose drops the judge does not confirm; refuted otherwise — domain text would be lost to filters not built for it ([D8]; measured by [M9], [M5]).
   - **Verdict rule**: confirmed when all four clauses hold; refuted when any clause is refuted; inconclusive otherwise.
 - **Outcome**: refuted
 
@@ -62,17 +64,17 @@ concluded: 2026-09-30
   - Factors: none. This is an assessment, and the repairs it motivates belong to the threshold experiment ([D6], measure rather than tune).
 - **Metrics**: primary drop precision per stage and source, at the lenient bar with the strict bar beside it ([D8], the bad-text bar). Secondary: residual bad rate, kept win rate, Cohen's κ between judge and person, side-with-judge share, twin match rate, and the corpus statistics that need no judge. Throughput is CPU hours per step. Two planned metrics were not measured: the near-duplicate rate among kept documents and sentence-dedup drops by reason. Each metric is defined in `experiments/GLOSSARY.md`.
 - **Protocol**: one corpus build, tracked in MLflow under `slm4ie/data/curate`. The sample seed is fixed at 20260916 and the adjudication seed at 20260930. The judge ran once over the sample, and its agreement gate was read on a separate calibration run ([D5], the calibration gate). A fresh draw stays unjudged for the tuning experiment ([D10]). Everything after the build is analysis-only: `analysis.py` recomputes every table and figure from the data files.
-- **Compute**: one local machine with 40 cores, 125 GB of memory and 6.4 TB free on `/vault`. The SLING cluster stayed an unused fallback ([D7]).
-- **People**: the project lead labelled 116 calibration and 29 adjudication documents in a notebook, a few hours in all.
-- **Data access**: four sources are licence-restricted (culturax, gigafida, kas, solar). They are used internally and counted apart from what a public release could hold ([D1]).
-- **External dependency**: Anthropic's Claude models, Sonnet 5 for the rubric and Opus 5 for the pairwise pass, through the Batch API and the Claude Code command line ([D3], the judge's backends).
+- **Compute**: one local machine — 40 cores, 125 GB of memory and 6.4 TB free on `/vault`. The SLING cluster stayed an unused fallback ([D7]).
+- **People**: a few hours — the project lead labelled 116 calibration and 29 adjudication documents in a notebook.
+- **Data access**: four licence-restricted sources — culturax, gigafida, kas and solar are used internally and counted apart from what a public release could hold ([D1]).
+- **External dependency**: Anthropic's Claude models — Sonnet 5 for the rubric and Opus 5 for the pairwise pass, through the Batch API and the Claude Code command line ([D3], the judge's backends).
 
 ## Datasets
 
-- **Curated corpus**: the pretraining corpus the pipeline builds from 20 Slovene sources, one row per source with its domain, kind, licence and size before and after curation. Built 2026-09-16, finishing at commit a63399d. [Sources of the curated corpus, before and after curation](tables/dataset-corpus-statistics.csv)
-- **Judged sample**: kept and dropped documents drawn per source, stage and decision, each cut to its opening characters for the judge ([D2], the judged unit). Its verdicts, with their domain labels, are frozen under `final/`. [The judged sample per stage and decision](tables/dataset-sample-statistics.csv)
-- **Pairwise drawing**: pairs of one kept and one dropped document from the same source and content filter, each asked in both orders. [The pairwise drawing per stage](tables/dataset-pairs-statistics.csv)
-- **Hand labels**: the calibration labels, on the first part of a calibration set drawn round-robin from the sample and labelled in id order, and the adjudication labels, on conflicts from the sources the calibration missed. Both use the judge's rubric and are frozen under `final/`. [The two sets of hand labels](tables/dataset-labels-statistics.csv)
+- **Curated corpus** (own; none labels): one item is one document of the pretraining corpus the pipeline builds from 20 Slovene sources. Its table holds one row per source with its domain, kind, licence and size before and after curation. Built 2026-09-16, finishing at commit a63399d. [Sources of the curated corpus, before and after curation](tables/dataset-corpus-statistics.csv)
+- **Judged sample** (derived from Curated corpus; silver labels): one item is one kept or dropped document, drawn per source, stage and decision and cut to its opening characters for the judge ([D2], the judged unit). Its verdicts, with their domain labels, are frozen under `final/`. [The judged sample per stage and decision](tables/dataset-sample-statistics.csv)
+- **Pairwise drawing** (derived from Judged sample; silver labels): one item is one pair of a kept and a dropped document from the same source and content filter, each asked in both orders. [The pairwise drawing per stage](tables/dataset-pairs-statistics.csv)
+- **Hand labels** (derived from Judged sample; gold labels): one item is one document a person labelled on the judge's rubric. The calibration labels cover the first part of a calibration set drawn round-robin from the sample and labelled in id order. The adjudication labels cover conflicts from the sources the calibration missed. Both are frozen under `final/`. [The two sets of hand labels](tables/dataset-labels-statistics.csv)
 
 ## Methods
 
@@ -202,17 +204,17 @@ concluded: 2026-09-30
   - Rerun every source as before: keeps the benchmark leak.
   - Drop the licence-restricted sources too: loses the internal-model total.
 - **History**:
-  - 2026-09-14 first version, grill Q15
+  - 2026-09-14 (before runs) first version, grill Q15
 
 ### D2 — Judge each document's opening, and kept-against-dropped pairs per source
 
 - **Decision**: Two units. For the rubric, a document's first 2,000 characters, 40 per source, stage and decision, drawn with a fixed seed. For the pairwise pass, one kept against one dropped document of the same source and stage, 20 pairs per source and content filter, asked in both orders.
 - **Why**: The Gopher filters decide on surface statistics, so the opening characters carry the evidence and bound the judge's tokens. Forty per cell gives about ±15 points of precision, enough to read one source at one stage. A forced choice needs no shared rating scale.
 - **History**:
-  - 2026-09-14 first version, grill Q21
-  - 2026-09-17 raised from 15 to 40 per cell; the funnel from the finished build showed per-source stage drops worth reading individually (medical loses 85% at `quality`), and 10,000 documents is within the judge budget
-  - 2026-09-25 pairwise unit added, per source rather than pooled. Absolute scales proved unreliable between annotators — human and judge matched on only 39.7% of the 1-5 coherence scale — while a forced choice between two documents needs no shared scale at all. Per-source draws are what the prediction "no source below 0.6" is actually about; 20 sources × 4 stages × 20 pairs × 2 orders is roughly 3,200 comparisons, about $4 on the Batch API
-  - 2026-09-29 pairwise pass run through the command-line backend on Opus 5, a different model from the rubric pass's Sonnet 5, so the two readings are never averaged
+  - 2026-09-14 (before runs) first version, grill Q21
+  - 2026-09-17 (after runs) raised from 15 to 40 per cell; the funnel from the finished build showed per-source stage drops worth reading individually (medical loses 85% at `quality`), and 10,000 documents is within the judge budget
+  - 2026-09-25 (after runs) pairwise unit added, per source rather than pooled. Absolute scales proved unreliable between annotators — human and judge matched on only 39.7% of the 1-5 coherence scale — while a forced choice between two documents needs no shared scale at all. Per-source draws are what the prediction "no source below 0.6" is actually about; 20 sources × 4 stages × 20 pairs × 2 orders is roughly 3,200 comparisons, about $4 on the Batch API
+  - 2026-09-29 (after runs) pairwise pass run through the command-line backend on Opus 5, a different model from the rubric pass's Sonnet 5, so the two readings are never averaged
 
 ### D3 — Run the judge as a resumable script with two backends
 
@@ -222,75 +224,76 @@ concluded: 2026-09-30
   - Session subagents: no cap, no resume.
   - Local open model: weaker on Slovene, no calibration evidence.
 - **History**:
-  - 2026-09-14 first version, grill Q17/Q21
-  - 2026-09-18 Batch API added as the default backend and the command line kept as the second; the whole 8,930-document run costs about $5 on Haiku 4.5 or $10 on Sonnet 5, so the model is chosen by the κ gate rather than by cost
-  - 2026-09-30 the full-sample run went through the command line and the calibration run through the Batch API; their agreement with the person differs ([F12])
+  - 2026-09-14 (before runs) first version, grill Q17/Q21
+  - 2026-09-18 (after runs) Batch API added as the default backend and the command line kept as the second; the whole 8,930-document run costs about $5 on Haiku 4.5 or $10 on Sonnet 5, so the model is chosen by the κ gate rather than by cost
+  - 2026-09-30 (after [F1]) the full-sample run went through the command line and the calibration run through the Batch API; their agreement with the person differs ([F12])
 
 ### D4 — Label seven properties per document, blind to its stage
 
 - **Decision**: Per document: language, text type (prose, boilerplate, list, code, garbage), adult or spam, coherence from 1 to 5, machine-translated, personal data, and domain from the catalogue's taxonomy. The judge sees the id and text only, never the stage or decision. The rubric is `experiments/data/curation-quality-slovenian/configs/judge-rubric.md`.
 - **Why**: Each stage targets one of these properties, so each stage can be scored on its own. The domain label doubles as gold for a planned domain classifier. For the stage metrics the properties collapse to keep or drop by the bad-text bar ([D8]).
 - **History**:
-  - 2026-09-14 first version, grill Q12/Q16
-  - 2026-09-17 domain vocabulary aligned with `configs/data/extract.yaml` so a judged label can be compared against the source's declared domain; blindness written into the rubric
+  - 2026-09-14 (before runs) first version, grill Q12/Q16
+  - 2026-09-17 (after runs) domain vocabulary aligned with `configs/data/extract.yaml` so a judged label can be compared against the source's declared domain; blindness written into the rubric
 
 ### D5 — Trust the judge once it agrees with a person on keep or drop
 
 - **Decision**: The project lead labelled 116 calibration documents blind to the judge. The gate is Cohen's κ of at least 0.6 on the keep-or-drop decision at the lenient bar. The calibration run of the judge meets it; the full-sample run the findings use falls short ([F12], the two runs).
 - **Why**: The pipeline makes one binary decision, so that is the judgement the judge must be trusted on. Agreement on the 1-5 coherence scale and the domain was far lower than on keep or drop. A κ of 0.6 is the conventional floor for substantial agreement.
 - **History**:
-  - 2026-09-14 first version, grill Q22
-  - 2026-09-18 weighted κ adopted for coherence after Haiku and Sonnet agreed on only 52% of the 1-5 scale while 98% of their disagreements were a single point, and one model pairing, Sonnet 5 against Haiku 4.5, differed on 87 of the 280 documents both judged; the coherence anchors were rewritten as an ordered decision with an explicit 4/5 test
-  - 2026-09-22 briefly cut to 100 documents for the labeller's time, then restored to 300 the same evening; the smaller set would have carried a κ interval of about ±0.15 against ±0.09 on 300
-  - 2026-09-25 gate rewritten onto the collapsed decision after 116 labels showed the first gate, which required agreement on each of the seven rubric properties separately, was unreachable by construction; labelling stopped at 116 rather than 300 (grill round 1, Q4). Coherence agreed exactly on 39.7% and the domain on 69%, against 94.0% on keep or drop
-  - 2026-09-25 the 116 fell in file order and so reached only 8 of 20 sources, all web-derived; agreement on curated prose was left to the adjudications ([F5])
-  - 2026-09-30 the 30 adjudications drawn across the twelve unreached sources, interleaved so a partial round still covers each; 29 labelled ([F5])
-  - 2026-09-30 found that the gate was read on the calibration run (κ 0.66) while every finding uses the full-sample run (κ 0.43 on the same 116); kept as a stated limitation rather than re-judging, at the project lead's call ([F12])
+  - 2026-09-14 (before runs) first version, grill Q22
+  - 2026-09-18 (after runs) weighted κ adopted for coherence after Haiku and Sonnet agreed on only 52% of the 1-5 scale while 98% of their disagreements were a single point, and one model pairing, Sonnet 5 against Haiku 4.5, differed on 87 of the 280 documents both judged; the coherence anchors were rewritten as an ordered decision with an explicit 4/5 test
+  - 2026-09-22 (after runs) briefly cut to 100 documents for the labeller's time, then restored to 300 the same evening; the smaller set would have carried a κ interval of about ±0.15 against ±0.09 on 300
+  - 2026-09-25 (after runs) gate rewritten onto the collapsed decision after 116 labels showed the first gate, which required agreement on each of the seven rubric properties separately, was unreachable by construction; labelling stopped at 116 rather than 300 (grill round 1, Q4). Coherence agreed exactly on 39.7% and the domain on 69%, against 94.0% on keep or drop
+  - 2026-09-25 (after runs) the 116 fell in file order and so reached only 8 of 20 sources, all web-derived; agreement on curated prose was left to the adjudications ([F5])
+  - 2026-09-30 (after [F1]) the 30 adjudications drawn across the twelve unreached sources, interleaved so a partial round still covers each; 29 labelled ([F5])
+  - 2026-09-30 (after [F1]; user) found that the gate was read on the calibration run (κ 0.66) while every finding uses the full-sample run (κ 0.43 on the same 116); kept as a stated limitation rather than re-judging, at the project lead's call ([F12])
 
 ### D6 — Measure the pipeline, do not tune it
 
 - **Decision**: No stage threshold is varied.
 - **Why**: The hypothesis is about whether the current pipeline is trustworthy; varying floors would turn it into a tuning study with a different hypothesis.
 - **History**:
-  - 2026-09-14 first version, grill Q27; sentence-dedup drops were to be logged by reason as the tuning experiment's baseline
-  - 2026-09-25 reaffirmed once the audit showed the content filters drop mostly usable text: the repairs that finding calls for go to `curation-thresholds-slovenian`, which varies the dials and validates on a fresh draw ([D10])
-  - 2026-09-30 logging sentence-dedup drops by reason was never built; it moves to the tuning experiment
+  - 2026-09-14 (before runs) first version, grill Q27; sentence-dedup drops were to be logged by reason as the tuning experiment's baseline
+  - 2026-09-25 (after runs) reaffirmed once the audit showed the content filters drop mostly usable text: the repairs that finding calls for go to `curation-thresholds-slovenian`, which varies the dials and validates on a fresh draw ([D10])
+  - 2026-09-30 (after [F1]) logging sentence-dedup drops by reason was never built; it moves to the tuning experiment
 
 ### D7 — Build locally, moving a stage to the SLING cluster only if it cannot fit
 
 - **Decision**: Run locally with workers sized to the machine and resource use monitored; move a stage to the SLING cluster only if it cannot fit in memory or disk.
 - **Why**: The first build completed locally; the rerun differs only by excluding two small sources. SLING is available for one year if needed.
 - **History**:
-  - 2026-09-14 first version, grill Q24
+  - 2026-09-14 (before runs) first version, grill Q24
 
 ### D8 — Count text as bad by coherence, shape and spam, fixed before the metrics
 
 - **Decision**: Bad text is coherence 2 or less, garbage or boilerplate, or adult or spam: the lenient bar, primary for every metric. The strict bar adds coherence 3 and is reported beside it. At the language filter, text the judge does not call Slovene is also bad.
 - **Why**: Every precision number moves with this line, so it was fixed before the results. The lenient bar is the one the person's labels calibrate best. The language rule is that filter's own purpose, which the rest of the bar never looks at.
 - **History**:
-  - 2026-09-25 first version, grill round 2 Q1; κ with the person 0.66 at the lenient bar against 0.47 at the strict
-  - 2026-09-30 language rule added at the project lead's call after a cold read found the bar counted the language filter's correct drops of other languages as mistakes; it raises that filter's drop precision and changes no clause's verdict ([F1])
+  - 2026-09-25 (after runs) first version, grill round 2 Q1; κ with the person 0.66 at the lenient bar against 0.47 at the strict
+  - 2026-09-30 (after [F1]; user) language rule added at the project lead's call after a cold read found the bar counted the language filter's correct drops of other languages as mistakes; it raises that filter's drop precision and changes no clause's verdict ([F1])
 
 ### D9 — Assess dedup by whether a dropped document's content survives
 
 - **Decision**: Duplication statistics first. Every sampled dedup drop is matched against the corpus: by identical text for exact dedup, by sharing at least half its three-sentence windows for sentence dedup. It counts as matched only if that twin reaches the finished corpus. The judge reads only the drops left unmatched.
 - **Why**: Judging quality cannot see a dedup stage's mistakes, since what it removes is copies of good text. Among judged documents, dedup's dropped text scored as usable as its kept text, or more so. A stage that removes duplicates can only be judged on whether what it removed was duplicated.
 - **History**:
-  - 2026-09-25 first version, grill round 2 Q3; exact dedup's kept and dropped text was usable at 96.1% against 96.6%, sentence dedup's at 94.2% against 98.0%
-  - 2026-09-30 MinHash replaced by three-sentence windows, the unit sentence dedup itself removes, so the match asks the stage's own question; the survival check added once exact twins were found removed later by sentence dedup ([F6])
+  - 2026-09-25 (after runs) first version, grill round 2 Q3; exact dedup's kept and dropped text was usable at 96.1% against 96.6%, sentence dedup's at 94.2% against 98.0%
+  - 2026-09-30 (after [F1]) MinHash replaced by three-sentence windows, the unit sentence dedup itself removes, so the match asks the stage's own question; the survival check added once exact twins were found removed later by sentence dedup ([F6])
 
 ### D10 — Hold back a fresh draw for validating any tuning
 
 - **Decision**: The tuning experiment may use the judged documents and the hand labels to choose thresholds, but no claim of improvement rests on them. It draws a fresh sample under a new seed, judged only once thresholds are frozen, and confirms with a judge from another model family.
 - **Why**: Thresholds tuned against one judge's verdicts stop being neutral evidence, since the pipeline would be fitted to that judge's taste on those documents. A fresh draw controls for the documents, and a second judge controls for the judge.
 - **History**:
-  - 2026-09-25 first version, grill round 2 Q4
+  - 2026-09-25 (after runs) first version, grill round 2 Q4
 
 ## Findings
 
 ### F1 — Every content filter drops mostly text worth keeping · key
 
 - **Summary**: More than half of what each content filter drops is text the judge would keep.
+- **Key number**: 0.44 — drop precision of the language filter, the highest of the four content filters, at the lenient bar
 - **Runs**: no runs; `analysis.py` at daeba94 over the judged stratified sample (Sonnet 5 rubric verdicts)
 - **Result**: ![Share of bad text among the documents each stage drops and keeps](figures/judge-rubric-drop-precision-by-stage.svg) Each row is one stage. The red dot is drop precision, the share of its dropped documents that are bad text, and the blue dot is the residual bad rate among what it keeps, both at the lenient bar. The intervals and the strict bar are in the stage table under the finding on kept text.
 - **Reading**:
@@ -305,6 +308,7 @@ concluded: 2026-09-30
 ### F2 — A filter's precision depends heavily on the source · key
 
 - **Summary**: The spam filter drops mostly real spam on the fineweb2 web crawl and almost nothing but good text on every curated source.
+- **Key number**: 0.90 — spam-filter drop precision on the fineweb2 web crawl, over 40 judged drops
 - **Runs**: no runs; `analysis.py` at daeba94 over the judged stratified sample
 - **Result**: ![Drop precision of every source at every stage](figures/judge-rubric-drop-precision-by-source.svg) Blank cells are source and stage pairs the sample never reached. Most coloured cells rest on 40 dropped documents, so a cell's 95% interval spans about fifteen points either way.
 - **Reading**:
@@ -319,6 +323,7 @@ concluded: 2026-09-30
 ### F3 — What the stages keep is clean · key
 
 - **Summary**: Fewer than one in ten documents that any stage keeps is bad text at the lenient bar.
+- **Key number**: 0.088 — residual bad rate among the language filter's kept documents, the highest of any stage, at the lenient bar
 - **Runs**: no runs; `analysis.py` at daeba94 over the judged stratified sample
 - **Result**: [Drop precision and residual bad rate per stage at both bars, with 95% Wilson intervals](tables/stage-decisions.csv)
 - **Reading**:
@@ -368,11 +373,12 @@ concluded: 2026-09-30
 ### F7 — Curated domain sources lose most of their text to a filter the judge does not confirm · key
 
 - **Summary**: The quality filter removes most of the medical source, and the judge calls none of the sampled drops bad text.
+- **Key number**: 0.83 — share of the medical source's language-filter output that the quality filter removes
 - **Runs**: no runs; `analysis.py` at daeba94 over the stage sentinels and the judged sample
 - **Result**: ![Where each source's documents went, stage by stage](figures/curate-losses-by-source.svg) Sources marked with an asterisk reached the language filter doubled by stale output files. Their shares are of the language filter's output rather than of their converted documents.
 - **Reading**:
   - **The quality filter is the largest single loss for most sources.** It removes about four in five of the medical source's documents that reach it. After every stage 1.5% of its converted documents remain; the doubling it carried from the language filter is removed again by dedup. The scientific theses (oss) also lose most of theirs at that filter, and one in ten of their sampled quality drops is bad text.
-  - **[H4] is refuted.** The clause fails when a medical, scientific or legal source loses more than half its documents to a stage whose drops the judge does not confirm. The medical source does so at the quality filter, where none of its 40 sampled drops is bad text ([F2], the per-source precision).
+  - **[H4] is refuted.** The clause fails when a medical, scientific or legal source loses more than half its documents to a stage whose drops the judge does not confirm. The medical source does so at the quality filter, where none of its 40 sampled drops is bad text ([F2], the per-source precision). The scientific theses (oss) lose 0.6883 at the quality filter, and the judge confirms only 4 of 40 sampled drops (0.10, 0.04–0.23), so oss also meets the refutation (the oss row of [H4] in `clause-readings.csv`).
   - **A judge blind to what makes medical text bad would overturn it.** The person-checked conflicts give no sign of that ([F5]), but they include only two medical documents, and the judge run sits below the agreement gate ([F12]).
 - **Implication**: Curated domain sources need their own quality settings or a way to skip the quality filter. Both are testable in the planned threshold experiment.
 - **History**:
@@ -436,12 +442,14 @@ concluded: 2026-09-30
   - **Two results were not expected.** The two dedup stages compound, so a document dropped as a copy can leave no copy behind ([F6]). And the filters are not uniformly wrong: on raw web crawls several of them work, which points to per-source settings rather than removal.
   - **The design trusted a gate it read on the wrong run.** The judge's agreement gate was met by a calibration run, while every finding uses a later run below it ([F12]). The outcome is therefore a judgement: the refutation holds because three filters stay below the bar even with that run's errors corrected at their worst. A follow-up must read its gate on the run its findings use.
   - **Equal weights per source answer a per-source question.** The sample gives every source the same weight, which suits clauses about sources and stages. Corpus-wide volumes need the counts in the funnel tables instead.
-- **Adoption candidate**: a per-source switch to skip a stage, so curated sources can bypass filters built for web crawls. A spam filter that counts distinct lexicon words rather than occurrences is an untested proposal for the threshold experiment. Code to promote into `slm4ie/` on merge: the metric functions in `analysis.py`; `duplication.py`, `profile.describe_corpus` and the pairwise judge task are already there.
+- **Adoption candidate**: a per-source switch to skip a stage, so curated sources can bypass filters built for web crawls. A spam filter that counts distinct lexicon words rather than occurrences is an untested proposal for the threshold experiment.
+  - **Carries**: the metric functions in `analysis.py`, promoted into `slm4ie/` on merge; `duplication.py`, `profile.describe_corpus` and the pairwise judge task are already there.
+  - **Stays out**: the rest of `analysis.py` and the labelling notebook `label.py`.
 - **Next**:
-  - Run curation-thresholds-slovenian: tune the filters per source against this sample, validate on the held-back draw ([D10]), and read its agreement gate on the same judge run as its findings.
-  - Measure the near-duplicate rate among kept documents and sentence-dedup drops by reason there, as that experiment's baseline.
-  - Repair the pipeline defects this audit found: the spam counting rule, repeated document ids in one legal source, stale output files that doubled five sources, and stage logs overwritten per group of sources.
-  - Settle how many tokens a word of this corpus becomes, which converts its word totals ([F10]) into the token counts the project's corpus-size targets use; that belongs to the planned domain-coverage experiment, kpi-coverage-slovenian.
+  - Run curation-thresholds-slovenian: tune the filters per source against this sample, validate on the held-back draw ([D10]), and read its agreement gate on the same judge run as its findings — planned as curation-thresholds-slovenian #5.
+  - Measure the near-duplicate rate among kept documents and sentence-dedup drops by reason there, as that experiment's baseline — planned as curation-thresholds-slovenian #5.
+  - Repair the pipeline defects this audit found: the spam counting rule (issue #15) and repeated document ids in one legal source (issue #6). Two more are stale output files that doubled five sources (issue #9) and stage logs overwritten per group of sources (issue #10).
+  - Settle how many tokens a word of this corpus becomes, which converts its word totals ([F10]) into the token counts the project's corpus-size targets use. kpi-coverage-slovenian read the targets on an estimate of two tokens per word, and its issue #3 deferred the exact subword count to the tokenizer design in requirement 2 — not yet planned.
 - **Limitations**:
   - The judge run behind every judged number agrees with the person at κ 0.43, below the record's own gate ([F12]).
   - The calibration labels reach only web-derived sources, and the adjudication covers 29 documents ([F5]).
@@ -456,13 +464,15 @@ concluded: 2026-09-30
 
 The corpus build logs to the project's MLflow server. The judge runs through the Claude Code command line on the project lead's subscription, and the calibration run through the Batch API with `ANTHROPIC_API_KEY` set. Data lives under `data/`, a symlink to `/vault/data/SLM4IE/`.
 
+Note added 2026-11-06: the shared corpus under `data/pretrain/` was rebuilt after this record concluded, so rerunning `analysis.py` no longer reproduces five of its tables. On main, the lock file `configs/data/curate.lock.yaml` records rebuilds on 2026-10-08 (8357955), 2026-10-28 (8856e2a) and 2026-11-01 (612512c). The current stage files date from 2026-10-28 to 2026-10-31. In `source-funnel.csv`, `domain-mix.csv` and `dataset-corpus-statistics.csv`, the committed corpus has 20 sources, 63,189,839 converted documents, 28,819,405 kept documents and 7,230,371,490 kept words. The current corpus has 18 sources, 63,956,505 converted documents, 22,806,079 kept documents and 6,616,744,710 kept words. `gated-totals.csv` moves the same kept totals, with 14 open sources where it had 16. `source-losses.csv` goes from 20 sources and 63,247,434 base documents to 18 sources and 63,956,505. The current corpus no longer holds `parlamint_si` or `legal_mc4`, and no source in it is doubled by stale files. The judged-sample tables, such as `stage-decisions.csv`, are unchanged. The throughput step now stops, because `data/pretrain/_logs/` no longer exists. Every number in this record is from the committed tables of 2026-09-30.
+
 ```bash
 export MLFLOW_TRACKING_URI=http://localhost:5555
 export CURATION=configs/data/curate.yaml
 export EXP=experiments/data/curation-quality-slovenian
 export OUT=data/experiments/data/curation-quality-slovenian/interim
 
-# Curated corpus behind every finding: exact dedup forced first, then the rest (commit 72248eb, resumed at a63399d)
+# Curated corpus behind every finding: exact dedup forced first, then the rest, resumed at a63399d (commit 72248eb)
 uv run python scripts/curate_pretraining_corpus.py run --config $CURATION --all --force --stage exact_dedup --max-workers 12
 uv run python scripts/curate_pretraining_corpus.py run --config $CURATION --all --mlflow --max-workers 32
 

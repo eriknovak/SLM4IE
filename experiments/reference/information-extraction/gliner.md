@@ -5,7 +5,7 @@ status: from-paper
 summary: Entity type names and the text go through one bidirectional encoder, every span of up to 12 words is scored against every type name by a sigmoid dot product, and the spans above 0.5 are kept greedily without overlap.
 variant_of:
 part_of:
-couples_to: [encoder-transformers/deberta-v3]
+couples_to: [{entry: encoder-transformers/deberta-v3, as: backbone}]
 ---
 
 ## Description
@@ -59,15 +59,15 @@ encoder-transformers topic are the candidates to put under it.
 
 ## Facts
 
-- **Tasks**: named entity recognition, flat or nested, with any type names given at inference
-- **Prompt tokens**: `[ENT]` before each type name and `[SEP]` before the text in the paper; `<<ENT>>` and `<<SEP>>` in the released models
-- **Span candidates**: every span whose first and last word lie in the text and whose width is at most 12 words, scored against every type
+- **Tasks**: named entity recognition — flat or nested, with any type names given at inference
+- **Prompt tokens**: `[ENT]` before each type name — and `[SEP]` before the text in the paper; `<<ENT>>` and `<<SEP>>` in the released models
+- **Span candidates**: every span — whose first and last word lie in the text and whose width is at most 12 words, scored against every type
 - **Longest span**: 12 words
-- **Scoring**: sigmoid of the dot product between the span vector and the type vector; the span vector is the projected first-word and last-word vectors joined, the type vector is the projected marker vector
-- **Decoding**: candidates above 0.5 sorted by score, kept greedily without overlap; the nested mode allows a span fully inside another
-- **Backbone**: DeBERTa-v3 small, base or large for English; mDeBERTa-v3-base for the multilingual model; the span and type projections are 512 wide
-- **Context length**: 384 subword tokens in the released models, prompt included
-- **Training data**: Pile-NER, 44,889 passages with 240k spans of 13k types, annotated by GPT-3.5 over the Pile
+- **Scoring**: sigmoid dot product — of the span vector and the type vector; the span vector is the projected first-word and last-word vectors joined, the type vector is the projected marker vector
+- **Decoding**: greedy without overlap — candidates above 0.5 sorted by score, kept greedily without overlap; the nested mode allows a span fully inside another
+- **Backbone**: DeBERTa-v3 — small, base or large for English; mDeBERTa-v3-base for the multilingual model; the span and type projections are 512 wide
+- **Context length**: 384 subword tokens — in the released models, prompt included
+- **Training data**: Pile-NER — 44,889 passages with 240k spans of 13k types, annotated by GPT-3.5 over the Pile
 - **Training**: at most 25 types per example after adding negatives, types shuffled and dropped at random, binary cross-entropy over every span and type pair, AdamW at 1e-5 for the encoder and 5e-5 for the rest, 30,000 steps with 10% warmup and cosine decay, dropout 0.4
 - **Sizes**: small 50M, medium 90M, large 300M, multilingual 209M parameters
 
@@ -104,14 +104,14 @@ encoder-transformers topic are the candidates to put under it.
 \Return $R$
 ```
 
-- **1**: The prompt is text. Each type name follows its own marker, and the separator keeps the encoder from reading the last type name into the first word. Nothing about the types is stored in the model.
-- **2**: One encoder pass gives every token a vector that has seen prompt and text. The type vector is read at the marker, not at the name, so a type of several words still gives one vector. A word of several subwords is read at its first subword.
-- **3**: A two-layer feed-forward network turns the marker vector into the type vector. The same network serves every type.
+- **1**: The prompt $x$ is text. Each type name follows its own marker, and the separator keeps the encoder from reading the last type name into the first word. Nothing about the types is stored in the model.
+- **2**: One encoder pass gives every token a vector in $H$ that has seen prompt and text. The type vector $p_m$ is read at the marker, not at the name, so a type of several words still gives one vector. A word of several subwords is read at its first subword, as $h_i$.
+- **3**: A two-layer feed-forward network turns the marker vector into the type vector $q_m$. The same network serves every type.
 - **4**: Candidate spans are every start with every width up to $K$, so a text of $N$ words has about $NK$ of them. The limit keeps the count linear in the length and discards nothing the benchmarks contain, where entities rarely exceed 12 words.
-- **5**: The span vector comes from its two ends. Each end is projected on its own, the two are joined, and one more projection brings the pair back to the encoder width. A span of one word uses the same vector twice.
-- **6**: The score is a dot product squashed to a probability. Every span and type pair is scored at once as one matrix product, which is where the parallel extraction comes from.
-- **7**: Only pairs above the threshold are candidates. Sorting by score decides which of two overlapping candidates wins.
-- **8** to **12**: Greedy decoding. A candidate is kept unless it overlaps a kept span; in the nested mode a span fully inside a kept span is also allowed. The set returned is the set of entities.
+- **5**: The span vector $s_{ij}$ comes from its two ends. Each end is projected on its own, the two are joined, and one more projection brings the pair back to the encoder width. A span of one word uses the same vector twice.
+- **6**: The score $\phi(i, j, m)$ is a dot product squashed to a probability. Every span and type pair is scored at once as one matrix product, which is where the parallel extraction comes from.
+- **7**: Only pairs above the threshold are candidates, $C$. Sorting by score decides which of two overlapping candidates wins.
+- **8–12**: Greedy decoding into the kept set $R$. A candidate is kept unless it overlaps a kept span; in the nested mode a span fully inside a kept span is also allowed. The set returned is the set of entities.
 
 ```algorithm
 \caption{GLiNER training: one batch}
@@ -126,18 +126,20 @@ encoder-transformers topic are the candidates to put under it.
 
 - **1**: The type list is rebuilt for every example. Negative types teach the model to return nothing for a type the text lacks. Shuffling and dropping keep it from learning a type's position.
 - **2**: Training scores the same span grid inference does, so there is no train-and-test gap in what is scored.
-- **3** and **4**: Every span and type pair is a binary decision. Gold spans are positives; all other pairs, including gold spans under the wrong type, are negatives.
+- **3–4**: Every span and type pair is a binary decision with label $y(i, j, m)$, summed into the loss $L$. Gold spans are positives; all other pairs, including gold spans under the wrong type, are negatives.
 - **5**: The encoder moves slowly and the fresh projections faster. The paper runs 30,000 such steps with a cosine schedule.
 
 ## Worked example
+
+- **Input**: the Slovenian sentence "Ana Novak vodi Krko, Lek pa vodi Maja Kos." with the type names person and organisation, and texts of 8 to 4,096 words for the span counts
 
 The example script lays out the prompt the released multilingual model builds
 for one Slovenian sentence with two type names, and counts the spans it scores
 at several text lengths.
 
-![The prompt each generation builds for the toy sentence](tables/prompt-layouts.csv)
+![The prompt each generation builds for the toy sentence](tables/gliner-prompt-layouts.csv)
 
-![Spans scored per type by text length](tables/candidate-counts.csv)
+![Spans scored per type by text length](tables/gliner-candidate-counts.csv)
 
 A text of 32 words gives 318 spans per type. At 512 words the grid is 6,078
 spans per type, still linear in the length because the width is capped, but

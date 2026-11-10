@@ -71,7 +71,7 @@ CLM_BATCH_ACTIONS: list[float] = [5.0, 30.0, 100.0]
 CLM_TEMPERATURES: list[float] = [1.0, 0.1, 0.01]
 
 #: Toy Kev record: words stand for tokens.
-KEV_STATE: list[str] = ["Disk", "at", "98%"]
+KEV_STATE: list[str] = ["Disk", "nearly", "full"]
 KEV_QUESTIONS: list[tuple[list[str], list[list[str]]]] = [
     (["Who", "owns", "this?"], [["sre"], ["app"]]),
     (["Act", "now?"], [["false"], ["true"]]),
@@ -93,7 +93,7 @@ def write_csv(name: str, header: list[str], rows: list[list[object]]) -> None:
     # write the header and the rows
     TABLES.mkdir(exist_ok=True)
     with (TABLES / f"{name}.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(header)
         writer.writerows(rows)
 
@@ -112,7 +112,7 @@ def confidence_by_options() -> None:
         rows.append(row)
 
     # write the table
-    write_csv("confidence-by-options", ["Top probability"] + [f"{k} options" for k in OPTION_COUNTS], rows)
+    write_csv("jev-confidence-by-options", ["top_probability"] + [f"with_{k}_options" for k in OPTION_COUNTS], rows)
 
 
 def unit(angle: float) -> tuple[float, float]:
@@ -167,7 +167,7 @@ def clm_answers() -> None:
 
     # write the table
     write_csv(
-        "clm-answers", ["Question", "Type", "Option", "Scaled cosine", "Probability", "Answer", "Confidence"], rows
+        "clm-answers", ["question", "type", "option", "scaled_cosine", "probability", "answer", "confidence"], rows
     )
 
 
@@ -212,7 +212,7 @@ def clm_infonce() -> None:
     # write the table
     write_csv(
         "clm-infonce",
-        ["Temperature"] + [f"State {i + 1} → action loss" for i in range(n)] + ["Batch loss"],
+        ["temperature"] + [f"state_{i + 1}_to_action_loss" for i in range(n)] + ["batch_loss"],
         rows,
     )
 
@@ -242,7 +242,7 @@ def von_temperature() -> None:
     # write the table
     write_csv(
         "von-temperature",
-        ["State tokens", "Normalised entropy", "Temperature", "Top probability", "Confidence"],
+        ["state_tokens", "normalised_entropy", "temperature", "top_probability", "confidence"],
         rows,
     )
 
@@ -278,7 +278,7 @@ def kev_packing() -> None:
     # write the table
     write_csv(
         "kev-packing",
-        ["Index", "Token", "Segment", "Position", "Seen by the last <decide>", "Scored for the last <decide>"],
+        ["index", "token", "segment", "position", "seen_by_the_last_decide", "scored_for_the_last_decide"],
         rows,
     )
 

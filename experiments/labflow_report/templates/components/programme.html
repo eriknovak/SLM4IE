@@ -1,0 +1,103 @@
+{#- Components board, programme: the map, the experiments table, the threads matrix, the beliefs,
+    the open questions and the Needs table -#}
+{% import "components/words.html" as words %}
+{% import "components/inline.html" as inline %}
+{% import "components/evidence.html" as evidence %}
+
+{#- the map: cards placed in columns by what each builds on, one line into each from its main parent,
+    the other links drawn while a card is hot, and the overview in its head row once the map overflows;
+    on a phone, the outline tree instead -#}
+{% macro map(m, pid) -%}
+<div class="pmapw" data-pmap>
+<div class="box pmap">{{ overview(m) }}<div class="pport" data-cols="{{ m.columns | join(' ') }}" data-col-w="{{ m.nodes[0].w }}"><div class="pcanvas" style="width: {{ m.width }}px; height: {{ m.height }}px">
+<svg class="pedges" width="{{ m.width }}" height="{{ m.height }}" viewBox="0 0 {{ m.width }} {{ m.height }}" aria-hidden="true">
+{%- for e in m.edges %}<path class="pe{{ ' pl' if e.planned else '' }}" data-e="{{ e.src }} {{ e.dst }}" d="{{ e.path }}"/><path class="pa{{ ' pl' if e.planned else '' }}" data-e="{{ e.src }} {{ e.dst }}" d="{{ e.arrow }}"/>{% endfor -%}
+{%- for e in m.links %}<path class="po" data-e="{{ e.src }} {{ e.dst }}" d="{{ e.path }}"/><path class="po pa" data-e="{{ e.src }} {{ e.dst }}" d="{{ e.arrow }}"/>{% endfor -%}
+</svg>
+{%- for e in m.edges if e.label or e.chip %}<span class="plabel{{ ' pl' if e.planned else '' }}" data-e="{{ e.src }} {{ e.dst }}" style="left: {{ e.lx }}px; top: {{ e.ly }}px; width: {{ e.lw }}px"{% if e.tip %} title="{{ e.tip }}"{% endif %}><span>{% if e.chip %}{{ e.chip }} {% endif %}{{ e.label }}</span></span>{% endfor %}
+{%- for n in m.nodes %}{{ card(n, pid) }}{% endfor -%}
+</div></div></div>
+{{ tree(m.tree) }}
+</div>
+{%- endmacro %}
+
+{#- the head row: the sideways hint and the whole map in 200×90 px, each card in its status colour,
+    a frame on the part in view, haloed while focused, a range input over it; the page script shows it when the map overflows -#}
+{% macro overview(m) -%}
+{% set o = m.overview %}
+<div class="pmhead" hidden><span class="pmhint" aria-hidden="true"></span><label class="pmm"><svg viewBox="0 0 {{ m.width }} {{ m.height }}" preserveAspectRatio="none" aria-hidden="true">
+{%- for e in m.edges %}<path class="pmm-e{{ ' pl' if e.planned else '' }}" data-e="{{ e.src }} {{ e.dst }}" d="{{ e.path }}"/>{% endfor -%}
+{%- for n in m.nodes %}<rect{% if n.kind == "planned" %} class="pl"{% elif n.kind == "other" %} class="ot"{% endif %} data-k="{{ n.key }}" x="{{ n.x }}" y="{{ n.y }}" width="{{ n.w }}" height="{{ n.h }}" rx="{{ o.rx }}" ry="{{ o.ry }}" style="fill: var(--o-{{ OUTCOME.get(n.word, n.word) }}, var(--muted))"/>{% endfor -%}
+{%- for part in ("pmm-halo", "pmm-frame") %}<rect class="{{ part }}" x="0" y="{{ o.frame_y }}" width="0" height="{{ o.frame_h }}" rx="{{ o.frame_rx }}" ry="{{ o.frame_ry }}"/>{% endfor %}
+</svg><input type="range" min="0" max="0" value="0" aria-label="Map overview"></label></div>
+{%- endmacro %}
+
+{#- the phone outline: each card under its main parent, that line's label above it -#}
+{% macro tree(rows) -%}
+<div class="ptree">
+{%- for r in rows %}<div class="pt-it">{% for g in r.guides %}<span class="pt-g{{ ' ' ~ g if g else '' }}"></span>{% endfor %}<div class="pt-b{{ ' kids' if r.kids else '' }}">
+{%- if r.edge and (r.edge.label or r.edge.chip) %}<p class="why{{ ' pl' if r.edge.planned else '' }}">{% if r.edge.chip %}{{ r.edge.chip }} {% endif %}{{ r.edge.label }}</p>{% endif -%}
+{{ card(r.node) }}</div></div>{% endfor -%}
+</div>
+{%- endmacro %}
+
+{#- a map card: its outcome mark, number and short name, the question it answers, its result, its line, then its other parents as chips;
+    a card placed on the map, given its page id, carries the anchor the experiments table jumps to -#}
+{% macro card(n, pid="") -%}
+{% set tag = "a" if n.href else "div" %}
+<{{ tag }} class="pnode {{ n.kind }}{{ ' run' if n.word == 'running' else '' }}"{% if n.href %} href="{{ n.href }}"{% endif %}{% if pid %} id="{{ pid }}/map-{{ n.number }}"{% endif %} data-k="{{ n.key }}" data-links="{{ n.links }}"{% if pid %} style="left: {{ n.x }}px; top: {{ n.y }}px; width: {{ n.w }}px; height: {{ n.h }}px"{% endif %} title="{{ n.title }}">
+<span class="ch">{{ words.mark(n.word) }}<span>{% if n.number %}{{ n.number }} {% endif %}{{ n.name }}</span></span>
+{%- if n.asks %}<span class="nq tipped" data-tip="{{ n.tip }}">{{ n.asks }}</span>{% endif -%}
+{%- if n.result %}<span class="nr tipped" data-tip="{{ n.result_tip }}">{{ n.result }}</span>{% endif -%}
+{%- if n.kind == "planned" %}<span class="nl">planned · {{ n.ticket }}</span>{% else %}<span class="nl">{{ n.line }}</span>{% endif -%}
+{%- if n.also %}<span class="palso"><i>also builds on</i>{% for chip in n.also %}{{ chip }}{% endfor %}</span>{% endif -%}
+</{{ tag }}>
+{%- endmacro %}
+
+{#- every member, then every planned experiment: number and short name over title, category, state, date, ticket;
+    the number links to the experiment's card on the map -#}
+{% macro experiments(rows, id, pid) -%}
+<div class="box" id="{{ id }}"><div class="scroll"><table class="data pexp"><thead><tr><th>Experiment</th><th>Category</th><th>State</th><th>Date</th><th>Ticket</th></tr></thead><tbody>
+{%- for r in rows %}<tr{% if r.planned %} class="planned"{% endif %}><td><a class="pnum" href="#{{ pid }}/map-{{ r.number }}" aria-label="Show experiment {{ r.number }} on the map">{{ r.number }}</a> {% if r.href %}<a class="nm" href="{{ r.href }}">{{ r.name }}</a>{% else %}<span class="nm">{{ r.name }}</span>{% endif %}{% if r.title %}<div class="sub">{{ r.title }}</div>{% endif %}</td><td>{{ r.category }}</td><td>{{ r.state }}</td><td class="mono">{{ r.date }}</td><td>{{ r.ticket }}</td></tr>{% endfor -%}
+</tbody></table></div></div>
+{%- endmacro %}
+
+{#- threads down, experiments across, then where each thread stands now -#}
+{% macro threads(t) -%}
+<div class="box"><div class="scroll"><table class="data pthreads"><thead><tr><th>Thread</th>
+{%- for c in t.columns %}<th title="{{ c.title }}">{{ c.head }}<span class="d">{{ c.sub }}</span></th>{% endfor -%}
+<th>Now</th></tr></thead><tbody>
+{%- for r in t.rows %}<tr><td><span class="tn">{{ r.name }}</span>{% if r.asks %}<div class="sub">{{ r.asks }}</div>{% endif %}</td>
+{%- for cell in r.cells %}<td>{% if cell %}<div class="cells">{{ cell }}</div>{% else %}<span class="no">·</span>{% endif %}</td>{% endfor -%}
+{%- for on in r.planned %}<td>{% if on %}{{ words.chip("?", "planned") }}{% else %}<span class="no">·</span>{% endif %}</td>{% endfor -%}
+<td>{% if r.now.word %}<span class="now">{{ words.mark(r.now.word) }}{% if r.now.text %} {{ r.now.text }}{% endif %}</span>{% else %}{{ inline.missing(r.now.text) }}{% endif %}</td></tr>{% endfor -%}
+</tbody></table></div></div>
+{%- if t.key %}<p class="small pkey">{% for w in t.key %}<span>{{ words.mark(w) }} {{ w }}</span>{% endfor %}<span><span class="no">·</span> not touched</span></p>{% endif %}
+{%- endmacro %}
+
+{#- one fold per belief, its claim the summary, the first open; its figure under the reasoning -#}
+{% macro beliefs(items) -%}
+<div class="pbeliefs">
+{%- for b in items %}{% if b.body or b.figure %}<details class="pb{{ ' cav' if b.caveat else '' }}"{% if loop.first %} open{% endif %}><summary><span class="t">{{ b.claim }}</span><span class="cnt">{{ "caveat" if b.caveat else b.count }}</span><span class="chev"></span></summary>{% if b.body %}<div class="pbb">{{ b.body }}</div>{% endif %}{% if b.figure %}{{ evidence.exhibit(b.figure) }}{% endif %}</details>
+{%- else %}<div class="pb{{ ' cav' if b.caveat else '' }}"><div class="ph"><span class="t">{{ b.claim }}</span><span class="cnt">{{ "caveat" if b.caveat else b.count }}</span></div></div>{% endif %}{% endfor -%}
+</div>
+{%- endmacro %}
+
+{#- each open question with the experiments that answer it, or not yet planned and its note -#}
+{% macro open_questions(rows) -%}
+<div class="box"><div class="scroll"><table class="data popen"><thead><tr><th>Open question</th><th>Answered by</th></tr></thead><tbody>
+{%- for r in rows %}<tr><td>{{ r.question }}</td><td><div class="cells">
+{%- for p in r.pills %}{{ p }}{% endfor -%}
+{%- if r.not_planned %}<span class="nyp">not yet planned</span>{% endif -%}
+{%- if r.no_ending %}{{ inline.missing("no ending") }}{% endif -%}
+{%- if r.note %}<span class="note">{{ r.note }}</span>{% endif -%}
+</div></td></tr>{% endfor -%}
+</tbody></table></div></div>
+{%- endmacro %}
+
+{#- per member: what it needs beyond code, a heavy need in amber, the full row on hover -#}
+{% macro needs(n, note) -%}
+<div class="box"><div class="scroll"><table class="data pneeds"><thead><tr><th>Experiment</th>{% for name in n.names %}<th>{{ name }}</th>{% endfor %}</tr></thead><tbody>
+{%- for r in n.rows %}<tr><td>{{ r.member }}</td>{% for need in r.needs %}<td{% if need.tip %} class="tipped" data-tip="{{ need.tip }}"{% endif %}>{% if not need.text %}{{ inline.missing() }}{% elif need.hot %}<span class="hot">{{ need.text }}</span>{% else %}{{ need.text }}{% endif %}</td>{% endfor %}</tr>{% endfor -%}
+</tbody></table></div><p class="small muted pnote">{{ note }}</p></div>
+{%- endmacro %}

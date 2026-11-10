@@ -7,16 +7,19 @@ members: []
 planned:
   - slug: ie-benchmark-slovenian
     short: Extraction benchmark
-    title: how frontier and open LLMs score on Slovene NER, question answering and classification under one fixed protocol, with cost and memory per document
+    title: How do frontier and open LLMs score on Slovene NER, question answering and classification under one fixed protocol, with cost and memory per document?
+    category: validation
     ticket: "#42"
   - slug: gliner-backbones-slovenian
     short: GLiNER backbones
-    title: which backbone, a Slovene or multilingual encoder or a small decoder LLM, gives a GLiNER model the best zero-shot Slovene NER
+    title: Which backbone, a Slovene or multilingual encoder or a small decoder LLM, gives a GLiNER model the best zero-shot Slovene NER?
+    category: methods
     ticket: "#45"
     builds_on: [ie-benchmark-slovenian]
   - slug: domain-finetune-slovenian
     short: Domain fine-tuning
-    title: whether GLiNER models fine-tuned on silver medical and scientific examples come within 10% of the best frontier LLM on the domain gold sets
+    title: Do GLiNER models fine-tuned on silver medical and scientific examples come within 10% of the best frontier LLM on the domain gold sets?
+    category: methods
     ticket: "#51"
     builds_on: [gliner-backbones-slovenian, medical-ie-slovenian, science-ie-slovenian, encoder-pretraining-slovenian]
 ---
@@ -26,14 +29,6 @@ planned:
 ## Question
 
 Frontier LLMs such as Claude, GPT and Gemini extract entities from text in many languages without task-specific training, but they are large, paid per call and cannot run on a local GPU. The project commits to models under one billion parameters that fit in 8 GB of GPU memory and come within 5–10% of those LLMs on Slovene information extraction (KPIs 5–7). GLiNER is the candidate design: an encoder scores each text span against label names, so new labels need no retraining. The question is whether such a model, built on the right backbone and fine-tuned on medical and scientific examples, reaches that margin. An answer gives each model's score next to the best LLM's on the same test sets, with its parameters, peak memory, and cost per document.
-
-## What we now believe
-
-_No experiment has concluded yet._
-
-## Threads
-
-_No members yet._
 
 ## Open
 

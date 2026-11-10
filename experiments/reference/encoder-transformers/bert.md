@@ -5,7 +5,7 @@ status: from-paper
 summary: A stack of Transformer encoder layers over token, segment and learned absolute position embeddings, pretrained to recover 15% masked tokens and to tell whether two segments were adjacent.
 variant_of:
 part_of:
-couples_to: [subword-tokenizers/wordpiece]
+couples_to: [{entry: subword-tokenizers/wordpiece, as: tokenizer}]
 ---
 
 ## Description
@@ -51,12 +51,12 @@ against.
 
 ## Facts
 
-- **Position encoding**: learned absolute, one vector per position added to the token embedding at the input, 512 positions
-- **Attention span**: every token attends to every token of the input
-- **Block normalisation**: post-norm, a layer norm after each of the two residual additions
-- **Activation**: GELU in a feed-forward network of inner width four times the hidden width
-- **Pretraining objective**: masked language modelling on 15% of the tokens, plus next-sentence prediction
-- **Tokenizer**: WordPiece, 30,000 pieces
+- **Position encoding**: learned absolute — one vector per position added to the token embedding at the input, 512 positions
+- **Attention span**: every token attends to every token — across the whole input
+- **Block normalisation**: post-norm — a layer norm after each of the two residual additions
+- **Activation**: GELU — in a feed-forward network of inner width four times the hidden width
+- **Pretraining objective**: masked language modelling plus next-sentence prediction — the masking on 15% of the tokens
+- **Tokenizer**: WordPiece — 30,000 pieces
 - **Context length**: 512 tokens
 - **Input**: `[CLS]`, segment A, `[SEP]`, segment B, `[SEP]`, with a learned segment embedding for A and for B
 - **Sizes**: Base 12 layers, width 768, 12 heads, 110M parameters; Large 24 layers, width 1024, 16 heads, 340M parameters
@@ -90,10 +90,10 @@ against.
 \Return $h^L$
 ```
 
-- **1**: Each token starts as the sum of three learned vectors: what the token is, which of the two segments it belongs to, and where it stands. The sum passes through a layer norm, which rescales every vector to a fixed spread. Position enters only here, so a later layer knows where a token is only through what this sum carried.
-- **2-3**: Every layer begins with attention. A token builds a query from its own vector and compares it with a key built from every other token, so the weights say how much each token matters to it. The weighted sum of value vectors is what the token gathers. The division by the square root of the head width keeps the comparisons from growing with the width.
-- **4**: The gathered information is added back to the token's own vector, and the sum is normalised. The norm sits after the addition, which is the post-norm arrangement.
-- **5-6**: A feed-forward network, the same for every token, widens the vector four times, applies the GELU activation and narrows it back. Its output is added to the token's vector and normalised again. This is where most of the model's parameters sit.
+- **1**: Each token $x_i$ starts as the sum of three learned vectors: what the token is $E_{tok}[x_i]$, in which of the two segments it belongs $E_{seg}[s_i]$ and where it stands $E_{pos}[i]$. A layer norm, which rescales every vector to a fixed spread, turns the sum into $h^0_i$. Position enters only here, so a later layer knows where a token is only through what this sum carried.
+- **2-3**: Every layer begins with attention. A token builds a query from its own vector and compares it with a key built from every other token, so the weights say how much each token matters to it. The weighted sum of value vectors, $a$, is what the token gathers. The division by the square root of the head width keeps the comparisons from growing with the width.
+- **4**: The gathered information is added back to the token's own vector, and the sum is normalised into $u$. The norm sits after the addition, which is the post-norm arrangement.
+- **5-6**: A feed-forward network, the same for every token, widens the vector four times, applies the GELU activation and narrows it back to $f$. It is added to the token's vector $u$ and normalised again into the layer's output $h^\ell$. This is where most of the model's parameters sit.
 - **7**: After the last layer every token has a vector that reflects the whole input. A tagging model reads these vectors one by one.
 
 ```algorithm
@@ -113,11 +113,11 @@ against.
 ```
 
 - **1**: Half of the examples pair a segment with its true continuation, half with text from elsewhere. The label is what next-sentence prediction has to recover. The two segments together fill the 512 positions, minus the three special tokens.
-- **2**: The two segments are laid out with the special tokens between them. The segment ids are the only thing that tells the model where A ends and B begins, besides the separator.
-- **3-5**: The positions to hide are chosen once per example, when the corpus is prepared, and the same mask is reused on every pass over the data. Most hidden positions get the `[MASK]` token. One in ten gets a random token, and one in ten is left as it is, so that the model cannot assume an unmasked token is right and keeps a useful vector for every position. `[MASK]` never appears in fine-tuning, which is the mismatch the two smaller cases soften.
-- **6**: The encoder of Algorithm 1 runs over the corrupted sequence.
-- **7**: Only the chosen positions are scored. The head transforms the token vector once more and scores it against the input embedding table, so the output and input vocabularies share one set of vectors.
-- **8**: The vector of the leading `[CLS]` token is passed through a small pooling layer and a two-way classifier that says IsNext or NotNext.
+- **2**: The two segments are laid out as one sequence $x$ with the special tokens between them. The segment ids are the only thing that tells the model where A ends and B begins, besides the separator.
+- **3-5**: The positions to hide, $M$, are chosen once per example, when the corpus is prepared, and the same mask is reused on every pass over the data. Most hidden positions get the `[MASK]` token. One in ten gets a random token, and one in ten is left as it is, so that the model cannot assume an unmasked token is right and keeps a useful vector for every position. `[MASK]` never appears in fine-tuning, which is the mismatch the two smaller cases soften.
+- **6**: The encoder of Algorithm 1 runs over the corrupted sequence and gives one vector $h_i$ per token.
+- **7**: Only the chosen positions are scored, and their cross-entropy sums to $L_{MLM}$. The head transforms the token vector once more and scores it against the input embedding table, so the output and input vocabularies share one set of vectors.
+- **8**: The vector of the leading `[CLS]` token is passed through a small pooling layer and a two-way classifier that says IsNext or NotNext; its cross-entropy is $L_{NSP}$.
 - **9**: The two losses are added with equal weight.
 
 ## Worked example

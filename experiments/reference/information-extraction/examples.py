@@ -118,7 +118,7 @@ def write_csv(name: str, header: list[str], rows: list[list[object]]) -> None:
     # write the header and the rows
     TABLES.mkdir(exist_ok=True)
     with (TABLES / f"{name}.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(header)
         writer.writerows(rows)
 
@@ -163,8 +163,8 @@ def prompt_layouts() -> None:
 
     # write the table
     write_csv(
-        "prompt-layouts",
-        ["Model", "Task", "Input sequence"],
+        "gliner-prompt-layouts",
+        ["model", "task", "input_sequence"],
         [
             ["GLiNER", "entities", " ".join(gliner)],
             ["GLiNER2", "entities", " ".join(entities + ["[SEP_TEXT]"] + text)],
@@ -196,14 +196,14 @@ def candidate_counts() -> None:
 
     # write the table
     write_csv(
-        "candidate-counts",
+        "gliner-candidate-counts",
         [
-            "Words",
-            "GLiNER spans (width ≤ 12)",
-            "GLiNER2 spans (width ≤ 8)",
-            "GLiNER2.5 starts kept",
-            "GLiNER2.5 pairs proposed",
-            "GLiNER2.5 candidates scored",
+            "words",
+            f"gliner_spans_width_{GLINER_MAX_WIDTH}",
+            f"gliner2_spans_width_{GLINER2_MAX_WIDTH}",
+            "gliner2_5_starts_kept",
+            "gliner2_5_pairs_proposed",
+            "gliner2_5_candidates_scored",
         ],
         rows,
     )
@@ -246,7 +246,11 @@ def constrained_classification() -> None:
     rows.append(["violations", "", "", len(free.violations), len(bound.violations)])
 
     # write the table
-    write_csv("constrained-classification", ["Task", "Label", "Probability", "Independent", "Constrained"], rows)
+    write_csv(
+        "type-safe-encoder-constrained-classification",
+        ["task", "label", "probability", "independent", "constrained"],
+        rows,
+    )
 
 
 def joint_decoding() -> None:
@@ -299,7 +303,7 @@ def joint_decoding() -> None:
     rows.append(["total", "", "", f"{greedy_solution.score:.1f}", f"{beam_solution.score:.1f}"])
 
     # write the table
-    write_csv("joint-decoding", ["Candidate", "Type", "Score", "Greedy", "Beam"], rows)
+    write_csv("type-safe-encoder-joint-decoding", ["candidate", "type", "score", "greedy", "beam"], rows)
 
 
 # ===============================

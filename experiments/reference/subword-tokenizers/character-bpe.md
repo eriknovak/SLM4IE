@@ -34,8 +34,8 @@ from MorphBPE in its base unit as well, so it cannot isolate the rule.
 
 - **Base unit**: Unicode characters
 - **Chunk while training**: whole word
-- **Picks next token by**: highest pair count, a tie going to the pair whose symbols entered the vocabulary first
-- **Encoding**: standard BPE merges, no lexicon
+- **Picks next token by**: highest pair count — a tie going to the pair whose symbols entered the vocabulary first
+- **Encoding**: standard BPE merges — no lexicon
 - **Needs lexicon**: no
 - **Setting**: vocabulary size, which includes the special tokens; the characters seen in training are always kept in full, even when they alone exceed it
 - **Repeatable**: yes, training has no random step
@@ -77,11 +77,11 @@ from MorphBPE in its base unit as well, so it cannot isolate the rule.
 \Return a standard BPE model holding $S$, $V$ and $M$ \Comment{`slm4ie/tokenizers/backends/char_bpe.py:46-47`}
 ```
 
-- **1**: Words are counted once, so the rest works on distinct words with a weight. The text is read exactly as encoding reads it, through the same normaliser and splitter.
-- **2-4**: Every word is one chunk. The loop is written out so that the line numbers match MorphBPE, which replaces line 3 with a cut at morpheme boundaries.
-- **5**: The special tokens take the first places. The characters follow in sorted order, so two runs give the same result.
-- **6**: Pairs are counted inside chunks only, so no merge ever spans two words.
-- **7-10**: Each round joins one pair everywhere and records it. The loop ends when the vocabulary is full or no pair is left. The count is the only criterion, so an ending is joined to its stem as soon as that pair is frequent.
+- **1**: Words are counted once, as $f(w)$, so the rest works on distinct words with a weight. The text is read exactly as encoding reads it, through the same normaliser and splitter.
+- **2-4**: Every word is one chunk $c_1$. The loop is written out so that the line numbers match MorphBPE, which replaces line 3 with a cut at morpheme boundaries.
+- **5**: The vocabulary $V$ starts with the special tokens. The characters follow in sorted order, so two runs give the same result. The merge list $M$ starts empty.
+- **6**: Pair counts $n(a, b)$ are taken inside chunks only, so no merge ever spans two words.
+- **7-10**: Each round joins the most frequent pair $(a^*, b^*)$ everywhere and records it. The loop ends when the vocabulary is full or no pair is left. The count is the only criterion, so an ending is joined to its stem as soon as that pair is frequent.
 - **11**: The trained model is the vocabulary and the merges, saved as a standard file.
 
 ```algorithm
@@ -100,10 +100,12 @@ from MorphBPE in its base unit as well, so it cannot isolate the rule.
 ```
 
 - **1-2**: The text is cleaned and cut into pieces the same way as in training.
-- **3-6**: Merges are replayed in the order they were learned. These lines run inside the HuggingFace `tokenizers` library, so they cite no project code.
+- **3-6**: Merges are replayed on each piece's symbols $s$ in the order they were learned. These lines run inside the HuggingFace `tokenizers` library, so they cite no project code.
 - **7**: What is left when no learned pair remains is the token sequence. Each unknown character stays its own unknown token.
 
 ## Worked example
+
+- **Input**: six forms of `hiša` and `miza` with counts 5, 4, 3, 4, 3 and 2, a vocabulary of 15, and the forms `hiša`, `mize`, `hišami`, `mizami` and `hišaq` to encode
 
 The corpus holds six forms of two nouns: `hiša` (house) five times, `hiše`
 four, `hišo` three, `miza` (table) four, `mize` three, `mizo` twice. The
