@@ -268,8 +268,9 @@ def glossary_items(site: Site) -> list[dict]:
 
 
 def rail_word(record: Model, running: frozenset[str]) -> str:
-    """The word a record's mark shows: its outcome; running while it runs; planned
-    while a draft; "" when it ended with no outcome word.
+    """The word a record's mark shows: dropped for a dropped exploration; its
+    outcome; running while it runs; planned while a draft; "" when it ended
+    with no outcome word.
 
     Args:
         record: The record.
@@ -278,6 +279,8 @@ def rail_word(record: Model, running: frozenset[str]) -> str:
     Returns:
         A word `OUTCOME` maps to a mark, or "".
     """
+    if record.stage == records.DROPPED:
+        return records.DROPPED
     if outcome := records.record_outcome(record):
         return outcome if outcome in OUTCOME else ""
     # an abandoned record keeps its exp/ branch, so the end wins over running

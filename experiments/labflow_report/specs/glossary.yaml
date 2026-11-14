@@ -8,7 +8,7 @@
 # `## Other` holds the terms no group takes. Groups and Other are optional,
 # so a glossary of Metrics alone is valid. labflow:init copies the template
 # to experiments/GLOSSARY.md; labflow:report adds a line for each term a
-# finding needs, from labflow:analyze's drafts.
+# finding needs, from the analysis pass's drafts.
 # test_labflow_report_glossary.py fails when the template and this file
 # disagree.
 #

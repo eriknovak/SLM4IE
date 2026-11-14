@@ -5,14 +5,14 @@
 # headings and the `- **Label**:` rows of each section, in this order.
 # test_labflow_report_record.py fails when the two disagree.
 #
-# Stages: a rule with no `at` holds from the plan on, at every stage and for
-# an abandoned record too; `at: running` from the first tracked run;
-# `at: reporting` once Findings holds a written `### F<n>` entry;
+# Stages: a rule with no `at` holds at every stage, from an exploration stub
+# on, and for an abandoned or dropped record too; `at: running` from the first
+# tracked run; `at: reporting` once Findings holds a written `### F<n>` entry;
 # `at: concluded` at the verdict. No frontmatter names `reporting`: a running
-# record reaches it when labflow:report writes its first finding, so the
-# TL;DR and Findings rules wait for that write. A section a later skill
-# writes (TL;DR, Datasets, Methods, Findings, Verdict) has its rules at that
-# skill's stage.
+# record reaches it when labflow:report writes its first finding, so the TL;DR
+# and Findings rules wait for that write. A section a later skill writes
+# (TL;DR, Datasets, Methods, Findings, Verdict) has its rules at that skill's
+# stage.
 # A plan-stage record passes the plan-stage check once labflow:start fills
 # its Hypothesis, Rounds, Design and Decisions rows; a raw copy of the
 # template reports those rows, since a row of only `<…>` guidance is empty.
@@ -24,6 +24,25 @@
 # (`` `<parent-slug>` ``, `` `<file>.py::<function>` ``) counts as guidance,
 # and REC-158 holds a section the template lacks to the same, from running.
 #
+# An exploration opens before the plan: labflow:start writes a stub record
+# at `exploring` that holds the frontmatter, the Hypothesis Question and
+# Decision it informs, the Design Metrics (one metric on a named evaluation
+# set) and the Design Compute (the budget, in hours or dollars). A stub the
+# exploration drops ends at the side stage `dropped` with the same parts.
+# The rules with no `at` that hold those parts (REC-031, 033, 034, 048, 054,
+# 058) hold at both; a rule with no `at` on a part the stub lacks lists
+# `at: *from_draft` instead, every stage from draft on and abandoned, so a
+# draft or abandoned record keeps it as before and a stub never sees it.
+#
+# An exploration reported as measured grows its stub into a short record
+# marked `kind: measured`: the question, the decision, measured clauses, the
+# datasets, the findings, the answer and Reproduce, its numbers from one
+# tracked rerun. It sets no bar and no Verdict rule and runs no rounds, so the
+# variant switches off every Rounds rule, the Verdict rule (REC-125), the
+# clause trace to the decision that set a bar (REC-126) and the clause
+# readings table of bars and margins (REC-160). A record without `kind` keeps
+# every rule; REC-187 reports a kind the spec does not declare.
+#
 # REC-114..157 check one part against another (checks/record.py): a citation
 # against the entry it names, a clause's round against Rounds, a Code row
 # against its file, a Next item against the form the programme reads. Such a
@@ -32,7 +51,7 @@
 # a bad case for every rule.
 #
 # REC-160 runs the clause readings rules (TAB-040..044) on a written
-# tables/clause-readings.csv through check_table of labflow:analyze's own
+# tables/clause-readings.csv through check_table of labflow:report's own
 # table_rules.py (standard library only, the rules save_table runs), never a
 # repo's copy; REC-161 runs the arm and verdict table rules (TAB-050..054) on
 # a written tables/verdict-by-arm.csv the same way. REC-162 holds a record
@@ -63,13 +82,16 @@ document: record
 # and `*/*/README.md` would also take reference/<topic>/README.md
 path: "[dmv]*/*/README.md"
 stage_key: status
-stages: [draft, running, reporting, concluded]
-side_stages: [abandoned]
+stages: [exploring, draft, running, reporting, concluded]
+side_stages: [abandoned, dropped]
 derived_stages: {reporting: Findings}
 # a gate is a point where a skill runs `check --gate <name>`: the rules on the
-# parts listed hold at every stage then; labflow:data runs `--gate data` at its
-# data-ready gate, so a draft record's Datasets rows are checked before runs
+# parts listed hold at every stage then; labflow:build runs `--gate data` before
+# final/ is fixed, so a draft record's Datasets rows are checked before runs
 gates: {data: [section.Datasets]}
+variant_key: kind
+variants:
+  measured: [section.Rounds, REC-125, REC-126, REC-160]
 
 # ===============================
 # Frontmatter
@@ -101,9 +123,13 @@ frontmatter:
     shows: nothing on the page; the commit the experiment branched from
     writer: labflow:start step 4
   - key: status
-    values: [draft, running, concluded, abandoned]
+    values: [exploring, draft, running, concluded, abandoned, dropped]
     shows: the stage the checker holds the record to, and the planned state
     writer: labflow:start step 4
+  - key: kind
+    values: [measured]
+    shows: nothing on the page; the checker holds a measured record to no bar, Verdict rule or round
+    writer: labflow:report measured exit
   - key: ticket
     type: str
     shows: the issue pill in the header, or 'no ticket'
@@ -212,7 +238,7 @@ sections:
       - label: Budget
         writer: labflow:start step 4
       - label: Pre-registered at
-        writer: labflow:run first tracked launch, or labflow:analyze before an analysis-only round's first pass
+        writer: labflow:run first tracked launch, or labflow:report before an analysis-only round's first pass
       - label: Earlier decisive
         writer: labflow:start new round
       - label: Closed
@@ -253,25 +279,25 @@ sections:
   - heading: Datasets
     form: rows
     shows: one dataset row per input, with its size, stats grid, fields and bars
-    writer: labflow:data dataset statistics
+    writer: labflow:build dataset statistics
   - heading: Methods
     form: entries
     shows: one method fold per step, with its code and settings
-    writer: labflow:code method
+    writer: labflow:build method
     rows:
       - label: Input
-        writer: labflow:code method
+        writer: labflow:build method
       - label: Output
-        writer: labflow:code method
+        writer: labflow:build method
       - label: How
         words: 240
-        writer: labflow:code method
+        writer: labflow:build method
       - label: Code
         shows: the code per step
-        writer: labflow:code method
+        writer: labflow:build method
       - label: Settings
         shows: the settings table
-        writer: labflow:code method
+        writer: labflow:build method
   - heading: Decisions
     form: entries
     shows: one decision fold per choice, grouped past six
@@ -363,51 +389,51 @@ artifacts:
     pattern: tables/clause-readings.csv
     columns: [clause, qualifier, value, ci_low, ci_high, bar, margin, outcome]
     generator: analysis.py
-    writer: labflow:analyze clause readings
+    writer: labflow:report clause readings
   - name: verdict-by-arm
     kind: table
     pattern: tables/verdict-by-arm.csv
     columns: [arm, clause, role, adopted]
     generator: analysis.py
-    writer: labflow:analyze clause readings
+    writer: labflow:report clause readings
   - name: arm-table
     kind: table
     pattern: tables/*-by-arm.csv
     columns: [arm]
     generator: analysis.py
-    writer: labflow:analyze outputs
+    writer: labflow:report outputs
   - name: finding-figure
     kind: figure
     pattern: figures/*-by-*.svg
     generator: analysis.py
-    writer: labflow:analyze outputs
+    writer: labflow:report outputs
   - name: finding-table
     kind: table
     pattern: tables/*-by-*.csv
     generator: analysis.py
-    writer: labflow:analyze outputs
+    writer: labflow:report outputs
   - name: dataset-statistics
     kind: table
     pattern: tables/dataset-*-statistics.csv
     generator: analysis.py
-    writer: labflow:data dataset statistics
+    writer: labflow:build dataset statistics
   - name: dataset-summary
     kind: table
     pattern: tables/dataset-*-summary.csv
     columns: [statistic, value, note]
     generator: analysis.py
-    writer: labflow:data dataset statistics
+    writer: labflow:build dataset statistics
   - name: dataset-fields
     kind: table
     pattern: tables/dataset-*-fields.csv
     columns: [field, type, distinct, values]
     generator: analysis.py
-    writer: labflow:data dataset statistics
+    writer: labflow:build dataset statistics
   - name: dataset-figure
     kind: figure
     pattern: figures/dataset-*-*-by-*.svg
     generator: analysis.py
-    writer: labflow:data dataset statistics
+    writer: labflow:build dataset statistics
   - name: scoping
     kind: table
     pattern: tables/scoping-*.csv
@@ -434,6 +460,7 @@ rules:
   - {id: REC-012, check: required, target: frontmatter.base_commit, message: the record names no base commit}
   - {id: REC-013, check: required, target: frontmatter.status, message: the record has no status}
   - {id: REC-014, check: values, target: frontmatter.status, message: unknown status}
+  - {id: REC-187, check: values, target: frontmatter.kind, message: "unknown kind: measured, or no kind for a full record"}
   - {id: REC-015, check: type, target: frontmatter.ticket, message: "ticket is text: quote \"#42\", or give a URL or a path"}
   - {id: REC-016, check: type, target: frontmatter.pr, message: "pr is text, the PR's URL"}
   - {id: REC-017, check: type, target: frontmatter.mlflow, message: "mlflow is text, the experiment's MLflow URL"}
@@ -463,10 +490,10 @@ rules:
   - {id: REC-033, check: required, target: section.Hypothesis.Question, message: the Hypothesis has no Question}
   - {id: REC-034, check: required, target: section.Hypothesis.Decision it informs, message: the Hypothesis has no Decision it informs}
   - {id: REC-035, check: values, target: section.Hypothesis.Disclosure, message: "Disclosure opens with its kind, then a colon"}
-  - {id: REC-036, check: required, target: section.Hypothesis.Statement, message: the Hypothesis has no Statement}
-  - {id: REC-037, check: required, target: section.Hypothesis.Rationale, message: the Hypothesis has no Rationale}
-  - {id: REC-038, check: required, target: section.Hypothesis.Predictions, message: the Hypothesis has no Predictions}
-  - {id: REC-039, check: required, target: section.Hypothesis.Outcome, message: the Hypothesis has no Outcome}
+  - {id: REC-036, check: required, target: section.Hypothesis.Statement, at: &from_draft [draft, running, reporting, concluded, abandoned], message: the Hypothesis has no Statement}
+  - {id: REC-037, check: required, target: section.Hypothesis.Rationale, at: *from_draft, message: the Hypothesis has no Rationale}
+  - {id: REC-038, check: required, target: section.Hypothesis.Predictions, at: *from_draft, message: the Hypothesis has no Predictions}
+  - {id: REC-039, check: required, target: section.Hypothesis.Outcome, at: *from_draft, message: the Hypothesis has no Outcome}
   - {id: REC-040, check: values, target: section.Hypothesis.Outcome, message: unknown Hypothesis outcome}
   - {id: REC-041, check: words, target: section.Hypothesis.Outcome, at: concluded, message: the Hypothesis Outcome is the word alone; its reading goes in the Verdict}
 
@@ -481,22 +508,22 @@ rules:
   # Design
   - {id: REC-048, check: required, target: section.Design, message: the record has no Design}
   - {id: REC-049, check: form, target: section.Design, message: Design is rows only}
-  - {id: REC-050, check: required, target: section.Design.Inputs, message: the Design has no Inputs row}
+  - {id: REC-050, check: required, target: section.Design.Inputs, at: *from_draft, message: the Design has no Inputs row}
   - {id: REC-051, check: words, target: section.Design.Inputs, message: Inputs row length}
-  - {id: REC-052, check: required, target: section.Design.Method / factors, message: the Design has no Method / factors row}
+  - {id: REC-052, check: required, target: section.Design.Method / factors, at: *from_draft, message: the Design has no Method / factors row}
   - {id: REC-053, check: words, target: section.Design.Method / factors, message: Method / factors row length}
   - {id: REC-054, check: required, target: section.Design.Metrics, message: the Design has no Metrics row}
   - {id: REC-055, check: words, target: section.Design.Metrics, message: Metrics row length}
   - {id: REC-159, check: metric-defined, target: section.Design.Metrics, at: reporting, message: "the primary metric has no line in experiments/GLOSSARY.md"}
-  - {id: REC-056, check: required, target: section.Design.Protocol, message: the Design has no Protocol row}
+  - {id: REC-056, check: required, target: section.Design.Protocol, at: *from_draft, message: the Design has no Protocol row}
   - {id: REC-057, check: words, target: section.Design.Protocol, message: Protocol row length}
   - {id: REC-058, check: required, target: section.Design.Compute, message: the Design has no Compute row}
   - {id: REC-059, check: words, target: section.Design.Compute, message: Compute row length}
-  - {id: REC-060, check: required, target: section.Design.People, message: the Design has no People row}
+  - {id: REC-060, check: required, target: section.Design.People, at: *from_draft, message: the Design has no People row}
   - {id: REC-061, check: words, target: section.Design.People, message: People row length}
-  - {id: REC-062, check: required, target: section.Design.Data access, message: the Design has no Data access row}
+  - {id: REC-062, check: required, target: section.Design.Data access, at: *from_draft, message: the Design has no Data access row}
   - {id: REC-063, check: words, target: section.Design.Data access, message: Data access row length}
-  - {id: REC-064, check: required, target: section.Design.External dependency, message: the Design has no External dependency row}
+  - {id: REC-064, check: required, target: section.Design.External dependency, at: *from_draft, message: the Design has no External dependency row}
   - {id: REC-065, check: words, target: section.Design.External dependency, message: External dependency row length}
 
   # Datasets

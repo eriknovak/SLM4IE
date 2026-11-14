@@ -14,6 +14,9 @@ derived_stages:                  # a stage no frontmatter names: the document re
   reporting: Findings            # from the stage before it once this entries section holds a written entry
 gates:                           # a gate a skill runs `check --gate <name>` at
   data: [section.Datasets]       # parts whose rules hold at every stage then
+variant_key: kind                # frontmatter key naming a variant; omit if none
+variants:                        # a variant the key may name: the rules it switches off
+  measured: [section.Rounds, REC-125]   # a part (and every part under it) or a rule id
 frontmatter:
   - key: short
     type: str                    # str | int | bool | date | list | map | any
@@ -40,7 +43,7 @@ artifacts:
     pattern: tables/clause-readings.csv
     columns: [clause, reading]
     generator: analysis.py
-    writer: labflow:analyze step 3
+    writer: labflow:report step 3
 rules:
   - id: REC-001
     check: required              # a built-in check or a registered custom one
@@ -55,8 +58,14 @@ entry whose title is no longer template guidance.
 
 A gate holds a document to some rules before their stage: `check --gate
 data` runs every rule on a gate target (or on a row under a target section)
-at any stage in `stages`, so labflow:data checks a draft record's Datasets
-rows at its data-ready gate.
+at any stage in `stages`, so labflow:build checks a draft record's Datasets
+rows before final/ is fixed.
+
+A variant switches rules off for the documents whose variant key names it:
+a record with `kind: measured` is held to no rule on a listed part, on a
+part under it, or with a listed id, at any stage or gate. A document without
+the key keeps every rule. Each variant must be one of the key's `values`, so
+the key's values rule reports a variant the spec does not declare.
 
 A part that declares a shape (`type` other than `any`, `values`, `words`,
 `form` other than `any`, `links_to`) must have a rule with that check on it,
@@ -104,6 +113,8 @@ DOCUMENT_KEYS = {
     "side_stages",
     "derived_stages",
     "gates",
+    "variant_key",
+    "variants",
     "frontmatter",
     "sections",
     "artifacts",
@@ -114,7 +125,7 @@ SECTION_KEYS = {"heading", "form", "words", "shows", "writer", "rows"}
 ROW_KEYS = {"label", "words", "values", "shows", "writer"}
 ARTIFACT_KEYS = {"name", "kind", "pattern", "columns", "generator", "writer"}
 RULE_KEYS = {"id", "check", "target", "at", "message"}
-TEXT_KEYS = ("document", "path", "root", "stage_key")
+TEXT_KEYS = ("document", "path", "root", "stage_key", "variant_key")
 PAGE_FILE_KEYS = {"pages"}
 PAGE_KEYS = {"page", "tab", "shows", "parts"}
 PART_KEYS = {"part", "shows", "reads"}
@@ -215,6 +226,8 @@ class DocumentSpec:
     side_stages: tuple = ()
     derived_stages: tuple[tuple[str, str], ...] = ()
     gates: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    variant_key: str = ""
+    variants: tuple[tuple[str, tuple[str, ...]], ...] = ()
     frontmatter: tuple[Field, ...] = ()
     sections: tuple[Section, ...] = ()
     artifacts: tuple[Artifact, ...] = ()
@@ -246,15 +259,25 @@ class DocumentSpec:
                         return row
         raise KeyError(target)
 
-    def applies(self, rule: Rule, stage: str | None, gate: str = "") -> bool:
-        """Whether a rule holds for a document at this stage.
+    def applies(
+        self, rule: Rule, stage: str | None, gate: str = "", variant: str = ""
+    ) -> bool:
+        """Whether a rule holds for a document at this stage and variant.
 
-        A rule with no `at` always holds. `at: <stage>` (`from_stage`) means
+        A rule the document's variant switches off never holds. Otherwise a
+        rule with no `at` always holds. `at: <stage>` (`from_stage`) means
         that stage and every later one in `stages`; `at: [<stage>, …]` means
         exactly those stages. With a gate, a rule on one of the gate's
         targets, or on a row under a target section, holds at every stage in
-        `stages`; a gate this spec does not declare changes nothing.
+        `stages`; a gate this spec does not declare changes nothing, and
+        neither does a variant.
         """
+        switched_off = dict(self.variants).get(variant, ())
+        if rule.id in switched_off or any(
+            rule.target == item or rule.target.startswith(f"{item}.")
+            for item in switched_off
+        ):
+            return False
         targets = dict(self.gates).get(gate, ())
         if stage in self.stages and any(
             rule.target == target or rule.target.startswith(f"{target}.")
@@ -341,6 +364,16 @@ def load_spec(path: Path) -> DocumentSpec:
         raise SpecError(
             f"{where}: gates must map a gate name to a list of targets, got {gates!r}"
         )
+    variants = data.get("variants") or {}
+    if not isinstance(variants, dict) or not all(
+        isinstance(name, str)
+        and isinstance(items, list)
+        and all(isinstance(i, str) for i in items)
+        for name, items in variants.items()
+    ):
+        raise SpecError(
+            f"{where}: variants must map a variant to a list of parts or rule ids, got {variants!r}"
+        )
     spec = DocumentSpec(
         document=data["document"],
         path=data["path"],
@@ -350,6 +383,8 @@ def load_spec(path: Path) -> DocumentSpec:
         side_stages=tuple(_list(data, "side_stages", where)),
         derived_stages=tuple(derived.items()),
         gates=tuple((name, tuple(targets)) for name, targets in gates.items()),
+        variant_key=data.get("variant_key", ""),
+        variants=tuple((name, tuple(items)) for name, items in variants.items()),
         frontmatter=frontmatter,
         sections=sections,
         artifacts=artifacts,
@@ -407,6 +442,28 @@ def load_spec(path: Path) -> DocumentSpec:
             if not is_part:
                 raise SpecError(
                     f"{where}: gate '{name}' targets '{target}', which names no part of the spec"
+                )
+
+    # check every variant is a value of its key and names a part or a rule
+    key_field = next((f for f in frontmatter if f.key == spec.variant_key), None)
+    if (spec.variant_key or spec.variants) and key_field is None:
+        raise SpecError(
+            f"{where}: variant_key '{spec.variant_key}' is not a frontmatter key"
+        )
+    rule_ids = {r.id for r in rules}
+    for name, items in spec.variants:
+        if name not in key_field.values:
+            raise SpecError(
+                f"{where}: variant '{name}' is not one of {spec.variant_key}'s values {list(key_field.values)}"
+            )
+        for item in items:
+            try:
+                is_part = item in rule_ids or spec.part(item) is not None
+            except KeyError:
+                is_part = False
+            if not is_part:
+                raise SpecError(
+                    f"{where}: variant '{name}' switches off '{item}', which names no part or rule of the spec"
                 )
 
     # check every declared shape carries a rule
