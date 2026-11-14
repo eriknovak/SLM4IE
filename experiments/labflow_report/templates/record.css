@@ -1,5 +1,5 @@
 /* the record page, scoped to it (ADR-0005); written from the record board */
-.page[data-page=record]{--fig:#fbfcfd;--spec:#a3215f;--spec-ink:#ffffff;--board:#fafaf9;--h:#5f37a8;--h-soft:#ebe4f7;--m:#0b6363;--m-soft:#d5ecec;--d:#7f4600;--d-soft:#f5e5cd;--vp-ink:#ffffff;--q:#1f252f;--o-ok:var(--ok);--o-bad:var(--bad);--o-part:var(--run);--o-inc:var(--muted);--o-run:var(--run);--o-adopt:var(--ok);--o-rej:var(--bad);--o-bet:var(--ok);--o-wor:var(--bad);--o-eq:var(--muted);--o-und:var(--line);--o-plan:var(--soft);--vp-ink:#ffffff}
+.page[data-page=record]{--fig:#fbfcfd;--spec:#a3215f;--spec-ink:#ffffff;--board:#fafaf9;--h:#5f37a8;--h-soft:#ebe4f7;--m:#0b6363;--m-soft:#d5ecec;--d:#7f4600;--d-soft:#f5e5cd;--vp-ink:#ffffff;--q:#1f252f;--o-ok:var(--ok);--o-bad:var(--bad);--o-part:var(--run);--o-inc:var(--muted);--o-run:var(--run);--o-adopt:var(--ok);--o-rej:var(--bad);--o-bet:var(--ok);--o-wor:var(--bad);--o-eq:var(--muted);--o-und:var(--line);--o-drop:var(--muted);--o-plan:var(--soft);--vp-ink:#ffffff}
 :root[data-theme=dark] .page[data-page=record]{--fig:#25262c;--fig-ink:#dcdfe5;--fig-muted:#9a9fac;--fig-line:#464852;--fig-soft:#35363e;--fig-paper:#25262c;--fig-series-dark:#e4e7ee;--spec:#ff8cc6;--spec-ink:#1c1c20;--board:#141417;--h:#c4a6ff;--h-soft:#33294a;--m:#6fd6d0;--m-soft:#183636;--d:#f2b766;--d-soft:#3b2d16;--vp-ink:#1c1c20;--q:#dcdfe5}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .page[data-page=record]{--fig:#25262c;--fig-ink:#dcdfe5;--fig-muted:#9a9fac;--fig-line:#464852;--fig-soft:#35363e;--fig-paper:#25262c;--fig-series-dark:#e4e7ee;--spec:#ff8cc6;--spec-ink:#1c1c20;--board:#141417;--h:#c4a6ff;--h-soft:#33294a;--m:#6fd6d0;--m-soft:#183636;--d:#f2b766;--d-soft:#3b2d16;--vp-ink:#1c1c20;--q:#dcdfe5}}
 /* the record page's own parts, the board's spacing, and the page shell's rules it undoes */
@@ -14,7 +14,7 @@
 .page[data-page=record] .badge{display:inline-block;font-family:var(--sans);font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:5px;vertical-align:middle}
 .page[data-page=record] .b-confirmed{background:var(--ok-soft);color:var(--ok)}
 .page[data-page=record] .b-refuted{background:var(--bad-soft);color:var(--bad)}
-.page[data-page=record] .b-inconclusive,.page[data-page=record] .b-partial,.page[data-page=record] .b-draft{background:var(--soft);color:var(--muted)}
+.page[data-page=record] .b-inconclusive,.page[data-page=record] .b-partial,.page[data-page=record] .b-draft,.page[data-page=record] .b-dropped{background:var(--soft);color:var(--muted)}
 .page[data-page=record] .b-running{background:var(--run-soft);color:var(--run)}
 .page[data-page=record] figure{margin:0;min-width:0}
 .page[data-page=record] .fold{border-top:1px dashed var(--line);padding:10px 0 0;margin:12px 0 0;display:flex;gap:10px;align-items:center;font-family:var(--sans);font-size:var(--t-body);font-weight:600}
@@ -149,6 +149,7 @@
 .page[data-page=record] .vp.und{background:var(--soft);color:var(--muted);box-shadow:inset 0 0 0 1.5px var(--muted)}
 .page[data-page=record] .vp.run{background:radial-gradient(circle,var(--run) 0 3px,transparent 3.5px);box-shadow:inset 0 0 0 2px var(--run)}
 .page[data-page=record] .vp.done{background:var(--accent)}
+.page[data-page=record] .vp.drop{background:var(--muted)}
 .page[data-page=record] .vp.split{color:transparent}
 .page[data-page=record] .vp.adopt svg,.page[data-page=record] .vp.rej svg{stroke-width:2.6}
 .page[data-page=record] .b-adopted,.page[data-page=record] .b-better,.page[data-page=record] .b-answered{background:var(--ok-soft);color:var(--ok)}
@@ -177,6 +178,7 @@
 .page[data-page=record] .meter .wor,.page[data-page=record] .meter .rej{background:var(--bad)}
 .page[data-page=record] .meter .eq{background:var(--muted)}
 .page[data-page=record] .meter .und{background:var(--line)}
+.page[data-page=record] .meter .drop{background:var(--muted)}
 .page[data-page=record] .tlink{display:inline-flex;gap:6px;align-items:baseline;font-family:var(--sans);font-size:12.5px;padding:1px 9px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--fg);text-decoration:none;margin:0 6px 4px 0}
 .page[data-page=record] .tlink .tic{color:var(--muted)}
 .page[data-page=record] .sha{font-family:var(--mono);font-size:11.5px;color:var(--accent);background:var(--accent-soft);border-radius:4px;padding:0 5px;text-decoration:none}

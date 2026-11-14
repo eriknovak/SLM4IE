@@ -59,6 +59,7 @@
 .page[data-page=entry] .vp.und{background:var(--soft);color:var(--muted);box-shadow:inset 0 0 0 1.5px var(--muted)}
 .page[data-page=entry] .vp.run{background:radial-gradient(circle,var(--run) 0 3px,transparent 3.5px);box-shadow:inset 0 0 0 2px var(--run)}
 .page[data-page=entry] .vp.done{background:var(--accent)}
+.page[data-page=entry] .vp.drop{background:var(--muted)}
 .page[data-page=entry] .cc.pill{font-family:var(--sans);text-decoration:none;color:var(--fg);background:var(--soft);max-width:260px}
 .page[data-page=entry] .cc.pill .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* folds: the paper notes and each algorithm, caret at the right end */

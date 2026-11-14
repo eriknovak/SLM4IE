@@ -57,6 +57,8 @@ OUTCOME = {
     "inconclusive": "inc",
     "planned": "plan",
     "running": "run",
+    # a dropped exploration closes like a conclusion, with no verdict
+    "dropped": "drop",
     "adopted": "adopt",
     "rejected": "rej",
     "better": "bet",
@@ -79,6 +81,7 @@ GLYPHS = {
     "adopt": "M8 4.4v7.2M4.4 8h7.2",
     "rej": "M4.4 8h7.2",
     "done": "M4 8.4l2.6 2.6L12 5.6",
+    "drop": "M4 8.4l2.6 2.6L12 5.6",
     "plan": "",
     "run": "",
 }

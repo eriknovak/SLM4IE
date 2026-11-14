@@ -17,7 +17,11 @@
 # Threads and Open are due once a member concludes (checks/programme.py).
 #
 # `members` are record folders relative to programmes/, so the built-in link
-# check resolves each to a record. Each `planned` item is a map: slug, short,
+# check resolves each to a record. A member may be an exploration stub at
+# `exploring` or one ended at `dropped`: neither holds a clause or a finding,
+# and a dropped member makes no section due, since it adds no belief. It
+# runs among the concluded members by its `concluded:` date, the date it was
+# dropped, and the page shows it with the outcome word `dropped`. Each `planned` item is a map: slug, short,
 # title (the question it will ask), category, ticket, builds_on (record or
 # planned slugs) and threads (Threads row names). A built-in check reads no
 # key inside a list item, so those keys, the Open endings (`— answered by
@@ -175,7 +179,7 @@ rules:
   - {id: PRG-038, check: planned-slugs, target: frontmatter.planned, message: "a planned slug is listed once and is no member"}
 
   # members and status
-  - {id: PRG-039, check: members-order, target: frontmatter.members, message: "members run in conclusion order, unconcluded ones last"}
+  - {id: PRG-039, check: members-order, target: frontmatter.members, message: "members run in conclusion order, a dropped one by its concluded date, the others last"}
   - {id: PRG-040, check: closed-programme, target: frontmatter.status, message: "a closed programme has no Open bullet and no planned experiment"}
 
   # checks/programme.py and checks/figures.py: tables and figures

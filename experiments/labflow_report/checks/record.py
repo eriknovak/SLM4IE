@@ -177,9 +177,10 @@ SIDE_FOLDERS = ("configs", "prompts")
 # a lock file is generated from the config the record names
 LOCK_FILE = re.compile(r"\.lock\.ya?ml$")
 
-# the table rules live in labflow:analyze's table_rules.py, beside the report
-# skill this package is in or under the home folder; a repo's copy is never run
-ANALYZE_TABLE_RULES = Path("analyze") / "references" / "table_rules.py"
+# the table rules live in labflow:report's table_rules.py, beside this package
+# or under the home folder; found from the skills folder, so that a repo's
+# experiments/ copy is never run
+REPORT_TABLE_RULES = Path("report") / "references" / "table_rules.py"
 PACKAGE_REFERENCES = Path(__file__).resolve().parents[2]
 CLAUSE_READINGS = "clause-readings"
 VERDICT_BY_ARM = "verdict-by-arm"
@@ -1036,7 +1037,7 @@ def table_breaches(
 ) -> Iterator[tuple[int, str]]:
     """The breaches of a standard table's own rules, and of `extra`, in each written copy.
 
-    The rules are labflow:analyze's table_rules.py, which save_table runs:
+    The rules are labflow:report's table_rules.py, which save_table runs:
     `check_table` runs them, and `KIND_CHECKS` names the kind's own.
     """
     tables = sorted(document.folder.glob(part.pattern))
@@ -1052,14 +1053,14 @@ def table_breaches(
                 yield 1, str(breach)
 
 
-# labflow:analyze's table_rules.py by path, loaded once a run
+# labflow:report's table_rules.py by path, loaded once a run
 _TABLE_RULES: dict[Path, ModuleType] = {}
 # the warnings already given, so a run warns once
 _WARNED: set[str] = set()
 
 
 def table_rules(rule_id: str) -> ModuleType | None:
-    """labflow:analyze's own table_rules.py as a module; a repo's copy is never run.
+    """labflow:report's own table_rules.py as a module; a repo's copy is never run.
 
     It uses the standard library only, so it loads wherever the checker runs.
     The copy beside the report skill this package is in comes first, then the
@@ -1073,7 +1074,7 @@ def table_rules(rule_id: str) -> ModuleType | None:
         The loaded module, or None when no copy exists.
     """
     candidates = [
-        references.parent.parent / ANALYZE_TABLE_RULES
+        references.parent.parent / REPORT_TABLE_RULES
         for references in (PACKAGE_REFERENCES, skill_references())
     ]
     path = next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
