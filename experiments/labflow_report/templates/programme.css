@@ -1,5 +1,5 @@
 /* the research programme page, scoped to it (ADR-0005), drawn to the Programme and SkelProgramme boards */
-.page[data-page=programme]{--vp-ink:#ffffff;--h:#5f37a8;--h-soft:#ebe4f7;--d:#7f4600;--d-soft:#f5e5cd;--o-ok:var(--ok);--o-bad:var(--bad);--o-part:var(--run);--o-inc:var(--muted);--o-run:var(--run);--o-adopt:var(--ok);--o-rej:var(--bad);--o-bet:var(--ok);--o-wor:var(--bad);--o-eq:var(--muted);--o-und:var(--line);--o-plan:var(--soft)}
+.page[data-page=programme]{--vp-ink:#ffffff;--h:#5f37a8;--h-soft:#ebe4f7;--d:#7f4600;--d-soft:#f5e5cd;--o-ok:var(--ok);--o-bad:var(--bad);--o-part:var(--run);--o-inc:var(--muted);--o-run:var(--run);--o-adopt:var(--ok);--o-rej:var(--bad);--o-bet:var(--ok);--o-wor:var(--bad);--o-eq:var(--muted);--o-und:var(--line);--o-drop:var(--muted);--o-plan:var(--soft)}
 :root[data-theme=dark] .page[data-page=programme]{--vp-ink:#1c1c20;--h:#c4a6ff;--h-soft:#33294a;--d:#f2b766;--d-soft:#3b2d16}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]) .page[data-page=programme]{--vp-ink:#1c1c20;--h:#c4a6ff;--h-soft:#33294a;--d:#f2b766;--d-soft:#3b2d16}}
 .page[data-page=programme] .kicker{font-family:var(--mono);margin:0}
@@ -35,6 +35,7 @@
 .page[data-page=programme] .vp.plan{background:transparent;border:1.5px dashed var(--muted);color:var(--muted)}
 .page[data-page=programme] .vp.run{background:radial-gradient(circle,var(--run) 0 3px,transparent 3.5px);box-shadow:inset 0 0 0 2px var(--run)}
 .page[data-page=programme] .vp.done{background:var(--accent)}
+.page[data-page=programme] .vp.drop{background:var(--muted)}
 .page[data-page=programme] .vp.split{color:transparent}
 .page[data-page=programme] .cc{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px 2px 3px;font-family:var(--mono);font-size:12px;font-weight:500;background:var(--soft);color:var(--fg);white-space:nowrap;text-decoration:none}
 .page[data-page=programme] .cc.ok,.page[data-page=programme] .cc.bet{background:var(--ok-soft);color:var(--ok)}

@@ -6,12 +6,15 @@ we now believe, Threads and Open are due (Open not once the programme is
 closed, which needs Open and `planned` empty). A citation `[<slug>:F<n>]` or
 `[<slug>:H|C|Q<n>]` names a member that holds the finding or clause, and
 every clause of every member sits in a Threads row (a member without
-clauses, each of its key findings). A `**Caveat:**` belief sits last. Each
+clauses, each of its key findings). A member at `exploring` is a stub with
+no clause or finding; a `dropped` one ended with no belief, so it makes no
+section due, but runs among the concluded by its `concluded:` date when it
+has one. A `**Caveat:**` belief sits last. Each
 Open bullet ends `— answered by <slug>[ and <slug>][, <note>]` or `— not yet
 planned[: <note>]`, the note free to hold dashes. Each `planned` item is a map with `slug`, `short` (two to
 five words), `title` (a question ending in `?`) and `category` (the record
 folder it will take); its optional `ticket`, `builds_on` and `threads` name
-an issue, known slugs and Threads rows. `members` run in conclusion order, unconcluded last.
+an issue, known slugs and Threads rows. `members` run in conclusion order, the others last.
 The programme cites no table or figure, since the page draws every part from
 the members' records and `planned`, but in a belief's Figure row: a member's
 figure by its path, or one the programme's script wrote into
@@ -40,6 +43,8 @@ from .topic import CLOSING, QUESTION_MARK
 RECORD = "record"
 PROGRAMME = "programme"
 CONCLUDED = "concluded"
+# a member ended by a conclusion or a dropped exploration; it runs by its concluded date
+ENDED = (CONCLUDED, "dropped")
 CLOSED = "closed"
 THREADS = "Threads"
 BELIEFS = "What we now believe"
@@ -338,12 +343,10 @@ def planned_slugs(
 def members_order(
     document: Document, part: Field, rule: Rule, corpus: Corpus
 ) -> Iterator[tuple[int, str]]:
-    """Concluded members run in `concluded:` order; the others follow them."""
+    """Ended members run in `concluded:` order; the others follow them."""
     previous = None
     for slug, member in members(document, corpus):
-        date = (
-            str(member.frontmatter.get(CONCLUDED) or "") if is_concluded(member) else ""
-        )
+        date = str(member.frontmatter.get(CONCLUDED) or "") if is_ended(member) else ""
         if previous is not None and date and (not previous[1] or date < previous[1]):
             when = f"concluded {date}"
             before = f"concluded {previous[1]}" if previous[1] else "not concluded"
@@ -434,6 +437,10 @@ def record_slug(record: Document) -> str:
 
 def is_concluded(record: Document) -> bool:
     return record.frontmatter.get("status") == CONCLUDED
+
+
+def is_ended(record: Document) -> bool:
+    return record.frontmatter.get("status") in ENDED
 
 
 def cited_ids(record: Document) -> set[str]:

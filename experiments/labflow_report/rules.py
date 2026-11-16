@@ -206,7 +206,7 @@ def read_corpus(
 def run_rules(
     document: Document, spec: DocumentSpec, corpus: Corpus, gate: str = ""
 ) -> list[Breach]:
-    """Runs every rule of a spec that holds at the document's stage.
+    """Runs every rule of a spec that holds at the document's stage and variant.
 
     Args:
         document: The document to check.
@@ -232,9 +232,11 @@ def run_rules(
         ]
 
     stage = document_stage(document, spec)
+    variant = document.frontmatter.get(spec.variant_key) if spec.variant_key else None
+    variant = "" if _empty(variant) else str(variant)
     breaches = []
     for rule in spec.rules:
-        if not spec.applies(rule, stage, gate):
+        if not spec.applies(rule, stage, gate, variant):
             continue
         if rule.check not in CHECKS:
             raise KeyError(
@@ -532,4 +534,4 @@ def _texts(document: Document, part) -> list[tuple[int, str]]:
 # imported last: each page module registers its checks through `check` above
 # `entry` would shadow the loop names in this module, so it takes an alias
 from .checks import entry as entry_checks  # noqa: F401
-from .checks import book, figures, glossary, ideas, programme, rail, record, topic  # noqa: F401
+from .checks import book, figures, glossary, ideas, log, programme, rail, record, topic  # noqa: F401

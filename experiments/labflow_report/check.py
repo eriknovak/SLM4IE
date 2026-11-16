@@ -11,7 +11,7 @@ record passes on plan-stage rules. `--skip-stage concluded,abandoned` leaves
 out documents at those stages; the report-guard hook passes it, so a finished
 record is not re-checked on every edit. `--gate data` also holds each
 document to the rules on the parts its spec's `gates: {data: [...]}` names,
-at any stage; labflow:data runs it on a draft record at its data-ready gate.
+at any stage; labflow:build runs it on a draft record before final/ is fixed.
 
 Exit codes: 0 clean, 1 a breach, 2 the check could not run (a missing path,
 no experiments folder, no spec files, a broken spec, an unknown check or

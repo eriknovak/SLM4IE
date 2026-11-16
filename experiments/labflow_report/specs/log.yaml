@@ -1,0 +1,81 @@
+# The exploration log: experiments/<category>/<slug>/LOG.md (ADR-0005).
+#
+# An exploration keeps one log beside its stub record. labflow:start writes
+# the file when the exploration opens; each attempt adds one `### A<n> — <what>`
+# entry under `## Attempts`, numbered from A1 in order. A failed attempt is an
+# entry too, and so is a follow-up question that serves the same decision:
+# the log grows, never a new experiment. Every entry holds five rows:
+#   - **Tried**: what changed, with its settings and seeds
+#   - **Result**: the metric's number with its spread (`0.71 ± 0.02 over 3
+#     seeds`, `0.65 [0.61, 0.69]`, or `one run` when the noise is unknown),
+#     or `failed — <why>` for an attempt that gave no number
+#   - **Suggests**: what the result points to next
+#   - **Tier**: scratch, since exploration numbers are never citable
+#   - **Cost**: the budget the attempt spent, `cost <n>` with its unit
+#     (`1.5h`, `15m`, `$3`): `h` or `m` right after the number, or `$`
+#     before it; the figure the plan's `attempt: <what> · cost <n>` Log line
+#     repeats
+# start/references/log-template.md follows this file; it shows the entry in a
+# `<…>` guidance paragraph, so a log fresh from the template, with no entry
+# yet, breaks no rule.
+#
+# The log has no frontmatter and no stage, so every rule holds always. The
+# report builder draws no page for it: the record page lists it beside the
+# README as a side document, by its `# ` title. checks/log.py holds the entry
+# ids (LOG-003), the number (LOG-006), its spread (LOG-007) and the cost
+# (LOG-012).
+
+document: log
+# the category folders data, methods and validation, as the record's glob
+path: "[dmv]*/*/LOG.md"
+
+# ===============================
+# Sections
+# ===============================
+
+sections:
+  - heading: Attempts
+    form: entries
+    shows: nothing of its own; the record page lists LOG.md as a side document
+    writer: labflow:start exploration mode
+    rows:
+      - label: Tried
+        shows: nothing; read in the log and at the exploration's exit stop
+        writer: labflow:run exploration attempt
+      - label: Result
+        shows: nothing; read in the log and at the exploration's exit stop
+        writer: labflow:run exploration attempt
+      - label: Suggests
+        shows: nothing; read in the log and at the exploration's exit stop
+        writer: labflow:run exploration attempt
+      - label: Tier
+        values: [scratch]
+        shows: nothing; marks the number as never citable
+        writer: labflow:run exploration attempt
+      - label: Cost
+        shows: nothing; the session sums it against the plan's budget
+        writer: labflow:run exploration attempt
+
+# ===============================
+# Tables and figures
+# ===============================
+
+artifacts: []
+
+# ===============================
+# Rules
+# ===============================
+
+rules:
+  - {id: LOG-001, check: required, target: section.Attempts, message: the log has no Attempts section}
+  - {id: LOG-002, check: form, target: section.Attempts, message: "Attempts holds `### A<n> — <what was tried>` entries only"}
+  - {id: LOG-003, check: log-ids, target: section.Attempts, message: "an entry title is not `A<n> — <what was tried>`, numbered from A1 in order"}
+  - {id: LOG-004, check: required, target: section.Attempts.Tried, message: an entry does not say what was tried}
+  - {id: LOG-005, check: required, target: section.Attempts.Result, message: an entry has no Result}
+  - {id: LOG-006, check: log-number, target: section.Attempts.Result, message: "a Result holds no number; write the metric's value, or `failed — <why>`"}
+  - {id: LOG-007, check: log-spread, target: section.Attempts.Result, message: "a Result gives no spread; write `± <sd>`, an interval `[low, high]`, or `one run`"}
+  - {id: LOG-008, check: required, target: section.Attempts.Suggests, message: an entry does not say what the result suggests}
+  - {id: LOG-009, check: required, target: section.Attempts.Tier, message: "an entry does not state its tier, scratch"}
+  - {id: LOG-010, check: values, target: section.Attempts.Tier, message: an exploration entry's tier is scratch}
+  - {id: LOG-011, check: required, target: section.Attempts.Cost, message: an entry does not log its cost}
+  - {id: LOG-012, check: log-cost, target: section.Attempts.Cost, message: "a Cost opens with the number spent and its unit, as `1.5h`, `15m` or `$3`"}

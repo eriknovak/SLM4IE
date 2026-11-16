@@ -50,6 +50,8 @@ RECORD_OUTCOMES = (
     "partial",
     "unanswered",
 )
+# the stage, and the word, of an exploration ended without a confirmation
+DROPPED = "dropped"
 # a question's reading words; any other word answers it in part
 QUESTION_WORDS = {
     "answered": "answered",
@@ -309,7 +311,7 @@ EMPTY = {
     "decisions": "No decision recorded yet.",
     "methods": "No method yet. Each step is written as its code lands.",
     "limits": "None written yet; they are written with the verdict.",
-    "datasets": "No dataset described yet. Each input gets a row at the data-ready gate.",
+    "datasets": "No dataset described yet. Each input gets a row before its final files are fixed.",
 }
 SKELETON_STAGES = ("draft", "running", "reporting")
 # a tracking server on one of these hosts opens only on the author's machine
@@ -510,7 +512,10 @@ def record_outcome(model: Model) -> str:
 
 
 def record_word(model: Model) -> str:
-    """The word a record's mark carries: its outcome, else running or planned."""
+    """The word a record's mark carries: dropped for a dropped exploration, its
+    outcome, else running or planned."""
+    if model.stage == DROPPED:
+        return DROPPED
     return record_outcome(model) or (
         "running" if model.stage == "running" else "planned"
     )
@@ -963,9 +968,11 @@ def read_head(model: Model, site: Site, page_id: str) -> dict:
     tail.append(_ticket(model.value("ticket"), site.github))
     if pr := model.value("pr"):
         tail.append(_pr(str(pr), site.github))
+    # a dropped exploration writes its concluded date when it is dropped
     concluded = model.value("concluded")
+    ended = DROPPED if model.stage == DROPPED else "concluded"
     tail.append(
-        f"concluded {concluded.isoformat()}" if concluded else (model.stage or "draft")
+        f"{ended} {concluded.isoformat()}" if concluded else (model.stage or "draft")
     )
 
     # the reference entries the record varies or uses
@@ -1970,9 +1977,9 @@ def read_findings_section(
 
 
 def note_drawn(exhibits: Exhibits, finding: Finding, full: bool) -> None:
-    """Notes the finding against each file its card draws: the Result, and in full its links too."""
-    match = markup.ASSET_LINK.search(finding.source("Result"))
-    drawn = [match.group(2)] if match else []
+    """Notes the finding against each file its card draws: the Result, and in full every link too."""
+    result = [src for _, src in markup.ASSET_LINK.findall(finding.source("Result"))]
+    drawn = result if full else result[:1]
     if full:
         drawn += [
             src
@@ -2045,7 +2052,7 @@ def read_card(
     """A finding in full: key number, claim, reading, could overturn it, So, runs, history, exhibits."""
     cited = finding_clauses(finding, clauses)
     number, word, note = key_number(finding, cited, readings)
-    match = markup.ASSET_LINK.search(finding.text("Result"))
+    match = markup.ASSET_LINK.search(finding.source("Result"))
     exhibit = read_result(prose, exhibits, finding)
     more = read_more_exhibits(prose, exhibits, finding, match.group(2) if match else "")
 
@@ -2479,9 +2486,9 @@ def figure_place(model: Model, site: Site, path: Path) -> tuple[str, str]:
 def read_more_exhibits(
     prose: Prose, exhibits: Exhibits, finding: Finding, result: str
 ) -> list[dict]:
-    """Tables and figures the Reading or Implication links beyond the Result."""
+    """Tables and figures the Result lists after its first, then the Reading or Implication links."""
     seen, found = {result}, []
-    for label in ("Reading", "Implication"):
+    for label in ("Result", "Reading", "Implication"):
         for lead, src in markup.ASSET_LINK.findall(finding.source(label)):
             if src not in seen:
                 seen.add(src)

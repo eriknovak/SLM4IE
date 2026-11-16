@@ -17,7 +17,7 @@
 .side .nd{width:7px;height:7px;border-radius:50%;background:var(--spec);flex:none;margin-top:6px}
 .side .vp{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;line-height:1;color:var(--vp-ink);flex:none;margin-top:1px}
 .side .vp svg{width:70%;height:70%;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;display:block}
-.side .vp.ok,.side .vp.bet,.side .vp.adopt{background:var(--ok)}.side .vp.bad,.side .vp.wor,.side .vp.rej{background:var(--bad)}.side .vp.part{background:var(--run)}.side .vp.inc,.side .vp.eq{background:var(--muted)}
+.side .vp.ok,.side .vp.bet,.side .vp.adopt{background:var(--ok)}.side .vp.bad,.side .vp.wor,.side .vp.rej{background:var(--bad)}.side .vp.part{background:var(--run)}.side .vp.inc,.side .vp.eq,.side .vp.drop{background:var(--muted)}
 .side .vp.und{background:var(--soft);color:var(--muted);box-shadow:inset 0 0 0 1.5px var(--muted)}.side .vp.adopt svg,.side .vp.rej svg{stroke-width:2.6}
 .side .vp.plan{background:transparent;border:1.5px dashed var(--muted)}.side .vp.run{background:radial-gradient(circle,var(--run) 0 3px,transparent 3.5px);box-shadow:inset 0 0 0 2px var(--run)}
 .side .sq{display:inline-block;width:11px;height:11px;border-radius:2px;flex:none;box-sizing:border-box}.side .sq.chk{background:var(--fg)}.side .sq.pap{border:1.5px solid var(--fg)}.side .sq.dft{border:1.5px dashed var(--muted)}
