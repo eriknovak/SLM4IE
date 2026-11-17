@@ -1,4 +1,4 @@
-layer,attention,RoPE base,tokens a middle token sees at length 8192
+layer,attention,rope_base,tokens_a_middle_token_sees
 1,global,160000,8192
 2,local,10000,129
 3,local,10000,129

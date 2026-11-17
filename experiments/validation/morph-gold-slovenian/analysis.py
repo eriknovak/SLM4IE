@@ -27,6 +27,9 @@ Run it with:
     uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py data
     ~/.claude/skills/exp/scripts/tracking-env.sh --experiment slm4ie/validation/morph-gold-slovenian -- \
         uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py scores
+
+The `figures` step redraws the figures from the committed tables alone, as
+`scores` does once its tables are written; it needs no tokenizers or MLflow.
 """
 
 import argparse
@@ -46,14 +49,14 @@ from typing import Any, Dict, Iterable, List, Sequence, Set
 
 import numpy as np
 from datachart.charts import LineChart, ScatterChart
-from datachart.constants import FIG_SIZE, LINE_STYLE, SHOW_GRID
+from datachart.constants import LEGEND_LOCATION, LINE_STYLE, SHOW_GRID
 from datachart.utils import Grid
 from mlflow.tracking import MlflowClient
 from scipy.stats import kendalltau
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
+from create_assets import FULL_WIDTH, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
 
 from slm4ie.tokenizers import stats as st  # noqa: E402
 from slm4ie.tokenizers.base import split_words  # noqa: E402
@@ -112,6 +115,14 @@ TABLE_ALGORITHMS = frozenset({"morphbpe", "morphpiece"})
 SAMPLE_NAMES = {"train": "training sample", "eval": "evaluation sample"}
 H1_BAR = 0.8
 H2_BAR = 0.9
+# the claim each clause-bearing figure shows, as the finding citing it reads it
+FIGURE_CLAIMS = {
+    "sweep-boundary-f1-by-gold": Claim("H1", "morpheme-boundary F1"),
+    "sweep-rank-agreement-by-ranking-pair": Claim("H2", "Kendall's τ", threshold=H2_BAR),
+    "sweep-morph-metrics-by-vocab": Claim("Q1", "morph metrics against vocabulary size"),
+}
+# the morph metrics Q1 reads under the Sloleks gold, on both form slices
+MORPH_METRICS = ("morph_score_f1", "morph_edit_distance", "morph_consistency")
 # bootstrap draws per matrix product; bounds the draw matrix at about 50 MB
 BOOTSTRAP_BATCH = 100
 # the corpus metrics Q1 reads, all on the evaluation sample
@@ -122,6 +133,10 @@ SECONDS_PER_HOUR = 3600
 BYTES_PER_GB = 1e9
 # the vocabulary sizes Q1's levelling rule reads
 LEVELLING_VOCAB_SIZES = 4
+# tick step of the boundary F1 scatter, whose two axes share one scale
+BOUNDARY_F1_TICK = 0.05
+# room left and right of the first and last vocabulary size, so its tick clears the y ticks
+VOCAB_AXIS_PAD = 0.25
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1308,15 +1323,20 @@ def training_cost_rows(scores: SweepScores, output_root: Path, runs: dict[str, d
 
 
 def _vocab_ticks(vocab_sizes: list[int]) -> dict[str, Any]:
-    """Place the vocabulary sizes at even steps, labelled in thousands.
+    """Place the vocabulary sizes at even steps, labelled in thousands, inset from the axis ends.
 
     Args:
         vocab_sizes: The sweep's vocabulary sizes, ascending.
 
     Returns:
-        The `xticks` and `xticklabels` of a chart.
+        The `xticks`, `xticklabels`, `xmin` and `xmax` of a chart.
     """
-    return {"xticks": list(range(len(vocab_sizes))), "xticklabels": [f"{size // 1000}k" for size in vocab_sizes]}
+    return {
+        "xticks": list(range(len(vocab_sizes))),
+        "xticklabels": [f"{size // 1000}k" for size in vocab_sizes],
+        "xmin": -VOCAB_AXIS_PAD,
+        "xmax": len(vocab_sizes) - 1 + VOCAB_AXIS_PAD,
+    }
 
 
 def _curves(rows: list[dict[str, Any]], algorithms: list[str], vocab_sizes: list[int], value: str) -> list[list[dict]]:
@@ -1365,11 +1385,11 @@ def rank_agreement_figure(rows: list[dict[str, Any]]) -> Any:
         show_yerr=False,
         vlines=bars,
         title="Rank agreement between rankings",
-        xlabel="Kendall's τ over the tokenizers",
+        xlabel="Kendall's τ over the tokenizers (rank correlation)",
         ylabel="Ranking pair",
         yticks=list(range(len(ordered))),
         yticklabels=labels,
-        figsize=FIG_SIZE.A4_LANDSCAPE,
+        figsize=FULL_WIDTH,
         show_grid=SHOW_GRID.X,
     )
 
@@ -1396,13 +1416,24 @@ def boundary_f1_figure(rows: list[dict[str, Any]], algorithms: list[str]) -> Any
         ]
         for algorithm in algorithms
     ]
+    # one scale on both axes; the x axis skips the corner tick the y axis already labels
+    values = [value for points in series for point in points for value in (point["x"], point["y"])]
+    low = np.floor(min(values) / BOUNDARY_F1_TICK) * BOUNDARY_F1_TICK
+    high = np.ceil(max(values) / BOUNDARY_F1_TICK) * BOUNDARY_F1_TICK
+    ticks = [round(float(tick), 2) for tick in np.arange(low, high + BOUNDARY_F1_TICK / 2, BOUNDARY_F1_TICK)]
     return ScatterChart(
         series,
         subtitle=algorithms,
         title="Boundary F1 under two golds",
         xlabel="Boundary F1, heuristic gold",
         ylabel="Boundary F1, Sloleks gold",
-        figsize=FIG_SIZE.FULL_MEDIUM,
+        xmin=ticks[0],
+        xmax=ticks[-1],
+        ymin=ticks[0],
+        ymax=ticks[-1],
+        xticks=ticks[1:],
+        yticks=ticks,
+        figsize=ONE_COLUMN,
         show_grid=SHOW_GRID.BOTH,
         show_legend=True,
     )
@@ -1410,12 +1441,12 @@ def boundary_f1_figure(rows: list[dict[str, Any]], algorithms: list[str]) -> Any
 
 METRIC_LABELS = {
     "fertility": "Fertility (tokens per word)",
-    "tokens_per_byte": "Tokens per byte",
-    "chars_per_token": "Characters per token",
-    "renyi_efficiency": "Rényi efficiency",
+    "tokens_per_byte": "Compression\n(tokens per byte)",
+    "chars_per_token": "Compression\n(characters per token)",
+    "renyi_efficiency": "Rényi efficiency\n(fraction of maximum)",
     "morph_score_f1": "Boundary F1",
-    "morph_edit_distance": "Morph-Edit-Distance",
-    "morph_consistency": "Morph-Consistency",
+    "morph_edit_distance": "Morph-Edit-Distance\n(edits per form)",
+    "morph_consistency": "Morph-Consistency (F1)",
 }
 
 
@@ -1435,7 +1466,7 @@ def metric_curves_figure(
         The datachart grid.
     """
     charts = []
-    for position, (metric, slice_name) in enumerate(panels):
+    for metric, slice_name in panels:
         selected = [row for row in rows if row["metric"] == metric and row["slice"] == slice_name]
         # the y label names the metric; three panels per row leave room only for the slice
         charts.append(
@@ -1446,11 +1477,12 @@ def metric_curves_figure(
                 xlabel="Vocabulary size",
                 ylabel=METRIC_LABELS[metric],
                 show_grid=SHOW_GRID.Y,
-                show_legend=position == 0,
                 **_vocab_ticks(vocab_sizes),
             )
         )
-    return Grid(charts, max_cols=3, title=title, figsize=FIG_SIZE.FULL_TALL)
+    # one legend below the grid, where it covers no panel's curves
+    legend = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": len(algorithms)}
+    return Grid(charts, max_cols=3, title=title, figsize=FULL_WIDTH, show_legend=True, legend=legend)
 
 
 def rare_vocabulary_figure(
@@ -1486,7 +1518,108 @@ def rare_vocabulary_figure(
                 **_vocab_ticks(vocab_sizes),
             )
         )
-    return Grid(charts, max_cols=2, title="Rare vocabulary tokens", figsize=FIG_SIZE.FULL_MEDIUM)
+    return Grid(charts, max_cols=2, title="Rare vocabulary tokens", figsize=ONE_COLUMN)
+
+
+def draw_figures(cfg: SweepConfig, analysis: AnalysisConfig) -> list[Path]:
+    """Draw every figure from the committed tables, each claim figure's data table first.
+
+    Args:
+        cfg: The sweep dial, for the algorithms and vocabulary sizes.
+        analysis: The analysis settings, for the count bins.
+
+    Returns:
+        The data tables and figures written.
+    """
+    # read the tables the figures are drawn from
+    agreement = read_table(TABLES_DIR / "sweep-rank-agreement-by-ranking-pair.csv")
+    boundary = read_table(TABLES_DIR / "sweep-boundary-f1-by-tokenizer.csv")
+    metrics = read_table(TABLES_DIR / "sweep-metrics-by-vocab.csv")
+    # a count bin is a label such as "0" or "1–9", matched against count_bin_labels
+    vocabulary = read_table(TABLES_DIR / "sweep-vocabulary-tokens-by-count.csv", text_columns={"count_bin"})
+    algorithms = list(cfg.tokenizers)
+    vocab_sizes = sorted(cfg.vocab_sizes)
+
+    # write the data tables of the claim figures whose table goes by another name
+    f1 = {(row["ranking"], row["algorithm"], row["vocab_size"]): row["f1"] for row in boundary}
+    by_gold = [
+        {
+            "algorithm": algorithm,
+            "vocab_size": size,
+            "f1_heuristic_gold": f1[("heuristic gold, all forms", algorithm, size)],
+            "f1_sloleks_gold": f1[("Sloleks gold, all forms", algorithm, size)],
+        }
+        for algorithm in algorithms
+        for size in vocab_sizes
+    ]
+    morph = [row for row in metrics if row["metric"] in MORPH_METRICS]
+    written = [
+        TABLES_DIR / "sweep-boundary-f1-by-gold.csv",
+        TABLES_DIR / "sweep-morph-metrics-by-vocab.csv",
+    ]
+    save_table(by_gold, written[0])
+    save_table(morph, written[1])
+
+    # define the figures
+    edges = list(analysis.count_bins)
+    rare = {label for label, low in zip(count_bin_labels(edges), edges) if low < analysis.rare_below}
+    morph_panels = [(metric, f"{slice_name} forms") for slice_name in ("all", "manual") for metric in MORPH_METRICS]
+    corpus_panels = [(metric, "evaluation sample") for metric in CORPUS_METRICS]
+    # the ranking-pair scatter and the three-panel grids take a section's own fold
+    full_width = {
+        "sweep-rank-agreement-by-ranking-pair",
+        "sweep-morph-metrics-by-vocab",
+        "sweep-corpus-metrics-by-vocab",
+    }
+    figures = {
+        "sweep-rank-agreement-by-ranking-pair": lambda: rank_agreement_figure(agreement),
+        "sweep-boundary-f1-by-gold": lambda: boundary_f1_figure(boundary, algorithms),
+        "sweep-morph-metrics-by-vocab": lambda: metric_curves_figure(
+            metrics, morph_panels, algorithms, vocab_sizes, "Morph metrics against vocabulary size"
+        ),
+        "sweep-corpus-metrics-by-vocab": lambda: metric_curves_figure(
+            metrics, corpus_panels, algorithms, vocab_sizes, "Corpus metrics against vocabulary size"
+        ),
+        "sweep-rare-vocabulary-share-by-vocab": lambda: rare_vocabulary_figure(
+            vocabulary, rare, algorithms, vocab_sizes
+        ),
+    }
+
+    # save the figures
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    for name, build in figures.items():
+        path = FIGURES_DIR / f"{name}.svg"
+        width = "full-width" if name in full_width else "one-column"
+        save_figure(build, path, claim=FIGURE_CLAIMS.get(name), width=width)
+        written.append(path)
+    return written
+
+
+def read_table(path: Path, text_columns: Set[str] = frozenset()) -> list[dict[str, Any]]:
+    """Read a table `write_csv` wrote, turning its numbers back into values.
+
+    Args:
+        path: The CSV file.
+        text_columns: Columns kept as text even where a cell reads as a number.
+
+    Returns:
+        One dict per row; an empty cell stays an empty string.
+    """
+    with open(path, newline="", encoding="utf-8") as handle:
+        return [
+            {key: cell if key in text_columns else _parse_cell(cell) for key, cell in row.items()}
+            for row in csv.DictReader(handle)
+        ]
+
+
+def _parse_cell(cell: str) -> Any:
+    """The value `csv.DictWriter` wrote as this cell: an int, a float or the text itself."""
+    for kind in (int, float):
+        try:
+            return kind(cell)
+        except ValueError:
+            continue
+    return cell
 
 
 # ===============================
@@ -1611,34 +1744,12 @@ def build_scores(cfg: SweepConfig, analysis: AnalysisConfig, force: bool) -> Non
     write_csv(TABLES_DIR / "sweep-unknown-tokens-by-tokenizer.csv", unknown_token_rows(scores))
     write_csv(TABLES_DIR / "sweep-training-cost-by-tokenizer.csv", training_cost_rows(scores, cfg.output_root, runs))
 
-    # define the figures
-    algorithms = list(cfg.tokenizers)
-    edges = list(analysis.count_bins)
-    rare = {label for label, low in zip(count_bin_labels(edges), edges) if low < analysis.rare_below}
-    morph_panels = [(metric, f"{slice_name} forms") for slice_name in ("all", "manual")
-                    for metric in ("morph_score_f1", "morph_edit_distance", "morph_consistency")]  # fmt: skip
-    corpus_panels = [(metric, "evaluation sample") for metric in CORPUS_METRICS]
-    figures = {
-        "sweep-rank-agreement-by-ranking-pair.svg": lambda: rank_agreement_figure(agreement),
-        "sweep-boundary-f1-by-gold.svg": lambda: boundary_f1_figure(boundary, algorithms),
-        "sweep-morph-metrics-by-vocab.svg": lambda: metric_curves_figure(
-            metrics, morph_panels, algorithms, vocab_sizes, "Morph metrics against vocabulary size"
-        ),
-        "sweep-corpus-metrics-by-vocab.svg": lambda: metric_curves_figure(
-            metrics, corpus_panels, algorithms, vocab_sizes, "Corpus metrics against vocabulary size"
-        ),
-        "sweep-rare-vocabulary-share-by-vocab.svg": lambda: rare_vocabulary_figure(
-            vocabulary, rare, algorithms, vocab_sizes
-        ),
-    }
-
-    # save the figures and log them to the parent run
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    # draw the figures from the tables just written and log them to the parent run
     parent_run = {run["parent_run_id"] for run in runs.values()}
-    for name, build in figures.items():
-        save_figure(build, FIGURES_DIR / name)
-        for run_id in parent_run:
-            client.log_artifact(run_id, str(FIGURES_DIR / name), artifact_path="analysis")
+    for path in draw_figures(cfg, analysis):
+        if path.parent == FIGURES_DIR:
+            for run_id in parent_run:
+                client.log_artifact(run_id, str(path), artifact_path="analysis")
 
     # log the settings behind the intervals on the sweep's parent run
     for run_id in parent_run:
@@ -1658,6 +1769,7 @@ def main() -> None:
     steps.add_parser("data", help="build the golds, the form counts and the dataset statistics")
     scores = steps.add_parser("scores", help="score every tokenizer and write the step-8 tables and figures")
     scores.add_argument("--force", action="store_true", help="rescore tokenizers already in the scores cache")
+    steps.add_parser("figures", help="redraw the figures from the committed tables; needs no tokenizers or MLflow")
     args = parser.parse_args()
 
     # set up logging and load the configs
@@ -1668,6 +1780,9 @@ def main() -> None:
     # run the step
     if args.step == "data":
         build_data(cfg, analysis)
+    elif args.step == "figures":
+        for path in draw_figures(cfg, analysis):
+            logging.info("wrote %s", path)
     else:
         build_scores(cfg, analysis, args.force)
 

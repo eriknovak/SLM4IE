@@ -1,0 +1,10 @@
+clause,qualifier,value,ci_low,ci_high,bar,margin,outcome
+H1,every source,22539297662,,,5000000000,,confirmed
+H1,gated sources removed,17418488860,,,5000000000,,confirmed
+H2,"science, source labels",2836041136,,,500000,,confirmed
+H2,"medical, source labels",22077564,,,500000,,confirmed
+H3,source labels,5941,,,10000,,confirmed
+H3,document labels,1057731,,,10000,,confirmed
+H4,source labels,165466,,,10000,,confirmed
+H4,document labels,960023,,,10000,,confirmed
+Q1,,,,,,,partial

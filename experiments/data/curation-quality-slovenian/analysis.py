@@ -20,6 +20,9 @@ need the per-stage funnel, which is step 11.
 Run it with:
 
     uv run python experiments/data/curation-quality-slovenian/analysis.py
+
+`--figures-only` redraws the figures from the committed tables alone, without
+the derived data, as the full run does once its tables are written.
 """
 
 import argparse
@@ -41,7 +44,7 @@ from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
 from slm4ie.utils.stats import cohen_kappa, wilson
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  # the path is set on the line above
+from create_assets import HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  # path set above
 
 # ===============================
 # Defaults
@@ -83,6 +86,9 @@ SVG_HASH_SALT = "curation-quality-slovenian"
 #: Bar colour of the "kept" part in the loss figure; the palette holds six colours.
 NEUTRAL_BAR_COLOR = "#b8b8b8"
 
+#: Multiplier from a share to a percentage.
+PERCENT = 100
+
 #: How many conflicts the adjudication draw takes by default.
 ADJUDICATION_SIZE = 30
 
@@ -119,6 +125,31 @@ FUNNEL_STAGES: tuple[str, ...] = (
     "03_quality",
     "04_repetition",
 )
+
+#: The bar H1 and H2 are refuted under: a stage's drop precision below it.
+PRECISION_BAR = 0.6
+
+#: The claim each clause-bearing figure shows, as the finding that cites it reads it.
+FIGURE_CLAIMS: dict[str, Claim] = {
+    "judge-rubric-drop-precision-by-stage": Claim("H1", "drop precision", threshold=PRECISION_BAR),
+    "judge-rubric-drop-precision-by-source": Claim("H2", "drop precision"),
+    "curate-losses-by-source": Claim("H4", "share of converted documents lost per stage"),
+}
+
+#: The columns of each claim figure's data table, read from the table the figure is drawn from.
+FIGURE_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "judge-rubric-drop-precision-by-stage": (
+        "stage",
+        "drop_precision",
+        "drop_precision_low",
+        "drop_precision_high",
+        "residual_bad_rate",
+        "residual_bad_rate_low",
+        "residual_bad_rate_high",
+    ),
+    "judge-rubric-drop-precision-by-source": ("source", "stage", "drop_precision", "drop_precision_n"),
+    "curate-losses-by-source": ("source", "base", "inflated_input", *STAGES, "kept"),
+}
 
 # ===============================
 # Helper functions
@@ -836,8 +867,48 @@ def loss_rows(funnel: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def figure_tables(tables_dir: Path) -> tuple[list[dict[str, Any]], ...]:
+    """Read back the committed tables the figures are drawn from.
+
+    Args:
+        tables_dir: The record's `tables/` folder.
+
+    Returns:
+        The pooled and per-source stage decisions, the pairwise outcomes, the
+        source losses and the throughput rows, in `draw_figures` order.
+    """
+    names = ("stage-decisions", "source-stage-decisions", "pairwise-outcomes", "source-losses", "throughput")
+    return tuple(read_csv(tables_dir / f"{name}.csv") for name in names)
+
+
+def read_csv(path: Path) -> list[dict[str, Any]]:
+    """Read a table `write_csv` wrote, turning its numbers and booleans back into values.
+
+    Args:
+        path: The CSV file.
+
+    Returns:
+        One dict per row; an empty cell stays an empty string.
+    """
+    with path.open(encoding="utf-8", newline="") as fh:
+        return [{key: _parse_cell(cell) for key, cell in row.items()} for row in csv.DictReader(fh)]
+
+
+def _parse_cell(cell: str) -> Any:
+    """The value `csv.DictWriter` wrote as this cell: a bool, an int, a float or the text itself."""
+    if cell in ("True", "False"):
+        return cell == "True"
+    for kind in (int, float):
+        try:
+            return kind(cell)
+        except ValueError:
+            continue
+    return cell
+
+
 def draw_figures(
     figures_dir: Path,
+    tables_dir: Path,
     pooled: list[dict[str, Any]],
     per_source: list[dict[str, Any]],
     pairwise: list[dict[str, Any]],
@@ -848,9 +919,12 @@ def draw_figures(
 
     Each figure carries one finding and is drawn from a table that is also
     written to `tables/`, so a number read off a figure can be checked there.
+    A figure a clause rests on also gets its own data table, named as it is,
+    and carries the clause's claim in its stamp.
 
     Args:
         figures_dir: Where the SVGs go.
+        tables_dir: Where the claim figures' data tables go.
         pooled: Rows from `stage_rows` pooled over sources.
         per_source: Rows from `stage_rows` per source.
         pairwise: Rows from `pairwise_rows`.
@@ -862,7 +936,8 @@ def draw_figures(
     """
     import matplotlib.pyplot as plt
     from datachart.charts import BarChart, DumbbellChart, Heatmap
-    from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION, VALUE_FORMAT
+    from datachart.constants import BAR_MODE, LEGEND_LOCATION, ORIENTATION, VALUE_FORMAT
+    from matplotlib.ticker import StrMethodFormatter
 
     # fixed clip-path ids
     plt.rcParams["svg.hashsalt"] = SVG_HASH_SALT
@@ -876,51 +951,68 @@ def draw_figures(
     figures: dict[str, Any] = {}
 
     # the gap between the dots is how well a stage separates bad text from good
-    # the axis ends half a tick past the largest share so its label stays inside
-    xmax = math.ceil(max(max(row["drop_precision"], row["residual_bad_rate"]) for row in pooled) * 10 + 0.5) / 10
+    # the axis ends half a tick past the largest share or the H1 bar, so both stay inside
+    largest = max(PRECISION_BAR, *(max(row["drop_precision"], row["residual_bad_rate"]) for row in pooled))
+    xmax = math.ceil(largest * 10 + 0.5) / 10
     figures["judge-rubric-drop-precision-by-stage"] = DumbbellChart(
         [{"label": row["stage"], "start": row["residual_bad_rate"], "end": row["drop_precision"]} for row in pooled],
+        title="Bad text dropped and kept",
         start_name="kept documents that are bad",
         end_name="dropped documents that are bad",
-        xlabel="share judged bad",
+        xlabel="documents judged bad (%)",
+        ylabel="stage",
         # room left of zero for the labels of dots that sit near it
         xmin=-0.05,
         xmax=xmax,
         show_values=True,
         value_format=VALUE_FORMAT.PERCENT_INT,
-        figsize=FIG_SIZE.FULL_MEDIUM,
+        vlines=[{"x": PRECISION_BAR, "label": "H1 bar"}],
+        figsize=ONE_COLUMN,
         **below(2),
     )
 
     # DumbbellChart takes no xticks, and a share has no negative tick to show
-    figures["judge-rubric-drop-precision-by-stage"].axes[0].set_xticks([i / 10 for i in range(int(xmax * 10) + 1)])
+    dumbbell_axes = figures["judge-rubric-drop-precision-by-stage"].axes[0]
+    dumbbell_axes.set_xticks([i / 10 for i in range(int(xmax * 10) + 1)])
+    dumbbell_axes.xaxis.set_major_formatter(StrMethodFormatter(VALUE_FORMAT.PERCENT_INT))
 
     sources = sorted({row["source"] for row in per_source})
-    cells = {(row["source"], row["stage"]): row["drop_precision"] for row in per_source if row["drop_precision"] != ""}
+    # cells print in percent without the sign, so "100" still fits a half-width cell
+    cells = {
+        (row["source"], row["stage"]): PERCENT * row["drop_precision"]
+        for row in per_source
+        if row["drop_precision"] != ""
+    }
     figures["judge-rubric-drop-precision-by-source"] = Heatmap(
         {
             "x": list(STAGES),
             "y": sources,
             "z": [[cells.get((source, stage)) for stage in STAGES] for source in sources],
         },
+        title="Drop precision (%)",
         xlabel="stage",
+        ylabel="source",
         vmin=0.0,
-        vmax=1.0,
-        value_format=VALUE_FORMAT.PERCENT_INT,
+        vmax=PERCENT,
+        value_format=VALUE_FORMAT.INTEGER,
         show_values=True,
-        show_colorbar=True,
-        xtickrotate=30,
-        figsize=FIG_SIZE.FULL_TALL,
+        # every cell prints its value, so a colour scale adds nothing in a half-width figure
+        show_colorbar=False,
+        xtickrotate=45,
+        figsize=HALF_TALL,
     )
 
     pooled_pairs = [row for row in reversed(pairwise) if row["source"] == "ALL"]
     figures["judge-pairwise-outcome-by-stage"] = BarChart(
         [[{"label": row["stage"], "y": row[call]} for row in pooled_pairs] for call in PAIRWISE_CALLS],
+        title="Pairwise outcome by stage",
         subtitle=["kept document better", "dropped document better", "tie", "orders disagree"],
-        xlabel="share of pairs",
+        xlabel="share of pairs (%)",
+        ylabel="stage",
         xmax=1.0,
+        xticks_format=VALUE_FORMAT.PERCENT_INT,
         bar_mode=BAR_MODE.STACK,
-        figsize=FIG_SIZE.FULL_MEDIUM,
+        figsize=ONE_COLUMN,
         orientation=ORIENTATION.HORIZONTAL,
         **below(2),
     )
@@ -934,15 +1026,18 @@ def draw_figures(
             ]
             for part in parts
         ],
+        title="Losses by source",
         subtitle=[f"dropped by {stage}" for stage in STAGES] + ["kept"],
-        xlabel="share of converted documents (* of language output, issue #9)",
+        xlabel="converted documents (%)\n* of language output, issue #9",
+        ylabel="source",
         xmax=1.0,
+        xticks_format=VALUE_FORMAT.PERCENT_INT,
         bar_mode=BAR_MODE.STACK,
         orientation=ORIENTATION.HORIZONTAL,
         # the palette holds six colours, so the seventh part gets a neutral one
         style=[None] * len(STAGES) + [{"plot_bar_color": NEUTRAL_BAR_COLOR}],
-        figsize=FIG_SIZE.FULL_TALL,
-        **below(2),
+        figsize=HALF_TALL,
+        **below(1),
     )
 
     steps = [row for row in throughput if row["stage"] != "TOTAL"]
@@ -954,16 +1049,29 @@ def draw_figures(
             }
             for row in reversed(steps)
         ],
-        xlabel="CPU hours",
+        title="CPU hours by step",
+        xlabel="CPU time (hours)",
+        ylabel="step",
         value_format=VALUE_FORMAT.DECIMAL,
-        figsize=FIG_SIZE.FULL_MEDIUM,
+        figsize=ONE_COLUMN,
         **horizontal,
     )
 
+    # each claim figure's data table first, since the figure check looks for it
+    sources_of = {
+        "judge-rubric-drop-precision-by-stage": pooled,
+        "judge-rubric-drop-precision-by-source": per_source,
+        "curate-losses-by-source": losses,
+    }
     written = []
+    for name, columns in FIGURE_TABLE_COLUMNS.items():
+        path = tables_dir / f"{name}.csv"
+        save_table([{column: row[column] for column in columns} for row in sources_of[name]], path)
+        written.append(path)
+
     for name, figure in figures.items():
         path = figures_dir / f"{name}.svg"
-        save_figure(figure, path)
+        save_figure(figure, path, claim=FIGURE_CLAIMS.get(name))
         written.append(path)
     return written
 
@@ -1220,6 +1328,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--extract-config", type=Path, default=Path("configs/data/extract.yaml"), help="Read for each source's access."
     )
     parser.add_argument(
+        "--figures-only",
+        action="store_true",
+        help="Redraw the figures from the committed tables and stop; reads no derived data.",
+    )
+    parser.add_argument(
         "--draw-adjudications",
         type=int,
         metavar="N",
@@ -1231,6 +1344,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> None:
     """Write the record's tables and figures and print the headline ones."""
     args = parse_args()
+
+    if args.figures_only:
+        for path in draw_figures(args.figures, args.tables, *figure_tables(args.tables)):
+            print(f"wrote {path}")
+        return
 
     # load the sample and the judge verdicts
     sample = read_jsonl(args.data_root / "interim" / "sample.jsonl")
@@ -1345,8 +1463,8 @@ def main() -> None:
             )
         written.append(write_csv(args.tables / "adjudication.csv", adjudicated))
 
-    # draw the figures
-    written += draw_figures(args.figures, pooled, per_source, pairwise, losses, throughput)
+    # draw the figures from the tables just written, as --figures-only does
+    written += draw_figures(args.figures, args.tables, *figure_tables(args.tables))
     for path in written:
         print(f"wrote {path}")
 

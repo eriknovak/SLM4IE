@@ -23,6 +23,9 @@ the volume targets (D4).
 Run it with:
 
     uv run --group corpus --group analysis python experiments/data/curation-thresholds-slovenian/analysis.py
+
+`--figures-only` redraws the figures from the committed tables alone, without
+the builds, as the full run does once its tables are written.
 """
 
 import argparse
@@ -48,7 +51,7 @@ from datatrove.utils.typeshelper import Languages
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from report_figures import save_figure  # noqa: E402  — path set above so the shared helper resolves
+from create_assets import FULL_WIDTH, HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
 
 from slm4ie.data.curate.config import (  # noqa: E402
     effective_stage_config,
@@ -229,6 +232,10 @@ MAX_BAD_RATE_RISE = 0.02
 
 #: The build every residual bad rate is compared against (D17).
 BASELINE_BUILD = "baseline"
+
+#: F12's figure, which reads Q1 against the baseline's rate plus two points; its data table shares the name.
+RESIDUAL_FIGURE = "residual-bad-rate-by-build"
+RESIDUAL_QUANTITY = "volume-weighted residual bad rate"
 
 
 # ===============================
@@ -2087,8 +2094,53 @@ def copy_origin_rows(entering: list[dict[str, Any]], kept: set[str], finished: s
     ]
 
 
+def figure_tables(tables_dir: Path, stem: str) -> tuple[list[dict[str, Any]], ...]:
+    """Read back the committed tables the figures are drawn from.
+
+    Args:
+        tables_dir: The record's `tables/` folder.
+        stem: The candidate config's stem, naming its tables.
+
+    Returns:
+        The losses, the two retention comparisons and the residual bad rates,
+        in `draw_figures` order.
+    """
+    names = (
+        "curate-losses-by-source",
+        "curate-retention-by-build-and-source",
+        f"{stem}-retention-by-build-and-source",
+        "residual-bad-rate-by-build-and-source",
+    )
+    return tuple(read_csv_values(tables_dir / f"{name}.csv") for name in names)
+
+
+def read_csv_values(path: Path) -> list[dict[str, Any]]:
+    """Read a CSV this script wrote, turning its numbers and booleans back into values.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        One dict per row; an empty cell stays an empty string.
+    """
+    return [{key: _parse_cell(cell) for key, cell in row.items()} for row in read_csv(path)]
+
+
+def _parse_cell(cell: str) -> Any:
+    """The value `csv.DictWriter` wrote as this cell: a bool, an int, a float or the text itself."""
+    if cell in ("True", "False"):
+        return cell == "True"
+    for kind in (int, float):
+        try:
+            return kind(cell)
+        except ValueError:
+            continue
+    return cell
+
+
 def draw_figures(
     figures_dir: Path,
+    tables_dir: Path,
     losses: list[dict[str, Any]],
     comparison: list[dict[str, Any]],
     route_comparison: list[dict[str, Any]],
@@ -2097,8 +2149,11 @@ def draw_figures(
 ) -> list[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
+    The residual figure carries Q1's claim, so its data table is written first.
+
     Args:
         figures_dir: Where the SVGs go.
+        tables_dir: Where the residual figure's data table goes.
         losses: Rows from `loss_rows`.
         comparison: Rows from `build_comparison_rows`.
         route_comparison: Rows from `route_comparison_rows`.
@@ -2111,7 +2166,7 @@ def draw_figures(
     # import the plotting libraries here; they load only when figures are drawn
     import matplotlib.pyplot as plt
     from datachart.charts import BarChart, DumbbellChart
-    from datachart.constants import BAR_MODE, FIG_SIZE, LEGEND_LOCATION, ORIENTATION
+    from datachart.constants import BAR_MODE, LEGEND_LOCATION, ORIENTATION
 
     # fixed clip-path ids keep a rerun on unchanged tables from changing the SVG
     plt.rcParams["svg.hashsalt"] = SVG_HASH_SALT
@@ -2135,8 +2190,9 @@ def draw_figures(
         orientation=ORIENTATION.HORIZONTAL,
         # the seventh part gets a neutral colour
         style=[None] * len(DROP_STAGES) + [{"plot_bar_color": KEPT_BAR_COLOR}],
-        figsize=FIG_SIZE.FULL_TALL,
-        **below(3),
+        figsize=HALF_TALL,
+        # one legend column: the half-width figure has no room for more
+        **below(1),
     )
 
     # retention in the audit's build and the rebuild
@@ -2151,15 +2207,15 @@ def draw_figures(
             }
             for row in both
         ],
-        title="Retention per source in two builds",
+        title="Retention in two builds",
         start_name="earlier audit's build",
         end_name="rebuild at main's settings",
         xlabel="share of converted documents kept",
         ylabel="source (* doubled in the audit's build)",
         xmin=0.0,
         xmax=1.0,
-        figsize=FIG_SIZE.FULL_TALL,
-        **below(2),
+        figsize=HALF_TALL,
+        **below(1),
     )
 
     # retention under routes
@@ -2173,42 +2229,49 @@ def draw_figures(
             }
             for row in sources
         ],
-        title="Retention per source under routes",
+        title="Retention under routes",
         start_name="baseline build",
         end_name="build with routes",
         xlabel="share of converted documents kept",
         ylabel="source (route)",
         xmin=0.0,
         xmax=1.0,
-        figsize=FIG_SIZE.FULL_TALL,
+        # full width: the source and route labels leave a half column no room to plot
+        figsize=FULL_WIDTH,
         **below(2),
     )
 
     # residual bad rate by build
     pooled = [row for row in residuals if row["source"] == "pooled"]
     baseline_rate = next(row["bad_rate"] for row in pooled if row["build"] == BASELINE_BUILD)
-    figures["residual-bad-rate-by-build"] = BarChart(
+    bar = baseline_rate + MAX_BAD_RATE_RISE
+    residual_table = tables_dir / f"{RESIDUAL_FIGURE}.csv"
+    save_table([{key: value for key, value in row.items() if key != "source"} for row in pooled], residual_table)
+    figures[RESIDUAL_FIGURE] = BarChart(
         [
             {"label": f"{row['build']} build", "y": row["bad_rate"], "yerr": row["bad_rate_high"] - row["bad_rate"]}
             for row in pooled
         ],
-        title="Bad text left in each build",
+        title="Bad text left per build",
         xlabel="build",
         ylabel="share of kept documents judged bad",
         ymin=0.0,
         show_yerr=True,
         show_values=True,
         value_format="{x:.3f}",
-        hlines={"y": baseline_rate + MAX_BAD_RATE_RISE, "label": "baseline plus two points"},
-        figsize=FIG_SIZE.FULL_MEDIUM,
+        hlines={"y": bar, "label": "baseline plus two points"},
+        figsize=ONE_COLUMN,
         **below(1),
     )
 
     # save the figures
-    written = []
+    claims = {RESIDUAL_FIGURE: Claim("Q1", RESIDUAL_QUANTITY, threshold=bar)}
+    full_width = {f"{stem}-retention-by-build-and-source"}
+    written = [residual_table]
     for name, figure in figures.items():
         path = figures_dir / f"{name}.svg"
-        save_figure(figure, path)
+        width = "full-width" if name in full_width else "one-column"
+        save_figure(figure, path, claim=claims.get(name), width=width)
         written.append(path)
     return written
 
@@ -2268,6 +2331,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Judge verdicts on the third draw and the calibration documents, from one run.",
     )
     parser.add_argument(
+        "--figures-only",
+        action="store_true",
+        help="Redraw the figures from the committed tables and stop; reads no build or verdicts.",
+    )
+    parser.add_argument(
         "--write-judge-input",
         type=Path,
         default=None,
@@ -2287,6 +2355,11 @@ def main() -> None:
     args = parse_args()
     if args.write_judge_input:
         write_judge_input(args.judge_sample, args.write_judge_input)
+        return
+    if args.figures_only:
+        stem = args.routes_config.stem
+        for path in draw_figures(args.figures, args.tables, *figure_tables(args.tables, stem), stem):
+            print(f"wrote {path}")
         return
 
     # build the baseline funnel
@@ -2523,7 +2596,8 @@ def main() -> None:
         write_csv(args.tables / "dataset-corpus-statistics.csv", corpus_dataset_rows(funnel)),
         write_csv(args.tables / "audit-precision-by-filter-and-source.csv", precision),
     ]
-    written += draw_figures(args.figures, losses, comparison, route_comparison, residuals, stem)
+    # draw the figures from the tables just written, as --figures-only does
+    written += draw_figures(args.figures, args.tables, *figure_tables(args.tables, stem), stem)
     for path in written:
         print(f"wrote {path}")
 

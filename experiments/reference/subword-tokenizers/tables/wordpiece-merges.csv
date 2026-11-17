@@ -1,4 +1,4 @@
-Merge,Joins,Count,Tied pairs left,hiša after it,The paper's rule would join
+merge,joins,count,tied_pairs_left,word_after_it,paper_rule_would_join
 1,h + ##i,12,##i##š,hi ##š ##a,"##i + ##š, h + ##i"
 2,hi + ##š,12,none,hiš ##a,hi + ##š
 3,m + ##i,9,##i##z,hiš ##a,"##i + ##z, m + ##i"

@@ -120,11 +120,11 @@ def deberta_relative_buckets() -> None:
     for distance in DISTANCES:
         rows.append(
             {
-                "distance (query minus key)": distance,
-                "V1 row, k = 512": v1_relative_index(distance),
-                "V2 bucket": v2_log_bucket(distance),
-                "V2 row, 256 buckets": v2_table_row(distance),
-                "V2 distances below 512 sharing the row": sum(
+                "query_minus_key_distance": distance,
+                "v1_row": v1_relative_index(distance),
+                "v2_bucket": v2_log_bucket(distance),
+                "v2_row": v2_table_row(distance),
+                "v2_distances_below_512_sharing_the_row": sum(
                     1 for d in range(V2_MAX_DISTANCE) if v2_table_row(d) == v2_table_row(distance)
                 ),
             }
@@ -144,10 +144,8 @@ def modernbert_attention_layout() -> None:
             {
                 "layer": layer + 1,
                 "attention": "global" if is_global else "local",
-                "RoPE base": GLOBAL_ROPE_THETA if is_global else LOCAL_ROPE_THETA,
-                f"tokens a middle token sees at length {SEQUENCE_LENGTH}": SEQUENCE_LENGTH
-                if is_global
-                else LOCAL_WINDOW + 1,
+                "rope_base": GLOBAL_ROPE_THETA if is_global else LOCAL_ROPE_THETA,
+                "tokens_a_middle_token_sees": SEQUENCE_LENGTH if is_global else LOCAL_WINDOW + 1,
             }
         )
 

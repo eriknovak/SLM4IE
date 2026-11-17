@@ -5,7 +5,7 @@ status: from-paper
 summary: BERT's encoder unchanged, retrained with a fresh mask on every pass, full sentences packed across document boundaries, no next-sentence prediction, a byte-level BPE vocabulary, and ten times the data at a batch of 8,000 sequences.
 variant_of: encoder-transformers/bert
 part_of:
-couples_to: [subword-tokenizers/byte-level-bpe]
+couples_to: [{entry: subword-tokenizers/byte-level-bpe, as: tokenizer}]
 ---
 
 ## Description
@@ -51,13 +51,13 @@ Slovenian morphology applies to this design directly.
 
 ## Facts
 
-- **Position encoding**: learned absolute, as in BERT
-- **Attention span**: every token attends to every token, as in BERT
-- **Block normalisation**: post-norm, as in BERT
-- **Activation**: GELU, as in BERT
-- **Pretraining objective**: masked language modelling on 15% of the tokens with a fresh mask on every pass; no next-sentence prediction
-- **Tokenizer**: byte-level BPE, 50,000 pieces, the GPT-2 vocabulary
-- **Context length**: 512 tokens, every training step at full length
+- **Position encoding**: learned absolute — as in BERT
+- **Attention span**: every token attends to every token — as in BERT
+- **Block normalisation**: post-norm — as in BERT
+- **Activation**: GELU — as in BERT
+- **Pretraining objective**: masked language modelling — on 15% of the tokens with a fresh mask on every pass; no next-sentence prediction
+- **Tokenizer**: byte-level BPE — 50,000 pieces, the GPT-2 vocabulary
+- **Context length**: 512 tokens — every training step at full length
 - **Input**: full sentences taken in order across document boundaries up to 512 tokens, a separator between documents, one segment for all tokens
 - **Sizes**: Base and Large as in BERT, 125M and 355M parameters with the larger vocabulary
 - **Training data**: BookCorpus and Wikipedia 16GB, CC-News 76GB, OpenWebText 38GB, Stories 31GB, in all over 160GB
@@ -97,9 +97,9 @@ Slovenian morphology applies to this design directly.
 ```
 
 - **1**: An input is filled with consecutive sentences until the length is reached, so almost every input is 512 tokens of text that belongs together. A document boundary inside the input is marked by a separator and not avoided. The paper also tried stopping at the document boundary, which scored slightly higher but gave batches of uneven size, and kept the packed form for the fixed batch size.
-- **2**: There is one segment, so the segment embedding carries no information. The special tokens are the start and end markers of the byte-level vocabulary.
-- **3-5**: The mask is drawn at the moment the sequence enters the model. Across the 500,000 steps the same sentence is hidden in a different place each time it is seen. The replacement rule inside the mask is BERT's.
-- **6-7**: The encoder and the prediction head are BERT's. Only the masked positions are scored.
+- **2**: The input $x$ has one segment, so the segment embedding carries no information. The special tokens are the start and end markers of the byte-level vocabulary.
+- **3-5**: The mask $M$ is drawn at the moment the sequence enters the model. Across the 500,000 steps the same sentence is hidden in a different place each time it is seen. The replacement rule inside the mask is BERT's.
+- **6-7**: The encoder, which gives $h$, and the prediction head are BERT's. Only the masked positions are scored, in $L_{MLM}$.
 - **8**: There is no second loss. The paper found that removing next-sentence prediction matched or improved every task it measured.
 
 ## Limits

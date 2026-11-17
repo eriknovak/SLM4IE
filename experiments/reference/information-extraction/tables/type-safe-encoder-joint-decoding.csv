@@ -1,4 +1,4 @@
-Candidate,Type,Score,Greedy,Beam
+candidate,type,score,greedy,beam
 Ana Novak,person,0.2,kept,kept
 Novak,organisation,0.1,,
 Krko,organisation,0.2,kept,kept

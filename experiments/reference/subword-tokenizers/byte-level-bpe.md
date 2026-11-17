@@ -45,10 +45,10 @@ MorphBPE, not this entry.
 
 ## Facts
 
-- **Base unit**: UTF-8 bytes, each shown as one printable character
-- **Chunk while training**: whole word, with the space before it
-- **Picks next token by**: highest pair count, a tie going to the pair whose symbols entered the vocabulary first
-- **Encoding**: standard BPE merges, no lexicon
+- **Base unit**: UTF-8 bytes — each shown as one printable character
+- **Chunk while training**: whole word — with the space before it
+- **Picks next token by**: highest pair count — a tie going to the pair whose symbols entered the vocabulary first
+- **Encoding**: standard BPE merges — no lexicon
 - **Needs lexicon**: no
 - **Setting**: vocabulary size, which includes the special tokens and the 256 byte symbols
 - **Unknown token**: none, every character is spelled from its bytes
@@ -102,11 +102,11 @@ MorphBPE, not this entry.
 \Return a standard BPE model holding $S$, $V$ and $M$, with a byte-level decoder \Comment{`slm4ie/tokenizers/backends/hf_bpe.py:41-49`}
 ```
 
-- **1**: Words are counted once, so the rest works on distinct words with a weight. A space is put before every line, and the text is cut into words, numbers and runs of punctuation, each keeping the space before it. Every piece is then written as the printable form of its UTF-8 bytes. The text is not normalised, so a letter written in decomposed form keeps its bytes.
-- **2-4**: Every word is one chunk, as in Character BPE.
-- **5**: The special tokens take the first places and the 256 byte symbols follow, whether or not a byte occurs in the corpus. The order fixes how a tie is broken.
-- **6**: Pairs are counted inside chunks only. The space before a word is inside the chunk, so a merge may absorb it, and no merge ever spans two words.
-- **7-10**: Each round joins one pair everywhere and records it. The loop ends when the vocabulary is full or no pair is left.
+- **1**: Words are counted once, as $f(w)$, so the rest works on distinct words with a weight. A space is put before every line, and the text is cut into words, numbers and runs of punctuation, each keeping the space before it. Every piece is then written as the printable form of its UTF-8 bytes. The text is not normalised, so a letter written in decomposed form keeps its bytes.
+- **2-4**: Every word is one chunk $c_1$, as in Character BPE.
+- **5**: The vocabulary $V$ starts with the special tokens and the 256 byte symbols follow, whether or not a byte occurs in the corpus. The order fixes how a tie is broken. The merge list $M$ starts empty.
+- **6**: Pair counts $n(a, b)$ are taken inside chunks only. The space before a word is inside the chunk, so a merge may absorb it, and no merge ever spans two words.
+- **7-10**: Each round joins the most frequent pair $(a^*, b^*)$ everywhere and records it. The loop ends when the vocabulary is full or no pair is left.
 - **11**: The trained model is the vocabulary and the merges. The decoder turns the printable byte symbols back into text.
 
 ```algorithm
@@ -125,10 +125,12 @@ MorphBPE, not this entry.
 ```
 
 - **1-2**: The text is cut into pieces the same way as in training. No piece can hold a byte outside $V$, so there is no unknown token.
-- **3-6**: Merges are replayed in the order they were learned. These lines run inside the HuggingFace `tokenizers` library, so they cite no project code.
+- **3-6**: Merges are replayed on each piece's symbols $s$ in the order they were learned. These lines run inside the HuggingFace `tokenizers` library, so they cite no project code.
 - **7**: What is left when no learned pair remains is the token sequence. Each token also reports which characters of the text it covers, with the space before a word left out. That span is how the morpheme metrics find its cuts without reading the byte symbols.
 
 ## Worked example
+
+- **Input**: six forms of `hiša` and `miza` with counts 5, 4, 3, 4, 3 and 2, a vocabulary of 263, and the forms `hiša`, `mize`, `hišami`, `mizami`, `hišaq` and `čas` to encode
 
 The corpus holds six forms of two nouns: `hiša` (house) five times, `hiše`
 four, `hišo` three, `miza` (table) four, `mize` three, `mizo` twice. The

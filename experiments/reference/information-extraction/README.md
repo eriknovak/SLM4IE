@@ -14,7 +14,7 @@ return?
 
 Zero-shot information extraction asks a model for entity types, labels or
 relations it was never trained on, named at the moment of the request. The
-entries here are one lineage of encoder-based extractors. Each one writes the
+entries here are one lineage of encoder-based extractors, and each one writes the
 request into the input as a prompt, runs a bidirectional encoder once over
 prompt and text, and matches the vectors of the request against the vectors of
 the text. What changes from one generation to the next is the prompt grammar,

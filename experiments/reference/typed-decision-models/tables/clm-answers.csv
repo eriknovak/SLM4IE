@@ -1,4 +1,4 @@
-Question,Type,Option,Scaled cosine,Probability,Answer,Confidence
+question,type,option,scaled_cosine,probability,answer,confidence
 department,choice,billing,99.6,0.996,billing,0.993
 department,choice,technical,94.0,0.004,billing,0.993
 urgent,noul,false,97.0,0.190,0.810,

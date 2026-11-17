@@ -56,15 +56,15 @@ same scores with and without the rules.
 
 ## Facts
 
-- **Tasks**: constrained text classification; joint entity and relation extraction with typed endpoints
-- **Prompt tokens**: none of its own; it reads the scores GLiNER2.5 produces
-- **Span candidates**: entity spans with probability at least 0.05, at most 32 per type; relation pairs from the 12 best head and tail role spans per count slot, at most 128 pairs per slot and 256 edges per type
+- **Tasks**: constrained classification and extraction — constrained text classification; joint entity and relation extraction with typed endpoints
+- **Prompt tokens**: none of its own — it reads the scores GLiNER2.5 produces
+- **Span candidates**: entity spans with probability at least 0.05 — at most 32 per type; relation pairs from the 12 best head and tail role spans per count slot, at most 128 pairs per slot and 256 edges per type
 - **Longest span**: inherited from GLiNER2.5
-- **Scoring**: a candidate's utility is its logit centred on the decision threshold, so a probability of 0.5 scores zero; a solution's score is the sum of its chosen utilities
-- **Decoding**: classification by exact depth-first search with a utility bound, 200,000 nodes at most, falling back to a beam of 16; joint extraction by a beam of 32 over edges in score order, checked against the greedy solution; an infeasible schema raises an error or, when asked, widens retention and minimises violations
-- **Backbone**: none; pure Python over scores
-- **Context length**: inherited; long texts are chunked and the chunk results merged
-- **Training data**: none; the rules are declared, not learned
+- **Scoring**: logit centred on the decision threshold — a candidate's utility, so a probability of 0.5 scores zero; a solution's score is the sum of its chosen utilities
+- **Decoding**: depth-first search and beams — classification by exact depth-first search with a utility bound, 200,000 nodes at most, falling back to a beam of 16; joint extraction by a beam of 32 over edges in score order, checked against the greedy solution; an infeasible schema raises an error or, when asked, widens retention and minimises violations
+- **Backbone**: none — pure Python over scores
+- **Context length**: inherited — long texts are chunked and the chunk results merged
+- **Training data**: none — the rules are declared, not learned
 - **Constraints, classification**: label references, and, or, not, implies, iff, excludes, exactly one of, at least, at most, exactly, at level, min level, max level, between levels, any selected, any other selected, is default
 - **Constraints, joint**: typed endpoints, no self loops, unique pair, unique slot, at most so many per head or per tail, overlap policy for entities, symmetric, inverse, acyclic
 
@@ -100,11 +100,11 @@ same scores with and without the rules.
 ```
 
 - **1**: Compilation rejects a schema that can never be satisfied, before any text is scored. A default label becomes an ordinary rule so the search needs no special case for it.
-- **2** and **3**: A label's utility is its logit minus the threshold's logit, so the sum of utilities is the log-odds of the whole assignment against the thresholds. Labels below the floor are dropped, except those a rule names: a rule may force a label the model scored low, and dropping it would make the schema infeasible for a reason the model never saw.
-- **4**: Rather than search over labels, the search runs over each task's feasible label sets. For a single-label task that is one set per label. For a multi-label task the free labels, which no rule mentions, are always taken when positive, so only the rule-named labels are enumerated.
-- **5**: Tasks with many rules go first because their choice prunes the most. The bound at each depth is what the remaining tasks could add at best.
-- **6** to **8**: Sets are visited in utility order, so the first set that cannot beat the best complete assignment ends the task's loop: every later set is worse.
-- **9** and **10**: A rule is evaluated in three values. False prunes the branch; undecided, because a task the rule reads is not yet assigned, lets the search go on. At the last task the assignment is complete and feasible.
+- **2–3**: A label's utility $u_{t,l}$ is its logit minus the threshold's logit, so the sum of utilities is the log-odds of the whole assignment against the thresholds. Labels below the floor are dropped, except those a rule names: a rule may force a label the model scored low, and dropping it would make the schema infeasible for a reason the model never saw.
+- **4**: Rather than search over labels, the search runs over each task's feasible label sets $L_t$. For a single-label task that is one set per label. For a multi-label task the free labels, which no rule mentions, are always taken when positive, so only the rule-named labels are enumerated.
+- **5**: Tasks with many rules go first because their choice prunes the most. The bound at each depth, $\mathrm{bound}_i$, is what the remaining tasks could add at best, and the best complete utility $u^\star$ starts at minus infinity.
+- **6–8**: Sets are visited in utility order, so the first set that cannot beat the best complete assignment ends the task's loop: every later set is worse.
+- **9–10**: A rule is evaluated in three values. False prunes the branch; undecided, because a task the rule reads is not yet assigned, lets the search go on. At the last task the assignment is complete and feasible, and its utility becomes the new best $u^\star$.
 - **11**: None means no feasible assignment exists among the retained labels. The caller then raises an infeasibility error, or in relaxed mode widens retention to every label and, failing that, returns the assignment with the fewest violations.
 
 ```algorithm
@@ -129,15 +129,17 @@ same scores with and without the rules.
 ```
 
 - **1**: The schema is lowered to rule objects. Typed endpoints come from the relation's declared head and tail types; the per-slot rule keeps each relation instance to one pair.
-- **2**: Candidates are capped so the search is bounded. A span the relation scorer wants as an endpoint but the entity scorer dropped is rescued, because a relation cannot exist without its nodes.
-- **3**: Edges are ranked by what taking them is worth, endpoints included, so a strong relation can bring in a weak entity.
-- **4** to **8**: Each edge is offered to every state in the beam, and each state spawns a copy without it and, if allowed, a copy with it. The checks are the schema's rules, evaluated against the edges already in the state, so a second relation on a head limited to one is refused.
+- **2**: Entity candidates $V$ and relation candidates $A$ are capped so the search is bounded. A span the relation scorer wants as an endpoint but the entity scorer dropped is rescued, because a relation cannot exist without its nodes.
+- **3**: Edges are ranked by what taking them is worth, endpoints included, so a strong relation can bring in a weak entity. The beam $B$ starts with the empty state.
+- **4–8**: Each edge is offered to every state in the beam, and each state spawns a copy without it and, if allowed, a copy with it. The checks are the schema's rules, evaluated against the edges already in the state, so a second relation on a head limited to one is refused.
 - **9**: Equal states are merged and the beam cut, which keeps the search linear in the number of edges.
 - **10**: Entities need no relation to be returned, so every finished state is topped up with the positive nodes the rules admit. The greedy solution is added as a candidate so the beam never does worse than greedy.
 - **11**: Symmetric and inverse rules are whole-result properties and cannot be checked edge by edge; every candidate is re-validated in full.
 - **12**: The best feasible candidate wins. When none is feasible the empty set is returned with an infeasibility flag, which is the guarantee: never an invalid structure.
 
 ## Worked example
+
+- **Input**: logits for a single-label task safety (safe 1.5, unsafe 0.1) and a multi-label task harm (violence 2.0, fraud −2.0) under the rule that any harm implies unsafe, and four entity candidates, a spurious "Novak" and four works_for candidates over "Ana Novak vodi Krko, Lek pa vodi Maja Kos."
 
 The example script runs the released solver and beam search on toy scores.
 
@@ -146,7 +148,7 @@ and unsafe, a multi-label task "harm" with labels violence and fraud, and one
 rule: any selected harm implies unsafe. The logits make the text read as safe
 on its own while violence scores high.
 
-![Independent and constrained decoding of the same logits](tables/constrained-classification.csv)
+![Independent and constrained decoding of the same logits](tables/type-safe-encoder-constrained-classification.csv)
 
 Independent decoding returns safe with violence, which the rule forbids.
 The constrained decoder returns unsafe with violence: the rule leaves two
@@ -161,7 +163,7 @@ entity candidates, one spurious organisation "Novak" inside the person span,
 and four relation candidates, one of them from an organisation to an
 organisation.
 
-![Greedy and beam decoding of the same candidates](tables/joint-decoding.csv)
+![Greedy and beam decoding of the same candidates](tables/type-safe-encoder-joint-decoding.csv)
 
 Greedy takes the strongest relation first, Ana Novak to Lek, which then
 blocks both Ana Novak to Krko by the per-head limit and Maja Kos to Lek by

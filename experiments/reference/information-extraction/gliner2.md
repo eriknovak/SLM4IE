@@ -5,7 +5,7 @@ status: from-paper
 summary: GLiNER's span matching behind a schema prompt that composes entity types, classification labels and record fields in one input, with a count head for how many records to fill and a label head for classification, on a 2,048-token context.
 variant_of: information-extraction/gliner
 part_of:
-couples_to: [encoder-transformers/deberta-v3]
+couples_to: [{entry: encoder-transformers/deberta-v3, as: backbone}]
 ---
 
 ## Description
@@ -57,15 +57,15 @@ release again sits on mDeBERTa-v3-base.
 
 ## Facts
 
-- **Tasks**: named entity recognition, single- and multi-label text classification, record extraction with named fields, and any combination in one pass
-- **Prompt tokens**: each schema group is `( [P] name ( marker field … ) )`, with `[E]` before an entity type, `[C]` before a record field and `[L]` before a label; groups are joined by `[SEP_STRUCT]` and `[SEP_TEXT]` precedes the text; `[DESCRIPTION]`, `[EXAMPLE]` and `[OUTPUT]` introduce a description, an example and its answer inside a group
-- **Span candidates**: every span of at most 8 words, scored against every entity type and every stamped record field
+- **Tasks**: any combination in one pass — of named entity recognition, single- and multi-label text classification, and record extraction with named fields
+- **Prompt tokens**: `[P]` schema groups — each schema group is `( [P] name ( marker field … ) )`, with `[E]` before an entity type, `[C]` before a record field and `[L]` before a label; groups are joined by `[SEP_STRUCT]` and `[SEP_TEXT]` precedes the text; `[DESCRIPTION]`, `[EXAMPLE]` and `[OUTPUT]` introduce a description, an example and its answer inside a group
+- **Span candidates**: every span — of at most 8 words, scored against every entity type and every stamped record field
 - **Longest span**: 8 words
-- **Scoring**: GLiNER's sigmoid dot product between the span vector and the marker vector; record fields are matched by the marker vector stamped with the record index; a label's logit is a classifier over its marker vector
-- **Decoding**: spans above 0.5 kept greedily without overlap per type; a count head picks the number of records from 0 to 19 and each field takes its best span, or every span above threshold for a list field; single-label classification takes the argmax, multi-label keeps labels above 0.5
-- **Backbone**: DeBERTa-v3-base for the base model, mDeBERTa-v3-base for the multilingual one
+- **Scoring**: sigmoid dot product — GLiNER's, between the span vector and the marker vector; record fields are matched by the marker vector stamped with the record index; a label's logit is a classifier over its marker vector
+- **Decoding**: greedy without overlap — spans above 0.5 kept greedily without overlap per type; a count head picks the number of records from 0 to 19 and each field takes its best span, or every span above threshold for a list field; single-label classification takes the argmax, multi-label keeps labels above 0.5
+- **Backbone**: DeBERTa-v3 — DeBERTa-v3-base for the base model, mDeBERTa-v3-base for the multilingual one
 - **Context length**: 2,048 tokens
-- **Training data**: 254,334 examples, 135,698 real texts annotated by GPT-4o and 118,636 synthetic
+- **Training data**: 254,334 examples — 135,698 real texts annotated by GPT-4o and 118,636 synthetic
 - **Training**: binary cross-entropy over span and field pairs with half the negatives masked at random, cross-entropy over the record count, binary cross-entropy over label logits; AdamW at 1e-5 for the encoder and 2e-5 for the heads, weight decay 0.01, 1,000 warmup steps, gradient clipping at 1, 5 epochs
 - **Sizes**: base 205M, multilingual about 300M parameters
 
@@ -107,25 +107,27 @@ release again sits on mDeBERTa-v3-base.
 \Return the entities, records and labels
 ```
 
-- **1**: Every request becomes a bracketed group. The group's name follows the prompt marker, its fields follow their own marker, and the marker's kind says what the fields are: entity types, record fields or labels. Several groups sit in one prompt, which is what lets one pass serve several tasks.
-- **2**: As in GLiNER, vectors are read at the markers. Each group gives one prompt vector and one vector per field.
-- **3** and **4**: Entity groups are plain GLiNER with a shorter width. Every span of at most 8 words is scored against every type vector and decoded greedily.
-- **5** and **6**: A record group first decides how many records the text holds. The classifier over the prompt vector has 20 outputs, 0 to 19, and the largest wins.
-- **7**: Each record needs its own field vectors, or every record would fill the same spans. A learned embedding of the record index is fed with the field vector through a GRU, the field vector is added back, and a two-layer transformer lets the fields of one record see each other.
-- **8**: A stamped field vector is matched against the spans exactly as a type vector is. The best span fills the field; a field declared as a list takes every span above threshold.
-- **9** and **10**: Classification never looks at spans. Each label's marker vector goes through a classifier that outputs one logit. A single-label task takes the largest logit; a multi-label task thresholds each one.
+- **1**: Every request becomes a bracketed group. The group's name follows the prompt marker, its fields follow their own marker, and the marker's kind says what the fields are: entity types, record fields or labels. Several groups sit in one prompt $x$, which is what lets one pass serve several tasks.
+- **2**: As in GLiNER, vectors are read from $H$ at the markers. Each group gives one prompt vector $p_g$ and one vector $u_{g,k}$ per field; a word is read at its first subword, as $h_i$.
+- **3–4**: Entity groups are plain GLiNER with a shorter width. Every span of at most 8 words is scored against every type vector and decoded greedily.
+- **5–6**: A record group first decides how many records the text holds, $n$. The classifier over the prompt vector has 20 outputs, 0 to 19, and the largest wins.
+- **7**: Each record needs its own field vectors, or every record would fill the same spans. A learned embedding of the record index is fed with the field vector through a GRU, the field vector is added back, and a two-layer transformer lets the fields of one record see each other, giving $u^{(r)}_{g,k}$.
+- **8**: A stamped field vector is matched against the spans exactly as a type vector is. The best span fills field $k$ of record $r$; a field declared as a list takes every span above threshold.
+- **9–10**: Classification never looks at spans. Each label's marker vector goes through a classifier that outputs one logit $z_{g,k}$. A single-label task takes the largest logit; a multi-label task thresholds each one.
 - **11**: One structured answer: lists of spans per type, lists of records per record type, labels per task.
 
 ## Worked example
+
+- **Input**: the toy sentence "Ana Novak vodi Krko, Lek pa vodi Maja Kos." with an entity group (person, organisation), a sentiment classification group and an employment record group, and texts of 8 to 4,096 words for the span counts
 
 The prompt-layouts table shows the input the released processor builds for
 the toy sentence with an entity group, a classification group, a record group
 and all of them composed, and the candidate-counts table shows how many spans
 the width of 8 yields.
 
-![The prompt each generation builds for the toy sentence](tables/prompt-layouts.csv)
+![The prompt each generation builds for the toy sentence](tables/gliner-prompt-layouts.csv)
 
-![Spans scored per type by text length](tables/candidate-counts.csv)
+![Spans scored per type by text length](tables/gliner-candidate-counts.csv)
 
 The shorter width cuts the grid by about a third against GLiNER at every
 length, from 318 to 228 spans per type at 32 words.

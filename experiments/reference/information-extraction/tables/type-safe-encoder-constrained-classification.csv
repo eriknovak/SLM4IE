@@ -1,4 +1,4 @@
-Task,Label,Probability,Independent,Constrained
+task,label,probability,independent,constrained
 safety,safe,0.82,selected,
 safety,unsafe,0.52,,selected
 harm,violence,0.88,selected,selected

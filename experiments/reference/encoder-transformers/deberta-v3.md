@@ -5,7 +5,7 @@ status: from-paper
 summary: DeBERTa V2 trained as the discriminator of replaced token detection, with a half-depth generator whose token embeddings it shares while its own gradient is kept from them.
 variant_of: encoder-transformers/deberta-v2
 part_of:
-couples_to: [subword-tokenizers/unigram]
+couples_to: [{entry: subword-tokenizers/unigram, as: tokenizer}]
 ---
 
 ## Description
@@ -54,12 +54,12 @@ this topic, and an experiment that varies the objective would name this entry.
 
 ## Facts
 
-- **Position encoding**: relative, bucketed, as in DeBERTa V2
-- **Attention span**: every token attends to every token, as in BERT
-- **Block normalisation**: post-norm, as in BERT
-- **Activation**: GELU, as in BERT
-- **Pretraining objective**: replaced token detection; a generator trained with masked language modelling on 15% of the tokens fills the masks, the discriminator classifies every token as original or replaced, loss $L_{MLM} + 50\, L_{RTD}$
-- **Tokenizer**: SentencePiece, 128,000 pieces, the DeBERTa V2 vocabulary; mDeBERTa uses 250,000 pieces
+- **Position encoding**: relative, bucketed — as in DeBERTa V2
+- **Attention span**: every token attends to every token — as in BERT
+- **Block normalisation**: post-norm — as in BERT
+- **Activation**: GELU — as in BERT
+- **Pretraining objective**: replaced token detection — a generator trained with masked language modelling on 15% of the tokens fills the masks, the discriminator classifies every token as original or replaced, loss $L_{MLM} + 50\, L_{RTD}$
+- **Tokenizer**: SentencePiece — 128,000 pieces, the DeBERTa V2 vocabulary; mDeBERTa uses 250,000 pieces
 - **Context length**: 512 tokens
 - **Generator**: same width as the discriminator, half its depth
 - **Embedding sharing**: the discriminator's table is the generator's, with the gradient stopped, plus a residual table started at zero; after training the two are added and saved
@@ -100,11 +100,11 @@ this topic, and an experiment that varies the objective would name this entry.
 \Return after the last step, save $E_G + E_\Delta$ as the discriminator's embedding table
 ```
 
-- **1-2**: The generator sees BERT's corrupted input and is scored as BERT is, on the masked positions only. It is a V2 encoder of half the depth with the usual prediction head.
+- **1-2**: The generator sees BERT's corrupted input $\tilde x_G$ and is scored as BERT is, on the masked positions only, by $L_{MLM}$. It is a V2 encoder of half the depth with the usual prediction head.
 - **3**: The generator and its embedding table learn from the masked-token loss alone. This is the step that, in ELECTRA, also received the detection gradient.
-- **4**: The discriminator's input is the original sequence with the masked positions filled by what the generator proposes. A proposal that happens to equal the original counts as original. Sampling is detached, so no gradient flows from the discriminator into the generator through the tokens.
-- **5**: The discriminator's embedding table is the generator's, read through a stop-gradient so that its own loss cannot change it, plus a residual table of its own. At the first step the residual is zero and the two models embed tokens identically.
-- **6**: Every position is scored, not only the masked ones. The label is whether the token differs from the original. A sequence of 512 tokens gives 512 training signals where masked language modelling gives about 77.
+- **4**: The discriminator's input $\tilde x_D$ is the original sequence with the masked positions filled by what the generator proposes. A proposal that happens to equal the original counts as original. Sampling is detached, so no gradient flows from the discriminator into the generator through the tokens.
+- **5**: The discriminator's embedding table $E_D$ is the generator's, read through a stop-gradient so that its own loss cannot change it, plus a residual table of its own. At the first step the residual is zero and the two models embed tokens identically.
+- **6**: Every position is scored, not only the masked ones. The label is whether the token differs from the original, and the summed loss is $L_{RTD}$. A sequence of 512 tokens gives 512 training signals where masked language modelling gives about 77.
 - **7**: The detection loss, weighted by 50 as in ELECTRA, updates the discriminator's layers and the residual embedding table. The generator's table receives nothing from it, which is what breaks the tug of war.
 - **8**: What is released is the discriminator with one embedding table, the sum of the two, so a downstream user sees an ordinary encoder.
 

@@ -62,11 +62,11 @@ tokenizer.
 
 ## Facts
 
-- **Base unit**: UTF-8 bytes on the BPE path, each shown as one printable character; Unicode characters for a morpheme token
-- **Chunk while training**: whole word, with the space before it, on the BPE path; the table does not train
-- **Picks next token by**: highest pair count on the BPE path
-- **Encoding**: table lookup for every word, byte-level BPE merges for a word not in the table
-- **Needs lexicon**: training and encoding; the table is saved with the model
+- **Base unit**: UTF-8 bytes — on the BPE path, each shown as one printable character; Unicode characters for a morpheme token
+- **Chunk while training**: whole word — with the space before it, on the BPE path; the table does not train
+- **Picks next token by**: highest pair count — on the BPE path
+- **Encoding**: table lookup — for every word, byte-level BPE merges for a word not in the table
+- **Needs lexicon**: training and encoding — the table is saved with the model
 - **Setting**: vocabulary size; half of the budget left after the special tokens is offered to morphemes, ranked by how often the words using them occur
 - **Unknown token**: none on the BPE path; a morpheme outside the vocabulary cannot occur, since a table entry needs every morpheme kept
 - **Round trip**: not guaranteed; two table words in a row cannot be told apart in the token stream
@@ -115,12 +115,12 @@ tokenizer.
 \Return $T$, $(V_b, M)$ and $V$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:112-118`}
 ```
 
-- **1**: Words are counted once. The splitter keeps letters together and makes each punctuation mark its own word, the same splitter the lexicon was built with.
-- **2**: A morpheme is as frequent as the words it occurs in. The count comes from the corpus, so a stem used by many common forms ranks high.
-- **3**: Half of the budget is the most morphemes the table may use. When the lexicon has fewer, all are kept.
-- **4**: Only a word whose every morpheme survived is kept in the table. A word with a dropped morpheme falls to the BPE path, so no token outside the vocabulary can ever be emitted.
-- **5**: The BPE path is the byte-level BPE of this topic, trained on the whole text with the budget left over. The floor keeps room for the 256 byte symbols.
-- **6-7**: The two vocabularies are joined. A morpheme already spelled by a BPE token is not added again, so the final size can fall below $B$.
+- **1**: Words are counted once, as $f(w)$. The splitter keeps letters together and makes each punctuation mark its own word, the same splitter the lexicon was built with.
+- **2**: A morpheme's count $g(m)$ is the frequency of the words it occurs in. The count comes from the corpus, so a stem used by many common forms ranks high.
+- **3**: Half of the budget is the most morphemes the table may use, the kept set $K$. When the lexicon has fewer, all are kept.
+- **4**: Only a word whose every morpheme survived is kept in the table $T$. A word with a dropped morpheme falls to the BPE path, so no token outside the vocabulary can ever be emitted.
+- **5**: The BPE path, with vocabulary $V_b$ and merges $M$, is the byte-level BPE of this topic, trained on the whole text with the budget left over. The floor keeps room for the 256 byte symbols.
+- **6-7**: The two vocabularies are joined into $V$. A morpheme already spelled by a BPE token is not added again, so the final size can fall below $B$.
 
 ```algorithm
 \caption{MorphPiece encoding}
@@ -139,7 +139,7 @@ tokenizer.
 ```
 
 - **1**: The BPE path runs first over the whole text. It supplies the word boundaries, the spans and the fallback tokens in one pass.
-- **2-3**: The tokens are regrouped into words. The lookup key is the surface text of the word, exactly as written, so a capital letter or an unseen form misses the table.
+- **2-3**: The tokens are regrouped into words. The lookup key $u$ is the surface text of the word, exactly as written, so a capital letter or an unseen form misses the table.
 - **4-5**: A hit replaces the word's BPE tokens by its morphemes. This is the line that differs from byte-level BPE. The spans are laid end to end, so the morpheme metrics read the table's cuts.
 - **6-7**: A miss keeps the BPE tokens as they are.
 - **8**: Tokens of both kinds leave in text order. A table word carries no space marker, so the stream alone does not say where it began.
@@ -165,6 +165,8 @@ tokenizer.
 - **7**: The paper reverses the table with a heuristic over surface marks. The code has no marks to read, so this is a best effort.
 
 ## Worked example
+
+- **Input**: six forms of `hiša` and `miza` with counts 5, 4, 3, 4, 3 and 2, a lexicon of the five morphemes `hiš`, `miz`, `a`, `e` and `o`, a vocabulary of 268 asked, and the forms `hiša`, `mize`, `hišami`, `mizami`, `Hiša` and `hiš` to encode
 
 The corpus holds six forms of two nouns: `hiša` (house) five times, `hiše`
 four, `hišo` three, `miza` (table) four, `mize` three, `mizo` twice. The

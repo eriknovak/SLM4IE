@@ -50,9 +50,9 @@ the boundary rule alone.
 ## Facts
 
 - **Base unit**: Unicode characters
-- **Chunk while training**: morpheme for a word in the lexicon, whole word otherwise
-- **Picks next token by**: highest pair count, a tie going to the pair that sorts last
-- **Encoding**: standard BPE merges, no lexicon
+- **Chunk while training**: morpheme — for a word in the lexicon, whole word otherwise
+- **Picks next token by**: highest pair count — a tie going to the pair that sorts last
+- **Encoding**: standard BPE merges — no lexicon
 - **Needs lexicon**: training only
 - **Setting**: vocabulary size, which includes the special tokens
 - **Repeatable**: yes, training has no random step
@@ -102,11 +102,11 @@ the boundary rule alone.
 \Return a standard BPE model holding $S$, $V$ and $M$ \Comment{`slm4ie/tokenizers/backends/_hf_base.py:118`}
 ```
 
-- **1**: Words are counted once, so the rest works on distinct words with a weight.
-- **2-4**: Each word becomes chunks. Line 3 is where the lexicon enters. A word it does not know stays one chunk.
-- **5**: The vocabulary starts as every character seen, sorted so that two runs give the same result.
-- **6**: Pairs are counted inside chunks only. This is what keeps a boundary from being crossed.
-- **7-10**: Each round joins one pair everywhere and records it. The loop ends when the vocabulary is full or no pair is left.
+- **1**: Words are counted once, as $f(w)$, so the rest works on distinct words with a weight.
+- **2-4**: Each word becomes chunks $c_1, \dots, c_k$. Line 3 is where the lexicon enters. A word it does not know stays one chunk.
+- **5**: The vocabulary $V$ starts as every character seen, sorted so that two runs give the same result, and the merge list $M$ starts empty.
+- **6**: Pair counts $n(a, b)$ are taken inside chunks only. This is what keeps a boundary from being crossed.
+- **7-10**: Each round joins the most frequent pair $(a^*, b^*)$ everywhere and records it. The loop ends when the vocabulary is full or no pair is left.
 - **11**: Only the vocabulary and the merges leave training. The lexicon is not part of the model.
 
 ```algorithm
@@ -125,10 +125,12 @@ the boundary rule alone.
 ```
 
 - **1-2**: The text is cleaned and cut into pieces. No lexicon is consulted.
-- **3-6**: Merges are replayed in the order they were learned. These lines run inside the HuggingFace `tokenizers` library, so they cite no project code.
+- **3-6**: Merges are replayed on each piece's symbols $s$ in the order they were learned. These lines run inside the HuggingFace `tokenizers` library, so they cite no project code.
 - **7**: What is left when no learned pair remains is the token sequence.
 
 ## Worked example
+
+- **Input**: six forms of `hiša` and `miza` with counts 5, 4, 3, 4, 3 and 2, each split into stem and ending, a vocabulary of 15, and the forms `hiša`, `mize`, `hišami` and `mizami` to encode
 
 The corpus holds six forms of two nouns: `hiša` (house) five times, `hiše`
 four, `hišo` three, `miza` (table) four, `mize` three, `mizo` twice. The

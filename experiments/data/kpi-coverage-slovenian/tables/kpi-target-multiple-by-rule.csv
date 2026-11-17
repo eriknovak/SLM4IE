@@ -1,0 +1,13 @@
+build,count,multiple_source_labels,multiple_document_labels
+loosened,"corpus tokens, all sources",4.5078595324,4.5078595324
+loosened,"corpus tokens, open sources",3.483697772,3.483697772
+loosened,science tokens,5672.082272,2876.559976
+loosened,medical tokens,44.155128,2982.562812
+loosened,science documents,16.5466,96.0023
+loosened,medical documents,0.5941,105.7731
+baseline,"corpus tokens, all sources",2.9586186624,2.9586186624
+baseline,"corpus tokens, open sources",2.3153106656,2.3153106656
+baseline,science tokens,2519.197096,1373.076448
+baseline,medical tokens,3.42242,2506.131836
+baseline,science documents,7.3338,69.4837
+baseline,medical documents,0.0367,88.6916

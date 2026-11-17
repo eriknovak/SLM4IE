@@ -8,7 +8,7 @@ base_commit: 2ece205
 status: concluded
 ticket: "#5"
 pr: "#30"
-mlflow:
+mlflow: http://localhost:5555/#/experiments/13
 builds_on: [../../data/curation-quality-slovenian/]
 varies: []
 uses: []
@@ -28,19 +28,23 @@ concluded: 2026-10-20
 
 ## Hypothesis
 
-- **Builds on**: the curation-quality experiment (curation-quality-slovenian) found that every content filter drops mostly text worth keeping. It also found that how well a filter decides swings with the source. It measured the pipeline without changing it, and left the repair to this experiment.
+- **Question**: Do filter settings chosen per source let each content filter drop mostly the text it targets, and mostly bad text, on a fresh draw held back from tuning?
+- **Decision it informs**: Whether the shared corpus takes per-source filter routes and retuned thresholds, so the pipeline keeps the usable text it now drops, or keeps the shared pipeline's settings.
+- **Builds on**:
+  - `curation-quality-slovenian`: the curation-quality experiment found that every content filter drops mostly text worth keeping. It also found that how well a filter decides swings with the source. It measured the pipeline without changing it, and left the repair to this experiment.
 - **Statement**: Once each source takes its own route through the content filters, with retuned thresholds, each filter mostly drops the text it is built to catch. The spam, quality and repetition filters then also mostly drop bad text, on a fresh draw held back from tuning.
 - **Rationale**: the earlier audit points to settings, not to the filters themselves.
   - **The filters sort in the right direction.** In the earlier audit, kept text beat dropped text at every content filter when the judge compared them in pairs. The filters are miscalibrated, not inverted.
   - **Their failures sit on particular sources.** The spam filter drops mostly real spam on the raw web crawls and mostly clean prose on curated sources. The quality and repetition filters decide at about a coin flip on the medical and academic sources.
   - **The causes are known and fixable.** Parliamentary rebuttals hit a spam term, and patient leaflets repeat dosage lines by design. Gopher's thresholds were tuned on English web text, not on Slovene curated prose.
 - **Predictions**: every clause is read on the fresh draw, judged only after the thresholds are frozen. A rate is read pooled over sources, and on each source the filter still runs on with at least 20 judged drops. Each filter is judged on its own target ([D1]): the language filter on non-Slovene text, the spam filter on spam, the quality filter on ill-formed text, the repetition filter on repeated furniture.
-  - **H1 — The language filter drops text that is not Slovene**: confirmed if at least 0.6 of its drops are judged not Slovene, pooled and on every source; refuted if any rate falls below 0.5 — the filter would be removing Slovene text.
-  - **H2 — The spam filter drops spam**: confirmed if at least 0.6 of its drops are judged adult or spam, pooled and on every source it runs on; refuted if any rate falls below 0.5 — routing and the repaired term list would not have fixed it.
-  - **H3 — The quality filter drops ill-formed text**: confirmed if at least 0.6 of its drops score coherence 2 or lower or are labelled garbage, pooled and on every source; refuted if any rate falls below 0.5 — its floors would still misread Slovene prose.
-  - **H4 — The repetition filter drops repeated furniture**: confirmed if at least 0.6 of its drops are labelled boilerplate or garbage, pooled and on every source; refuted if any rate falls below 0.5 — its limits would still catch text that repeats by design.
-  - **H5 — The spam, quality and repetition filters drop bad text**: confirmed if each one's drop precision at the lenient bar is at least 0.6, pooled and on every source it runs on; refuted if any falls below 0.5 — a filter could hit its target and still discard usable text.
-  - **Verdict rule**: confirmed when all five clauses hold; refuted when any clause is refuted; inconclusive otherwise.
+  - **H1 — The language filter drops text that is not Slovene**: confirmed if at least 0.6 of its drops are judged not Slovene, pooled and on every source; refuted if any rate falls below 0.5 — the filter would be removing Slovene text ([D2]; measured by [M7]).
+  - **H2 — The spam filter drops spam**: confirmed if at least 0.6 of its drops are judged adult or spam, pooled and on every source it runs on; refuted if any rate falls below 0.5 — routing and the repaired term list would not have fixed it ([D2]; measured by [M7]).
+  - **H3 — The quality filter drops ill-formed text**: confirmed if at least 0.6 of its drops score coherence 2 or lower or are labelled garbage, pooled and on every source; refuted if any rate falls below 0.5 — its floors would still misread Slovene prose ([D2]; measured by [M7]).
+  - **H4 — The repetition filter drops repeated furniture**: confirmed if at least 0.6 of its drops are labelled boilerplate or garbage, pooled and on every source; refuted if any rate falls below 0.5 — its limits would still catch text that repeats by design ([D2]; measured by [M7]).
+  - **H5 — The spam, quality and repetition filters drop bad text**: confirmed if each one's drop precision at the lenient bar is at least 0.6, pooled and on every source it runs on; refuted if any falls below 0.5 — a filter could hit its target and still discard usable text ([D2]; measured by [M7]).
+  - **Q1 — Does the loosened build keep more good text without a kept corpus more than two points dirtier than the baseline's?**: read on the rise of the loosened build's volume-weighted residual bad rate above the baseline's, with its 95% interval, and on the good documents it keeps beyond the baseline's; answered yes when it keeps more and the low end of the interval is at most two points — the answer says whether the loosened settings can go into the shared corpus while no H clause can be called ([D17]; measured by [M12]). Note added 2026-10-19: the amended question, agreed on 2026-10-15, at the project lead's call.
+  - **Verdict rule**: confirmed when all five H clauses hold; refuted when any H clause is refuted; inconclusive otherwise. Q1 is read beside that outcome and does not change it.
   - **Read beside the clauses, not as clauses**: the share of bad text among kept documents per stage; retention per source, with the medical, scientific, legal and parliamentary sources called out; the corpus total against KPI 3 and the medicine and science totals against KPI 4 ([D4]); per-domain counts at every stage from the document-level domain classifier of the planned KPI coverage experiment, once it exists.
 - **Outcome**: inconclusive
 
@@ -56,18 +60,18 @@ concluded: 2026-10-20
   - Factors: the route each source takes, the Gopher quality and repetition floors, the language-identification threshold, and the spam thresholds on the repaired spam signal. The dedup stages stay fixed.
 - **Metrics**: primary target precision per content filter and source, and drop precision at the lenient bar for the spam, quality and repetition filters. Secondary: residual bad rate, retention per source, corpus and domain totals in estimated tokens, and Cohen's κ between the judge and the person. Each metric is defined in `experiments/GLOSSARY.md`.
 - **Protocol**: analysis-only for the judging: `analysis.py` recomputes every table from the corpus counts and the verdict files. Each corpus rebuild logs to MLflow: the baseline under `slm4ie/data/curate`, since it is the shared corpus, and each candidate build under `slm4ie/data/curation-thresholds-slovenian`. Findings rest on one judge run, and its agreement with the hand labels is read on that same run ([D3]).
-- **Compute**: one local machine with 40 cores; each candidate rebuild reruns only the units whose effective settings changed.
-- **People**: the project lead reviews the routes; no new hand labels are planned.
-- **Data access**: four licence-restricted sources (culturax, gigafida, kas, solar) are used internally, as in the earlier audit.
-- **External dependency**: Anthropic's Claude for the judge.
+- **Compute**: one local machine, 40 cores — each candidate rebuild reruns only the units whose effective settings changed.
+- **People**: route review — the project lead reviews the routes; no new hand labels are planned.
+- **Data access**: four licence-restricted sources — culturax, gigafida, kas and solar are used internally, as in the earlier audit.
+- **External dependency**: Anthropic's Claude — the judge, Sonnet 5 through the Claude Code command line ([D11]).
 
 ## Datasets
 
-- **Baseline corpus**: the shared pretraining corpus rebuilt with the pipeline as it stands on main ([D5], the baseline build), one row per source with its domain, kind, licence and size before and after curation. Built 2026-10-05 to 2026-10-08 at commit 2ece205 from 18 Slovene sources. [Sources of the baseline corpus, before and after curation](tables/dataset-corpus-statistics.csv)
-- **Candidate-routes build**: the same 18 sources rebuilt with every source on its route ([M1]) and the letter rule repaired ([M2]), in this experiment's own data folder ([D6]). The second candidate of the tuning pass, with the curated-prose quality settings of [D9], built 2026-10-12 to 2026-10-14 at commit 4425f23. It replaced the first candidate, built 2026-10-08 to 2026-10-11 at commit a03f2dd from the baseline's converted documents, whose counts stay in MLflow. [Documents per source at each stage of the candidate-routes build](tables/curation-routes-documents-by-source.csv)
-- **Loosened build**: the same 18 sources rebuilt with the per-route loosened settings ([D16]) into a folder of its own beside the frozen build ([D13]), built 2026-10-16 to 2026-10-19 at commit 8e21f67. [Documents each build keeps after the repetition filter, per source, with how many of them were judged](tables/residual-bad-rate-by-build-and-source.csv)
-- **Fresh draw**: kept and dropped documents of the frozen build, 40 per source, stage and decision under seed 20261014 ([D10]), each cut to its opening 2,000 characters for the judge. Its one judge run also holds the earlier audit's 116 hand-labelled documents ([D11]); the verdicts sit under `interim/`. [Judged drops per filter and source in the fresh draw](tables/curation-routes-fresh-precision-by-filter-and-source.csv)
-- **Third draw**: kept and dropped documents of the loosened build at the quality and repetition filters, 40 per source and decision under seed 20261019 ([D13]), with the same hand-labelled documents in its judge run. [Judged drops per filter and source in the third draw](tables/curation-routes-loosened-bad-removed-and-good-lost-by-filter-and-source.csv)
+- **Baseline corpus** (own; none labels): one item is one document of the shared pretraining corpus, rebuilt with the pipeline as it stands on main ([D5], the baseline build). Its table holds one row per source with its domain, kind, licence and size before and after curation. Built 2026-10-05 to 2026-10-08 at commit 2ece205 from 18 Slovene sources. [Sources of the baseline corpus, before and after curation](tables/dataset-corpus-statistics.csv)
+- **Candidate-routes build** (own; none labels): one item is one document of the same 18 sources rebuilt with every source on its route ([M1]) and the letter rule repaired ([M2]), in this experiment's own data folder ([D6]). The second candidate of the tuning pass, with the curated-prose quality settings of [D9], built 2026-10-12 to 2026-10-14 at commit 4425f23. It replaced the first candidate, built 2026-10-08 to 2026-10-11 at commit a03f2dd from the baseline's converted documents, whose counts stay in MLflow. [Documents per source at each stage of the candidate-routes build](tables/curation-routes-documents-by-source.csv)
+- **Loosened build** (own; none labels): one item is one document of the same 18 sources rebuilt with the per-route loosened settings ([D16]) into a folder of its own beside the frozen build ([D13]), built 2026-10-16 to 2026-10-19 at commit 8e21f67. [Documents each build keeps after the repetition filter, per source, with how many of them were judged](tables/residual-bad-rate-by-build-and-source.csv)
+- **Fresh draw** (derived from Candidate-routes build; silver labels): one item is one kept or dropped document of the frozen build, drawn 40 per source, stage and decision under seed 20261014 ([D10]) and cut to its opening 2,000 characters for the judge. Its one judge run also holds the earlier audit's 116 hand-labelled documents ([D11]); the verdicts sit under `interim/`. [Judged drops per filter and source in the fresh draw](tables/curation-routes-fresh-precision-by-filter-and-source.csv)
+- **Third draw** (derived from Loosened build; silver labels): one item is one kept or dropped document of the loosened build at the quality and repetition filters, drawn 40 per source and decision under seed 20261019 ([D13]). Its judge run also holds the same hand-labelled documents. [Judged drops per filter and source in the third draw](tables/curation-routes-loosened-bad-removed-and-good-lost-by-filter-and-source.csv)
 
 ## Methods
 
@@ -207,7 +211,7 @@ concluded: 2026-10-20
   1. Each source must enter the quality filter with the same count in both builds, or the reading stops.
   2. A filter its route leaves unchanged must drop the same count in both builds, or the reading stops; it adds nothing and is skipped.
   3. For a changed filter, with $d$ documents dropped in a build and $b$ of its $n$ judged drops bad, it drops $d \cdot b / n$ bad documents. Gains are frozen minus loosened, for documents and for bad text; good text is the rest. A repetition term can be negative, since the loosened build feeds that filter more documents.
-  4. The interval on bad text is $\pm 1.96 \sqrt{V}$, with $V = \sum d^2 \tilde p (1 - \tilde p) / n$ over every estimated filter of both builds. Here $\tilde p = (b + 1.92) / (n + 3.84)$, the Agresti–Coull share, so a share of 0 or 1 still counts as uncertain.
+  4. The interval on bad text is $\pm 1.96 \sqrt{V}$, with $V = \sum d^2 \tilde{p}(1-\tilde{p})/n$ over every estimated filter of both builds. Here $\tilde{p} = (b+1.92)/(n+3.84)$, the Agresti–Coull share, so a share of 0 or 1 still counts as uncertain.
   5. Nothing is cut at zero, so a source can show negative bad text by chance; pooled rows sum such noise out.
   6. The estimate beside a route is the variant applying all its changes ([M10]). Estimate and measurement share the frozen build's fresh-draw shares, so their agreement checks only the loosened build's counts and the third draw's shares.
 - **Code**: `analysis.py::gain_rows`
@@ -220,7 +224,7 @@ concluded: 2026-10-20
 - **How**: the repetition filter is the last stage all three draws sample, so "kept" means its output and the dedup stages are not counted.
   1. For a build and a source, let $k$ be the documents kept at the repetition filter, $n$ the judged documents drawn as kept there, and $b$ how many of them are bad text at the lenient bar. The build keeps $k \cdot b / n$ bad documents on that source; the rest are good. A source that keeps documents but has no judged kept one stops the reading.
   2. A source's rate is $b / n$ with its 95% Wilson interval.
-  3. The volume-weighted rate is the bad documents summed over sources divided by the kept documents summed over sources, so each source weighs by what it keeps, not by how many of its documents were judged. Its 95% interval is $\pm 1.96 \sqrt{V} / \sum k$, with $V = \sum k^2 \tilde p (1 - \tilde p) / n$ over sources and $\tilde p$ the Agresti–Coull share, as for the gains ([M11]).
+  3. The volume-weighted rate is the bad documents summed over sources divided by the kept documents summed over sources, so each source weighs by what it keeps, not by how many of its documents were judged. Its 95% interval is $\pm 1.96 \sqrt{V} / \sum k$, with $V = \sum k^2 \tilde{p}(1-\tilde{p})/n$ over sources and $\tilde{p}$ the Agresti–Coull share, as for the gains ([M11]).
   4. A build's rise is its weighted rate minus the baseline's. The interval on the rise adds the two builds' variances, since their draws are independent.
   5. Good documents kept beyond the baseline's are the build's good documents minus the baseline's. The answer to the amended question is yes when that is positive and the low end of the rise's interval is at most two points ([D17]).
 - **Code**: `analysis.py::judged_kept`, `analysis.py::residual_rows`, `analysis.py::residual_rise_rows`
@@ -235,7 +239,7 @@ concluded: 2026-10-20
 - **Alternatives**:
   - The earlier audit's single bar for every filter: it blends a filter's purpose with general quality, and hides which one fails.
 - **History**:
-  - 2026-10-05 first version, at record creation
+  - 2026-10-05 (before runs) first version, at record creation
 
 ### D2 — Count a filter as working at 0.6, and as failing below 0.5
 
@@ -244,29 +248,29 @@ concluded: 2026-10-20
 - **Alternatives**:
   - 0.8, the earlier audit's confirm bar: too ambitious for the spam filter on web crawls.
 - **History**:
-  - 2026-10-05 first version, at record creation
+  - 2026-10-05 (before runs) first version, at record creation
 
 ### D3 — Tune on the old evidence, claim only on a fresh draw
 
 - **Decision**: Thresholds are tuned on the earlier audit's judge verdicts and 116 hand labels. Every claim rests on a fresh draw under a new seed, judged only after the thresholds freeze. The agreement gate is read on the judge run the findings use. No second judge from another model family is run.
 - **Why**: Thresholds fitted to one judge's verdicts on one sample stop being neutral evidence. The earlier audit read its gate on one run and its findings on another, which weakened every number it reported.
 - **History**:
-  - 2026-10-05 first version, at record creation; second judge through OpenRouter, model chosen later by the project lead
-  - 2026-10-19 second judge dropped at the project lead's call: a run costs too much for what it would add, since the judged draws already show the dataset's quality; retitled from "… read by two judges"
+  - 2026-10-05 (before runs) first version, at record creation; second judge through OpenRouter, model chosen later by the project lead
+  - 2026-10-19 (after [F1]; user) second judge dropped at the project lead's call: a run costs too much for what it would add, since the judged draws already show the dataset's quality; retitled from "… read by two judges"
 
 ### D4 — Keep the corpus above the volume targets while tuning
 
 - **Decision**: No setting may push the final corpus below KPI 3, more than 5B estimated tokens, or medicine or science below KPI 4, more than 500k estimated tokens each. Domains are read from source labels. Document-level domain counts from the planned KPI coverage experiment are added beside them once that classifier exists.
 - **Why**: Tuning trades kept text against quality, and the project's corpus-size targets bound that trade. Source labels already cover the curated domain sources, so this experiment need not wait for the classifier.
 - **History**:
-  - 2026-10-05 first version, from the ordering agreed with the KPI coverage experiment
+  - 2026-10-05 (before runs) first version, from the ordering agreed with the KPI coverage experiment
 
 ### D5 — Take the baseline from a fresh build of the shared corpus at main's settings
 
 - **Decision**: The baseline is the shared corpus rebuilt with the pipeline as it stands on main: the repaired spam filter, the current source list, and no per-source routes. The repaired spam filter counts each spam term once, however often it repeats. It is not the earlier audit's build.
 - **Why**: The earlier build counted five sources twice and predates the spam repair. Two sources are now skipped as copies of others: parlamint_si inside siparl, legal_mc4 inside c4. Main's settings are no setting of this experiment, so they rebuild the shared corpus.
 - **History**:
-  - 2026-10-05 first version, after every unit of the on-disk corpus was found out of date
+  - 2026-10-05 (before runs) first version, after every unit of the on-disk corpus was found out of date
 
 ### D6 — Score every candidate setting on a full build of the pipeline
 
@@ -275,7 +279,7 @@ concluded: 2026-10-20
 - **Alternatives**:
   - Rerun only the filters on the earlier audit's judged documents: fast, but blind to dedup and to corpus totals.
 - **History**:
-  - 2026-10-05 first version, at the project lead's call
+  - 2026-10-05 (before runs) first version, at the project lead's call
 
 ### D7 — Switch the language and spam filters off on curated sources
 
@@ -284,8 +288,8 @@ concluded: 2026-10-20
 - **Alternatives**:
   - Keep both filters and raise their thresholds: the wrong language drops are confident calls (Romanian, Dutch, Czech for Slovene), so no confidence threshold separates them.
 - **History**:
-  - 2026-10-08 first version, as the routes' starting point
-  - 2026-10-08 the PDF crawl joins the curated-prose route with its language filter on: in the earlier audit none of its 40 judged spam drops was spam, and 0.375 of its language drops were not Slovene, against none on the other curated sources, so its language filter still removes real foreign text
+  - 2026-10-08 (after [F1]) first version, as the routes' starting point
+  - 2026-10-08 (after [F1]) the PDF crawl joins the curated-prose route with its language filter on: in the earlier audit none of its 40 judged spam drops was spam, and 0.375 of its language drops were not Slovene, against none on the other curated sources, so its language filter still removes real foreign text
 
 ### D8 — Repair the quality filter's letter rule rather than lower its floor
 
@@ -295,8 +299,8 @@ concluded: 2026-10-20
   - Lower the floor per route, to 0.65: the floor would then track how much punctuation a source uses, not how much junk it holds.
   - Raise the floor on the raw crawls to drop the junk the repair keeps: that junk has the same letter share as good text.
 - **History**:
-  - 2026-10-08 first version, at the project lead's call
-  - 2026-10-12 raw crawls keep the floor at 0.8, at the project lead's call: about one in six audit drops the repair keeps there is junk ([M4]), but no letter floor, stopword share or line measure tested drops it without as much good text
+  - 2026-10-08 (after [F1]; user) first version, at the project lead's call
+  - 2026-10-12 (after [F1]; user) raw crawls keep the floor at 0.8, at the project lead's call: about one in six audit drops the repair keeps there is junk ([M4]), but no letter floor, stopword share or line measure tested drops it without as much good text
 
 ### D9 — Loosen the curated-prose quality filter only where its drops were usable text
 
@@ -306,8 +310,8 @@ concluded: 2026-10-20
   - Switch the quality filter off on curated prose: it would also keep the number-only PDF tables, at letter shares near 0.2.
   - Lower the 20-word floor for the parliament source alone: the judged samples later favoured lowering it route-wide ([D16]).
 - **History**:
-  - 2026-10-12 first version, at the project lead's call
-  - 2026-10-16 the 20-word floor lowered to 10 and the stopword rule switched off on this route ([D16])
+  - 2026-10-12 (after [F1]; user) first version, at the project lead's call
+  - 2026-10-16 (after [F1]) the 20-word floor lowered to 10 and the stopword rule switched off on this route ([D16])
 
 ### D10 — Freeze the thresholds of the second candidate build and draw the fresh sample from it
 
@@ -317,7 +321,7 @@ concluded: 2026-10-20
   - Sample only the four content filters: about a third less judging, but no fresh reading of the dedup stages beside the audit's.
   - Wait for the medical extraction fix first: it changes one source and its fix lies outside this experiment.
 - **History**:
-  - 2026-10-14 first version, at the project lead's call
+  - 2026-10-14 (after [F1]; user) first version, at the project lead's call
 
 ### D11 — Judge the fresh draw with the earlier audit's judge, the 116 hand-labelled documents in the same run
 
@@ -328,8 +332,8 @@ concluded: 2026-10-20
   - Opus 5.5: the strongest model, slowest and heaviest on quota, with the same confound.
   - Judge the 116 documents in a run of their own: the gate would again read on a run the findings do not use.
 - **History**:
-  - 2026-10-15 first version, at the project lead's call
-  - 2026-10-19 the 116 documents also spread through the third draw ([D13]), at the project lead's call
+  - 2026-10-15 (after [F1]; user) first version, at the project lead's call
+  - 2026-10-19 (after [F1]; user) the 116 documents also spread through the third draw ([D13]), at the project lead's call
 
 ### D12 — Keep a filter on a source only where at least half of what it drops is bad text
 
@@ -339,7 +343,7 @@ concluded: 2026-10-20
   - Two good documents per bad one removed: a cleaner corpus at a large loss of usable text.
   - One good document per two bad ones: favours volume, keeps more spam.
 - **History**:
-  - 2026-10-15 first version, at the project lead's call
+  - 2026-10-15 (after [F1]; user) first version, at the project lead's call
 
 ### D13 — Retune on both judged samples, check on a third draw limited to what changed
 
@@ -348,15 +352,15 @@ concluded: 2026-10-20
 - **Alternatives**:
   - Tune on the earlier audit's sample only and keep the fresh draw for checking: clean, but tunes on evidence the fresh draw showed to mislead.
 - **History**:
-  - 2026-10-15 first version, at the project lead's call
-  - 2026-10-16 the loosened settings ([D16]) build into their own folder, so the frozen second build stays for comparison, at the project lead's call
+  - 2026-10-15 (after [F1]; user) first version, at the project lead's call
+  - 2026-10-16 (after [F1]; user) the loosened settings ([D16]) build into their own folder, so the frozen second build stays for comparison, at the project lead's call
 
 ### D14 — Leave a learned quality classifier to a follow-up experiment
 
 - **Decision**: This experiment changes only which filters and rules run on each source, and their thresholds. A classifier trained on the judge's verdicts, to catch the spam and boilerplate the rules cannot separate from good text, is left to an experiment of its own.
 - **Why**: A classifier changes the pipeline's design and needs its own hypothesis, training data and evaluation. The rule settings can be fixed with the evidence already judged.
 - **History**:
-  - 2026-10-15 first version, at the project lead's call
+  - 2026-10-15 (after [F1]; user) first version, at the project lead's call
 
 ### D15 — Keep the Slovenian slices of the multilingual collections in the corpus
 
@@ -366,7 +370,7 @@ concluded: 2026-10-20
   - Drop fineweb2 and culturax: loses about 24% of the words, mostly unique web text.
   - Drop all three: loses about 36% of the words, including PDF text no other source holds.
 - **History**:
-  - 2026-10-15 first version, at the project lead's call
+  - 2026-10-15 (after [F1]; user) first version, at the project lead's call
 
 ### D16 — Loosen the filters per route, judged on each route's pooled drops
 
@@ -377,12 +381,12 @@ concluded: 2026-10-20
   - Only the repeated-phrase rule off everywhere: keeps the repetition filter on where almost nothing it drops is bad.
   - Call each source on its own figure: unsteady below 20 judged drops.
 - **History**:
-  - 2026-10-16 first version, at the project lead's call, from a scratch run trying each change alone
-  - 2026-10-16 the project lead kept the three quality-rule changes (ellipsis-line rule, 20-word floor, stopword rule) beside the repetition changes
+  - 2026-10-16 (after [F1]; user) first version, at the project lead's call, from a scratch run trying each change alone
+  - 2026-10-16 (after [F1]; user) the project lead kept the three quality-rule changes (ellipsis-line rule, 20-word floor, stopword rule) beside the repetition changes
 
 ### D17 — Also ask whether the loosened build keeps more good text without a dirtier kept corpus
 
-- **Decision**: Beside the clauses, the record asks whether the loosened build keeps more good text than the baseline, with a volume-weighted residual bad rate at most 2 points above the baseline's. Rates come from judged kept documents, the baseline's from the earlier audit's draw ([M12]). The answer is yes unless the whole 95% interval on the rise lies above 2 points.
+- **Decision**: The record asks, as [Q1], whether the loosened build keeps more good text than the baseline, with a volume-weighted residual bad rate at most 2 points above the baseline's. Rates come from judged kept documents, the baseline's from the earlier audit's draw ([M12]). The answer is yes unless the whole 95% interval on the rise lies above 2 points.
 - **Why**: No clause can be called, since every judge run sits below the agreement gate ([F9]). Curation also aims at a larger, no dirtier corpus, which the clauses do not score. Forty judged kept documents per source leave the interval about ten points wide, so the bar reads its low end. A no then needs a rise of about seven points.
 - **Alternatives**:
   - Also cap each source's rise at 5 points: within the noise of about 40 judged kept documents per source.
@@ -390,8 +394,8 @@ concluded: 2026-10-20
   - Answer from the point estimate alone: claims more than the draws can separate.
   - Call it inconclusive while the interval spans the bar: leaves the amended question open at this sample size.
 - **History**:
-  - 2026-10-19 first version, at the project lead's call; the open amendment was agreed on 2026-10-15
-  - 2026-10-20 the bar is read against the interval's low end, at the project lead's call, after the loosened build's point estimate was seen above it; the frozen build's rise corrected from about one point to about two, measured from the saved draws
+  - 2026-10-19 (after [F1]; user) first version, at the project lead's call; the open amendment was agreed on 2026-10-15
+  - 2026-10-20 (after [F1]; user) the bar is read against the interval's low end, at the project lead's call, after the loosened build's point estimate was seen above it; the frozen build's rise corrected from about one point to about two, measured from the saved draws
 
 ## Findings
 
@@ -503,11 +507,12 @@ concluded: 2026-10-20
 ### F12 — The loosened build keeps more good text, and the draws cannot place its rise in bad text above the bar · key
 
 - **Summary**: The loosened build keeps about a quarter more good documents than the baseline, and the interval on its rise in bad text spans the bar.
+- **Key number**: +11.6M — good documents the loosened build keeps beyond the baseline's 41.0M, read after the repetition filter
 - **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build, and f7810f13462d4f089b7814b359be3feb, the frozen build, both under `slm4ie/data/curation-thresholds-slovenian`; 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over the three builds' counts and the verdicts of the earlier audit's draw, the fresh draw and the third draw ([M12]).
 - **Result**: ![Share of the documents each build keeps after the repetition filter that the judge calls bad text, weighted by each source's volume, with the upper end of its 95% interval. The horizontal line is the bar of the amended question: the baseline's rate plus two points. The loosened build's rate is 0.089 against the baseline's 0.059, a rise of 3.0 points whose interval runs from −1.9 to +7.9 points, and it keeps 11.6M more good documents, 52.6M against 41.0M. The frozen build sits between the two, at a rise of 2.2 points. The per-source rates behind the weighted ones are in the table linked from the Reading.](figures/residual-bad-rate-by-build.svg)
 - **Reading**:
   - **The good documents kept grow by over a quarter while the bad share rises by about three points, within the noise of the draws.** Kept here means what leaves the repetition filter, the last stage all three draws sample, so the dedup stages are not counted. Weighted by volume, the loosened build's rate sits 3.0 points above the baseline's, and the 95% interval on that rise reaches below zero at one end and past the bar at the other. The [per-source rates](tables/residual-bad-rate-by-build-and-source.csv) rest on about forty judged kept documents each, so no source's rise is separable from chance either.
-  - **The amended question is answered yes, while every clause stays inconclusive.** Under the rule of reading the bar against the interval's low end ([D17]), the loosened build keeps more good text without a rise the draws can place above two points. Each of [H1], [H2], [H3], [H4] and [H5] is inconclusive, since every judge run they read sits below the agreement gate ([F9]).
+  - **The amended question, [Q1], is answered yes, while every H clause stays inconclusive.** Under the rule of reading the bar against the interval's low end ([D17]), the loosened build keeps more good text without a rise the draws can place above two points. Each of [H1], [H2], [H3], [H4] and [H5] is inconclusive, since every judge run they read sits below the agreement gate ([F9]).
   - **A tighter comparison could still fail the bar.** The point estimate already lies above it, so judging more kept documents per source could narrow the interval until it lies wholly above two points. The three builds were also judged in separate runs, all below the gate. A judge drifting between runs would move the rise as much as the settings do.
 - **Implication**: The loosened settings are the ones to carry into the shared corpus at conclusion, with the rise in bad text recorded as a cost the draws could not bound. Judging a draw of the baseline rebuild in one run with the loosened build's would tighten that bound.
 - **History**:
@@ -522,15 +527,17 @@ concluded: 2026-10-20
   - **Simple rules cannot remove all bad text.** Once the rules that misread Slovene prose were repaired or switched off ([D8], [D9]), no letter, stopword or line measure tested separated the remaining web junk from good text. Every further cut lost one good document per bad one. What the rules leave is boilerplate and link lists made of ordinary words.
   - **The judge, not the filters, limited what could be measured.** Agreement with the person fell from 0.51 to 0.39 between two runs of the same model, rubric and labelled documents.
   - **Forty judged kept documents per source cannot bound the bad text.** The three builds were judged in separate runs, so judge drift and setting changes are confounded. A follow-up judges the baseline and the new corpus in one run, and tests a learned classifier for the junk the rules cannot see ([D14]).
-- **Adoption candidate**: carry the loosened route settings into the shared corpus: the three routes and per-source settings of `configs/curation-routes-loosened.yaml` move into `configs/data/curate.yaml`, with the repaired letter rule on ([M2]). Already in `slm4ie/`: the route machinery, the letter-rule filter, a sentence-dedup guard that skips sentences past datatrove's 16-bit index, and a sampler fix that makes its index lookups fast. Code to promote from `analysis.py`: the precision, trade-off and residual-rate functions ([M3], [M8], [M12]). The quality and dedup stages' modules changed, so the shared corpus rebuilds from the quality stage on at merge.
+- **Adoption candidate**: carry the loosened route settings into the shared corpus: the three routes and per-source settings of `configs/curation-routes-loosened.yaml` move into `configs/data/curate.yaml`, with the repaired letter rule on ([M2]). The quality and dedup stages' modules changed, so the shared corpus rebuilds from the quality stage on at merge.
+  - **Carries**: the precision, trade-off and residual-rate functions of `analysis.py` ([M3], [M8], [M12]). Already in `slm4ie/`: the route machinery, the letter-rule filter, a sentence-dedup guard that skips sentences past datatrove's 16-bit index, and a sampler fix that makes its index lookups fast.
+  - **Stays out**: the rest of `analysis.py` and the tuning variants of `configs/tuning-filter-settings.yaml`.
 - **Next**:
-  - Judge the baseline's and the new corpus's kept documents in one run, over forty per source, to bound the rise in bad text ([F12]).
-  - Test a quality classifier trained on the judge's verdicts ([D14]), in the planned quality-classifier-slovenian experiment.
-  - Decide whether the news source's one-line teasers need a length floor ([F8]).
-  - Catch documents with a punctuation mark after every word, such as two theses and one PDF the repetition filter used to drop.
-  - Check whether the repetition target fits what its rules catch ([F11]).
-  - Fix the medical source's extraction (issue #29, [F6]).
-  - Add per-domain counts once the KPI coverage classifier exists ([D4]).
+  - Judge the baseline's and the new corpus's kept documents in one run, over forty per source, to bound the rise in bad text ([F12]) — not yet planned.
+  - Test a quality classifier trained on the judge's verdicts ([D14]) — planned as quality-classifier-slovenian.
+  - Decide whether the news source's one-line teasers need a length floor ([F8]) — not yet planned.
+  - Catch documents with a punctuation mark after every word, such as two theses and one PDF the repetition filter used to drop — not yet planned.
+  - Check whether the repetition target fits what its rules catch ([F11]) — not yet planned.
+  - Fix the medical source's extraction ([F6]) (issue #29).
+  - Add per-domain counts once the KPI coverage classifier exists ([D4]) — planned as kpi-coverage-slovenian #3.
 - **Limitations**:
   - Every judged number rests on a run below the gate ([F9]).
   - The three builds were judged in separate runs, the baseline's on the earlier audit's draw.
@@ -554,7 +561,7 @@ export RUBRIC=experiments/data/curation-quality-slovenian/configs/judge-rubric.m
 # Baseline rebuild of the shared corpus for F1-F3 and F12 (commit 2ece205)
 uv run python scripts/curate_pretraining_corpus.py run --config configs/data/curate.yaml --all --mlflow
 
-# Frozen candidate-routes build for F4-F8 (commit 4425f23)
+# Frozen candidate-routes build for F4-F8, writing `configs/curation-routes.lock.yaml` (commit 4425f23)
 uv run python scripts/curate_pretraining_corpus.py run --config $EXP/configs/curation-routes.yaml --all --mlflow --max-workers 32
 
 # Fresh draw from the frozen build for F10 and F12 (commit d0c5186)
@@ -564,7 +571,7 @@ uv run python scripts/curate_pretraining_corpus.py sample --config $EXP/configs/
 uv run python $EXP/analysis.py --write-judge-input $OUT/judge-input.jsonl
 uv run python scripts/judge_documents.py --source $OUT/judge-input.jsonl --out $OUT/verdicts-fresh-sonnet.jsonl --rubric $RUBRIC --backend cli --model claude-sonnet-5 --batch-size 10 --concurrency 4
 
-# Loosened build for F9-F12 (commit 8e21f67)
+# Loosened build for F9-F12, writing `configs/curation-routes-loosened.lock.yaml` (commit 8e21f67)
 uv run python scripts/curate_pretraining_corpus.py run --config $EXP/configs/curation-routes-loosened.yaml --all --mlflow --max-workers 38
 
 # Third draw from the loosened build, quality and repetition filters only, for F9-F12 (commit 51aaba8)

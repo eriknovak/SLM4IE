@@ -1,4 +1,4 @@
-Merge,Character BPE joins,hiša in Character BPE,MorphBPE joins,hiša in MorphBPE
+merge,character_bpe_joins,word_in_character_bpe,morphbpe_joins,word_in_morphbpe
 1,h + i,hi š a,i + š,h iš a
 2,hi + š,hiš a,h + iš,hiš a
 3,i + z,hiš a,m + i,hiš a

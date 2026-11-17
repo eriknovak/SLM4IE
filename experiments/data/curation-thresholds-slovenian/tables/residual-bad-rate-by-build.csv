@@ -1,0 +1,4 @@
+build,kept,judged,bad_rate,bad_rate_low,bad_rate_high,good_kept
+baseline,43536873,718,0.0586,0.0264,0.0908,40987208
+frozen,54734626,720,0.0804,0.0457,0.115,50335898
+loosened,57686534,720,0.0885,0.0518,0.1253,52580585

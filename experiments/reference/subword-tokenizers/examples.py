@@ -66,6 +66,8 @@ SPACE_MARKER = "▁"
 #: Euler's constant, for the digamma function at an integer.
 EULER_GAMMA = 0.5772156649015329
 TRACED_WORD = "hiša"
+#: Columns of a merge trace; `word_after_it` follows `TRACED_WORD`.
+MERGE_COLUMNS: list[str] = ["merge", "joins", "count", "tied_pairs_left", "word_after_it"]
 Replay = Callable[[str, list[tuple[str, str]]], list[str]]
 
 # ===============================
@@ -415,11 +417,11 @@ def morphbpe() -> None:
     write_csv(
         "morphbpe-merges",
         [
-            "Merge",
-            "Character BPE joins",
-            f"{TRACED_WORD} in Character BPE",
-            "MorphBPE joins",
-            f"{TRACED_WORD} in MorphBPE",
+            "merge",
+            "character_bpe_joins",
+            "word_in_character_bpe",
+            "morphbpe_joins",
+            "word_in_morphbpe",
         ],
         [
             [
@@ -436,7 +438,7 @@ def morphbpe() -> None:
     # write the held-out encodings
     write_csv(
         "morphbpe-encoding",
-        ["Form", "In the corpus", "Stem and ending", "Character BPE", "MorphBPE"],
+        ["form", "in_the_corpus", "stem_and_ending", "character_bpe", "morphbpe"],
         [
             [
                 word,
@@ -465,7 +467,7 @@ def character_bpe() -> None:
 
     # write the merge trace
     rows = merge_rows(merges, CORPUS, char.vocab, TRACED_WORD)
-    write_csv("character-bpe-merges", ["Merge", "Joins", "Count", "Tied pairs left", f"{TRACED_WORD} after it"], rows)
+    write_csv("character-bpe-merges", MERGE_COLUMNS, rows)
 
     # check the replayed merges against the backend's encoder
     ranks = merge_ranks(merges)
@@ -475,7 +477,7 @@ def character_bpe() -> None:
     # write the encodings
     write_csv(
         "character-bpe-encoding",
-        ["Form", "In the corpus", "Tokens", "Token count"],
+        ["form", "in_the_corpus", "tokens", "token_count"],
         [
             [word, "yes" if word in CORPUS else "no", " ".join(char.encode(word)), str(len(char.encode(word)))]
             for word in ["hiša", "mize", *HELD_OUT, "hišaq"]
@@ -504,7 +506,7 @@ def byte_level_bpe() -> None:
     # write the merge trace
     words = {as_bytes(form): count for form, count in CORPUS.items()}
     rows = merge_rows(merges, words, bpe.vocab, as_bytes(TRACED_WORD))
-    write_csv("byte-level-bpe-merges", ["Merge", "Joins", "Count", "Tied pairs left", f"{TRACED_WORD} after it"], rows)
+    write_csv("byte-level-bpe-merges", MERGE_COLUMNS, rows)
 
     # check the replayed merges against the backend's encoder
     ranks = merge_ranks(merges)
@@ -528,7 +530,7 @@ def byte_level_bpe() -> None:
         )
     write_csv(
         "byte-level-bpe-encoding",
-        ["Form", "In the corpus", "Tokens", "Token count", "Cuts seen by the morph metrics"],
+        ["form", "in_the_corpus", "tokens", "token_count", "cuts_seen_by_the_morph_metrics"],
         encoding_rows,
     )
 
@@ -570,7 +572,7 @@ def wordpiece() -> None:
         row.append(", ".join(" + ".join(pair) for pair in likelihood_picks(CORPUS, merges[:k])))
     write_csv(
         "wordpiece-merges",
-        ["Merge", "Joins", "Count", "Tied pairs left", f"{TRACED_WORD} after it", "The paper's rule would join"],
+        [*MERGE_COLUMNS, "paper_rule_would_join"],
         rows,
     )
 
@@ -580,7 +582,7 @@ def wordpiece() -> None:
         word_rows, tokens = greedy_walk(wordpiece_tokenizer.vocab, word)
         assert tokens == wordpiece_tokenizer.encode(word), (word, tokens, wordpiece_tokenizer.encode(word))
         walk_rows.extend(word_rows)
-    write_csv("wordpiece-walk", ["Form", "From character", "Tried, longest first", "Picked"], walk_rows)
+    write_csv("wordpiece-walk", ["form", "from_character", "tried_longest_first", "picked"], walk_rows)
 
     # write the encodings
     encoding_rows: list[list[str]] = []
@@ -600,7 +602,7 @@ def wordpiece() -> None:
         )
     write_csv(
         "wordpiece-encoding",
-        ["Form", "In the corpus", "Tokens", "Token count", "Cuts seen by the morph metrics"],
+        ["form", "in_the_corpus", "tokens", "token_count", "cuts_seen_by_the_morph_metrics"],
         encoding_rows,
     )
 
@@ -644,7 +646,7 @@ def unigram() -> None:
             vocab_rows.append([piece, f"{score:.3f}", "0", "kept as a character"])
     write_csv(
         "unigram-vocabulary",
-        ["Piece", "Log probability", "Count in the corpus", "Digamma of count minus digamma of total"],
+        ["piece", "log_probability", "count_in_the_corpus", "digamma_of_count_minus_digamma_of_total"],
         vocab_rows,
     )
 
@@ -655,7 +657,7 @@ def unigram() -> None:
         assert candidates[0][0] == unigram_tokenizer.encode(word), (word, candidates[0], unigram_tokenizer.encode(word))
         for rank, (pieces, score) in enumerate(candidates):
             segmentation_rows.append([word, " ".join(pieces), f"{score:.3f}", "yes" if rank == 0 else "no"])
-    write_csv("unigram-segmentations", ["Form", "Segmentation", "Log probability", "Picked"], segmentation_rows)
+    write_csv("unigram-segmentations", ["form", "segmentation", "log_probability", "picked"], segmentation_rows)
 
     # write the encodings
     encoding_rows: list[list[str]] = []
@@ -676,7 +678,7 @@ def unigram() -> None:
         )
     write_csv(
         "unigram-encoding",
-        ["Form", "In the corpus", "Tokens", "Ids", "Token count", "Cuts seen by the morph metrics"],
+        ["form", "in_the_corpus", "tokens", "ids", "token_count", "cuts_seen_by_the_morph_metrics"],
         encoding_rows,
     )
 
@@ -710,7 +712,7 @@ def morphpiece() -> None:
     ]
     write_csv(
         "morphpiece-vocabulary",
-        ["Morpheme token", "Count in the corpus", "Also a BPE token", "Id"],
+        ["morpheme_token", "count_in_the_corpus", "also_a_bpe_token", "id"],
         vocabulary_rows,
     )
 
@@ -718,7 +720,7 @@ def morphpiece() -> None:
     shared = len(vocabulary_rows) - len(piece.morpheme_tokens)
     write_csv(
         "morphpiece-sizes",
-        ["Asked", "BPE path", "Morphemes kept", "Of which already BPE tokens", "Final"],
+        ["asked", "bpe_path", "morphemes_kept", "of_which_already_bpe_tokens", "final"],
         [
             [
                 str(MORPHPIECE_VOCAB_SIZE),
@@ -736,7 +738,7 @@ def morphpiece() -> None:
         for pair in json.loads(piece._bpe.to_str())["model"]["merges"]
     ]
     write_csv(
-        "morphpiece-merges", ["Merge", "Joins"], [[str(k + 1), " + ".join(pair)] for k, pair in enumerate(merges)]
+        "morphpiece-merges", ["merge", "joins"], [[str(k + 1), " + ".join(pair)] for k, pair in enumerate(merges)]
     )
 
     # check each encoding follows its path and write the encodings
@@ -760,7 +762,7 @@ def morphpiece() -> None:
         )
     write_csv(
         "morphpiece-encoding",
-        ["Form", "In the table", "Tokens", "Ids", "Token count", "Cuts seen by the morph metrics"],
+        ["form", "in_the_table", "tokens", "ids", "token_count", "cuts_seen_by_the_morph_metrics"],
         encoding_rows,
     )
 

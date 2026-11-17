@@ -50,10 +50,10 @@ rule, and not only the vocabulary, moves the morpheme scores.
 
 ## Facts
 
-- **Base unit**: Unicode characters, a character inside a word being a different symbol from the same character at its start
+- **Base unit**: Unicode characters — a character inside a word being a different symbol from the same character at its start
 - **Chunk while training**: whole word
-- **Picks next token by**: highest pair count, a tie going to the pair whose symbols entered the vocabulary first
-- **Encoding**: longest piece in the vocabulary from each position, no merges, no lexicon
+- **Picks next token by**: highest pair count — a tie going to the pair whose symbols entered the vocabulary first
+- **Encoding**: longest piece in the vocabulary — from each position, no merges, no lexicon
 - **Needs lexicon**: no
 - **Setting**: vocabulary size, which includes the special tokens; every character seen in training is kept, once as a word start and once more with the prefix when it also occurs inside a word
 - **Unknown token**: one for the whole word when any part of it is not in the vocabulary, or when the word has more than 100 characters
@@ -108,11 +108,11 @@ rule, and not only the vocabulary, moves the morpheme scores.
 \Changed \Return a WordPiece model holding $S$ and $V$; $M$ is discarded \Comment{`slm4ie/tokenizers/backends/hf_wordpiece.py:38-48`}
 ```
 
-- **1**: Words are counted once, so the rest works on distinct words with a weight. The text is put into the composed Unicode form and cut on spaces, with every punctuation mark its own word. The first character of a word is a bare symbol and every later one carries `##`, so `hiša` is the four symbols `h`, `##i`, `##š`, `##a`.
-- **2-4**: Every word is one chunk, as in Character BPE.
-- **5**: The special tokens take the first places and the word-start characters follow in sorted order. The prefixed characters come last, in an order the library does not fix. The order decides how a tie is broken.
-- **6**: Pairs are counted inside chunks only, so no merge ever spans two words. A bare symbol can only ever be the first half of a pair.
-- **7-10**: Each round joins one pair everywhere and records it. The joined symbol keeps the prefix of its first half and drops the prefix of its second, so `hi` and `##š` give `hiš`, and `##a` and `##m` would give `##am`. The loop ends when the vocabulary is full or no pair is left.
+- **1**: Words are counted once, as $f(w)$, so the rest works on distinct words with a weight. The text is put into the composed Unicode form and cut on spaces, with every punctuation mark its own word. The first character of a word is a bare symbol and every later one carries `##`, so `hiša` is the four symbols `h`, `##i`, `##š`, `##a`.
+- **2-4**: Every word is one chunk $c_1$, as in Character BPE.
+- **5**: The vocabulary $V$ starts with the special tokens and the word-start characters follow in sorted order. The prefixed characters come last, in an order the library does not fix. The order decides how a tie is broken. The merge list $M$ starts empty.
+- **6**: Pair counts $n(a, b)$ are taken inside chunks only, so no merge ever spans two words. A bare symbol can only ever be the first half of a pair.
+- **7-10**: Each round joins the most frequent pair $(a^*, b^*)$ everywhere and records it. The joined symbol keeps the prefix of its first half and drops the prefix of its second, so `hi` and `##š` give `hiš`, and `##a` and `##m` would give `##am`. The loop ends when the vocabulary is full or no pair is left.
 - **11**: The trained model is the vocabulary with the unknown token and the prefix. The merges are not saved, because encoding never reads them.
 
 ```algorithm
@@ -136,13 +136,15 @@ rule, and not only the vocabulary, moves the morpheme scores.
 ```
 
 - **1-2**: The text is cleaned and cut into words the same way as in training.
-- **3-4**: Each word is cut on its own. A word of more than 100 characters is not tried at all and becomes the unknown token.
-- **5-6**: From the current position, every candidate from the rest of the word down to one character is looked up, longest first, with `##` in front unless the position is the start of the word. The first hit is the longest piece that fits.
-- **7-8**: When even the single character does not fit, the whole word becomes the unknown token, and the pieces already found are dropped.
-- **9-10**: Otherwise the piece is kept and the search goes on from where it ended. These lines, like 5 to 8, run inside the HuggingFace `tokenizers` library and cite no project code.
+- **3-4**: Each word is cut on its own, its tokens $s$ empty and its position $i$ at the start. A word of more than 100 characters is not tried at all and becomes the unknown token.
+- **5-6**: From the current position, every candidate from the rest of the word down to one character is looked up, longest first, with `##` in front unless the position is the start of the word. The first hit is the longest piece that fits, ending at $j$.
+- **7-8**: When even the single character does not fit, the whole word becomes the unknown token in $s$, the pieces already found are dropped, and $i$ jumps to the end of the word.
+- **9-10**: Otherwise the piece is kept and the search goes on from where it ended, $i \gets j$. These lines, like 5 to 8, run inside the HuggingFace `tokenizers` library and cite no project code.
 - **11**: The tokens of all words, in order. Each token also reports which characters of the text it covers, which is how the morpheme metrics find its cuts. An unknown token covers its whole word.
 
 ## Worked example
+
+- **Input**: six forms of `hiša` and `miza` with counts 5, 4, 3, 4, 3 and 2, a vocabulary of 21, the forms `mize` and `hišami` to walk, and `hiša`, `mize`, `hišami`, `mizami`, `hišaq` and `hiš` to encode
 
 The corpus holds six forms of two nouns: `hiša` (house) five times, `hiše`
 four, `hišo` three, `miza` (table) four, `mize` three, `mizo` twice. The

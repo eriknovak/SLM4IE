@@ -55,16 +55,16 @@ labelled decisions.
 
 ## Facts
 
-- **Question types**: choice over named options; Noul as the two options false and true; score with each level an option, the answer being the expected level
-- **Backbone**: Qwen3.5 base at 0.8, 4 and 9 billion parameters, and the post-trained Qwen3.8 at 27 billion; a low-rank adapter of rank 16 and scale 32 on the attention, feed-forward and recurrent projections, with the base frozen except for the 27 billion model
-- **Where an option is read**: the hidden state of the option's closing marker token, scored against the hidden state of the question's decide token by a bilinear pointer head of width 256
-- **Options per question**: as many as fit the question's token budget of 8,192 tokens; the served protocol allows 255
-- **Isolation between questions**: exact; a block-causal mask on attention-only bases, and one row per question with the state's cache reused on bases with recurrent layers, with each question's positions restarting right after the state
-- **Training objective**: cross-entropy on the correct option, with the adapter and head trained together; optional Brier, ordinal and label-smoothing terms exist in the code and the released models do not use them
-- **Calibration**: one scalar temperature per checkpoint, fitted on held-out labelled rows and dividing the logits at inference; confidence as the vendor adapter's formula
-- **Training data**: a base set of 10,000 examples from ten public datasets, 896 generated policy examples and 1,680 examples from 60 generated rule structures, two epochs; then short follow-up stages from the released checkpoint on generated cases with day counts or removed evidence, 5,219 real consumer-finance complaints and generated tool-use data; no Jev outputs
-- **Context length**: states of up to 65,536 tokens served, plus 8,192 per question; the base stage trains on states of at most 384 tokens and the document stages on at most 7,552, and the 27 billion model on up to 32,768
-- **Weights**: Apache-2.0 adapters and heads on Hugging Face under jaredpalmer, with the 27 billion model as full weights
+- **Question types**: choice, Noul and score — choice over named options; Noul as the two options false and true; score with each level an option, the answer being the expected level
+- **Backbone**: Qwen3.5 and Qwen3.8 with a low-rank adapter — Qwen3.5 base at 0.8, 4 and 9 billion parameters, and the post-trained Qwen3.8 at 27 billion; a low-rank adapter of rank 16 and scale 32 on the attention, feed-forward and recurrent projections, with the base frozen except for the 27 billion model
+- **Where an option is read**: the option's closing marker token — its hidden state, scored against the hidden state of the question's decide token by a bilinear pointer head of width 256
+- **Options per question**: as many as fit 8,192 tokens — the question's token budget; the served protocol allows 255
+- **Isolation between questions**: exact — a block-causal mask on attention-only bases, and one row per question with the state's cache reused on bases with recurrent layers, with each question's positions restarting right after the state
+- **Training objective**: cross-entropy — on the correct option, with the adapter and head trained together; optional Brier, ordinal and label-smoothing terms exist in the code and the released models do not use them
+- **Calibration**: one scalar temperature — per checkpoint, fitted on held-out labelled rows and dividing the logits at inference; confidence as the vendor adapter's formula
+- **Training data**: public datasets and generated examples — a base set of 10,000 examples from ten public datasets, 896 generated policy examples and 1,680 examples from 60 generated rule structures, two epochs; then short follow-up stages from the released checkpoint on generated cases with day counts or removed evidence, 5,219 real consumer-finance complaints and generated tool-use data; no Jev outputs
+- **Context length**: states of up to 65,536 tokens — served, plus 8,192 per question; the base stage trains on states of at most 384 tokens and the document stages on at most 7,552, and the 27 billion model on up to 32,768
+- **Weights**: Apache-2.0 — adapters and heads on Hugging Face under jaredpalmer, with the 27 billion model as full weights
 
 ## Sources
 
@@ -103,23 +103,23 @@ labelled decisions.
 \Return $p_1, \dots, p_Q$
 ```
 
-- **1**: The state opens the sequence behind one marker token. A state longer
+- **1**: The state $S$ opens the sequence behind one marker token. A state longer
   than the limit is cut, or refused when the caller asks for strictness.
-- **2** and **3**: Each question is appended as a branch. The branch's
+- **2–3**: Each question is appended as a branch $B_k$. The branch's
   positions start where the state ended, so every question sits at the same
   distance from the state whatever came before it in the sequence.
 - **4**: The mask is causal within the state and within a branch, and a
   branch may read the state. A branch never reads another branch, which is
   what makes the questions independent of one another.
-- **5**: One forward pass gives every token a hidden state. The recurrent
+- **5**: One forward pass gives every token a hidden state in $H$. The recurrent
   layers of the newer Qwen bases ignore attention masks, so there each
   question is its own row, state first, and the state's cache is computed
   once and reused. The two forms agree to rounding.
-- **6** to **8**: The pointer head projects the decide token as a query and
-  every closing option marker as a key, and their scaled product is the
-  option's score. The decide token comes last in its branch, so it has read
+- **6–8**: The pointer head projects the decide token $h_k$ as a query and
+  every closing option marker $h_{k,o}$ as a key, and their scaled product is the
+  option's score $z_{k,o}$. The decide token comes last in its branch, so it has read
   every option before it is compared with each.
-- **9**: A softmax over the question's scores is its distribution. The
+- **9**: A softmax over the question's scores is its distribution $p_k$. The
   temperature is one during training and a fitted constant when served, so
   the argmax never changes.
 - **10**: Every question's distribution is returned in one response. A score
@@ -139,20 +139,22 @@ labelled decisions.
 \Return adapter, head, $T$
 ```
 
-- **1** and **2**: Training runs the same packing and readout as serving,
+- **1–2**: Training runs the same packing and readout as serving, giving the scores $z_k$,
   with the temperature at one so that the fitted value keeps its meaning.
-- **3**: The loss is the negative log probability of the labelled option.
+- **3**: The loss $\ell$ is the negative log probability of the labelled option.
   Generated examples may carry a whole target distribution instead of one
   label, and then the loss is the cross-entropy against it.
 - **4**: Only the adapter and the head move. The 27 billion model trains
   every weight at a much lower learning rate instead.
-- **5**: After training, one scalar temperature is fitted by likelihood on
+- **5**: After training, one scalar temperature $T$ is fitted by likelihood on
   labelled rows the model did not train on. It changes how sure the model
   says it is and never which option it picks.
 - **6**: The checkpoint is the adapter, the head and the temperature; the
   base is downloaded separately.
 
 ## Worked example
+
+- **Input**: the three-word state "Disk nearly full" and two questions, "Who owns this?" with options sre and app, and the yes-or-no "Act now?"
 
 The example script ports the packing rule to a record whose tokens are words:
 a three-word state and two questions, one with two named options and one
