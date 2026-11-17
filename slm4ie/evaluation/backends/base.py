@@ -1,6 +1,6 @@
 """The chat-backend interface, its registry and the reasoning-block stripper.
 
-A backend answers one chat per call and reports what step 7 logs: the answer text, the
+A backend answers one chat per call and returns it as a `ChatResult`: the answer text, the
 input and output token counts and the wall time. The transformers backend also reports the
 peak GPU memory; vllm does not, since vllm-service reserves most of the GPU up front. Every
 backend decodes greedily where it allows it and, where it can, constrains the answer to the

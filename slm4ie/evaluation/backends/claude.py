@@ -64,7 +64,8 @@ class ClaudeBackend(ChatBackend):
 
         Raises:
             ValueError: If `messages` is not one system turn then one user turn.
-            RuntimeError: If the CLI exits non-zero or reports an error other than an off-schema answer.
+            RuntimeError: If the CLI exits non-zero, reports an error other than an off-schema answer,
+                or replies without its token usage.
         """
         roles = [message["role"] for message in messages]
         if roles != ["system", "user"]:
@@ -93,9 +94,11 @@ class ClaudeBackend(ChatBackend):
             raise RuntimeError(f"claude exited {process.returncode} for model {self.model!r}: {process.stderr.strip()}")
 
         # read the answer and the usage
-        usage = reply["usage"]
         if reply.get("is_error") and not off_schema:
             raise RuntimeError(f"claude reported an error for model {self.model!r}: {reply.get('result')}")
+        if "usage" not in reply:
+            raise RuntimeError(f"claude reply for model {self.model!r} has no 'usage' field: {reply}")
+        usage = reply["usage"]
         structured = reply.get("structured_output")
         if off_schema:
             text = ""

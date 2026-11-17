@@ -19,6 +19,11 @@ each run from its answers artifact without calling a model (M5, M3), and writes:
 - the memory table and the figure of mean test strict F1 against peak GPU
   memory: the weights and KV-cache memory per token of each model's vllm memory
   run, with the KV cache of the longest sequence its answers hold (M5, D7);
+- mean test strict F1 of every local model scored on all four test sets against
+  its parameter count and served precision, and against its test throughput
+  pooled over the four test runs, beside whether vllm ran it in eager mode (Q1);
+  the Claude models' pooled throughput sits apart, as sequential CLI calls; a
+  figure of each, the throughput figure drawing the Claude models as points;
 - the record's standard tables: the C1 reading per test set and the two
   picked arms with the verdict's adoption;
 - the tables read beside the clauses: strict F1 per label, Claude's
@@ -30,7 +35,7 @@ each run from its answers artifact without calling a model (M5, M3), and writes:
 - the audit counts the critique checks: test documents a tuning split also
   holds, the thinnest cells, seeds per configuration and the runs read.
 
-Every table goes through `save_table` and the figure through `save_figure`,
+Every table goes through `save_table` and every figure through `save_figure`,
 both from the shared `create_assets.py`, which check the rules of labflow's
 `tables.md` and `figures.md` before writing.
 
@@ -57,8 +62,8 @@ from pathlib import Path
 from typing import Any
 
 from datachart.charts import BarChart, ScatterChart
-from datachart.constants import LEGEND_LOCATION, LINE_STYLE, ORIENTATION, SHOW_GRID
-from datachart.utils import Grid
+from datachart.constants import AXIS_SCALE, BAR_MODE, LEGEND_LOCATION, LINE_MARKER, LINE_STYLE, ORIENTATION, SHOW_GRID
+from datachart.config import config
 from mlflow.tracking import MlflowClient
 
 from slm4ie.data.tasks.config import load_tasks_config
@@ -134,6 +139,15 @@ COUNT_METRICS = (
     "documents", "windows", "input_tokens", "cache_write_tokens", "cache_read_tokens", "output_tokens",
 )  # fmt: skip
 MEMORY_FIGURE = "benchmark-models-strict-f1-by-memory"
+# each of these tables is also the data table of the figure with its stem
+PARAMETERS_TABLE = "benchmark-models-strict-f1-by-parameters"
+SPEED_TABLE = "benchmark-models-strict-f1-by-speed"
+CLAUDE_SPEED_TABLE = "benchmark-models-claude-speed-by-model"
+# the facts each local model of the model list carries, and the precisions it may be served at
+LOCAL_MODEL_FIELDS = ("parameters_billion", "served_precision", "vllm_eager")
+SERVED_PRECISIONS = ("bf16", "fp8", "4-bit")
+# how the Claude arm answers: one headless Claude Code call per window, one after another (D8)
+CLAUDE_SERVING = "sequential calls through the Claude Code CLI"
 C1_FIGURE = "benchmark-models-c1-difference-by-test-set"
 DATASET_FIGURE = "dataset-test-sets-spans-by-label"
 # each test set as the record names it
@@ -144,6 +158,29 @@ F1_POINTS = 100
 # rows of the C1 figure: the download-gated sets from the top, a gap, then the public set
 C1_GATED_TOP = 4.0
 C1_PUBLIC_ROW = 0.5
+# how far above its point, in rows, each C1 point's label starts
+C1_LABEL_RISE = 0.2
+# the typographic minus the figure labels print
+MINUS = "−"
+# the F1 axis of the Q1 scatter figures, as fractions, runs from here up to the ceiling of F1
+F1_TICKS = (0.2, 0.4, 0.6, 0.8, 1.0)
+# how far above the Claude line, in axes height, its name starts
+REFERENCE_NAME_RISE = 0.025
+# names of the muted models: a mid grey at 5.3:1 against white, over the muted markers
+MUTED_NAME_COLOR = "#6B6B6B"
+# the speed figure's log axis: test windows per second, from 0.027 to 1.37
+SPEED_TICKS = (0.03, 0.1, 0.3, 1.0)
+SPEED_LIMITS = (0.02, 2.0)
+# the figures' background colour, matplotlib's white, as the theme sets none
+PLATE_COLOR = "#FFFFFF"
+# a label past the palette's colours is drawn hatched in ink on the plate colour instead
+LABEL_HATCH = {"plot_bar_color": PLATE_COLOR, "plot_bar_hatch": "////"}
+# the other labels' segments are edged in the plate colour, so a thin gap parts them
+LABEL_GAP = {"plot_bar_edge_color": PLATE_COLOR}
+# the picked Claude model's grey-blue: its reference line, and the Claude points of the speed figure
+CLAUDE_COLOR = "#1F77B4"
+# the speed figure's key to its squares, in the empty lower right of the plot
+EAGER_NOTE = "squares: served in a slower mode to fit the GPU"
 
 
 # ===============================
@@ -320,6 +357,21 @@ class ScoredRun:
     longest_sequence_tokens: int
     cut_off_windows: int
     cut_off_misses: int
+
+
+@dataclass(frozen=True)
+class LocalModel:
+    """The facts the model list records about one local model.
+
+    Attributes:
+        parameters_billion: Total parameters stored in the weights, in billions.
+        served_precision: The precision the vllm-service serves the weights at: `bf16`, `fp8` or `4-bit`.
+        vllm_eager: Whether the vllm-service runs the model in eager mode with a 4,096-token context.
+    """
+
+    parameters_billion: float
+    served_precision: str
+    vllm_eager: bool
 
 
 @dataclass(frozen=True)
@@ -644,10 +696,11 @@ def c1_readings(scored: list[ScoredRun], picks: list[dict[str, Any]]) -> list[C1
 
     readings = []
     for name, entry in TEST_SETS.items():
-        local = tests.get((picked.get("local"), entry))
-        claude = tests.get((picked.get("claude"), entry))
+        local_key, claude_key = picked.get("local"), picked.get("claude")
+        local = tests.get((local_key, entry)) if local_key else None
+        claude = tests.get((claude_key, entry)) if claude_key else None
         if local is None or claude is None:
-            readings.append(C1Reading(name, picked.get("local"), picked.get("claude"), local, claude, None, "missing"))
+            readings.append(C1Reading(name, local_key, claude_key, local, claude, None, "missing"))
             continue
 
         # pair the two models on the same test documents
@@ -673,7 +726,7 @@ def c1_rows(readings: list[C1Reading]) -> list[dict[str, Any]]:
     rows = []
     for c1 in readings:
         row = {"entry": TEST_SETS[c1.test_set], "local": c1.local_model, "claude": c1.claude_model}
-        if c1.difference is not None:
+        if c1.difference is not None and c1.local and c1.claude:
             row |= {
                 "local_strict_f1": c1.local.metrics["strict_f1"],
                 "claude_strict_f1": c1.claude.metrics["strict_f1"],
@@ -760,7 +813,11 @@ def gap_rows(readings: list[C1Reading]) -> list[dict[str, Any]]:
     read = [c1 for c1 in readings if c1.difference is not None]
     gated = [c1 for c1 in read if c1.test_set != PUBLIC_TEST_SET]
     public = [c1 for c1 in read if c1.test_set == PUBLIC_TEST_SET]
-    f1 = {c1.test_set: (c1.local.metrics["strict_f1"], c1.claude.metrics["strict_f1"]) for c1 in read}
+    f1 = {
+        c1.test_set: (c1.local.metrics["strict_f1"], c1.claude.metrics["strict_f1"])
+        for c1 in read
+        if c1.local and c1.claude
+    }
 
     rows = [_gap_row(c1.test_set, "download-gated", *f1[c1.test_set], c1.difference) for c1 in gated]
     if gated:
@@ -787,7 +844,7 @@ def memory_rows(scored: list[ScoredRun], memory: dict[str, float]) -> list[dict[
         tests = [r.metrics["strict_f1"] for r in scored if r.model_key == model_key and r.split == "test"]
         rows.append(
             {
-                "model": model_key,
+                "variant": model_key,
                 "peak_gpu_memory_gib": gib,
                 "test_entries": len(tests),
                 "test_strict_f1_mean": statistics.mean(tests) if tests else None,
@@ -796,26 +853,216 @@ def memory_rows(scored: list[ScoredRun], memory: dict[str, float]) -> list[dict[
     return rows
 
 
-def memory_figure(
-    rows: list[dict[str, Any]], picked: str | None, claude_model: str | None, claude_f1: float | None
-) -> Any:
-    """Draw each local model's mean test strict F1 against its peak GPU memory.
-
-    The picked local model is its own highlighted series, the other local
-    models a muted one, and the picked Claude model a horizontal line.
+def local_models(config_path: Path) -> dict[str, LocalModel]:
+    """Read each local model's parameter count, served precision and eager mode from the model list.
 
     Args:
-        rows: The rows of `memory_rows` that carry a test F1.
+        config_path: The model list.
+
+    Returns:
+        Local model key -> its facts.
+
+    Raises:
+        KeyError: If a local model lacks one of `LOCAL_MODEL_FIELDS`.
+        ValueError: If a local model's `served_precision` is not one of `SERVED_PRECISIONS`.
+    """
+    models = {}
+    for key, spec in load_yaml(config_path)["models"].items():
+        if spec["arm"] != "local":
+            continue
+        missing = [field for field in LOCAL_MODEL_FIELDS if field not in spec]
+        if missing:
+            raise KeyError(f"local model '{key}' of {config_path.name} has no {missing}")
+        if spec["served_precision"] not in SERVED_PRECISIONS:
+            raise ValueError(
+                f"local model '{key}' of {config_path.name} has served_precision {spec['served_precision']!r}, "
+                f"expected one of {SERVED_PRECISIONS}"
+            )
+        models[key] = LocalModel(float(spec["parameters_billion"]), spec["served_precision"], bool(spec["vllm_eager"]))
+    return models
+
+
+def full_test_models(scored: list[ScoredRun], arm: str) -> list[str]:
+    """List an arm's models that have a test run on every test set.
+
+    Args:
+        scored: The scored runs.
+        arm: `claude` or `local`.
+
+    Returns:
+        The model keys, sorted.
+    """
+    entries: dict[str, set[str]] = defaultdict(set)
+    for run in scored:
+        if run.arm == arm and run.split == "test":
+            entries[run.model_key].add(run.entry)
+    return sorted(key for key, seen in entries.items() if seen >= set(TEST_SETS.values()))
+
+
+def mean_test_strict_f1(scored: list[ScoredRun], model_key: str) -> float:
+    """Average a model's strict F1 over its test runs, each test set weighted equally.
+
+    Args:
+        scored: The scored runs.
+        model_key: The model.
+
+    Returns:
+        The mean test strict F1.
+    """
+    return statistics.mean(r.metrics["strict_f1"] for r in scored if r.model_key == model_key and r.split == "test")
+
+
+def pooled_test_speed(scored: list[ScoredRun], model_key: str) -> dict[str, Any]:
+    """Pool a model's test runs into one throughput: total windows and documents over total seconds.
+
+    The seconds are the summed wall time of the model's calls, one window at a time.
+
+    Args:
+        scored: The scored runs.
+        model_key: The model.
+
+    Returns:
+        `windows`, `duration_s`, `windows_per_second` and `documents_per_second`.
+    """
+    tests = [r for r in scored if r.model_key == model_key and r.split == "test"]
+    windows = sum(int(r.metrics["windows"]) for r in tests)
+    documents = sum(int(r.metrics["documents"]) for r in tests)
+    seconds = sum(r.metrics["seconds"] for r in tests)
+    return {
+        "windows": windows,
+        "duration_s": seconds,
+        "windows_per_second": windows / seconds if seconds else None,
+        "documents_per_second": documents / seconds if seconds else None,
+    }
+
+
+def parameter_rows(scored: list[ScoredRun], models: dict[str, LocalModel]) -> list[dict[str, Any]]:
+    """Pair each fully tested local model's parameter count and served precision with its mean test strict F1.
+
+    Args:
+        scored: The scored runs.
+        models: The local models of `local_models`.
+
+    Returns:
+        One row per local model scored on every test set, fewest parameters first.
+    """
+    rows = [
+        {
+            "variant": key,
+            "parameters_billion": models[key].parameters_billion,
+            "served_precision": models[key].served_precision,
+            "test_strict_f1_mean": mean_test_strict_f1(scored, key),
+        }
+        for key in full_test_models(scored, "local")
+    ]
+    return sorted(rows, key=lambda row: row["parameters_billion"])
+
+
+def speed_rows(scored: list[ScoredRun], models: dict[str, LocalModel]) -> list[dict[str, Any]]:
+    """Pair each fully tested local model's pooled test throughput with its mean test strict F1.
+
+    Args:
+        scored: The scored runs.
+        models: The local models of `local_models`.
+
+    Returns:
+        One row per local model scored on every test set, slowest first.
+    """
+    rows = []
+    for key in full_test_models(scored, "local"):
+        speed = pooled_test_speed(scored, key)
+        rows.append(
+            {
+                "variant": key,
+                "windows_per_second": speed["windows_per_second"],
+                "documents_per_second": speed["documents_per_second"],
+                "vllm_eager_mode": "yes" if models[key].vllm_eager else "no",
+                "test_strict_f1_mean": mean_test_strict_f1(scored, key),
+                "windows": speed["windows"],
+                "duration_s": speed["duration_s"],
+            }
+        )
+    return sorted(rows, key=lambda row: row["windows_per_second"])
+
+
+def claude_speed_rows(scored: list[ScoredRun]) -> list[dict[str, Any]]:
+    """Pool each fully tested Claude model's test throughput, marked with how it was called.
+
+    Args:
+        scored: The scored runs.
+
+    Returns:
+        One row per Claude model scored on every test set, slowest first.
+    """
+    rows = []
+    for key in full_test_models(scored, "claude"):
+        speed = pooled_test_speed(scored, key)
+        rows.append(
+            {
+                "variant": key,
+                "windows_per_second": speed["windows_per_second"],
+                "documents_per_second": speed["documents_per_second"],
+                "serving": CLAUDE_SERVING,
+                "windows": speed["windows"],
+                "duration_s": speed["duration_s"],
+            }
+        )
+    return sorted(rows, key=lambda row: row["windows_per_second"])
+
+
+def _f1_point(row: dict[str, Any], x_key: str) -> dict[str, Any]:
+    """Place one model of a Q1 scatter figure: its `x_key` value against its mean test strict F1."""
+    return {"x": row[x_key], "y": row["test_strict_f1_mean"], "label": row["variant"]}
+
+
+def _f1_axis() -> dict[str, Any]:
+    """Give the chart keywords every Q1 scatter figure shares: the F1 axis in points, the size and the grid."""
+    return {
+        "ylabel": "Strict span F1, mean of four test sets (points)",
+        "yticks": list(F1_TICKS),
+        "yticklabels": [f"{F1_POINTS * t:.0f}" for t in F1_TICKS],
+        "ymin": F1_TICKS[0],
+        "ymax": F1_TICKS[-1],
+        "figsize": ONE_COLUMN,
+        "show_grid": SHOW_GRID.BOTH,
+    }
+
+
+def _grey_muted_names(figure: Any, names: set[str]) -> None:
+    """Draw the names of muted points in a mid grey: datachart draws them in its marker grey, too light to read."""
+    for text in (text for ax in figure.axes for text in ax.texts if text.get_text() in names):
+        text.set_color(MUTED_NAME_COLOR)
+
+
+def local_f1_figure(
+    rows: list[dict[str, Any]],
+    x_key: str,
+    picked: str | None,
+    claude_model: str | None,
+    claude_f1: float | None,
+    title: str,
+    xlabel: str,
+) -> Any:
+    """Draw each local model's mean test strict F1 against one of its measures (Q1).
+
+    The picked local model is its own highlighted series, the other local
+    models a muted one with their names in a readable mid grey, and the
+    picked Claude model a horizontal line named at its right end. The axis
+    holds F1 as a fraction and its ticks read in points, as the C1 figure's do.
+
+    Args:
+        rows: One row per local model, with `model`, `test_strict_f1_mean` and `x_key`.
+        x_key: The column drawn on the x-axis.
         picked: The picked local model's key; none when no local model is picked.
         claude_model: The picked Claude model's key, which names the line.
         claude_f1: The picked Claude model's mean test strict F1, drawn as a line; none when absent.
+        title: The figure title.
+        xlabel: The x-axis label, with its unit.
 
     Returns:
         The datachart figure.
     """
-    points = {
-        r["model"]: {"x": r["peak_gpu_memory_gib"], "y": r["test_strict_f1_mean"], "label": r["model"]} for r in rows
-    }
+    points = {r["variant"]: _f1_point(r, x_key) for r in rows}
     series = [[points[picked]]] if picked in points else []
     subtitles, emphasis = ([picked], ["highlight"]) if series else ([], [])
     others = [point for model, point in points.items() if model != picked]
@@ -823,21 +1070,104 @@ def memory_figure(
         series.append(others)
         subtitles.append("other local models")
         emphasis.append("background")
-    return ScatterChart(
+
+    # name the Claude line at its right end, just above it, instead of in a legend
+    low, high = F1_TICKS[0], F1_TICKS[-1]
+    claude_name = None
+    if claude_f1 is not None:
+        claude_name = {
+            "text": f"{claude_model or 'Claude'}, {F1_POINTS * claude_f1:.1f}",
+            "x": 0.99,
+            "y": (claude_f1 - low) / (high - low) + REFERENCE_NAME_RISE,
+            "coords": "axes",
+            "style": {"plot_text_halign": "right", "plot_text_valign": "bottom"},
+        }
+
+    figure = ScatterChart(
         series,
         subtitle=subtitles,
         emphasis=emphasis,
         annotation="label",
-        hlines={"y": claude_f1, "label": claude_model or "Claude"} if claude_f1 is not None else None,
-        title="Strict F1 by peak memory",
-        xlabel="Peak GPU memory: weights and the longest sequence's KV cache (GiB)",
-        ylabel="Strict span F1, mean of four test sets",
-        figsize=ONE_COLUMN,
-        show_grid=SHOW_GRID.BOTH,
-        show_legend=True,
-        # the bottom centre is empty, and the top would cover the Claude line
-        legend={"location": LEGEND_LOCATION.LOWER_CENTER},
+        hlines={"y": claude_f1, "style": {"plot_hline_color": CLAUDE_COLOR}} if claude_f1 is not None else None,
+        texts=claude_name,
+        title=title,
+        xlabel=xlabel,
+        show_legend=False,
+        **_f1_axis(),
     )
+    _grey_muted_names(figure, {point["label"] for point in others})
+    return figure
+
+
+def speed_figure(
+    rows: list[dict[str, Any]],
+    claude_rows: list[dict[str, Any]],
+    picked: str | None,
+    claude_model: str | None,
+) -> Any:
+    """Draw each model's mean test strict F1 against its pooled test throughput on a log axis (Q1).
+
+    The picked local model is highlighted and the other local models muted,
+    those vllm runs in eager mode as squares, which a note in the lower right
+    explains. The Claude models are their own series of triangles in the
+    grey-blue of the other Q1 figures' Claude line, each named, the picked
+    one with its mean F1 as that line's name gives it.
+
+    Args:
+        rows: The rows of `speed_rows`.
+        claude_rows: The rows of `claude_speed_rows`, each with its `test_strict_f1_mean`.
+        picked: The picked local model's key; none when no local model is picked.
+        claude_model: The picked Claude model's key; none when no Claude model is picked.
+
+    Returns:
+        The datachart figure.
+    """
+    points = {r["variant"]: _f1_point(r, "windows_per_second") for r in rows}
+    eager = {r["variant"] for r in rows if r["vllm_eager_mode"] == "yes"}
+    claude_points = [_f1_point(r, "windows_per_second") for r in claude_rows]
+    for point in claude_points:
+        if point["label"] == claude_model:
+            point["label"] = f"{claude_model}, {F1_POINTS * point['y']:.1f}"
+    groups = [
+        ([points[picked]] if picked in points else [], picked, "highlight", {}),
+        (claude_points, "Claude models, one command-line call per window", None,
+         {"plot_scatter_marker": LINE_MARKER.TRIANGLE, "plot_scatter_color": CLAUDE_COLOR}),
+        ([p for m, p in points.items() if m != picked and m not in eager], "other local models", "background", {}),
+        ([p for m, p in points.items() if m != picked and m in eager], "local models, vllm eager mode",
+         "background", {"plot_scatter_marker": LINE_MARKER.SQUARE}),
+    ]  # fmt: skip
+    groups = [group for group in groups if group[0]]
+
+    # explain the squares in the empty lower right instead of in a legend
+    note = None
+    if eager:
+        note = {
+            "text": EAGER_NOTE,
+            "x": 0.99,
+            "y": 0.03,
+            "coords": "axes",
+            "style": {"plot_text_halign": "right", "plot_text_valign": "bottom"},
+        }
+
+    figure = ScatterChart(
+        [group[0] for group in groups],
+        subtitle=[group[1] for group in groups],
+        emphasis=[group[2] for group in groups],
+        style=[group[3] for group in groups],
+        annotation="label",
+        texts=note,
+        title="Strict F1 by throughput",
+        xlabel="Test throughput, one window at a time (windows per second, log scale)",
+        scalex=AXIS_SCALE.LOG,
+        xticks=list(SPEED_TICKS),
+        xticklabels=[f"{t:g}" for t in SPEED_TICKS],
+        xmin=SPEED_LIMITS[0],
+        xmax=SPEED_LIMITS[1],
+        show_legend=False,
+        **_f1_axis(),
+    )
+    _grey_muted_names(figure, {p["label"] for m, p in points.items() if m != picked})
+    return figure
 
 
 def c1_figure_rows(readings: list[C1Reading]) -> list[dict[str, Any]]:
@@ -865,19 +1195,24 @@ def c1_figure_rows(readings: list[C1Reading]) -> list[dict[str, Any]]:
     ]
 
 
-def c1_figure(rows: list[dict[str, Any]]) -> Any:
+def c1_figure(rows: list[dict[str, Any]], levels: dict[str, tuple[float, float]]) -> Any:
     """Draw local minus Claude strict F1 per test set against the equivalence margin (C1).
 
     Each test set is a point with its 95% paired-bootstrap interval. The
     download-gated sets sit on top, sorted by the difference; the public
-    SlavicNER sits apart below them in its own colour.
+    SlavicNER sits apart below them in its own colour. Both models' strict F1
+    stand at the right end of each row, so the levels behind each difference
+    read beside it.
 
     Args:
         rows: The rows of `c1_figure_rows`.
+        levels: Test set -> the local and the Claude model's strict F1, from the C1 table.
 
     Returns:
         The datachart figure.
     """
+    # every row is the same picked pair, so the first row names both models
+    pair = f"{rows[0]['local']} minus {rows[0]['claude']}"
     gated = sorted((r for r in rows if r["access"] == "download-gated"), key=lambda r: -r["difference"])
     public = [r for r in rows if r["access"] == "public"]
     gated_rows = [(r, C1_GATED_TOP - i) for i, r in enumerate(gated)]
@@ -895,12 +1230,26 @@ def c1_figure(rows: list[dict[str, Any]]) -> Any:
             for r, y in series
         ]
 
+    # each point carries its difference in points and its reading just above it
+    readings = [
+        {
+            "text": f"{F1_POINTS * r['difference']:+.1f}, {r['reading']}".replace("-", MINUS),
+            "x": r["difference"],
+            "y": y + C1_LABEL_RISE,
+            "style": {"plot_text_halign": "center", "plot_text_valign": "bottom"},
+        }
+        for r, y in placed
+    ]
+
     margin_line = {"plot_vline_style": LINE_STYLE.DASHED, "plot_vline_alpha": 0.6}
-    return ScatterChart(
+    capsize = {"plot_scatter_error_capsize": 3}
+    figure = ScatterChart(
         [points(gated_rows), points(public_rows)],
         subtitle=["download-gated", "public"],
         show_yerr=False,
-        style={"plot_scatter_error_capsize": 3},
+        # the public point takes its own shape, so colour is not the only signal
+        style=[capsize, {**capsize, "plot_scatter_marker": LINE_MARKER.DIAMOND}],
+        texts=readings,
         vspans={"xmin": -MARGIN, "xmax": MARGIN, "label": "equivalence margin"},
         vlines=[
             {"x": 0.0, "style": {"plot_vline_style": LINE_STYLE.SOLID}},
@@ -908,7 +1257,7 @@ def c1_figure(rows: list[dict[str, Any]]) -> Any:
             {"x": MARGIN, "style": margin_line},
         ],
         title="Local minus Claude",
-        xlabel="gemma4-12b minus claude-opus-5-5, strict span F1 (points)",
+        xlabel=f"{pair}, strict span F1 (points)",
         ylabel="Test set",
         xticks=list(C1_TICKS),
         xticklabels=[f"{F1_POINTS * t:+.0f}" if t else "0" for t in C1_TICKS],
@@ -917,16 +1266,45 @@ def c1_figure(rows: list[dict[str, Any]]) -> Any:
         xmin=C1_TICKS[0] - MARGIN / 2,
         xmax=C1_TICKS[-1] + MARGIN / 2,
         ymin=C1_PUBLIC_ROW - 0.6,
-        ymax=C1_GATED_TOP + 0.6,
+        ymax=C1_GATED_TOP + 0.8,
         figsize=ONE_COLUMN,
         show_grid=SHOW_GRID.X,
         show_legend=True,
-        legend={"location": LEGEND_LOCATION.OUTSIDE_RIGHT},
+        # left of the margin and below the lowest download-gated row nothing is drawn
+        legend={"location": LEGEND_LOCATION.LOWER_LEFT},
     )
+
+    # both models' strict F1 as a column of tick labels on the right edge, one per row, in the theme's sizes
+    ax = figure.axes[0]
+    right = ax.twinx()
+    right.set_ylim(ax.get_ylim())
+    right.set_yticks(
+        [y for _, y in placed],
+        [
+            f"{F1_POINTS * levels[r['test_set']][0]:.1f} vs {F1_POINTS * levels[r['test_set']][1]:.1f}"
+            for r, _ in placed
+        ],
+        fontsize=config["axes_ticks_label_size"],
+        color=ax.get_yticklabels()[0].get_color(),
+    )
+    right.tick_params(axis="y", length=0)
+    right.set_ylabel(
+        f"{rows[0]['local']} vs {rows[0]['claude']} (points)",
+        fontsize=config["font_ylabel_size"],
+        color=ax.yaxis.label.get_color(),
+    )
+    for spine in right.spines.values():
+        spine.set_visible(False)
+    return figure
 
 
 def dataset_figure(test_rows: dict[str, list[dict[str, Any]]]) -> Any:
-    """Draw the gold spans per label in the test split of each test set, one panel per set.
+    """Draw each test set's mix of labels: one stacked bar per set, each label's share of its gold test spans.
+
+    Every label keeps one colour across the rows and stacks in one order,
+    most spans over the four test sets first. Each row name carries the
+    set's total spans. Segments are parted by thin gaps in the plate colour.
+    A label past the palette's colours is hatched and keeps its ink outline.
 
     Args:
         test_rows: Test set name -> the test split's rows of `statistics_rows`.
@@ -934,27 +1312,33 @@ def dataset_figure(test_rows: dict[str, list[dict[str, Any]]]) -> Any:
     Returns:
         The datachart figure.
     """
-    panels = []
-    for name, rows in test_rows.items():
-        # horizontal bars draw the first point at the bottom, so the largest goes last
-        bars = [{"label": r["label"], "y": r["spans"]} for r in sorted(rows, key=lambda r: r["spans"])]
-        panels.append(
-            BarChart(
-                bars,
-                title=f"{TEST_SET_TITLES[name]}, {sum(r['spans'] for r in rows):,} spans",
-                orientation=ORIENTATION.HORIZONTAL,
-                show_grid=SHOW_GRID.X,
-                xmin=0,
-                figsize=ONE_COLUMN,
-            )
-        )
-    return Grid(
-        panels,
-        max_cols=2,
+    # horizontal bars draw the first category at the bottom, so the first test set goes last
+    names = {
+        name: f"{TEST_SET_TITLES[name]} ({sum(r['spans'] for r in rows):,} spans)"
+        for name, rows in reversed(test_rows.items())
+    }
+    totals: Counter[str] = Counter()
+    for rows in test_rows.values():
+        totals.update({r["label"]: r["spans"] for r in rows})
+    labels = [label for label, _ in totals.most_common()]
+    shares = {(name, r["label"]): r["share_pct"] for name, rows in test_rows.items() for r in rows}
+
+    palette = len(config["color_general_multiple"])
+    return BarChart(
+        [[{"label": names[name], "y": shares.get((name, label), 0.0)} for name in names] for label in labels],
+        subtitle=labels,
+        style=[LABEL_GAP if i < palette else LABEL_HATCH for i in range(len(labels))],
+        bar_mode=BAR_MODE.STACK,
+        orientation=ORIENTATION.HORIZONTAL,
         title="Test spans by label",
-        xlabel="Gold spans (count)",
-        ylabel="Label",
+        xlabel="Share of the test split's gold spans (%)",
+        ylabel="Test set",
+        xmin=0,
+        xmax=100,
         figsize=ONE_COLUMN,
+        show_grid=SHOW_GRID.X,
+        show_legend=True,
+        legend={"location": LEGEND_LOCATION.OUTSIDE_RIGHT},
     )
 
 
@@ -1206,8 +1590,9 @@ def audit_rows(
 ) -> list[dict[str, Any]]:
     """Count what the critique checks for leakage, thin cells and seeds, one row per check.
 
-    The five checks of tables.md come first, in its order; the thin-cell
-    counts by window, gold span, label and SUK subcorpus follow.
+    The five checks of tables.md come first, in its order, then the runs set
+    aside for a newer rerun; the thin-cell counts by window, gold span, label
+    and SUK subcorpus follow.
 
     Args:
         runs: The finished tracked runs the pass read.
@@ -1245,9 +1630,10 @@ def audit_rows(
         seeds[(run.data.tags.get("model_key"), params["entry"], params["split"])].add(params.get("seed"))
     fewest_seeds = min(len(found) for found in seeds.values())
 
-    # the runs read, by kind
+    # the runs read, by kind; a full run C1 reads but did not score had a newer rerun
     benchmark = sum(1 for run in runs if run.data.tags.get("type") == "benchmark")
     memory = len(runs) - benchmark
+    superseded = sum(1 for run in full if run.data.tags.get("examples") == CLAUSE_EXAMPLES) - len(scored)
 
     return [
         {"check": "rows shared between splits", "count": sum(shared.values()), "expected": 0, "note": shared_note},
@@ -1262,16 +1648,19 @@ def audit_rows(
             "check": "tracked runs",
             "count": len(runs),
             "expected": None,
-            "note": (
-                f"{benchmark} benchmark runs, {len(scored)} scored after {len(full) - len(scored)} older reruns "
-                f"were set aside; {memory} memory runs"
-            ),
+            "note": f"{benchmark} benchmark runs, {len(scored)} of them scored; {memory} memory runs",
         },
         {
             "check": "scratch runs",
             "count": 0,
             "expected": None,
             "note": f"the pass reads tracked runs only; the experiment holds {scratch_runs} scratch runs",
+        },
+        {
+            "check": "runs set aside for a newer rerun",
+            "count": superseded,
+            "expected": None,
+            "note": f"full examples={CLAUSE_EXAMPLES} runs whose model, entry and split has a newer run, which is scored",
         },
         {"check": "fewest windows per cell", "count": windows[0], "expected": None, "note": windows[1]},
         {"check": "fewest gold spans per cell", "count": gold[0], "expected": None, "note": gold[1]},
@@ -1395,7 +1784,12 @@ def build_scores() -> None:
         # the claim names no variant: every point is the same picked pair, and the table has no variant column
         claim = Claim(CLAUSE, "local minus Claude strict span F1", threshold=-MARGIN)
         FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-        save_figure(lambda: c1_figure(figure_rows), FIGURES_DIR / f"{C1_FIGURE}.svg", claim=claim)
+        # both models' strict F1 per test set come from the C1 table
+        names = {entry: name for name, entry in TEST_SETS.items()}
+        levels = {
+            names[row["entry"]]: (row["local_strict_f1"], row["claude_strict_f1"]) for row in c1 if "difference" in row
+        }
+        save_figure(lambda: c1_figure(figure_rows, levels), FIGURES_DIR / f"{C1_FIGURE}.svg", claim=claim)
 
     # write the tables read beside the clauses
     labels = label_rows(scored)
@@ -1410,32 +1804,77 @@ def build_scores() -> None:
     # write the counts the critique checks
     write_table("audit-count-by-check", audit_rows(runs, scored, labels, subcorpora, scratch_run_count(client)))
 
+    # write mean test F1 against model size and against pooled test throughput
+    models = local_models(MODELS_CONFIG)
+    parameters = parameter_rows(scored, models)
+    speeds = speed_rows(scored, models)
+    claude_speeds = claude_speed_rows(scored)
+    write_table(PARAMETERS_TABLE, parameters)
+    write_table(SPEED_TABLE, speeds)
+    write_table(CLAUDE_SPEED_TABLE, claude_speeds)
+
+    # the picked pair and the picked Claude model's mean test F1, the reference of the Q1 figures
+    picked = {row["arm"]: row["model"] for row in picks if row.get("picked")}
+    local, claude = picked.get("local"), picked.get("claude")
+    claude_tests = [r.metrics["strict_f1"] for r in scored if r.model_key == claude and r.split == "test"]
+    claude_f1 = statistics.mean(claude_tests) if claude_tests else None
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
     # write the memory table and draw F1 against memory
     memory = memory_rows(scored, peak_memory_gib(runs, scored))
     if memory:
         write_table(MEMORY_FIGURE, memory)
-        picked = {row["arm"]: row["model"] for row in picks if row.get("picked")}
-        claude_tests = [
-            r.metrics["strict_f1"] for r in scored if r.model_key == picked.get("claude") and r.split == "test"
-        ]
-        claude_f1 = statistics.mean(claude_tests) if claude_tests else None
         # draw only models scored on all four test sets, as the y label says
         drawn = [row for row in memory if row["test_entries"] == len(TEST_SETS)]
         if drawn:
             # the picked Claude model has no GPU memory, so it is the claim's baseline line
-            local = picked.get("local")
             claim = Claim(
                 DIAGNOSTIC_CLAUSE,
                 "test strict span F1",
-                arms=(local,) if any(row["model"] == local for row in drawn) else (),
+                arms=(local,) if any(row["variant"] == local for row in drawn) else (),
                 threshold=claude_f1,
             )
-            FIGURES_DIR.mkdir(parents=True, exist_ok=True)
             save_figure(
-                lambda: memory_figure(drawn, local, picked.get("claude"), claude_f1),
+                lambda: local_f1_figure(
+                    drawn, "peak_gpu_memory_gib", local, claude, claude_f1,
+                    "Strict F1 by peak memory", "Peak GPU memory (GiB)",
+                ),
                 FIGURES_DIR / f"{MEMORY_FIGURE}.svg",
                 claim=claim,
-            )
+            )  # fmt: skip
+
+    # draw F1 against parameters, the picked Claude model again as the baseline line
+    if parameters:
+        claim = Claim(
+            DIAGNOSTIC_CLAUSE,
+            "test strict span F1",
+            arms=(local,) if any(row["variant"] == local for row in parameters) else (),
+            threshold=claude_f1,
+        )
+        save_figure(
+            lambda: local_f1_figure(
+                parameters, "parameters_billion", local, claude, claude_f1,
+                "Strict F1 by parameters", "Total parameters (billions)",
+            ),
+            FIGURES_DIR / f"{PARAMETERS_TABLE}.svg",
+            claim=claim,
+        )  # fmt: skip
+
+    # draw F1 against throughput; Claude has a throughput, so its models are points, not a line
+    if speeds:
+        claude_points = [
+            row | {"test_strict_f1_mean": mean_test_strict_f1(scored, row["variant"])} for row in claude_speeds
+        ]
+        claim = Claim(
+            DIAGNOSTIC_CLAUSE,
+            "test strict span F1",
+            arms=(local,) if any(row["variant"] == local for row in speeds) else (),
+        )
+        save_figure(
+            lambda: speed_figure(speeds, claude_points, local, claude),
+            FIGURES_DIR / f"{SPEED_TABLE}.svg",
+            claim=claim,
+        )
 
 
 def get_args() -> argparse.Namespace:

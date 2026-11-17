@@ -11,7 +11,18 @@
 # Model spec fields:
 #   arm          `claude` or `local`; analysis.py picks each arm's best (D1).
 #   weights      Where the weights come from: a HuggingFace repository, or
-#                `subscription` for Claude.
+#                `subscription` for Claude. A human-readable provenance note,
+#                read by no code.
+#   parameters_billion
+#                Local models only: total parameters stored in the weights, in
+#                billions, two decimals. analysis.py tables strict F1 against it.
+#   served_precision
+#                Local models only: the precision the vllm-service serves the
+#                weights at (its config.yaml, D7): `bf16`, `fp8` or `4-bit`.
+#                analysis.py prints it beside the parameter count.
+#   vllm_eager   Local models only: true when the vllm-service runs the model in
+#                eager mode with a 4,096-token context, to fit the GPU (D7).
+#                analysis.py prints it beside the model's throughput.
 #   <backend>    One block per backend that can run the model:
 #                  model     the model in that backend's naming (Claude id,
 #                            vllm-service served name, HuggingFace id);
@@ -24,6 +35,14 @@
 #   Google's Gemma 4 checkpoints are 4-bit QAT (compressed-tensors). The
 #   transformers blocks stay for runs outside the vllm-service; transformers
 #   decompresses the Gemma 4 checkpoints to bf16, which does not fit 16 GB.
+#
+#   parameters_billion was counted on 2026-11-17 from the safetensors headers of
+#   the downloaded weights, without loading a tensor: the sum of every tensor's
+#   element count, a 4-bit packed int32 counted as 8 parameters, the quantisation
+#   scales and shapes left out, and a stored lm_head left out when the model's
+#   config ties it to the input embeddings (both Gemma 4 checkpoints). Vision and
+#   audio towers and Qwen3.5's multi-token-prediction head are counted, though
+#   the benchmark serves text only.
 
 models:
   # --- Claude arm: the subscription, through Claude Code's headless mode -----
@@ -44,46 +63,75 @@ models:
   qwen3.5-4b:
     arm: local
     weights: Qwen/Qwen3.5-4B                           # bf16
+    parameters_billion: 4.66
+    served_precision: bf16
+    vllm_eager: false
     vllm: { model: qwen3.5-4b }
     transformers: { model: Qwen/Qwen3.5-4B }
   qwen3.5-9b:
     arm: local
     weights: Qwen/Qwen3.5-9B                           # fp8 under vllm
+    parameters_billion: 9.65
+    served_precision: fp8
+    vllm_eager: false
     vllm: { model: qwen3.5-9b }
     transformers: { model: Qwen/Qwen3.5-9B, options: { quantization: 8bit } }
   gemma4-e4b:
     arm: local
     weights: google/gemma-4-E4B-it-qat-w4a16-ct        # 4-bit QAT
+    # the "effective 4B" name leaves out the per-layer embedding tables (2.82B,
+    # looked up rather than multiplied) and the audio and vision towers
+    parameters_billion: 7.94
+    served_precision: 4-bit
+    vllm_eager: false
     vllm: { model: gemma4-e4b }
     transformers: { model: google/gemma-4-E4B-it-qat-w4a16-ct }
   gemma4-12b:
     arm: local
     weights: google/gemma-4-12B-it-qat-w4a16-ct        # 4-bit QAT
+    parameters_billion: 11.96
+    served_precision: 4-bit
+    vllm_eager: false
     vllm: { model: gemma4-12b }
     transformers: { model: google/gemma-4-12B-it-qat-w4a16-ct }
   gemma3-12b:
     arm: local
     weights: google/gemma-3-12b-it                     # fp8 under vllm; GaMS3 12B's base
+    parameters_billion: 12.19
+    served_precision: fp8
+    vllm_eager: true
     vllm: { model: gemma3-12b }
     transformers: { model: google/gemma-3-12b-it, options: { quantization: 8bit } }
   llama3.2-3b:
     arm: local
     weights: meta-llama/Llama-3.2-3B-Instruct          # bf16
+    parameters_billion: 3.21
+    served_precision: bf16
+    vllm_eager: false
     vllm: { model: llama3.2-3b }
     transformers: { model: meta-llama/Llama-3.2-3B-Instruct }
   llama3.1-8b:
     arm: local
     weights: meta-llama/Llama-3.1-8B-Instruct          # fp8 under vllm
+    parameters_billion: 8.03
+    served_precision: fp8
+    vllm_eager: false
     vllm: { model: llama3.1-8b }
     transformers: { model: meta-llama/Llama-3.1-8B-Instruct, options: { quantization: 8bit } }
   gams-9b:
     arm: local
     weights: cjvt/GaMS-9B-Instruct                     # fp8 under vllm; Gemma 2 based
+    parameters_billion: 9.24
+    served_precision: fp8
+    vllm_eager: false
     # its chat template rejects a system turn, so the system text opens the user turn (D3)
     vllm: { model: gams-9b, options: { fold_system: true } }
     transformers: { model: cjvt/GaMS-9B-Instruct, options: { quantization: 8bit, fold_system: true } }
   gams3-12b:
     arm: local
     weights: cjvt/GaMS3-12B-Instruct                   # fp8 under vllm; Gemma 3 based
+    parameters_billion: 11.77
+    served_precision: fp8
+    vllm_eager: true
     vllm: { model: gams3-12b }
     transformers: { model: cjvt/GaMS3-12B-Instruct, options: { quantization: 8bit } }

@@ -102,6 +102,15 @@ def test_chat_raises_on_a_reported_error(monkeypatch):
         ClaudeBackend("haiku").chat(MESSAGES, SCHEMA)
 
 
+def test_chat_raises_the_reported_error_when_the_reply_has_no_usage(monkeypatch):
+    """An error reply without a usage field raises the reported error, not a KeyError."""
+    reply = json.dumps({"is_error": True, "result": "rate limited"})
+    monkeypatch.setattr(claude_module.subprocess, "run", fake_run({}, reply))
+
+    with pytest.raises(RuntimeError, match="rate limited"):
+        ClaudeBackend("haiku").chat(MESSAGES, SCHEMA)
+
+
 def test_chat_returns_empty_text_when_the_schema_retries_run_out(monkeypatch):
     """Chat returns empty text when the schema retries run out."""
     reply = json.dumps({"is_error": True, "subtype": "error_max_structured_output_retries", "usage": USAGE})

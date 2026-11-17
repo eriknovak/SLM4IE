@@ -23,9 +23,10 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **F1** (F1 score): harmonic mean of precision and recall; 1 is perfect, 0 means nothing right. Macro F1 averages F1 over classes or units with equal weight; micro F1 pools all decisions first.
 - **Macro-F1**: the F1 score computed per class and averaged with equal weight per class, so a rare class such as medical counts as much as a frequent one.
 - **Strict span F1** (span-and-label F1, strict F1): F1 over named-entity mentions where a predicted mention counts as correct only if its start, end and label all equal a gold mention's; micro over all mentions unless macro is named.
+- **F1 point** (point, points): one hundredth of F1, so a gap of 5 points is 0.05; scores in the records are often written as F1 × 100.
 - **Partial-overlap span F1** (partial-overlap F1): span F1 where a predicted mention counts as correct when it shares at least one character with a gold mention of the same label; the gap to strict F1 is the share lost to boundary errors.
 - **Relaxed span F1** (relaxed F1): span F1 where a predicted mention counts as correct when it contains a gold mention of the same label; it forgives a mention drawn too wide but not one drawn too narrow.
-- **Miss rate** (unparseable rate, missed window): the share of sentence windows whose answer could not be parsed against the required JSON schema; such a window is scored as having no mentions.
+- **Miss rate** (unparseable rate, missed window): the share of sentence windows whose answer could not be parsed against the required JSON schema, or timed out; such a window is scored as having no mentions.
 - **Cut-off answer** (token cap): an answer that stopped at the 2,048-token output limit before its JSON closed, so it counts as a missed window.
 - **Equivalence margin** (margin): the largest difference between two systems still read as no practical difference; equivalent when the whole confidence interval of the difference lies inside it, undecided when the interval crosses its edge.
 - **Paired bootstrap**: a bootstrap that redraws the same scored documents for two systems at once and recomputes the difference between them on each draw, so the interval reflects only how the systems differ.
@@ -116,6 +117,7 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 ## KPI coverage
 
 - **KPI** (KPI 2, KPI 3, KPI 4): a key performance indicator the ARIS proposal (Z2-70067) commits to: KPI 2, over 10,000 examples in each of at least two domains, medicine and science; KPI 3, over 5B tokens per language; KPI 4, over 500,000 tokens per domain.
+- **Model KPIs** (KPI 5, KPI 7): the proposal's targets for the project's own models: KPI 5, peak memory within an 8–16 GB GPU; KPI 7, scores within 5–10% of frontier LLMs on Slovene extraction.
 - **Unknown** (as a KPI verdict): the total falls short of the threshold but datasets in that domain reported no size, so the shortfall may be an absence of evidence rather than an absence of text.
 - **Document-level domain** (document labels, document-level labels): the domain a classifier or judge assigns to one document from its own text, as opposed to the source label every document of a dataset inherits.
 - **Lexicon scoring** (lexicon classifier): labelling a document by counting, per 1,000 words, its weighted hits on a word list per domain and taking the highest-scoring domain when it clears a threshold and leads the runner-up by a margin.
@@ -135,15 +137,26 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 
 - **NER** (named-entity recognition): labelling spans of text with the kind of entity they name — a person, a place, a drug, a diagnosis. One of the information-extraction tasks the project targets.
 - **Entity span** (span, IE spans, extraction spans): a named entity's character range and label, `[start, end, label]`, `end` exclusive; labels such as `PER`, `LOC`, `ORG`, `MISC` or `DERIV-PER` (derived from a person's name). Decoded from IOB tags: `B-` opens, `I-` continues, `O` is outside.
+- **Entity labels** (PER, LOC, ORG, MISC, EVT, PRO): the named-entity classes of the four test sets: persons, locations, organisations, other names (miscellaneous), events and products; SlavicNER uses events and products in place of miscellaneous.
+- **Fine-tuning**: further training of a pretrained model on labelled examples of the target task.
 - **IE** (information extraction): pulling structured facts — entities, relations, attributes — out of running text. The project's target task family.
 - **KAS-term**: a terminology-identification dataset built from KAS, the corpus of Slovene academic theses, with the spans of technical terms marked in each text.
 - **HUMADEX**: a medical named-entity dataset machine-translated into Slovene, with entity spans; large, but not native Slovene text.
 - **Sentence window** (window): consecutive sentences of one document packed up to a character limit and sent to a model as one prompt; a document's mentions are the union over its windows.
 - **Janes-Tag** (Janes-Tag 3.0): a CLARIN.SI corpus of Slovene tweets, forum posts and comments with named entities marked, the project's non-standard, user-written NER test set.
 - **SlavicNER** (BSNLP): the named-entity corpus of the BSNLP 2017–2023 shared tasks, news articles grouped by topic in several Slavic languages; its Slovene part has been public on GitHub since 2017.
-- **Download-gated** (gated test set): a test set served from a repository behind a download page rather than as plain files on the open web, which lowers the chance a model saw it in training.
+- **Download-gated** (gated test set): a test set served from a repository behind a download page rather than as plain files on the open web, which lowers the chance a model saw it in training. Not the licence sense of gated source.
 - **GaMS** (GaMS 9B, GaMS3 12B): open LLMs trained further on Slovene text from Gemma base models by the University of Ljubljana.
 - **Silver labels** (silver annotation, silver data): labels assigned by a model rather than a person, used to train a smaller model where human labels are too few.
+- **SUK** (SUK 1.1): the Slovene training corpus SUK 1.1 from CLARIN.SI, which joins ssj500k, Ambiga, ElexisWSD and SentiCoref under one annotation scheme; `ner/suk` holds its documents outside ssj500k.
+- **Zero-shot** (zero-shot prompting): asking a model to do a task from instructions alone, with no labelled example of the task in the prompt and no training on it.
+- **Task registry entry** (entry): one dataset converted for one task, named `<task>/<dataset>` such as `ner/suk`, with its splits and its role; a held-out entry is never read for training.
+- **Extractor**: the project's converter from one dataset's downloaded files to its plain text and annotations, the step before a task registry entry can be built.
+- **SentiNews**: a CLARIN.SI corpus of Slovene news articles labelled for sentiment.
+- **SuperGLUE-SL**: the Slovene translation of the SuperGLUE benchmark of reading-comprehension and inference tasks; its public test files carry no labels.
+- **CLASSLA**: the Slovene and South Slavic language-processing pipeline from CLARIN.SI and the University of Ljubljana, whose NER work splits Janes-Tag by sentence.
+- **SloBENCH**: the Slovene evaluation leaderboard from CJVT, which keeps its SUK test set hidden.
+- **Frontier model** (frontier LLM): the largest and strongest commercial LLMs of the day, such as Claude, GPT and Gemini, reached only through their vendors' services.
 
 ## Tokenizers
 
@@ -166,10 +179,8 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Manual forms** (manually checked forms, automatic rows): in Sloleks 3.2, the forms of lexemes whose cuts the lexicon's authors checked by hand; the rest are generated by rules and called automatic.
 - **Heuristic gold** (lemma-alignment gold, corrected heuristic): the project's own morphological gold, which cuts an inflected form where it first differs from its lemma, with rules for the usual stem changes.
 - **Sloleks gold** (Sloleks 3.2 gold, Sloleks 3.2 split): the morphological gold cut from the Sloleks 3.2 stem-ending split, one cut per form.
-- **SSJ** (ssj500k, UD Slovenian SSJ): the manually annotated Slovene reference corpus, whose Universal Dependencies treebank the MorphScore v2 Slovene items are drawn from.
+- **SSJ** (ssj500k, UD Slovenian SSJ): the manually annotated Slovene reference corpus, with named-entity labels on part of it; its Universal Dependencies treebank supplies the MorphScore v2 Slovene items.
 - **UD** (Universal Dependencies): a cross-lingual scheme of part-of-speech tags, morphological features and syntactic dependencies, with one annotated treebank per language.
-- **SUK** (SUK 1.1): the Slovene training corpus SUK 1.1 from CLARIN.SI, which joins ssj500k, Ambiga, ElexisWSD and SentiCoref under one annotation scheme; `ner/suk` holds its documents outside ssj500k.
-- **Zero-shot** (zero-shot prompting): asking a model to do a task from instructions alone, with no labelled example of the task in the prompt and no training on it.
 
 ## Other
 
@@ -180,3 +191,12 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Lineage run** (lineage): an MLflow run that trains or scores nothing and only records which data and code produced a set of outputs, keeping them as attached files.
 - **JSONL** (JSON lines): a text file with one JSON object per line, the shape of every converted dataset in the project.
 - **LLM** (large language model, LLMs): a neural language model trained on large text collections that answers a prompt with generated text; here both the hosted Claude models and the open-weight models run on a local GPU.
+- **vLLM** (vllm-service): an open-source server for LLMs that batches requests on the GPU; the vllm-service is the project's local install of it.
+- **Eager mode**: vLLM's mode that runs the model step by step without compiled GPU graphs; it uses less memory and runs slower.
+- **Number format** (bf16, fp8, 4-bit, served precision): the format the weights are stored in: 16-bit brain floating point, 8-bit floating point or 4-bit integers; fewer bits take less GPU memory.
+- **Gemma 4 E4B** (E4B): Gemma 4's small model named for about 4 billion effective parameters; it stores 7.9 billion, because its per-layer embeddings are kept unquantised beside the 4-bit weights.
+- **xgrammar**: a library that restricts an LLM's decoding to tokens a JSON schema allows, so every answer it finishes parses.
+- **Cache tokens** (fresh, cache-written, cache-read): Claude's three billed kinds of input token: read for the first time, stored for reuse, or read back from that store at a lower price.
+- **QAT** (quantisation-aware training): training a model with its low-precision format simulated, so its 4-bit checkpoint loses less accuracy than one quantised afterwards.
+- **KV cache** (KV, KV bytes per token): the stored attention keys and values of every token read so far, which grows with the prompt and answer and takes GPU memory beside the weights.
+- **Clause** (diagnostic, measured): one prediction a record reads; a diagnostic clause explains a result without moving the verdict, and a measured one reports a quantity with its spread instead of testing a bar.
