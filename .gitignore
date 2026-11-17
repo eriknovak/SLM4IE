@@ -186,3 +186,6 @@ mlruns/
 
 # marimo's notebook cache.
 __marimo__/
+experiments/report.html
+experiments/build_report.py
+experiments/labflow_report/
