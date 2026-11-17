@@ -7,7 +7,7 @@ branch: exp/ie-benchmark-slovenian
 base_commit: 909c513
 status: concluded
 ticket: "#42"
-pr:
+pr: https://github.com/eriknovak/SLM4IE/pull/56
 mlflow: http://localhost:5555/#/experiments/17
 builds_on: []
 varies: [model-families/decoder-only]
