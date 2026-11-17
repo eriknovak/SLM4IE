@@ -23,6 +23,7 @@ import slm4ie.data.extract.extractors.huggingface  # noqa: F401
 import slm4ie.data.extract.extractors.json  # noqa: F401
 import slm4ie.data.extract.extractors.jsonl  # noqa: F401
 import slm4ie.data.extract.extractors.macocu  # noqa: F401
+import slm4ie.data.extract.extractors.slavicner  # noqa: F401
 import slm4ie.data.extract.extractors.tei  # noqa: F401
 import slm4ie.data.extract.extractors.text  # noqa: F401
 from slm4ie.data.archives import extract_archive

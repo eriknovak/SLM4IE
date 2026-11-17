@@ -33,9 +33,9 @@ def test_loads_successfully(tasks_config: TasksConfig) -> None:
     assert isinstance(tasks_config, TasksConfig)
 
 
-def test_has_eleven_entries(tasks_config: TasksConfig) -> None:
-    """The registry currently declares 11 task entries."""
-    assert len(tasks_config.entries) == 11
+def test_has_thirteen_entries(tasks_config: TasksConfig) -> None:
+    """The registry currently declares 13 task entries."""
+    assert len(tasks_config.entries) == 13
 
 
 def test_every_entry_has_required_fields(tasks_config: TasksConfig) -> None:

@@ -1,0 +1,4 @@
+variant,windows_per_second,documents_per_second,serving,windows,duration_s
+claude-haiku-5-5,0.1920499499589837,0.15827283336152165,sequential calls through the Claude Code CLI,3764,19599.067850857973
+claude-opus-5-5,0.21447157537941108,0.17675101669153379,sequential calls through the Claude Code CLI,3764,17550.111213298514
+claude-sonnet-5-5,0.2678428723478559,0.2207355446394923,sequential calls through the Claude Code CLI,3764,14053.015363095328

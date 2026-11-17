@@ -1,0 +1,6 @@
+field,type,distinct,values
+id,text,491,
+text,text,491,
+spans.start,numeric,,
+spans.end,numeric,,
+spans.label,categorical,5,EVT; LOC; ORG; PER; PRO

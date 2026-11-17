@@ -1,0 +1,116 @@
+# ner-labels.yaml — Plain-language label descriptions for the zero-shot NER prompt.
+#
+# Read by: slm4ie/evaluation/prompts.py::load_label_descriptions
+#          one description per label reaches the model in the prompt's label list,
+#          followed by the examples of the chosen variant.
+#
+# Top-level keys:
+#   label_sets   Map of label set name -> set spec.
+#
+# Label set fields:
+#   entries      Task registry entries (configs/data/tasks.yaml) scored on this set;
+#                an entry sits in exactly one set.
+#   labels       Label -> label spec, in the registry's label order.
+#
+# Label spec fields:
+#   description  What the label covers, in the words of its annotation guidelines.
+#   examples     Variant name -> list of Slovene example names. Every label carries
+#                both variants:
+#                  unseen   names that match no gold mention of any test split;
+#                  common   frequent names, some of which are test mentions
+#                           (ZDA alone is 402 SlavicNER test mentions).
+#
+# Notes:
+#   No label set is mapped onto another: each test set is scored on its own
+#   labels. Running both example variants measures how much naming frequent
+#   test mentions in the prompt lifts the scores.
+
+label_sets:
+  # Slovene NER guidelines used for ssj500k, SUK and Janes-NER: Zupan, Ljubešić
+  # and Erjavec (2017), Slovenian NER guidelines v1.1 (CLARIN.SI 11356/1123);
+  # checked against the gold mentions of the validation splits.
+  slovene-ner:
+    entries: [ner/ssj500k, ner/suk, ner/janes_tag]
+    labels:
+      PER:
+        description: >-
+          The name of a person, real or fictional: a first name, a surname, both, or a nickname.
+          Also a capitalised noun naming the members of a nation or the inhabitants of a place, and
+          any social-media username written with @, whoever holds the account.
+        examples:
+          unseen: [Marija Kovačič, Rožanc, Prekmurci, Mariborčani, "@miha_kos"]
+          common: [Janez Novak, Novak, Prešeren, Slovenci, Italijan, Ljubljančani, "@janez_novak"]
+      LOC:
+        description: >-
+          The name of a place: a continent, country, region, city, town or village, or a river,
+          lake, sea, mountain or other natural feature, also when written as an abbreviation.
+        examples:
+          unseen: [Nova Zelandija, Kamnik, KP, Nanos, Soča]
+          common: [Evropa, Slovenija, ZDA, Ljubljana, LJ, Triglav, Sava]
+      ORG:
+        description: >-
+          The name of an organisation: a company, public institution, government body, political
+          party, international organisation, association, school or university, media house,
+          sports club or team, also a club named after its city, and an online service named as
+          a company.
+        examples:
+          unseen: [Kolinska, Ministrstvo za kulturo, Unicef, Univerza v Mariboru, Radio Študent, Rudar Velenje, Snapchat]
+          common: [Mercator, Vlada, SDS, EU, Univerza v Ljubljani, RTV Slovenija, Olimpija, Twitter, Facebook]
+      MISC:
+        description: >-
+          Any other proper name that is not a person, place or organisation: a product or model,
+          a piece of software, the title of a book, film, song or other work, an event or festival.
+        examples:
+          unseen: [Renault Clio, Ubuntu, Martin Krpan, Festival Lent]
+          common: [Nokia 7270, Windows, Krst pri Savici, Sziget festival]
+      DERIV-PER:
+        description: >-
+          An adjective formed from a person's name, usually a possessive one; only the adjective
+          is the mention.
+        examples:
+          unseen: [Kardeljev, Newtonov (as in "Newtonov zakon"), Krpanova (as in "Krpanova kobila")]
+          common: [Prešernov, Janševa (as in "Janševa vlada"), Darwinova (as in "Darwinova teorija")]
+
+  # BSNLP shared-task guidelines: Piskorski, Marcińczuk and Yangarber (2024),
+  # Cross-lingual Named Entity Corpus for Slavic Languages (arXiv 2404.00482);
+  # checked against the gold mentions of the validation split.
+  bsnlp:
+    entries: [ner/slavicner]
+    labels:
+      PER:
+        description: >-
+          The name of a person, real or fictional: a first name, a surname or both. Also a noun
+          naming the members of a nation.
+        examples:
+          unseen: [Jacinda Ardern, Ardern, Shinzo Abe, Kanadčani, Norvežani]
+          common: [Angela Merkel, Merklova, Vladimir Putin, Britanci, Američani, Rusi]
+      ORG:
+        description: >-
+          The name of an organisation: a company, political party, public institution, government
+          body, international organisation, news agency, or a religious, educational, research or
+          sports organisation.
+        examples:
+          unseen: [Unicef, OPEC, Unesco, Siemens]
+          common: [Evropska unija, EU, Evropska komisija, Nato, Gazprom, Pfizer, STA]
+      LOC:
+        description: >-
+          The name of a place: a continent, country, region, city or natural feature, or a named
+          facility such as a street, square, building, stadium, bridge or airport.
+        examples:
+          unseen: [Nova Zelandija, Oslo, Gibraltar, Kilimandžaro, Heathrow]
+          common: [Evropa, ZDA, Velika Britanija, Bruselj, Ljubljana, Brnik]
+      EVT:
+        description: >-
+          The name of an event: an election, war, summit, negotiation process, sports competition
+          or holiday, and the COVID-19 pandemic with its disease and virus names.
+        examples:
+          unseen: [svetovno prvenstvo v nogometu, velika noč, Woodstock, ebola, španska gripa]
+          common: [brexit, olimpijske igre, božič, covid-19, koronavirus]
+      PRO:
+        description: >-
+          The name of a product or service: goods, vehicle and aircraft models, medicines and
+          vaccines, technologies and standards, infrastructure projects such as pipelines, online
+          platforms, and newspapers, TV channels or websites named as media.
+        examples:
+          unseen: [Airbus A320, Novavax, Wi-Fi, Turški tok, TikTok, Al Jazeera]
+          common: [Boeing 737, Sputnik V, 5G, Severni tok 2, Twitter, Facebook, Večer, CNN]

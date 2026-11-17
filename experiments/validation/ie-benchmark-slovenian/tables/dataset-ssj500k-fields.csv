@@ -1,0 +1,6 @@
+field,type,distinct,values
+id,text,179,
+text,text,179,
+spans.start,numeric,,
+spans.end,numeric,,
+spans.label,categorical,5,DERIV-PER; LOC; MISC; ORG; PER
