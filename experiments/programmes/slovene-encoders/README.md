@@ -3,7 +3,6 @@ title: Can a small encoder pretrained on Slovene alone beat multilingual encoder
 slug: slovene-encoders
 short: Slovene encoders
 status: open
-members: []
 planned:
   - slug: encoder-baselines-slovenian
     short: Encoder baselines

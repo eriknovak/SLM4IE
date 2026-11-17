@@ -9,7 +9,7 @@ status: concluded
 ticket: "#5"
 pr: "#30"
 mlflow: http://localhost:5555/#/experiments/13
-builds_on: [../../data/curation-quality-slovenian/]
+builds_on: [curation-quality-slovenian]
 varies: []
 uses: []
 tests: []
@@ -554,9 +554,9 @@ Every build logs to the project's MLflow server, the baseline under `slm4ie/data
 
 ```bash
 export MLFLOW_TRACKING_URI=http://localhost:5555
-export EXP=experiments/data/curation-thresholds-slovenian
+export EXP=experiments/programmes/slovene-training-data/curation-thresholds-slovenian
 export OUT=data/experiments/data/curation-thresholds-slovenian/interim
-export RUBRIC=experiments/data/curation-quality-slovenian/configs/judge-rubric.md
+export RUBRIC=experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-rubric.md
 
 # Baseline rebuild of the shared corpus for F1-F3 and F12 (commit 2ece205)
 uv run python scripts/curate_pretraining_corpus.py run --config configs/data/curate.yaml --all --mlflow

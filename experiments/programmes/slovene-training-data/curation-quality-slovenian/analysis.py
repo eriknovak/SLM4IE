@@ -19,7 +19,7 @@ need the per-stage funnel, which is step 11.
 
 Run it with:
 
-    uv run python experiments/data/curation-quality-slovenian/analysis.py
+    uv run python experiments/programmes/slovene-training-data/curation-quality-slovenian/analysis.py
 
 `--figures-only` redraws the figures from the committed tables alone, without
 the derived data, as the full run does once its tables are written.
@@ -43,7 +43,9 @@ from slm4ie.data.curate.inspect.profile import iter_stage_sentinels
 from slm4ie.data.curate.paths import executor_task_stats, read_bucket_index
 from slm4ie.utils.stats import cohen_kappa, wilson
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
+TOOLS = EXPERIMENTS / "tools"
+sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
 from create_assets import HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  # path set above
 
 # ===============================

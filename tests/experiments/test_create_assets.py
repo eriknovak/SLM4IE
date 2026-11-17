@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("datachart_themes.slm4ie")
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments" / "tools"))
 import create_assets  # noqa: E402  — path set above so the shared helper resolves
 
 

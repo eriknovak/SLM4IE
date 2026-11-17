@@ -296,7 +296,7 @@ datasets.
 
 ## Candidate sources
 
-Datasets the [Slovene data landscape](../experiments/data/data-landscape-slovenian/README.md)
+Datasets the [Slovene data landscape](../experiments/programmes/slovene-training-data/data-landscape-slovenian/README.md)
 catalogued (`tables/catalogue.csv`) that could join a later corpus build. The
 shortlist keeps rows that are not in the registry, are openly downloadable,
 were written in Slovene (not translated or machine-made), and are mostly edited,
@@ -325,6 +325,6 @@ of `finepdf`; learner and student writing (KOST, KOŠ); dictionaries, lexicons
 and label-only sets; and every forum or social-media source, per the register
 exclusion above.
 
-[F2]: ../experiments/data/data-landscape-slovenian/README.md#f2--medicines-new-native-supply-is-large-in-words-and-small-in-documents--key
-[F3]: ../experiments/data/data-landscape-slovenian/README.md#f3--science-clears-both-kpis-on-native-prose-alone--key
-[F4]: ../experiments/data/data-landscape-slovenian/README.md#f4--the-catalogue-is-mostly-supply-the-project-does-not-use--supporting-f3
+[F2]: ../experiments/programmes/slovene-training-data/data-landscape-slovenian/README.md#f2--medicines-new-native-supply-is-large-in-words-and-small-in-documents--key
+[F3]: ../experiments/programmes/slovene-training-data/data-landscape-slovenian/README.md#f3--science-clears-both-kpis-on-native-prose-alone--key
+[F4]: ../experiments/programmes/slovene-training-data/data-landscape-slovenian/README.md#f4--the-catalogue-is-mostly-supply-the-project-does-not-use--supporting-f3

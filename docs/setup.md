@@ -67,8 +67,8 @@ uv run ruff check <paths>    # Python lint (docstrings included)
 uv run rumdl fmt <paths>     # Markdown formatting and lint
 ```
 
-`experiments/build_report.py` is vendored from the labflow skill and excluded
-from ruff so it stays byte-identical to upstream.
+The report builder runs from the labflow skill; the repo keeps no copy of it,
+and git ignores the built `experiments/report.html`.
 
 Secrets and ephemeral values (such as presigned download URLs) belong in a
 gitignored `*.local.yaml` sibling overlay, which `load_yaml` deep-merges

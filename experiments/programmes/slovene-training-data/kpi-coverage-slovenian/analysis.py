@@ -10,7 +10,7 @@ verdicts, the gap attribution and the figures.
 
 Run it with:
 
-    uv run --group analysis python experiments/data/kpi-coverage-slovenian/analysis.py
+    uv run --group analysis python experiments/programmes/slovene-training-data/kpi-coverage-slovenian/analysis.py
 
 `--figures-only` redraws the figures from the committed tables alone, without
 the builds, as the full run does once its tables are written.
@@ -35,10 +35,6 @@ import yaml
 from datachart.charts import BarChart, DumbbellChart, LineChart
 from datachart.constants import AXIS_SCALE, BAR_MODE, LEGEND_LOCATION, ORIENTATION, SORT
 
-# make the shared figure helper importable
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from create_assets import HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402
-
 from slm4ie.data.curate.inspect.domains import DecisionRule, DomainLexicons, assign_domain, load_lexicons, score_text
 from slm4ie.data.curate.inspect.judge import DOMAINS
 from slm4ie.data.curate.inspect.profile import cached_source_counts, iter_stage_sentinels
@@ -46,12 +42,18 @@ from slm4ie.data.curate.inspect.supervised import DomainClassifier, fit_classifi
 from slm4ie.data.curate.lineage import read_sentinel
 from slm4ie.utils.config import load_yaml
 
+# make the shared figure helper importable
+EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
+TOOLS = EXPERIMENTS / "tools"
+sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
+from create_assets import HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402
+
 # ===============================
 # Defaults
 # ===============================
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+ROOT = EXPERIMENTS.parent
 TABLES_DIR = HERE / "tables"
 FIGURES_DIR = HERE / "figures"
 EXTRACT_CONFIG = ROOT / "configs" / "data" / "extract.yaml"

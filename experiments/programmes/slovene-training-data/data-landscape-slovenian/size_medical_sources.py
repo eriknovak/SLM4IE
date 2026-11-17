@@ -12,7 +12,7 @@ second run re-counts without re-downloading. Requests carry a contact address
 and are spaced out; a source is never hit faster than one request per two
 seconds except the Wikipedia API.
 
-    uv run --group analysis python experiments/data/data-landscape-slovenian/size_medical_sources.py
+    uv run --group analysis python experiments/programmes/slovene-training-data/data-landscape-slovenian/size_medical_sources.py
         [--only zdravniski-vestnik,clinical-guidelines] [--force]
 """
 
@@ -36,7 +36,7 @@ from pypdf import PdfReader
 # ===============================
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+ROOT = HERE.parents[3]
 INTERIM = ROOT / "data" / "experiments" / "data" / "data-landscape-slovenian" / "interim"
 SIZES_TABLE = HERE / "tables" / "native-medical-sizes.csv"
 

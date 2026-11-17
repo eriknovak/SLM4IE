@@ -4,8 +4,6 @@ slug: tokenizer-choice-slovenian
 short: Slovene tokenizer choice
 why: The project must choose its tokenizer before it pretrains its models, since the tokenizer is fixed for the life of a model.
 status: open
-members:
-  - ../validation/morph-gold-slovenian/
 planned:
   - slug: morph-metrics-slovenian
     short: New morph metrics
@@ -51,7 +49,7 @@ Slovene is morphologically rich: a noun inflects for six cases in three numbers,
 ## What we now believe
 
 - **The morphological gold does not decide which tokenizer looks best, but the set of scored forms does.** The stem-ending split of the Sloleks authors and the project's corrected heuristic rank the 24 tokenizers alike [morph-gold-slovenian:F1]. Scoring only the manually checked forms reorders them, because the manual forms hold fewer nouns and the word classes rank the tokenizers apart [morph-gold-slovenian:F2]. Every morph score is therefore reported on the manual forms first, and per word class beside the pooled score.
-- **Figure**: ![Kendall's τ with its bootstrap interval and its bar for every pair of tokenizer rankings: the two golds agree above their bar, the manual and all-forms rankings fall below theirs](../validation/morph-gold-slovenian/figures/sweep-rank-agreement-by-ranking-pair.svg)
+- **Figure**: ![Kendall's τ with its bootstrap interval and its bar for every pair of tokenizer rankings: the two golds agree above their bar, the manual and all-forms rankings fall below theirs](morph-gold-slovenian/figures/sweep-rank-agreement-by-ranking-pair.svg)
 - **Unigram cuts closest to the Sloleks morphemes and is the one algorithm still gaining at 128k, while compression improves for every algorithm.** Compression and Morph-Edit-Distance have not levelled off for any of the six algorithms by 128k, and morpheme-boundary F1 still rises there for Unigram alone [morph-gold-slovenian:F3].
 
 ## Threads

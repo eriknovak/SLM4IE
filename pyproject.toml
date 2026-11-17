@@ -155,7 +155,7 @@ docs = [
 ]
 
 # Turning tracked runs into an experiment's tables and figures:
-# each experiments/<category>/<slug>/analysis.py, via slm4ie/utils/mlflow.py.
+# each experiments/programmes/<programme>/<slug>/analysis.py, via slm4ie/utils/mlflow.py.
 analysis = [
     {include-group = "tracking"},
     "pandas>=2.2",                    # report tables from the MLflow store

@@ -392,8 +392,8 @@ export MLFLOW_TRACKING_URI=http://localhost:5555
 cd "$(git rev-parse --show-toplevel)"
 
 # F2 — fetch and count the new native medical sources (commit ff303ac)
-uv run --group analysis python experiments/data/data-landscape-slovenian/size_medical_sources.py
+uv run --group analysis python experiments/programmes/slovene-training-data/data-landscape-slovenian/size_medical_sources.py
 
 # F1, F2, F3, F4, F5 — catalogue, tables, figures and the lineage run (commit ce19752)
-uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py --mlflow
+uv run --group analysis python experiments/programmes/slovene-training-data/data-landscape-slovenian/analysis.py --mlflow
 ```

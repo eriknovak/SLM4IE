@@ -41,9 +41,9 @@ both from the shared `create_assets.py`, which check the rules of labflow's
 
 Run it with:
 
-    uv run --group analysis --group evaluation python experiments/validation/ie-benchmark-slovenian/analysis.py data
+    uv run --group analysis --group evaluation python experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py data
     ~/.claude/skills/exp/scripts/tracking-env.sh -- uv run --group analysis --group evaluation \
-        python experiments/validation/ie-benchmark-slovenian/analysis.py scores
+        python experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py scores
 """
 
 import argparse
@@ -94,9 +94,9 @@ logger = logging.getLogger(__name__)
 HERE = Path(__file__).resolve().parent
 TABLES_DIR = HERE / "tables"
 FIGURES_DIR = HERE / "figures"
-TASKS_DIR = HERE.parents[2] / "data" / "tasks"
+TASKS_DIR = EXPERIMENTS.parent / "data" / "tasks"
 MODELS_CONFIG = HERE / "configs" / "benchmark-models.yaml"
-TASKS_CONFIG = HERE.parents[2] / "configs" / "data" / "tasks.yaml"
+TASKS_CONFIG = EXPERIMENTS.parent / "configs" / "data" / "tasks.yaml"
 SPLITS = ("val", "test")
 # the splits a model or a pick may have seen before a test split is read
 TUNING_SPLITS = ("train", "val")

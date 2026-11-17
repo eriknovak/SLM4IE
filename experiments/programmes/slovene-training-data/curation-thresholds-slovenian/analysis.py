@@ -22,7 +22,7 @@ the volume targets (D4).
 
 Run it with:
 
-    uv run --group corpus --group analysis python experiments/data/curation-thresholds-slovenian/analysis.py
+    uv run --group corpus --group analysis python experiments/programmes/slovene-training-data/curation-thresholds-slovenian/analysis.py
 
 `--figures-only` redraws the figures from the committed tables alone, without
 the builds, as the full run does once its tables are written.
@@ -50,7 +50,9 @@ from datatrove.pipeline.filters import GopherRepetitionFilter
 from datatrove.utils.typeshelper import Languages
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
+TOOLS = EXPERIMENTS / "tools"
+sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
 from create_assets import FULL_WIDTH, HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
 
 from slm4ie.data.curate.config import (  # noqa: E402

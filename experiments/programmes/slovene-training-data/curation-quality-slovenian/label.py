@@ -2,12 +2,12 @@
 
 Run it with:
 
-    uv run marimo edit experiments/data/curation-quality-slovenian/label.py
+    uv run marimo edit experiments/programmes/slovene-training-data/curation-quality-slovenian/label.py
 
 and label the adjudication set, the cases where the judge and the pipeline
 conflict, with:
 
-    uv run marimo edit experiments/data/curation-quality-slovenian/label.py -- --set adjudication
+    uv run marimo edit experiments/programmes/slovene-training-data/curation-quality-slovenian/label.py -- --set adjudication
 
 The judge's labels only become evidence once their agreement with a person is
 known, so this notebook collects that person's labels on the same rubric. The

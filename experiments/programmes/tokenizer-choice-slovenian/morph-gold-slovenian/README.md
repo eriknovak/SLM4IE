@@ -1,6 +1,6 @@
 ---
 title: Whether the Sloleks 3.2 stem-ending split ranks Slovene tokenizers as the lemma-alignment gold does
-slug: morph-gold-slovenian
+slug: morph-gold-slovenian  # MLflow experiment: slm4ie/validation/morph-gold-slovenian
 short: Sloleks morph gold
 category: validation
 branch: exp/morph-gold-slovenian
@@ -169,7 +169,7 @@ concluded: 2026-10-25
   3. Morph-Consistency is computed once on all scored forms and once on the manual ones ([D11]).
   4. Each sample is split into words, and the tokenizer encodes every distinct word once, weighted by its count. From those tokens follow fertility, tokens per byte, characters per token and the Rényi efficiency of order $\alpha$, read from `eval.renyi_alpha`, and every vocabulary token's count, binned by `scoring.count_bins` ([D12]). Special tokens are left out.
   5. A tokenizer is rescored only when a digest of the golds, the samples, the settings and the scoring code changes.
-- **Code**: `experiments/validation/morph-gold-slovenian/analysis.py::score_tokenizer`
+- **Code**: `experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py::score_tokenizer`
 - **Settings**: `scoring.max_workers` (tokenizers scored at once), `scoring.count_bins` (lower edges of the count bins), in `configs/analysis.yaml`; `eval.renyi_alpha` (the Rényi order), `special_tokens` (tokens left out of the counts), in `configs/sweep-vocab-size.yaml`
 
 ### M8 — Rank the tokenizers per gold and slice, and compute Kendall's τ with a lexeme bootstrap
@@ -182,7 +182,7 @@ concluded: 2026-10-25
   3. Each of `stats.n_resamples` bootstrap draws resamples the lexemes with replacement, so a lexeme's weight is how many times it was drawn, and recomputes F1 ([D6]). The MorphScore items carry no lexeme, so they are resampled as items. Readings over the same lexemes share the draws, so both rankings of one pair come from the same resampled lexemes.
   4. Kendall's τ between two rankings is computed on the point F1 and on every paired draw; the interval is the central `stats.ci_level` of the draws. The 16-tokenizer readings drop the two table-trained algorithms ([D5]).
   5. Q1's rule takes, per metric, slice and algorithm, the gain from 16k to 32k and from 64k to 128k in the metric's better direction. The metric has levelled off when the late gain is under `scoring.levelled_ratio` of the early one, falls when it is negative, and has no early gain when the early one is not positive.
-- **Code**: `experiments/validation/morph-gold-slovenian/analysis.py::build_scores`
+- **Code**: `experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py::build_scores`
 - **Settings**: `stats.n_resamples` (bootstrap draws), `stats.ci_level` (central mass of each interval), `stats.seed` (seed of the draws), in `configs/sweep-vocab-size.yaml`; `scoring.levelled_ratio` (the Q1 levelling share), `scoring.rare_below` (the count under which a vocabulary token is rare), in `configs/analysis.yaml`
 
 ## Decisions
@@ -434,14 +434,14 @@ export MLFLOW_TRACKING_URI=http://localhost:5555   # the shared server
 cd <repo>   # with data/ linked to /vault/data/SLM4IE
 
 # Corpus split, both samples and the morpheme table (commit cd57bce)
-uv run python scripts/sweep_tokenizers.py sample --config experiments/validation/morph-gold-slovenian/configs/sweep-vocab-size.yaml --max-workers 4
+uv run python scripts/sweep_tokenizers.py sample --config experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/configs/sweep-vocab-size.yaml --max-workers 4
 
 # Scored golds, held-out form counts, MorphScore items and the dataset tables (commit cd57bce)
-uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py data
+uv run --group analysis python experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py data
 
 # F1 to F6 — train the 24 tokenizers, tracked (commit 7d81996)
-uv run python scripts/sweep_tokenizers.py train --config experiments/validation/morph-gold-slovenian/configs/sweep-vocab-size.yaml --all --tier tracked --max-workers 4
+uv run python scripts/sweep_tokenizers.py train --config experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/configs/sweep-vocab-size.yaml --all --tier tracked --max-workers 4
 
 # F1 to F6 — score and rank the tokenizers, and draw every table and figure (commit 8f408e8)
-uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py scores
+uv run --group analysis python experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py scores
 ```

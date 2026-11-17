@@ -7,7 +7,14 @@ from types import ModuleType
 
 from slm4ie.tokenizers.morphology import LexemeSplit, MorphemeSegmentation, MorphLexicon
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "experiments" / "validation" / "morph-gold-slovenian" / "analysis.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "experiments"
+    / "programmes"
+    / "tokenizer-choice-slovenian"
+    / "morph-gold-slovenian"
+    / "analysis.py"
+)
 
 
 def _load() -> ModuleType:

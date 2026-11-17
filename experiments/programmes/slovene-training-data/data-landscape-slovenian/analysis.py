@@ -10,7 +10,7 @@ aggregates per domain under the three access filters of D8.
 Run it from anywhere; `--mlflow` also records the pass as a lineage run in the
 experiment's MLflow experiment, with the tables and figures as artifacts:
 
-    uv run --group analysis python experiments/data/data-landscape-slovenian/analysis.py [--mlflow]
+    uv run --group analysis python experiments/programmes/slovene-training-data/data-landscape-slovenian/analysis.py [--mlflow]
 
 `--figures-only` redraws the figures from the committed tables alone, without
 the raw evidence files, as the full run does once its tables are written.
@@ -29,7 +29,9 @@ import yaml
 from datachart.charts import BarChart
 from datachart.constants import BAR_MODE, EMPHASIS, LEGEND_LOCATION, ORIENTATION, SORT
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
+TOOLS = EXPERIMENTS / "tools"
+sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
 from create_assets import ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  # path set above
 
 from slm4ie.utils import mlflow as ml  # noqa: E402
@@ -41,7 +43,7 @@ from slm4ie.utils import mlflow as ml  # noqa: E402
 MLFLOW_EXPERIMENT = "slm4ie/data/data-landscape-slovenian"
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+ROOT = EXPERIMENTS.parent
 RAW_DIR = ROOT / "data" / "experiments" / "data" / "data-landscape-slovenian" / "raw"
 TABLES_DIR = HERE / "tables"
 FIGURES_DIR = HERE / "figures"

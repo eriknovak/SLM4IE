@@ -24,9 +24,9 @@ the sweep's parent run.
 
 Run it with:
 
-    uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py data
+    uv run --group analysis python experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py data
     ~/.claude/skills/exp/scripts/tracking-env.sh --experiment slm4ie/validation/morph-gold-slovenian -- \
-        uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py scores
+        uv run --group analysis python experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py scores
 
 The `figures` step redraws the figures from the committed tables alone, as
 `scores` does once its tables are written; it needs no tokenizers or MLflow.
@@ -55,11 +55,8 @@ from mlflow.tracking import MlflowClient
 from scipy.stats import kendalltau
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from create_assets import FULL_WIDTH, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
-
-from slm4ie.tokenizers import stats as st  # noqa: E402
-from slm4ie.tokenizers.base import split_words  # noqa: E402
+from slm4ie.tokenizers import stats as st
+from slm4ie.tokenizers.base import split_words
 from slm4ie.tokenizers.config import SweepConfig, load_sweep_config
 from slm4ie.tokenizers.corpus import SPLIT_SIDES, iter_sample, load_corpus_split
 from slm4ie.tokenizers.evaluate import load_tokenizer_artifact
@@ -86,6 +83,12 @@ from slm4ie.utils.config import load_yaml
 from slm4ie.utils.io import open_output, open_text_stream
 from slm4ie.utils.parallel import run_parallel
 from slm4ie.utils.versioning import file_sha256
+
+# make the shared figure helper importable
+EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
+TOOLS = EXPERIMENTS / "tools"
+sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
+from create_assets import FULL_WIDTH, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
 
 # ===============================
 # Logging

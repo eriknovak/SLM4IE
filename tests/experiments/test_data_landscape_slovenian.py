@@ -19,7 +19,7 @@ import yaml
 pytest.importorskip("datachart")
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPERIMENT = ROOT / "experiments" / "data" / "data-landscape-slovenian"
+EXPERIMENT = ROOT / "experiments" / "programmes" / "slovene-training-data" / "data-landscape-slovenian"
 
 
 @pytest.fixture(scope="module")

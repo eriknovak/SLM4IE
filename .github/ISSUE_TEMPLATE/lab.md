@@ -1,11 +1,11 @@
 ---
 name: Experiment
-about: A hypothesis to test, recorded under experiments/<category>/<slug>/ (labflow)
+about: A hypothesis to test, recorded under experiments/programmes/<programme>/<slug>/ (labflow)
 title: ""
 labels: lab, needs-triage
 ---
 
-Experiment record: `experiments/<category>/<slug>/` (labflow, branch `exp/<slug>`). Builds on <slug> (#n); siblings: <slug> (#n).
+Experiment record: `experiments/programmes/<programme>/<slug>/` (labflow, branch `exp/<slug>`). Builds on <slug> (#n); siblings: <slug> (#n).
 
 ## Problem Statement
 

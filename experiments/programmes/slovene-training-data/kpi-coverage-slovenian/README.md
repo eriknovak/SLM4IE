@@ -1,6 +1,6 @@
 ---
 title: KPI coverage of the curated Slovene corpus under source and document-level domain labels
-slug: kpi-coverage-slovenian
+slug: kpi-coverage-slovenian  # MLflow experiment: slm4ie/data/kpi-coverage-slovenian
 short: KPI coverage check
 category: data
 branch: exp/kpi-coverage-slovenian
@@ -10,9 +10,9 @@ ticket: "#3"
 pr: "#31"
 mlflow: http://localhost:5555/#/experiments/15
 builds_on:
-  - ../../data/curation-thresholds-slovenian/
-  - ../../data/curation-quality-slovenian/
-  - ../../data/data-landscape-slovenian/
+  - curation-thresholds-slovenian
+  - curation-quality-slovenian
+  - data-landscape-slovenian
 varies: []
 uses: []
 tests: []
@@ -324,11 +324,11 @@ Every run logs to the project's MLflow server under `slm4ie/data/kpi-coverage-sl
 
 ```bash
 export MLFLOW_TRACKING_URI=http://localhost:5555
-export EXP=experiments/data/kpi-coverage-slovenian
+export EXP=experiments/programmes/slovene-training-data/kpi-coverage-slovenian
 export FINAL=data/experiments/data/kpi-coverage-slovenian/final
 export INTERIM=data/experiments/data/kpi-coverage-slovenian/interim
 export GOLD=data/experiments/data/curation-quality-slovenian/interim/sample.jsonl
-export LOOSENED=experiments/data/curation-thresholds-slovenian/configs/curation-routes-loosened.yaml
+export LOOSENED=experiments/programmes/slovene-training-data/curation-thresholds-slovenian/configs/curation-routes-loosened.yaml
 
 # Gold split, classifier gates and the saved TF-IDF fit the classifier passes read (commit d2dedc1)
 uv sync --group corpus --group analysis --group embeddings

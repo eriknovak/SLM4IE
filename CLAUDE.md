@@ -65,32 +65,41 @@ wrapper in `scripts/` that loads a YAML from `configs/`.
 
 ## Experiment layout
 
+Records are stored by programme (labflow's programme layout):
+
 ```text
 experiments/
-  README.md                        the findings book — index of every experiment
+  README.md                        the findings book: one chapter per programme
   GLOSSARY.md                      metrics, abbreviations, project terms
-  build_report.py                  the HTML report builder
-  report.html                      generated; never hand-edited
-  <category>/<slug>/
-    README.md                      the record: hypothesis → decisions → findings → verdict
-    configs/<type>-<factor>.yaml   this experiment's dials
-    analysis.py                    pulls MLflow runs → tables/ + figures/
-    tables/*.csv  figures/*.svg    static, committed, linked from the record
+  report.html                      generated and gitignored; never hand-edited
+  tools/                           create_assets.py, table_rules.py (shared helpers)
+  reference/                       reference entries on methods and datasets
+  programmes/<programme>/
+    README.md                      the programme page: question, threads, beliefs
+    figures/                       programme figures
+    <slug>/
+      README.md                    the record: hypothesis → decisions → findings → verdict
+      configs/<type>-<factor>.yaml this experiment's dials
+      analysis.py                  pulls MLflow runs → tables/ + figures/
+      tables/*.csv  figures/*.svg  static, committed, linked from the record
+  programmes/unassigned/<slug>/    an experiment in no programme (no page)
 ```
 
-Categories are chosen by what the hypothesis is *about*: `data/` (corpora,
-splits, filtering), `methods/` (tokenizers, architectures, training recipes),
-`validation/` (metrics, benchmarks, evaluation protocol).
+An experiment belongs to the programme whose folder holds it; the programme page
+keeps no member list. The record's `category:` field still says what the
+hypothesis is *about*, for PR labels and the `exp(<category>)` commit scope:
+`data` (corpora, splits, filtering), `methods` (tokenizers, architectures,
+training recipes), `validation` (metrics, benchmarks, evaluation protocol). The
+HTML report is built from the labflow skill, never from a copy in the repo.
 
-No experiment has a record yet. `data/pretraining-corpus-slovenian/` and
-`methods/tokenizer-sweep-slovenian/` are reserved slugs awaiting a hypothesis:
-their former configs are now shared registries under `configs/`, the prior
-tokenizer-sweep runs are parked in MLflow under `slm4ie/archive/`, and the
-write-ups of those runs live in `docs/notes/`.
+`pretraining-corpus-slovenian` and `tokenizer-sweep-slovenian` are reserved
+slugs awaiting a hypothesis: their former configs are now shared registries
+under `configs/`, the prior tokenizer-sweep runs are parked in MLflow under
+`slm4ie/archive/`, and the write-ups of those runs live in `docs/notes/`.
 
 Experiments may depend on each other. The dependency is explicit — the record's
-frontmatter carries `builds_on: [../../data/<slug>/]` and its Hypothesis states
-what the parent left open. An independent experiment leaves the field empty.
+frontmatter carries `builds_on: [<parent-slug>]` and its Hypothesis states what
+the parent left open. An independent experiment leaves the field empty.
 
 Naming derives from one choice, the slug, so it stays consistent everywhere:
 
@@ -98,12 +107,15 @@ Naming derives from one choice, the slug, so it stays consistent everywhere:
 | ------ | ------------------------------------------------ | ------------------------------------------ |
 | Slug   | 2–4 kebab words naming what is under test        | `tokenizer-sweep-slovenian`                |
 | Branch | `exp/<slug>`                                     | `exp/tokenizer-sweep-slovenian`            |
-| MLflow | `slm4ie/<category>/<slug>`                       | `slm4ie/methods/tokenizer-sweep-slovenian` |
+| MLflow | `slm4ie/<slug>`                                  | `slm4ie/tokenizer-sweep-slovenian`         |
 | Config | `<type>-<factor>.yaml`, or `<type>-<setting>`    | `sweep-vocab-size.yaml`                    |
 | Figure | `<config-stem>-<quantity>-by-<dimension>`        | `sweep-fertility-by-vocab.svg`             |
 
 A dial's name says what the experiment varies (`sweep-vocab-size.yaml`); when
 nothing varies it names the setting it fixes (`curation-south-slavic.yaml`).
+
+Records concluded before the move to the programme layout keep their old
+`slm4ie/<category>/<slug>` MLflow name, pinned on the record's `slug:` line.
 
 Shared pipeline stages track lineage under `slm4ie/data/<stage>` instead
 (`slm4ie/data/extract`, `slm4ie/data/tasks`); those runs belong to no
@@ -136,13 +148,15 @@ tasks/<task>/<dataset>/{train,val,test}.jsonl.gz  # prepare_datasets.py tasks
 tokenization/<dataset>.jsonl.gz                # prepare_datasets.py tokenization
 tokenizers/<sweep run>/                        # sweep_tokenizers.py artifacts
   _reports/                                      # the sweep comparison report
-experiments/<category>/<slug>/                 # per-experiment derived data
+experiments/<slug>/                            # per-experiment derived data
   raw/ interim/ final/                           # as downloaded / partial / consumed
 ```
 
 Everything above the `experiments/` tier is **shared data**: many experiments
 read the same corpus, so it is never rebuilt per experiment. Only data an
-experiment derives for itself goes under the `experiments/` tier.
+experiment derives for itself goes under the `experiments/` tier. The six
+records concluded before the programme layout keep their data under
+`experiments/<category>/<slug>/`, where their Reproduce steps point.
 
 Extraction produces two artifacts per dataset under `extracted/`, joined on the
 fly downstream — never materialize a merged file:
@@ -278,8 +292,8 @@ The pre-commit hook (`.githooks/pre-commit`, enabled with
 `git config core.hooksPath .githooks`) and CI (`.github/workflows/lint.yaml`)
 reject Python that fails `ruff format --check` or `ruff check`, and Markdown
 that fails `rumdl check`. Run `uv run ruff format` and `uv run rumdl fmt` on
-the files you touched before committing. `experiments/build_report.py` is
-vendored from the labflow skill and excluded from ruff.
+the files you touched before committing. The report builder runs from the
+labflow skill; the repo keeps no copy of it.
 
 ### Verify with ruff before claiming Python work is done
 
@@ -306,7 +320,7 @@ checks structure but not semantic agreement with the code.
 - Configs are YAML; never hardcode dataset URLs, paths, or hyperparameters in
   Python. Shared **registries** — anything every experiment reuses — live in
   `configs/`; an experiment's **dials** live in
-  `experiments/<category>/<slug>/configs/`. A shared registry is named for the
+  `experiments/programmes/<programme>/<slug>/configs/`. A shared registry is named for the
   subcommand that reads it, so `prepare_datasets.py extract` reads
   `configs/data/extract.yaml` and `curate_pretraining_corpus.py run` reads
   `configs/data/curate.yaml`.
@@ -341,7 +355,7 @@ checks structure but not semantic agreement with the code.
   worker code to stay silent.
 - Annotated extractors should keep text and annotations split (see Data
   layout). Don't add a "merged" output without a strong reason.
-- Every figure is drawn through `experiments/create_assets.py`: an
+- Every figure is drawn through `experiments/tools/create_assets.py`: an
   `analysis.py` imports it before building any chart and writes each figure
   with its `save_figure` (a figure or a zero-argument builder). The `slm4ie`
   datachart theme lives in the private `datachart-themes` repo

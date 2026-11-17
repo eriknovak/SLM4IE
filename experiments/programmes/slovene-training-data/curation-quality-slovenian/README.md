@@ -107,7 +107,7 @@ concluded: 2026-09-30
 
 ### M3 — Judge each drawn document on a seven-property rubric
 
-- **Input**: the drawn documents ([M2]) and the rubric prompt `experiments/data/curation-quality-slovenian/configs/judge-rubric.md`.
+- **Input**: the drawn documents ([M2]) and the rubric prompt `experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-rubric.md`.
 - **Output**: `interim/verdicts-full-sonnet.jsonl`, one verdict per document: language, text type, coherence from 1 to 5, domain, and yes-or-no flags for adult or spam, machine translation and personal data.
 - **How**: documents go to the judge in groups, each shown by id and text only, never with its stage or decision. Every reply is checked against a schema, and a group whose reply fails is judged again. Documents already judged are skipped on a rerun.
 - **Code**: `slm4ie/data/curate/inspect/judge.py::judge_documents`
@@ -121,7 +121,7 @@ concluded: 2026-09-30
   1. The person labels documents in a notebook on the judge's rubric, seeing the judge's verdict only after saving.
   2. Both raters' labels collapse to keep or drop by the bad-text bar ([D8]).
   3. Cohen's κ and raw agreement are taken at both bars, and coherence agreement exactly and within one point.
-- **Code**: `experiments/data/curation-quality-slovenian/analysis.py::agreement_rows`
+- **Code**: `experiments/programmes/slovene-training-data/curation-quality-slovenian/analysis.py::agreement_rows`
 - **Settings**: `--calibration-verdicts` (the judge run the gate is read on), a flag of `analysis.py`
 
 ### M5 — Score each stage's drops and keeps against the judge
@@ -133,12 +133,12 @@ concluded: 2026-09-30
   2. For each stage, pooled and per source, take drop precision as the share of dropped documents that are bad text, and the residual bad rate as that share among kept documents. Pooling adds up the equal-sized cells, so every source weighs the same whatever its size.
   3. Score both at the lenient and the strict bar; at the language filter, text the judge does not call Slovene also counts as bad ([D8]).
   4. Attach a 95% Wilson interval to each share, and leave blank a cell the sample never reached.
-- **Code**: `experiments/data/curation-quality-slovenian/analysis.py::stage_rows`
+- **Code**: `experiments/programmes/slovene-training-data/curation-quality-slovenian/analysis.py::stage_rows`
 - **Settings**: none
 
 ### M6 — Ask the judge to choose between a kept and a dropped document
 
-- **Input**: the drawn documents ([M2]) and the pairwise prompt `experiments/data/curation-quality-slovenian/configs/judge-pairwise.md`.
+- **Input**: the drawn documents ([M2]) and the pairwise prompt `experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-pairwise.md`.
 - **Output**: the drawing `interim/pairwise-opus.pairs.jsonl`, the answers `interim/pairwise-opus.jsonl`, and `tables/pairwise-outcomes.csv`.
 - **How**:
   1. Pair kept and dropped documents of the same source and stage at random, with a fixed seed.
@@ -167,7 +167,7 @@ concluded: 2026-09-30
   1. A conflict is a content filter dropping text the judge calls clean even at the strict bar, or keeping text it calls bad at the lenient bar. Dedup drops are left out, because a duplicate is not bad text ([D9]). The person's call is then read at the lenient bar, the one the findings use.
   2. Draw only from sources the calibration labels never reached, round-robin by source and conflict direction with a fixed seed.
   3. The person labels them blind to judge and pipeline, and the share siding with the judge is reported with a Wilson interval.
-- **Code**: `experiments/data/curation-quality-slovenian/analysis.py::draw_adjudications`
+- **Code**: `experiments/programmes/slovene-training-data/curation-quality-slovenian/analysis.py::draw_adjudications`
 - **Settings**: `--draw-adjudications` (conflicts to draw, 30), a flag of analysis.py; the seed is fixed at 20260930
 
 ### M9 — Describe the corpus without a judge
@@ -191,7 +191,7 @@ concluded: 2026-09-30
   2. Take each task's duration as its slowest pipeline block, since a block's timer stays open while later blocks consume its output.
   3. Take each task's end from its statistics file's timestamp. The step starts at the earliest of the tasks' ends minus their own durations.
   4. Mark the per-source stages as covering one group of sources, since each group overwrites the previous group's logs.
-- **Code**: `experiments/data/curation-quality-slovenian/analysis.py::throughput_rows`
+- **Code**: `experiments/programmes/slovene-training-data/curation-quality-slovenian/analysis.py::throughput_rows`
 - **Settings**: none
 
 ## Decisions
@@ -230,7 +230,7 @@ concluded: 2026-09-30
 
 ### D4 — Label seven properties per document, blind to its stage
 
-- **Decision**: Per document: language, text type (prose, boilerplate, list, code, garbage), adult or spam, coherence from 1 to 5, machine-translated, personal data, and domain from the catalogue's taxonomy. The judge sees the id and text only, never the stage or decision. The rubric is `experiments/data/curation-quality-slovenian/configs/judge-rubric.md`.
+- **Decision**: Per document: language, text type (prose, boilerplate, list, code, garbage), adult or spam, coherence from 1 to 5, machine-translated, personal data, and domain from the catalogue's taxonomy. The judge sees the id and text only, never the stage or decision. The rubric is `experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-rubric.md`.
 - **Why**: Each stage targets one of these properties, so each stage can be scored on its own. The domain label doubles as gold for a planned domain classifier. For the stage metrics the properties collapse to keep or drop by the bad-text bar ([D8]).
 - **History**:
   - 2026-09-14 (before runs) first version, grill Q12/Q16
@@ -469,7 +469,7 @@ Note added 2026-11-06: the shared corpus under `data/pretrain/` was rebuilt afte
 ```bash
 export MLFLOW_TRACKING_URI=http://localhost:5555
 export CURATION=configs/data/curate.yaml
-export EXP=experiments/data/curation-quality-slovenian
+export EXP=experiments/programmes/slovene-training-data/curation-quality-slovenian
 export OUT=data/experiments/data/curation-quality-slovenian/interim
 
 # Curated corpus behind every finding: exact dedup forced first, then the rest, resumed at a63399d (commit 72248eb)

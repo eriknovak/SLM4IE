@@ -4,11 +4,6 @@ slug: slovene-training-data
 short: Slovene training data
 why: The project needs the answer because every later experiment trains or evaluates on it, and the proposal behind the project commits to minimum amounts of text and examples per domain.
 status: open
-members:
-  - ../data/data-landscape-slovenian/
-  - ../data/curation-quality-slovenian/
-  - ../data/curation-thresholds-slovenian/
-  - ../data/kpi-coverage-slovenian/
 planned:
   - slug: silver-ner-slovenian
     short: Silver NER examples
@@ -45,13 +40,13 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 
 - **Open Slovene text is enough to pretrain on in medicine and science, before curation**: the survey of open datasets found medicine's new native sources far past the token target ([data-landscape-slovenian:F2]) and science past both targets on text written in Slovene ([data-landscape-slovenian:F3]).
 - **The curation pipeline cannot yet be trusted with that domain text**: what it keeps is clean ([curation-quality-slovenian:F3]), but every content filter drops mostly good text ([curation-quality-slovenian:F1]), how well a filter decides swings with the source ([curation-quality-slovenian:F2]), and the quality filter removes most of the medical source ([curation-quality-slovenian:F7]).
-- **Figure**: ![Share of bad text among the documents each stage drops and keeps, at the lenient bar](../data/curation-quality-slovenian/figures/judge-rubric-drop-precision-by-stage.svg)
+- **Figure**: ![Share of bad text among the documents each stage drops and keeps, at the lenient bar](curation-quality-slovenian/figures/judge-rubric-drop-precision-by-stage.svg)
 - **Per-source filter settings win back good text without a measurable rise in bad text**: the loosened routes keep about a quarter more good documents than the baseline, with a rise in bad text the draws cannot place above two points ([curation-thresholds-slovenian:F12]), and the gain matched its estimate on every route ([curation-thresholds-slovenian:F10]). Whether each filter now drops what it targets stays uncalled, since the judge never reached the agreement gate ([curation-thresholds-slovenian:F9]).
-- **Figure**: ![Share of the documents each build keeps after the repetition filter that the judge calls bad text, weighted by source volume, against the bar of the baseline's rate plus two points](../data/curation-thresholds-slovenian/figures/residual-bad-rate-by-build.svg)
+- **Figure**: ![Share of the documents each build keeps after the repetition filter that the judge calls bad text, weighted by source volume, against the bar of the baseline's rate plus two points](curation-thresholds-slovenian/figures/residual-bad-rate-by-build.svg)
 - **The curated corpus meets every data target once documents carry their own domain**: the loosened build clears the corpus, per-domain token and per-domain document targets, and medicine clears the document target only through the medical pages inside the web crawls ([kpi-coverage-slovenian:F1]). Under source labels medicine falls short because its one source never held ten thousand distinct texts ([kpi-coverage-slovenian:F2]).
-- **Figure**: ![Each data target's count as a multiple of its target, under source labels and under document-level labels, per build, with the target itself as the vertical line](../data/kpi-coverage-slovenian/figures/kpi-target-multiple-by-rule.svg)
+- **Figure**: ![Each data target's count as a multiple of its target, under source labels and under document-level labels, per build, with the target itself as the vertical line](kpi-coverage-slovenian/figures/kpi-target-multiple-by-rule.svg)
 - **Medical extraction examples have to be built**: almost all of medicine's open documents are translation or machine output ([data-landscape-slovenian:F1]), and the machine-written sets gather in medicine rather than across the catalogue ([data-landscape-slovenian:F6]). Medical documents exist in the corpus, but none carries extraction annotation in native Slovene ([kpi-coverage-slovenian:F5]).
-- **Figure**: ![Share of each domain's openly downloadable documents that were written in Slovene; medicine sits near zero](../data/data-landscape-slovenian/figures/documents-by-domain-and-provenance.svg)
+- **Figure**: ![Share of each domain's openly downloadable documents that were written in Slovene; medicine sits near zero](data-landscape-slovenian/figures/documents-by-domain-and-provenance.svg)
 
 ## Threads
 

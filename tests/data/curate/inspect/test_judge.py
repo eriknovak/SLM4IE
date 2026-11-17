@@ -812,14 +812,14 @@ class TestPairwiseJudging:
 
 def test_the_experiment_pairwise_prompt_carries_the_placeholder() -> None:
     """The comparison prompt shipped with the experiment can actually be filled."""
-    prompt = Path("experiments/data/curation-quality-slovenian/configs/judge-pairwise.md")
+    prompt = Path("experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-pairwise.md")
 
     assert DOCUMENTS_PLACEHOLDER in prompt.read_text(encoding="utf-8")
 
 
 def test_the_experiment_rubric_carries_the_placeholder() -> None:
     """The rubric shipped with the experiment can actually be filled."""
-    rubric = Path("experiments/data/curation-quality-slovenian/configs/judge-rubric.md")
+    rubric = Path("experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-rubric.md")
 
     assert DOCUMENTS_PLACEHOLDER in rubric.read_text(encoding="utf-8")
     assert os.path.isfile(rubric)

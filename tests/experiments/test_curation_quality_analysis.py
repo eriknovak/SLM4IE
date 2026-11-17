@@ -11,7 +11,14 @@ import pytest
 
 from slm4ie.data.curate.paths import record_bucket
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "experiments" / "data" / "curation-quality-slovenian" / "analysis.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "experiments"
+    / "programmes"
+    / "slovene-training-data"
+    / "curation-quality-slovenian"
+    / "analysis.py"
+)
 
 
 def _load() -> ModuleType:

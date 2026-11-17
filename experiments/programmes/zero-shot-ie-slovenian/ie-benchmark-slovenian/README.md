@@ -1,6 +1,6 @@
 ---
 title: How close an open LLM on one local GPU comes to Claude on Slovene information extraction
-slug: ie-benchmark-slovenian
+slug: ie-benchmark-slovenian  # MLflow experiment: slm4ie/validation/ie-benchmark-slovenian
 short: Extraction benchmark
 category: validation
 branch: exp/ie-benchmark-slovenian
@@ -151,13 +151,13 @@ concluded: 2026-11-17
   5. Apply the record's verdict rule to the four readings; a test set without both picked runs leaves the verdict incomplete.
   6. Take each local model's newest memory run ([M5]) and compute its peak GPU memory as weights + KV bytes per token × the longest window of its scored runs, input plus output tokens.
 - **Code**:
-  - step 1: `experiments/validation/ie-benchmark-slovenian/analysis.py::score_runs`
-  - step 2: `experiments/validation/ie-benchmark-slovenian/analysis.py::pick_rows`
-  - step 3: `experiments/validation/ie-benchmark-slovenian/analysis.py::pick_rows`
-  - step 4: `experiments/validation/ie-benchmark-slovenian/analysis.py::read_clause`
-  - step 5: `experiments/validation/ie-benchmark-slovenian/analysis.py::verdict`
-  - step 6: `experiments/validation/ie-benchmark-slovenian/analysis.py::peak_memory_gib`
-- **Settings**: `MARGIN` (equivalence margin in strict F1, 0.05), `MISS_RATE_CEILING` (highest validation miss rate a pick may have, 0.10), `CLAUSE_EXAMPLES` (example variant C1 reads, unseen), in `experiments/validation/ie-benchmark-slovenian/analysis.py`
+  - step 1: `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py::score_runs`
+  - step 2: `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py::pick_rows`
+  - step 3: `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py::pick_rows`
+  - step 4: `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py::read_clause`
+  - step 5: `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py::verdict`
+  - step 6: `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py::peak_memory_gib`
+- **Settings**: `MARGIN` (equivalence margin in strict F1, 0.05), `MISS_RATE_CEILING` (highest validation miss rate a pick may have, 0.10), `CLAUSE_EXAMPLES` (example variant C1 reads, unseen), in `experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py`
 
 ### M5 — Run one model over one split, keep every answer and log its usage
 
@@ -444,7 +444,7 @@ cd "$(git rev-parse --show-toplevel)"   # the repository root
 uv run --group data python scripts/prepare_datasets.py download suk ssj500k janes_tag slavicner
 uv run --group data python scripts/prepare_datasets.py extract suk ssj500k janes_tag slavicner
 uv run --group data python scripts/prepare_datasets.py tasks ner/ssj500k ner/suk ner/janes_tag ner/slavicner
-uv run --group analysis --group evaluation python experiments/validation/ie-benchmark-slovenian/analysis.py data
+uv run --group analysis --group evaluation python experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py data
 
 # F4 — peak GPU memory of the nine local models from the vllm-service (commit ac2e506)
 uv run --group analysis --group evaluation python scripts/evaluate_llms.py memory --model-key qwen3.5-4b --model-key qwen3.5-9b --model-key gemma4-e4b --model-key gemma4-12b --model-key gemma3-12b --model-key llama3.2-3b --model-key llama3.1-8b --model-key gams-9b --model-key gams3-12b --experiment slm4ie/validation/ie-benchmark-slovenian --tag tier=tracked --tag branch=exp/ie-benchmark-slovenian --tag base_commit=ac2e506 --tag type=memory
@@ -461,5 +461,5 @@ run gams3-12b ner/janes_tag test; run gams3-12b ner/slavicner test
 for k in claude-opus-5-5 claude-sonnet-5-5 claude-haiku-5-5; do for e in ner/ssj500k ner/suk ner/janes_tag ner/slavicner; do for s in val test; do uv run --group analysis --group evaluation python scripts/evaluate_llms.py run --backend claude --model-key $k --entry $e --split $s --answers-dir data/experiments/validation/ie-benchmark-slovenian/interim/answers --resume --experiment slm4ie/validation/ie-benchmark-slovenian --tag tier=tracked --tag branch=exp/ie-benchmark-slovenian --tag base_commit=ac2e506 --tag type=benchmark || exit 1; done; done; done
 
 # tables/ and figures/ for every finding; F8 reads the parameter counts in configs/benchmark-models.yaml
-uv run --group analysis --group evaluation python experiments/validation/ie-benchmark-slovenian/analysis.py scores
+uv run --group analysis --group evaluation python experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/analysis.py scores
 ```

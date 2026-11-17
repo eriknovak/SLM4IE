@@ -302,7 +302,8 @@ def test_answers_file_name_changes_with_the_label_descriptions():
 # ===============================
 
 MODELS_CONFIG = (
-    Path(__file__).parents[2] / "experiments/validation/ie-benchmark-slovenian/configs/benchmark-models.yaml"
+    Path(__file__).parents[2]
+    / "experiments/programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/configs/benchmark-models.yaml"
 )
 
 

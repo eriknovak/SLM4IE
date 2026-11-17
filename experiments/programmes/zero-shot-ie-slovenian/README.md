@@ -3,8 +3,6 @@ title: Can a model under one billion parameters extract Slovene information with
 slug: zero-shot-ie-slovenian
 short: Zero-shot Slovene extraction
 status: open
-members:
-  - ../validation/ie-benchmark-slovenian/
 planned:
   - slug: jev-ner-slovenian
     short: Jev on Slovene NER
@@ -36,7 +34,7 @@ Frontier LLMs such as Claude, GPT and Gemini extract entities from text in many 
 ## What we now believe
 
 - **The best open LLM on one 16 GB GPU comes within the margin of Claude on one Slovene NER test set of four**: Gemma 4 12B trails Claude Opus by 5 to 12 points of strict span F1 on the download-gated sets, most on social-media text ([ie-benchmark-slovenian:F1]). Its deficit is largest on rare labels ([ie-benchmark-slovenian:F3]). So silver labels for the later experiments need Claude.
-- **Figure**: ![Gemma 4 12B minus Claude Opus in strict span F1 per test set, with 95% intervals against the 5-point equivalence band; only the public SlavicNER falls inside it.](../validation/ie-benchmark-slovenian/figures/benchmark-models-c1-difference-by-test-set.svg)
+- **Figure**: ![Gemma 4 12B minus Claude Opus in strict span F1 per test set, with 95% intervals against the 5-point equivalence band; only the public SlavicNER falls inside it.](ie-benchmark-slovenian/figures/benchmark-models-c1-difference-by-test-set.svg)
 - **Zero-shot reference scores now exist for Slovene NER on four test sets**: the strongest model scores from 78 strict span F1 on ssj500k to 94 on SUK, and later models are scored on the same sets and protocol ([ie-benchmark-slovenian:F4]).
 - **Caveat:** every score is zero-shot NER only; question answering, classification and typed-decision models such as Jev are not yet measured ([ie-benchmark-slovenian:F4]).
 

@@ -11,7 +11,14 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "experiments" / "data" / "curation-thresholds-slovenian" / "analysis.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "experiments"
+    / "programmes"
+    / "slovene-training-data"
+    / "curation-thresholds-slovenian"
+    / "analysis.py"
+)
 
 
 def _load() -> ModuleType:

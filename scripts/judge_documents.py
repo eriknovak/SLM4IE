@@ -20,21 +20,21 @@ Examples:
     uv run python scripts/judge_documents.py \
         --source $EXP/interim/sample.jsonl \
         --out $EXP/interim/verdicts.jsonl \
-        --rubric experiments/data/curation-quality-slovenian/configs/judge-rubric.md \
+        --rubric experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-rubric.md \
         --model claude-haiku-4-5
 
     # Try two requests through the local CLI, no API key needed.
     uv run python scripts/judge_documents.py \
         --source $EXP/interim/sample.jsonl \
         --out $EXP/interim/verdicts.jsonl \
-        --rubric experiments/data/curation-quality-slovenian/configs/judge-rubric.md \
+        --rubric experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-rubric.md \
         --backend cli --max-batches 2
 
     # Compare what each content filter kept against what it dropped.
     uv run python scripts/judge_documents.py \
         --source $EXP/interim/sample.jsonl \
         --out $EXP/interim/pairwise-sonnet.jsonl \
-        --rubric experiments/data/curation-quality-slovenian/configs/judge-pairwise.md \
+        --rubric experiments/programmes/slovene-training-data/curation-quality-slovenian/configs/judge-pairwise.md \
         --task pairwise --backend cli
 """
 

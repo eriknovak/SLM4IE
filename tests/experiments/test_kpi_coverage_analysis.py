@@ -9,7 +9,14 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "experiments" / "data" / "kpi-coverage-slovenian" / "analysis.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "experiments"
+    / "programmes"
+    / "slovene-training-data"
+    / "kpi-coverage-slovenian"
+    / "analysis.py"
+)
 
 
 def _load() -> ModuleType:

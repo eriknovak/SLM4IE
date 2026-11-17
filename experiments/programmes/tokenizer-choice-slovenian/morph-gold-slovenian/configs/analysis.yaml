@@ -14,7 +14,7 @@
 #   scoring.levelled_ratio  a metric has levelled off when its 64k→128k gain is
 #     under this share of its 16k→32k gain (Q1).
 #
-# Run: uv run --group analysis python experiments/validation/morph-gold-slovenian/analysis.py {data,scores}
+# Run: uv run --group analysis python experiments/programmes/tokenizer-choice-slovenian/morph-gold-slovenian/analysis.py {data,scores}
 
 paths:
   golds_dir: /vault/data/SLM4IE/experiments/validation/morph-gold-slovenian/final/morph-golds-heldout-forms
