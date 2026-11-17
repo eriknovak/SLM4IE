@@ -57,7 +57,9 @@ Slovene is morphologically rich: a noun inflects for six cases in three numbers,
 ## Threads
 
 - **Trust in the morphological gold**: whether the gold that defines a correct morpheme cut changes which tokenizer looks best — [morph-gold-slovenian:H1], [morph-gold-slovenian:H2]
+  - **Standing**: in part, [morph-gold-slovenian:F1], [morph-gold-slovenian:F2]
 - **Vocabulary size**: which metrics still improve as the vocabulary grows, and where each levels off for Slovene — [morph-gold-slovenian:Q1]
+  - **Standing**: in part, [morph-gold-slovenian:F3]
 
 ## Open
 

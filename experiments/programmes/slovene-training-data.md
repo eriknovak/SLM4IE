@@ -56,10 +56,15 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
 ## Threads
 
 - **Pretraining text per domain**: whether open native text is enough to train tokenizers and models in each domain — [data-landscape-slovenian:H1], [data-landscape-slovenian:H3], [kpi-coverage-slovenian:H1], [kpi-coverage-slovenian:H2]
+  - **Standing**: answered, [data-landscape-slovenian:F2], [data-landscape-slovenian:F3], [kpi-coverage-slovenian:F1]
 - **Information-extraction examples**: whether native examples exist to fine-tune and evaluate extraction in each domain — [data-landscape-slovenian:H2], [data-landscape-slovenian:H4], [kpi-coverage-slovenian:H3], [kpi-coverage-slovenian:H4]
+  - **Standing**: in part, [data-landscape-slovenian:F2], [kpi-coverage-slovenian:F1], [kpi-coverage-slovenian:F2]
 - **Curation of the corpus**: whether the pipeline removes bad text while keeping good domain text, per stage and per source — [curation-quality-slovenian:H1], [curation-quality-slovenian:H2], [curation-quality-slovenian:H3], [curation-quality-slovenian:H4], [kpi-coverage-slovenian:Q1]
+  - **Standing**: answered, [curation-quality-slovenian:F1], [curation-quality-slovenian:F2], [curation-quality-slovenian:F3], [curation-quality-slovenian:F7]
 - **Filter tuning per source**: whether settings chosen per source let each content filter drop what it targets, and mostly bad text — [curation-thresholds-slovenian:H1], [curation-thresholds-slovenian:H2], [curation-thresholds-slovenian:H3], [curation-thresholds-slovenian:H4], [curation-thresholds-slovenian:H5], [curation-thresholds-slovenian:Q1]
+  - **Standing**: open
 - **Provenance of the text**: how much of the supply was written in Slovene rather than translated or generated — [data-landscape-slovenian:F1], [data-landscape-slovenian:F6]
+  - **Standing**: answered, [data-landscape-slovenian:F1], [data-landscape-slovenian:F6]
 
 ## Open
 
