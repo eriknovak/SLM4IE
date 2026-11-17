@@ -1,0 +1,10 @@
+check,count,expected,note
+rows shared between splits,0,0,
+fewest rows per cell,88,,"ssj500k, 12 of 12 models"
+fewest seeds per configuration,1,1,
+tracked runs,98,,"89 benchmark runs, 83 scored after 6 older reruns were set aside; 9 memory runs"
+scratch runs,0,,the pass reads tracked runs only; the experiment holds 28 scratch runs
+fewest windows per cell,149,,"ssj500k, 12 of 12 models"
+fewest gold spans per cell,1031,,"ssj500k, 12 of 12 models"
+fewest gold spans per label cell,20,,"DERIV-PER on janes-tag, 10 of 10 models"
+fewest documents per suk subcorpus cell,393,,"senticoref, 10 of 10 models"

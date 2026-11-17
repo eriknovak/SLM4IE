@@ -24,7 +24,10 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Macro-F1**: the F1 score computed per class and averaged with equal weight per class, so a rare class such as medical counts as much as a frequent one.
 - **Strict span F1** (span-and-label F1, strict F1): F1 over named-entity mentions where a predicted mention counts as correct only if its start, end and label all equal a gold mention's; micro over all mentions unless macro is named.
 - **Partial-overlap span F1** (partial-overlap F1): span F1 where a predicted mention counts as correct when it shares at least one character with a gold mention of the same label; the gap to strict F1 is the share lost to boundary errors.
-- **Miss rate** (unparseable rate): the share of documents for which a model's answer could not be parsed against the required JSON schema; such a document is scored as having no mentions.
+- **Relaxed span F1** (relaxed F1): span F1 where a predicted mention counts as correct when it contains a gold mention of the same label; it forgives a mention drawn too wide but not one drawn too narrow.
+- **Miss rate** (unparseable rate, missed window): the share of sentence windows whose answer could not be parsed against the required JSON schema; such a window is scored as having no mentions.
+- **Cut-off answer** (token cap): an answer that stopped at the 2,048-token output limit before its JSON closed, so it counts as a missed window.
+- **Equivalence margin** (margin): the largest difference between two systems still read as no practical difference; equivalent when the whole confidence interval of the difference lies inside it, undecided when the interval crosses its edge.
 - **Paired bootstrap**: a bootstrap that redraws the same scored documents for two systems at once and recomputes the difference between them on each draw, so the interval reflects only how the systems differ.
 - **Precision@k** (P@k): precision over the top k ranked items only.
 - **Recall@k** (R@k): the share of correct items found within the top k.
@@ -135,6 +138,12 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **IE** (information extraction): pulling structured facts — entities, relations, attributes — out of running text. The project's target task family.
 - **KAS-term**: a terminology-identification dataset built from KAS, the corpus of Slovene academic theses, with the spans of technical terms marked in each text.
 - **HUMADEX**: a medical named-entity dataset machine-translated into Slovene, with entity spans; large, but not native Slovene text.
+- **Sentence window** (window): consecutive sentences of one document packed up to a character limit and sent to a model as one prompt; a document's mentions are the union over its windows.
+- **Janes-Tag** (Janes-Tag 3.0): a CLARIN.SI corpus of Slovene tweets, forum posts and comments with named entities marked, the project's non-standard, user-written NER test set.
+- **SlavicNER** (BSNLP): the named-entity corpus of the BSNLP 2017–2023 shared tasks, news articles grouped by topic in several Slavic languages; its Slovene part has been public on GitHub since 2017.
+- **Download-gated** (gated test set): a test set served from a repository behind a download page rather than as plain files on the open web, which lowers the chance a model saw it in training.
+- **GaMS** (GaMS 9B, GaMS3 12B): open LLMs trained further on Slovene text from Gemma base models by the University of Ljubljana.
+- **Silver labels** (silver annotation, silver data): labels assigned by a model rather than a person, used to train a smaller model where human labels are too few.
 
 ## Tokenizers
 

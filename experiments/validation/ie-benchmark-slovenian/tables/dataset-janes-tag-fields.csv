@@ -1,6 +1,6 @@
 field,type,distinct,values
-id,string,2957,<source>:<doc_id>
-text,string,2957,document text
-spans.start,integer,,character offset
-spans.end,integer,,"character offset, exclusive"
-spans.label,string,5,DERIV-PER LOC MISC ORG PER
+id,text,2957,
+text,text,2957,
+spans.start,numeric,,
+spans.end,numeric,,
+spans.label,categorical,5,DERIV-PER; LOC; MISC; ORG; PER
