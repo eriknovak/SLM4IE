@@ -100,3 +100,212 @@
   state: OPEN
   title: Protect only the stem during BPE training, as the Slovak morphological tokenizer does
   url: https://github.com/eriknovak/SLM4IE/issues/24
+- body: '## Why
+
+
+    The project''s targets ask a small model to come within 5–10% of a frontier LLM''s F1 at a fraction
+    of the cost per document. A small model alone either reaches that margin or misses it. A calibrated
+    model that keeps the spans it is sure of and sends the uncertain ones to Claude trades cost against
+    F1 step by step, so a miss becomes a measured price.
+
+
+    ## Step
+
+
+    Scoring, after training: calibrate the scores, then route spans under a confidence cut-off to Claude
+
+
+    ## Touches
+
+
+    - gliner-features/confidence-calibration | changes | Where it sits, calibrate step | fit the temperature
+    and the learned head on the Slovene validation splits, then send spans under a cut-off to Claude |
+    a curve of span F1 against the share of documents Claude sees
+
+    - gliner-features/training-losses | changes | Options row | train with the calibrated cross-entropy
+    against focal loss | scores closer to calibrated before any fitting
+
+    - gliner-features/onnx-export | does not apply | — | the learned head does not run in exported models,
+    so the cascade is measured in PyTorch | —
+
+    - gliner-features/label-descriptions | does not apply | — | descriptions change the prompt, not how
+    scores are read | —
+
+    - gliner-features/nested-multi-label | does not apply | — | the benchmark sets stay flat, so decoding
+    keeps its default | —
+
+    - gliner-features/entity-vectors | does not apply | — | routing reads scores, not vectors | —
+
+    - gliner-features/streaming-span | does not apply | — | streaming models skip the learned head | —
+
+    - gliner-features/relation-extraction | does not apply | — | the cascade is tested on NER first |
+    —
+
+    - gliner-features/multitask-pipelines | does not apply | — | the cascade is tested on NER first |
+    —
+
+    - gliner-features/prompt-compression | does not apply | — | the cascade keeps zero-shot labels | —
+
+    - gliner-features/bi-encoder-labels | does not apply | — | the label sets are small | —
+
+    '
+  number: 58
+  state: OPEN
+  title: Send a calibrated GLiNER model's uncertain spans to Claude
+  url: https://github.com/eriknovak/SLM4IE/issues/58
+- body: '## Why
+
+
+    The medical data labels spans with OMOP (Observational Medical Outcomes Partnership) domains such
+    as Observation, Measurement and Procedure. The bare names are vague and overlap, and medical mentions
+    often nest or fit two domains. A model trained on bare names and flat spans may miss the inner spans
+    and the second domain, and cannot tell close domains apart.
+
+
+    ## Step
+
+
+    Training data and decoding: the prompt carries a description per domain, and the spans may nest or
+    carry several domains
+
+
+    ## Touches
+
+
+    - gliner-features/label-descriptions | changes | Where it sits, describe step | write one description
+    per OMOP domain into the annotation guide and keep it in every training example | close domains are
+    confused less often
+
+    - gliner-features/nested-multi-label | changes | Where it sits, decode step | annotate and decode
+    nested spans and spans with two domains | inner mentions and second domains are found
+
+    - gliner-features/training-losses | changes | Options row | keep binary cross-entropy or focal loss,
+    which score each domain on its own, instead of cross-entropy over domains | multi-label scores stay
+    independent
+
+    - gliner-features/entity-vectors | changes | Where it sits, link step | return span vectors and link
+    each medical span to its nearest OMOP concept as a follow-up | a first measure of concept linking
+
+    - gliner-features/prompt-compression | does not apply | — | a compressed prompt cannot hold descriptions
+    | —
+
+    - gliner-features/confidence-calibration | does not apply | — | independent of how the data is labelled
+    | —
+
+    - gliner-features/onnx-export | does not apply | — | a deployment step, after this one | —
+
+    - gliner-features/streaming-span | does not apply | — | the backbone is chosen elsewhere | —
+
+    - gliner-features/relation-extraction | does not apply | — | the medical data marks spans, not relations
+    | —
+
+    - gliner-features/multitask-pipelines | does not apply | — | NER only | —
+
+    - gliner-features/bi-encoder-labels | does not apply | — | a handful of domains needs no label cache
+    | —
+
+    '
+  number: 59
+  state: OPEN
+  title: Train the medical GLiNER model with OMOP domain descriptions and nested, multi-label spans
+  url: https://github.com/eriknovak/SLM4IE/issues/59
+- body: '## Why
+
+
+    The backbone comparison asks whether a small decoder LLM can carry a Slovene GLiNER head. The library
+    documents only one design on a decoder-only LLM, the streaming span model on Qwen3-0.6B. Without it,
+    the decoder arm would need a head written in this project.
+
+
+    ## Step
+
+
+    Architecture: the GLiNER head on a causal decoder in place of a bidirectional encoder
+
+
+    ## Touches
+
+
+    - gliner-features/streaming-span | changes | Where it sits, attach step | train the streaming span
+    head on Qwen3-0.6B, or a Slovene-adapted decoder, on the same span data as the encoder arms, and score
+    it on whole texts | a decoder arm under the one-billion parameter limit
+
+    - gliner-features/training-losses | changes | Options row | use the same loss as the encoder arms
+    | the arms differ only in backbone
+
+    - gliner-features/onnx-export | does not apply | — | streaming models cannot be exported; the comparison
+    states this as a deployment cost | —
+
+    - gliner-features/confidence-calibration | does not apply | — | streaming models skip the learned
+    head | —
+
+    - gliner-features/entity-vectors | does not apply | — | a stateful session returns no vectors | —
+
+    - gliner-features/label-descriptions | does not apply | — | every arm takes the same bare labels |
+    —
+
+    - gliner-features/nested-multi-label | does not apply | — | the benchmark sets stay flat | —
+
+    - gliner-features/relation-extraction | does not apply | — | NER only | —
+
+    - gliner-features/multitask-pipelines | does not apply | — | NER only | —
+
+    - gliner-features/prompt-compression | does not apply | — | not supported for streaming models | —
+
+    - gliner-features/bi-encoder-labels | does not apply | — | a separate architecture | —
+
+    '
+  number: 60
+  state: OPEN
+  title: Use the streaming span model as the small-decoder arm of the GLiNER backbone comparison
+  url: https://github.com/eriknovak/SLM4IE/issues/60
+- body: '## Why
+
+
+    The targets of 8 GB of GPU memory and a low cost per document belong to the deployed model, but scores
+    are usually measured on the full-precision training copy. Export drops the learned calibration head
+    and the entity vectors, and int8 costs small models more accuracy than large ones, so the deployed
+    form may score below what the record reports.
+
+
+    ## Step
+
+
+    Deployment: export, quantize and optionally compress each final model, then score the deployed form
+
+
+    ## Touches
+
+
+    - gliner-features/onnx-export | changes | Where it sits, export step | score each final model in full
+    precision and as int8 ONNX, with peak memory and documents per second | span F1, memory and speed
+    reported for the form users run
+
+    - gliner-features/confidence-calibration | changes | Limits, no help after export | fold the global
+    temperature into the exported threshold by hand | keeps part of the calibration after export
+
+    - gliner-features/prompt-compression | changes | Where it sits, compress step | add a compressed variant
+    of each domain model for its fixed types | a faster model for users who need no new labels
+
+    - gliner-features/entity-vectors | does not apply | — | exported runtimes return no vectors | —
+
+    - gliner-features/streaming-span | does not apply | — | streaming models cannot be exported | —
+
+    - gliner-features/label-descriptions | does not apply | — | prompt content survives export unchanged
+    | —
+
+    - gliner-features/nested-multi-label | does not apply | — | decoding survives export unchanged | —
+
+    - gliner-features/training-losses | does not apply | — | training is done before this step | —
+
+    - gliner-features/relation-extraction | does not apply | — | NER models first | —
+
+    - gliner-features/multitask-pipelines | does not apply | — | NER models first | —
+
+    - gliner-features/bi-encoder-labels | does not apply | — | the label sets are small | —
+
+    '
+  number: 61
+  state: OPEN
+  title: Score each final GLiNER model in its exported int8 form beside full precision
+  url: https://github.com/eriknovak/SLM4IE/issues/61
