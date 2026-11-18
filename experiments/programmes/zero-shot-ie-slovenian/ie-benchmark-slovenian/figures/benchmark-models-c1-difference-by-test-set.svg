@@ -47,7 +47,7 @@ L 93.710499 22.550095
      </g>
      <g id="line2d_2"/>
      <g id="text_1">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="93.710499" y="225.425217" transform="rotate(-0 93.710499 225.425217)">-15</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="93.710499" y="225.425217" transform="rotate(-0 93.710499 225.425217)">−15</text>
      </g>
     </g>
     <g id="xtick_2">
@@ -58,7 +58,7 @@ L 158.391932 22.550095
      </g>
      <g id="line2d_4"/>
      <g id="text_2">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="158.391932" y="225.425217" transform="rotate(-0 158.391932 225.425217)">-10</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="158.391932" y="225.425217" transform="rotate(-0 158.391932 225.425217)">−10</text>
      </g>
     </g>
     <g id="xtick_3">
@@ -69,7 +69,7 @@ L 223.073365 22.550095
      </g>
      <g id="line2d_6"/>
      <g id="text_3">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="223.073365" y="225.425217" transform="rotate(-0 223.073365 225.425217)">-5</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="223.073365" y="225.425217" transform="rotate(-0 223.073365 225.425217)">−5</text>
      </g>
     </g>
     <g id="xtick_4">
@@ -391,7 +391,7 @@ z
      </g>
     </g>
     <g id="text_21">
-     <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="448.728041" y="119.198281" transform="rotate(-90 448.728041 119.198281)">gemma4-12b vs claude-opus-5-5 (points)</text>
+     <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="448.728041" y="119.198281" transform="rotate(-90 448.728041 119.198281)">Gemma 4 12B vs Claude Opus (points)</text>
     </g>
    </g>
   </g>
@@ -399,7 +399,7 @@ z
    <text style="font-size: 14px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="226.8" y="13.638052" transform="rotate(-0 226.8 13.638052)">Local minus Claude</text>
   </g>
   <g id="text_23">
-   <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="226.8" y="239.928041" transform="rotate(-0 226.8 239.928041)">gemma4-12b minus claude-opus-5-5, strict span F1 (points)</text>
+   <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="226.8" y="239.928041" transform="rotate(-0 226.8 239.928041)">Gemma 4 12B minus Claude Opus, strict span F1 (points)</text>
   </g>
   <g id="text_24">
    <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif" transform="translate(9.838834 139.568203) rotate(-90)">Test set</text>

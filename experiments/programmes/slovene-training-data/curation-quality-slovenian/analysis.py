@@ -70,6 +70,9 @@ PAIRWISE_CALLS: tuple[str, ...] = ("kept", "dropped", "tie", "orders_differ")
 #: Stages that remove duplicates rather than bad text (D9).
 DEDUP_STAGES = frozenset({"exact_dedup", "sentence_dedup"})
 
+#: The stages that remove bad text, read by drop precision; the dedup stages are read by what survives.
+CONTENT_STAGES: tuple[str, ...] = tuple(stage for stage in STAGES if stage not in DEDUP_STAGES)
+
 #: Text shapes that are bad whatever the coherence score says.
 BAD_TEXT_TYPES = frozenset({"garbage", "boilerplate"})
 
@@ -85,8 +88,17 @@ SECONDS_PER_HOUR = 3600
 #: Fixed SVG hash salt, so a rerun on unchanged tables leaves the committed SVG untouched.
 SVG_HASH_SALT = "curation-quality-slovenian"
 
-#: Bar colour of the "kept" part in the loss figure; the palette holds six colours.
+#: Bar colour of the "kept" part in the loss and pairwise figures; the palette holds six colours.
 NEUTRAL_BAR_COLOR = "#b8b8b8"
+
+#: Bar colour of a tied pair in the pairwise figure, lighter than the kept grey.
+TIE_BAR_COLOR = "#ececec"
+
+#: Bar colour of a pair whose two orders disagree in the pairwise figure.
+ORDERS_DIFFER_BAR_COLOR = "#d6d6d6"
+
+#: Fewest judged drops a source and stage cell needs before the heatmap prints its precision.
+MIN_CELL_DROPS = 20
 
 #: Multiplier from a share to a percentage.
 PERCENT = 100
@@ -131,14 +143,23 @@ FUNNEL_STAGES: tuple[str, ...] = (
 #: The bar H1 and H2 are refuted under: a stage's drop precision below it.
 PRECISION_BAR = 0.6
 
+#: The bar H1 is confirmed from: a stage's drop precision at or above it.
+CONFIRM_BAR = 0.8
+
+#: The share of a domain source's documents one stage may remove before H4 is read against the judge.
+LOSS_BAR = 0.5
+
+#: The clause figure of H4: each domain source's largest loss to a single stage.
+LARGEST_LOSS_FIGURE = "curate-largest-stage-loss-by-domain-source"
+
 #: The claim each clause-bearing figure shows, as the finding that cites it reads it.
 FIGURE_CLAIMS: dict[str, Claim] = {
     "judge-rubric-drop-precision-by-stage": Claim("H1", "drop precision", threshold=PRECISION_BAR),
     "judge-rubric-drop-precision-by-source": Claim("H2", "drop precision"),
-    "curate-losses-by-source": Claim("H4", "share of converted documents lost per stage"),
+    LARGEST_LOSS_FIGURE: Claim("H4", "share of converted documents lost to one stage", threshold=LOSS_BAR),
 }
 
-#: The columns of each claim figure's data table, read from the table the figure is drawn from.
+#: The columns of each figure's data table, read from the table the figure is drawn from.
 FIGURE_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "judge-rubric-drop-precision-by-stage": (
         "stage",
@@ -151,11 +172,25 @@ FIGURE_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     ),
     "judge-rubric-drop-precision-by-source": ("source", "stage", "drop_precision", "drop_precision_n"),
     "curate-losses-by-source": ("source", "base", "inflated_input", *STAGES, "kept"),
+    LARGEST_LOSS_FIGURE: ("source", "stage", "largest_stage_loss"),
+    "curate-cpu-hours-by-stage": ("stage", "cpu_hours", "share_of_cpu_hours"),
 }
 
 # ===============================
 # Helper functions
 # ===============================
+
+
+def stage_name(stage: str) -> str:
+    """Spell a stage the way the record's prose does.
+
+    Args:
+        stage: The stage key, such as `sentence_dedup`.
+
+    Returns:
+        The key with spaces for underscores, such as `sentence dedup`.
+    """
+    return stage.replace("_", " ")
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -877,9 +912,17 @@ def figure_tables(tables_dir: Path) -> tuple[list[dict[str, Any]], ...]:
 
     Returns:
         The pooled and per-source stage decisions, the pairwise outcomes, the
-        source losses and the throughput rows, in `draw_figures` order.
+        source losses, the throughput rows and the clause readings, in
+        `draw_figures` order.
     """
-    names = ("stage-decisions", "source-stage-decisions", "pairwise-outcomes", "source-losses", "throughput")
+    names = (
+        "stage-decisions",
+        "source-stage-decisions",
+        "pairwise-outcomes",
+        "source-losses",
+        "throughput",
+        "clause-readings",
+    )
     return tuple(read_csv(tables_dir / f"{name}.csv") for name in names)
 
 
@@ -916,29 +959,34 @@ def draw_figures(
     pairwise: list[dict[str, Any]],
     losses: list[dict[str, Any]],
     throughput: list[dict[str, Any]],
+    readings: list[dict[str, Any]],
 ) -> list[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
     Each figure carries one finding and is drawn from a table that is also
     written to `tables/`, so a number read off a figure can be checked there.
     A figure a clause rests on also gets its own data table, named as it is,
-    and carries the clause's claim in its stamp.
+    and carries the clause's claim in its stamp. The drop-precision figures
+    show the content filters only: the dedup stages are read by whether a
+    copy survives (D9), and their rates stay in the stage tables.
 
     Args:
         figures_dir: Where the SVGs go.
-        tables_dir: Where the claim figures' data tables go.
+        tables_dir: Where the figures' data tables go.
         pooled: Rows from `stage_rows` pooled over sources.
         per_source: Rows from `stage_rows` per source.
         pairwise: Rows from `pairwise_rows`.
         losses: Rows from `loss_rows`.
         throughput: Rows from `throughput_rows`.
+        readings: Rows of `clause-readings.csv`, holding H4's largest loss per domain source.
 
     Returns:
         The paths written.
     """
     import matplotlib.pyplot as plt
     from datachart.charts import BarChart, DumbbellChart, Heatmap
-    from datachart.constants import BAR_MODE, LEGEND_LOCATION, ORIENTATION, VALUE_FORMAT
+    from datachart.config import config
+    from datachart.constants import BAR_MODE, LEGEND_LOCATION, LINE_STYLE, ORIENTATION, VALUE_FORMAT
     from matplotlib.ticker import StrMethodFormatter
 
     # fixed clip-path ids
@@ -951,13 +999,18 @@ def draw_figures(
         return {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": ncols}}
 
     figures: dict[str, Any] = {}
+    content_pooled = [row for row in pooled if row["stage"] in CONTENT_STAGES]
+    content_per_source = [row for row in per_source if row["stage"] in CONTENT_STAGES]
 
     # the gap between the dots is how well a stage separates bad text from good
-    # the axis ends half a tick past the largest share or the H1 bar, so both stay inside
-    largest = max(PRECISION_BAR, *(max(row["drop_precision"], row["residual_bad_rate"]) for row in pooled))
+    # the axis ends half a tick past the largest share or the confirm bar, so both stay inside
+    largest = max(CONFIRM_BAR, *(max(row["drop_precision"], row["residual_bad_rate"]) for row in content_pooled))
     xmax = math.ceil(largest * 10 + 0.5) / 10
     figures["judge-rubric-drop-precision-by-stage"] = DumbbellChart(
-        [{"label": row["stage"], "start": row["residual_bad_rate"], "end": row["drop_precision"]} for row in pooled],
+        [
+            {"label": stage_name(row["stage"]), "start": row["residual_bad_rate"], "end": row["drop_precision"]}
+            for row in content_pooled
+        ],
         title="Bad text dropped and kept",
         start_name="kept documents that are bad",
         end_name="dropped documents that are bad",
@@ -968,7 +1021,10 @@ def draw_figures(
         xmax=xmax,
         show_values=True,
         value_format=VALUE_FORMAT.PERCENT_INT,
-        vlines=[{"x": PRECISION_BAR, "label": "H1 bar"}],
+        vlines=[
+            {"x": PRECISION_BAR, "label": "refuted below 60%"},
+            {"x": CONFIRM_BAR, "label": "confirmed from 80%", "style": {"plot_vline_style": LINE_STYLE.DASHED}},
+        ],
         figsize=ONE_COLUMN,
         **below(2),
     )
@@ -978,18 +1034,23 @@ def draw_figures(
     dumbbell_axes.set_xticks([i / 10 for i in range(int(xmax * 10) + 1)])
     dumbbell_axes.xaxis.set_major_formatter(StrMethodFormatter(VALUE_FORMAT.PERCENT_INT))
 
-    sources = sorted({row["source"] for row in per_source})
-    # cells print in percent without the sign, so "100" still fits a half-width cell
+    # cells print whole percents without the sign, so "100" still fits a half-width cell;
+    # a half rounds up, and a cell on too few drops stays blank
     cells = {
-        (row["source"], row["stage"]): PERCENT * row["drop_precision"]
-        for row in per_source
-        if row["drop_precision"] != ""
+        (row["source"], row["stage"]): math.floor(round(PERCENT * row["drop_precision"], 1) + 0.5)
+        for row in content_per_source
+        if row["drop_precision"] != "" and row["drop_precision_n"] >= MIN_CELL_DROPS
     }
+    # rows by mean precision over the content filters, highest first, so the crawls group
+    sources = sorted(
+        sorted({row["source"] for row in content_per_source}),
+        key=lambda source: -sum(cells.get((source, stage), 0.0) for stage in CONTENT_STAGES) / len(CONTENT_STAGES),
+    )
     figures["judge-rubric-drop-precision-by-source"] = Heatmap(
         {
-            "x": list(STAGES),
+            "x": [stage_name(stage) for stage in CONTENT_STAGES],
             "y": sources,
-            "z": [[cells.get((source, stage)) for stage in STAGES] for source in sources],
+            "z": [[cells.get((source, stage)) for stage in CONTENT_STAGES] for source in sources],
         },
         title="Drop precision (%)",
         xlabel="stage",
@@ -1000,40 +1061,54 @@ def draw_figures(
         show_values=True,
         # every cell prints its value, so a colour scale adds nothing in a half-width figure
         show_colorbar=False,
+        # four unrotated stage names crowd a half-width figure (FIG-006)
         xtickrotate=45,
         figsize=HALF_TALL,
     )
 
+    # the claimed outcome first, so every bar's "dropped better" share starts at zero
+    pairwise_order = ("dropped", "tie", "orders_differ", "kept")
+    pairwise_names = {
+        "dropped": "dropped document better",
+        "tie": "tie",
+        "orders_differ": "orders disagree",
+        "kept": "kept document better",
+    }
+    pairwise_colors = {
+        "dropped": config.get("plot_dumbbell_end_color"),
+        "tie": TIE_BAR_COLOR,
+        "orders_differ": ORDERS_DIFFER_BAR_COLOR,
+        "kept": NEUTRAL_BAR_COLOR,
+    }
     pooled_pairs = [row for row in reversed(pairwise) if row["source"] == "ALL"]
     figures["judge-pairwise-outcome-by-stage"] = BarChart(
-        [[{"label": row["stage"], "y": row[call]} for row in pooled_pairs] for call in PAIRWISE_CALLS],
+        [[{"label": stage_name(row["stage"]), "y": row[call]} for row in pooled_pairs] for call in pairwise_order],
         title="Pairwise outcome by stage",
-        subtitle=["kept document better", "dropped document better", "tie", "orders disagree"],
+        subtitle=[pairwise_names[call] for call in pairwise_order],
         xlabel="share of pairs (%)",
         ylabel="stage",
         xmax=1.0,
         xticks_format=VALUE_FORMAT.PERCENT_INT,
         bar_mode=BAR_MODE.STACK,
+        style=[{"plot_bar_color": pairwise_colors[call]} for call in pairwise_order],
         figsize=ONE_COLUMN,
         orientation=ORIENTATION.HORIZONTAL,
         **below(2),
     )
 
+    # the chart draws its first record at the bottom, so the smallest kept share lands on top
     parts = (*STAGES, "kept")
+    by_kept = sorted(losses, key=lambda row: row["kept"], reverse=True)
     figures["curate-losses-by-source"] = BarChart(
         [
-            [
-                {"label": row["source"] + (" *" if row["inflated_input"] else ""), "y": row[part]}
-                for row in reversed(losses)
-            ]
+            [{"label": row["source"] + (" *" if row["inflated_input"] else ""), "y": row[part]} for row in by_kept]
             for part in parts
         ],
-        title="Losses by source",
-        subtitle=[f"dropped by {stage}" for stage in STAGES] + ["kept"],
-        xlabel="converted documents (%)\n* of language output, issue #9",
+        title="Document losses per source",
+        subtitle=[f"dropped by {stage_name(stage)}" for stage in STAGES] + ["kept"],
+        xlabel="share of converted documents\n* of the language filter's output",
         ylabel="source",
         xmax=1.0,
-        xticks_format=VALUE_FORMAT.PERCENT_INT,
         bar_mode=BAR_MODE.STACK,
         orientation=ORIENTATION.HORIZONTAL,
         # the palette holds six colours, so the seventh part gets a neutral one
@@ -1042,28 +1117,66 @@ def draw_figures(
         **below(1),
     )
 
-    steps = [row for row in throughput if row["stage"] != "TOTAL"]
-    figures["curate-cpu-hours-by-step"] = BarChart(
-        [
+    # H4 reads each domain source's largest loss to one stage against half its documents
+    largest_losses = sorted(
+        (
             {
-                "label": f"{row['stage']}/{row['step']}" if row["step"] else f"{row['stage']} ({row['scope']})",
-                "y": row["cpu_hours"],
+                "source": reading["qualifier"].split(", ")[0],
+                "stage": reading["qualifier"].split(", ")[1].removesuffix(" filter"),
+                "largest_stage_loss": reading["value"],
             }
-            for row in reversed(steps)
-        ],
-        title="CPU hours by step",
+            for reading in readings
+            if reading["clause"] == "H4"
+        ),
+        key=lambda row: row["largest_stage_loss"],
+    )
+    figures[LARGEST_LOSS_FIGURE] = BarChart(
+        [{"label": f"{row['source']} ({row['stage']})", "y": row["largest_stage_loss"]} for row in largest_losses],
+        title="Largest loss to one stage",
+        xlabel="share of converted documents",
+        ylabel="domain source (stage)",
+        xmax=1.0,
+        # a tick on the bar, as the losses figure's axis has
+        xticks=[0.0, LOSS_BAR, 1.0],
+        xticks_format=VALUE_FORMAT.DECIMAL,
+        value_format=VALUE_FORMAT.DECIMAL_2,
+        vlines=[{"x": LOSS_BAR, "label": "half the documents"}],
+        figsize=ONE_COLUMN,
+        **horizontal,
+        **below(1),
+    )
+
+    # one bar per corpus-wide stage: the dedup and statistics steps summed, in pipeline order
+    corpus_hours: dict[str, float] = defaultdict(float)
+    for row in throughput:
+        if row["scope"] == "corpus" and row["stage"] != "TOTAL":
+            corpus_hours[row["stage"]] += row["cpu_hours"]
+    total_hours = sum(corpus_hours.values())
+    stage_hours = [
+        {
+            "stage": stage_name(stage),
+            "cpu_hours": round(hours, 1),
+            "share_of_cpu_hours": round(hours / total_hours, 4),
+        }
+        for stage, hours in corpus_hours.items()
+    ]
+    figures["curate-cpu-hours-by-stage"] = BarChart(
+        [{"label": row["stage"], "y": row["cpu_hours"]} for row in reversed(stage_hours)],
+        title="CPU hours by stage",
         xlabel="CPU time (hours)",
-        ylabel="step",
+        ylabel="stage",
         value_format=VALUE_FORMAT.DECIMAL,
         figsize=ONE_COLUMN,
         **horizontal,
     )
 
-    # each claim figure's data table first, since the figure check looks for it
+    # each figure's data table first, since the figure check looks for it
     sources_of = {
-        "judge-rubric-drop-precision-by-stage": pooled,
-        "judge-rubric-drop-precision-by-source": per_source,
+        "judge-rubric-drop-precision-by-stage": content_pooled,
+        "judge-rubric-drop-precision-by-source": content_per_source,
         "curate-losses-by-source": losses,
+        LARGEST_LOSS_FIGURE: largest_losses[::-1],
+        "curate-cpu-hours-by-stage": stage_hours,
     }
     written = []
     for name, columns in FIGURE_TABLE_COLUMNS.items():

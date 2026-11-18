@@ -1,0 +1,7 @@
+domain,access_filter,datasets,documents,datasets_without_document_count,meets_kpi2
+medicine,open,7,7056,1,unknown
+medicine,open+login,7,7056,1,unknown
+medicine,all,18,9336,10,unknown
+science,open,16,147291,3,yes
+science,open+login,25,559190,6,yes
+science,all,30,561358,10,yes

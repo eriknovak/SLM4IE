@@ -48,9 +48,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Set
 
 import numpy as np
-from datachart.charts import LineChart, ScatterChart
-from datachart.constants import LEGEND_LOCATION, LINE_STYLE, SHOW_GRID
+from datachart.charts import BumpChart, LineChart, ScatterChart
+from datachart.config import config as chart_config
+from datachart.constants import EMPHASIS, LEGEND_LOCATION, LINE_LABEL_POSITION, LINE_MARKER, LINE_STYLE, SHOW_GRID
 from datachart.utils import Grid
+from matplotlib.ticker import MaxNLocator
 from mlflow.tracking import MlflowClient
 from scipy.stats import kendalltau
 from tqdm import tqdm
@@ -88,7 +90,15 @@ from slm4ie.utils.versioning import file_sha256
 EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
 TOOLS = EXPERIMENTS / "tools"
 sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
-from create_assets import FULL_WIDTH, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
+from create_assets import (  # noqa: E402  — path set above
+    FULL_WIDTH,
+    HALF_TALL,
+    ONE_COLUMN,
+    Claim,
+    half_width,
+    save_figure,
+    save_table,
+)
 
 # ===============================
 # Logging
@@ -130,14 +140,14 @@ MORPH_METRICS = ("morph_score_f1", "morph_edit_distance", "morph_consistency")
 BOOTSTRAP_BATCH = 100
 # the corpus metrics Q1 reads, all on the evaluation sample
 CORPUS_METRICS = ("fertility", "tokens_per_byte", "chars_per_token", "renyi_efficiency")
+# the corpus metrics drawn; tokens per byte and characters per token are fertility times a constant
+CORPUS_FIGURE_METRICS = ("fertility", "renyi_efficiency")
 # documents per chunk when counting the word types of a sample
 CHUNK_DOCS = 5000
 SECONDS_PER_HOUR = 3600
 BYTES_PER_GB = 1e9
 # the vocabulary sizes Q1's levelling rule reads
 LEVELLING_VOCAB_SIZES = 4
-# tick step of the boundary F1 scatter, whose two axes share one scale
-BOUNDARY_F1_TICK = 0.05
 # room left and right of the first and last vocabulary size, so its tick clears the y ticks
 VOCAB_AXIS_PAD = 0.25
 
@@ -1325,6 +1335,44 @@ def training_cost_rows(scores: SweepScores, output_root: Path, runs: dict[str, d
 # ===============================
 
 
+# the record's names of the algorithms, for legends and line labels
+ALGORITHM_LABELS = {
+    "bpe": "BPE",
+    "charbpe": "character BPE",
+    "wordpiece": "WordPiece",
+    "unigram": "Unigram",
+    "morphbpe": "MorphBPE",
+    "morphpiece": "MorphPiece",
+}
+# one marker per algorithm, so two lines that coincide still show two shapes
+ALGORITHM_MARKERS = {
+    "bpe": LINE_MARKER.CIRCLE,
+    "charbpe": LINE_MARKER.SQUARE,
+    "wordpiece": LINE_MARKER.TRIANGLE,
+    "unigram": LINE_MARKER.DIAMOND,
+    "morphbpe": LINE_MARKER.TRIANGLE_DOWN,
+    "morphpiece": LINE_MARKER.PENTAGON,
+}
+# the two rankings H1 compares, by the name each takes on the bump chart's axis
+GOLD_RANKINGS = {"heuristic gold": "heuristic gold, all forms", "Sloleks gold": "Sloleks gold, all forms"}
+# the clauses whose rows the rank-agreement figure draws in ink
+CLAUSES = ("H1", "H2")
+# the name and unit of each metric; its better direction comes from METRIC_DIRECTIONS
+METRIC_NAMES = {
+    "fertility": ("Fertility", "tokens per word"),
+    "tokens_per_byte": ("Compression", "tokens per byte"),
+    "chars_per_token": ("Compression", "characters per token"),
+    "renyi_efficiency": ("Rényi efficiency", "fraction of maximum"),
+    "morph_score_f1": ("Boundary F1", None),
+    "morph_edit_distance": ("Morph-Edit-Distance", "edits per form"),
+    "morph_consistency": ("Morph-Consistency", "F1"),
+}
+# at most this many y ticks on a metric panel, spaced 1, 2, 2.5 or 5 times a power of ten
+METRIC_TICKS = 5
+TICK_STEPS = [1, 2, 2.5, 5, 10]
+TICK_DIGITS = 6
+
+
 def _vocab_ticks(vocab_sizes: list[int]) -> dict[str, Any]:
     """Place the vocabulary sizes at even steps, labelled in thousands, inset from the axis ends.
 
@@ -1345,6 +1393,9 @@ def _vocab_ticks(vocab_sizes: list[int]) -> dict[str, Any]:
 def _curves(rows: list[dict[str, Any]], algorithms: list[str], vocab_sizes: list[int], value: str) -> list[list[dict]]:
     """Turn rows of one metric into one line per algorithm over the vocabulary positions.
 
+    A row with a bootstrap interval (`ci_low`, `ci_high`) carries it as the
+    symmetric `yerr` datachart draws, the interval's wider side.
+
     Args:
         rows: Rows holding `algorithm`, `vocab_size` and `value`.
         algorithms: The algorithms, in legend order.
@@ -1352,20 +1403,68 @@ def _curves(rows: list[dict[str, Any]], algorithms: list[str], vocab_sizes: list
         value: The key of the plotted value.
 
     Returns:
-        One `{"x", "y"}` record list per algorithm.
+        One `{"x", "y"}` record list per algorithm, with `yerr` where the row has an interval.
     """
     position = {size: index for index, size in enumerate(vocab_sizes)}
-    return [
-        sorted(
-            ({"x": position[row["vocab_size"]], "y": row[value]} for row in rows if row["algorithm"] == algorithm),
-            key=lambda point: point["x"],
-        )
-        for algorithm in algorithms
-    ]
+    curves = []
+    for algorithm in algorithms:
+        points = []
+        for row in rows:
+            if row["algorithm"] != algorithm:
+                continue
+            point = {"x": position[row["vocab_size"]], "y": row[value]}
+            if row.get("ci_low", "") != "":
+                point["yerr"] = half_width(row[value], row["ci_low"], row["ci_high"])
+            points.append(point)
+        curves.append(sorted(points, key=lambda point: point["x"]))
+    return curves
+
+
+def _line_styles(algorithms: list[str]) -> list[dict[str, Any]]:
+    """Give each algorithm's line its own marker.
+
+    Args:
+        algorithms: The algorithms, in legend order.
+
+    Returns:
+        One `LineChart` style per algorithm.
+    """
+    return [{"plot_line_marker": ALGORITHM_MARKERS[name]} for name in algorithms]
+
+
+def _pair_label(row: dict[str, Any], tokenizers: int) -> str:
+    """Name a ranking pair in a few plain words, such as "manual against all forms".
+
+    Args:
+        row: A row of `rank_agreement_rows`.
+        tokenizers: The number of tokenizers in the full sweep.
+
+    Returns:
+        The row label of the rank-agreement figure.
+    """
+    # name what differs between the two rankings
+    gold_a, _, slice_a = row["ranking_a"].partition(", ")
+    gold_b, _, slice_b = row["ranking_b"].partition(", ")
+    if gold_a == next(iter(GOLD_RANKINGS)) and slice_a == slice_b:
+        label = f"golds, {slice_a}"
+    elif gold_a == gold_b:
+        # drop the words both slices end in from the first, as in "manual against all forms"
+        words_a, words_b = slice_a.split(), slice_b.split()
+        shared = 0
+        while shared < min(len(words_a), len(words_b)) - 1 and words_a[-1 - shared] == words_b[-1 - shared]:
+            shared += 1
+        label = f"{' '.join(words_a[: len(words_a) - shared])} against {slice_b}"
+    else:
+        label = f"{gold_a} against {gold_b}"
+
+    # the readings on fewer tokenizers leave out the table-trained ones (D5, D10)
+    if row["tokenizers"] < tokenizers:
+        label += f", without table-trained ({row['tokenizers']})"
+    return label
 
 
 def rank_agreement_figure(rows: list[dict[str, Any]]) -> Any:
-    """Draw each Kendall's tau with its interval against the two bars.
+    """Draw each Kendall's tau with its interval against the two bars, the clause rows in ink.
 
     Args:
         rows: The rows of `rank_agreement_rows`.
@@ -1373,155 +1472,254 @@ def rank_agreement_figure(rows: list[dict[str, Any]]) -> Any:
     Returns:
         The datachart figure.
     """
+    # one row per pair, top to bottom in table order; the clause rows form their own series
     ordered = list(reversed(rows))
-    points = [
-        {"x": row["tau"], "y": index, "xerr": [row["tau"] - row["ci_low"], row["ci_high"] - row["tau"]]}
-        for index, row in enumerate(ordered)
-    ]
-    labels = [f"{row['clause']}: {row['ranking_a']} vs {row['ranking_b']} ({row['tokenizers']})" for row in ordered]
+    tokenizers = max(row["tokenizers"] for row in rows)
+    series: list[list[dict[str, Any]]] = [[], []]
+    for index, row in enumerate(ordered):
+        point = {"x": row["tau"], "y": index, "xerr": [row["tau"] - row["ci_low"], row["ci_high"] - row["tau"]]}
+        series[0 if row["clause"] in CLAUSES else 1].append(point)
     bars = [
-        {"x": H1_BAR, "label": "H1 bar", "style": {"plot_vline_style": LINE_STYLE.DASHED}},
-        {"x": H2_BAR, "label": "H2 bar", "style": {"plot_vline_style": LINE_STYLE.DOTTED}},
+        {"x": H1_BAR, "label": f"H1 bar, {H1_BAR:g}", "style": {"plot_vline_style": LINE_STYLE.DASHED}},
+        {"x": H2_BAR, "label": f"H2 bar, {H2_BAR:g}", "style": {"plot_vline_style": LINE_STYLE.DOTTED}},
     ]
     return ScatterChart(
-        points,
+        series,
+        subtitle=["clauses", "read beside the clauses"],
+        emphasis=[None, EMPHASIS.BACKGROUND],
+        style=[{"plot_scatter_color": chart_config.get("font_general_color")}, None],
         show_yerr=False,
         vlines=bars,
         title="Rank agreement between rankings",
         xlabel="Kendall's τ over the tokenizers (rank correlation)",
         ylabel="Ranking pair",
         yticks=list(range(len(ordered))),
-        yticklabels=labels,
+        yticklabels=[_pair_label(row, tokenizers) for row in ordered],
         figsize=FULL_WIDTH,
         show_grid=SHOW_GRID.X,
+        show_legend=True,
+        legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": len(bars) + 1},
     )
 
 
 def boundary_f1_figure(rows: list[dict[str, Any]], algorithms: list[str]) -> Any:
-    """Draw each tokenizer's boundary F1 under the heuristic gold against the Sloleks gold.
+    """Draw each tokenizer's rank by boundary F1 under the heuristic gold and under the Sloleks gold.
+
+    Each crossing of two lines is a pair of tokenizers the golds order
+    differently, the pairs Kendall's tau counts (H1).
 
     Args:
         rows: The rows of `boundary_f1_rows`.
-        algorithms: The algorithms, in legend order.
+        algorithms: The algorithms, in palette order.
 
     Returns:
         The datachart figure.
     """
+    # one two-point line per tokenizer, coloured as its algorithm is in the other figures
     f1 = {(row["ranking"], row["algorithm"], row["vocab_size"]): row["f1"] for row in rows}
     sizes = sorted({row["vocab_size"] for row in rows})
+    tokenizers = [(algorithm, size) for algorithm in algorithms for size in sizes]
+    palette = chart_config.get("color_general_multiple")
     series = [
         [
-            {
-                "x": f1[("heuristic gold, all forms", algorithm, size)],
-                "y": f1[("Sloleks gold, all forms", algorithm, size)],
-            }
-            for size in sizes
+            {"x": position, "y": f1[(ranking, algorithm, size)]}
+            for position, ranking in enumerate(GOLD_RANKINGS.values())
         ]
-        for algorithm in algorithms
+        for algorithm, size in tokenizers
     ]
-    # one scale on both axes; the x axis skips the corner tick the y axis already labels
-    values = [value for points in series for point in points for value in (point["x"], point["y"])]
-    low = np.floor(min(values) / BOUNDARY_F1_TICK) * BOUNDARY_F1_TICK
-    high = np.ceil(max(values) / BOUNDARY_F1_TICK) * BOUNDARY_F1_TICK
-    ticks = [round(float(tick), 2) for tick in np.arange(low, high + BOUNDARY_F1_TICK / 2, BOUNDARY_F1_TICK)]
-    return ScatterChart(
+    # no halo on the end labels: they clear every line, and a halo writes them as outlines, not text
+    styles = [
+        {
+            "plot_line_color": palette[algorithms.index(algorithm) % len(palette)],
+            "plot_bump_marker": ALGORITHM_MARKERS[algorithm],
+            "plot_value_halo_width": 0,
+        }
+        for algorithm, _ in tokenizers
+    ]
+    return BumpChart(
         series,
-        subtitle=algorithms,
-        title="Boundary F1 under two golds",
-        xlabel="Boundary F1, heuristic gold",
-        ylabel="Boundary F1, Sloleks gold",
-        xmin=ticks[0],
-        xmax=ticks[-1],
-        ymin=ticks[0],
-        ymax=ticks[-1],
-        xticks=ticks[1:],
-        yticks=ticks,
-        figsize=ONE_COLUMN,
-        show_grid=SHOW_GRID.BOTH,
-        show_legend=True,
+        subtitle=[f"{ALGORITHM_LABELS[algorithm]} {size // 1000}k" for algorithm, size in tokenizers],
+        style=styles,
+        label_position=LINE_LABEL_POSITION.END,
+        title="Ranks under two golds",
+        xlabel="Gold",
+        ylabel="Rank by boundary F1 (1 = highest)",
+        xticks=list(range(len(GOLD_RANKINGS))),
+        xticklabels=list(GOLD_RANKINGS),
+        figsize=HALF_TALL,
     )
 
 
-METRIC_LABELS = {
-    "fertility": "Fertility (tokens per word)",
-    "tokens_per_byte": "Compression\n(tokens per byte)",
-    "chars_per_token": "Compression\n(characters per token)",
-    "renyi_efficiency": "Rényi efficiency\n(fraction of maximum)",
-    "morph_score_f1": "Boundary F1",
-    "morph_edit_distance": "Morph-Edit-Distance\n(edits per form)",
-    "morph_consistency": "Morph-Consistency (F1)",
-}
+def metric_label(metric: str) -> str:
+    """Name a metric with its unit and its better direction, as an axis label.
+
+    Args:
+        metric: A key of `METRIC_NAMES`.
+
+    Returns:
+        The label, such as "Fertility (tokens per word, lower is better)" with a line break after the name.
+    """
+    name, unit = METRIC_NAMES[metric]
+    better = f"{METRIC_DIRECTIONS[metric]} is better"
+    return f"{name}\n({unit}, {better})" if unit else f"{name}\n({better})"
+
+
+def _shared_limits(curves: list[list[dict]]) -> dict[str, Any]:
+    """Pick one y range and its ticks that hold every point and error band of the curves.
+
+    Args:
+        curves: The curves of every panel of one metric.
+
+    Returns:
+        The `ymin`, `ymax` and `yticks` of each of those panels.
+    """
+    low = min(point["y"] - point.get("yerr", 0.0) for points in curves for point in points)
+    high = max(point["y"] + point.get("yerr", 0.0) for points in curves for point in points)
+    locator = MaxNLocator(nbins=METRIC_TICKS - 1, steps=TICK_STEPS)
+    # round off the float noise of the tick arithmetic, so labels read 0.15, not 0.15000000000000002
+    ticks = [round(float(tick), TICK_DIGITS) for tick in locator.tick_values(low, high)]
+    return {"ymin": ticks[0], "ymax": ticks[-1], "yticks": ticks}
 
 
 def metric_curves_figure(
-    rows: list[dict[str, Any]], panels: list[tuple[str, str]], algorithms: list[str], vocab_sizes: list[int], title: str
+    rows: list[dict[str, Any]],
+    panels: list[tuple[str, str, str]],
+    algorithms: list[str],
+    vocab_sizes: list[int],
+    title: str,
+    *,
+    max_cols: int = 3,
+    figsize: tuple[float, float] = FULL_WIDTH,
+    legend_cols: int | None = None,
 ) -> Any:
     """Draw one panel of metric-against-vocabulary curves per (metric, slice), one line per algorithm.
 
+    Every panel of one metric shares that metric's y range, so equal heights
+    mean equal values across slices. A metric whose rows carry a bootstrap
+    interval draws it as a band around each line.
+
     Args:
         rows: The rows of `metric_rows`.
-        panels: The (metric, slice) pairs, in grid order, three per row.
+        panels: The (metric, slice, panel title) triples, in grid order.
         algorithms: The algorithms, in legend order.
         vocab_sizes: The vocabulary sizes, ascending.
         title: The grid's title.
+        max_cols: Panels per grid row.
+        figsize: The size of the grid, a constant of `create_assets`.
+        legend_cols: Columns of the legend below the grid; `None` puts every algorithm in one row.
 
     Returns:
         The datachart grid.
     """
+    # the curves of each panel, then one y range per metric over its panels
+    curves = [
+        _curves(
+            [row for row in rows if row["metric"] == metric and row["slice"] == slice_name],
+            algorithms,
+            vocab_sizes,
+            "value",
+        )
+        for metric, slice_name, _ in panels
+    ]
+    limits = {
+        metric: _shared_limits(
+            [line for (other, _, _), lines in zip(panels, curves) if other == metric for line in lines]
+        )
+        for metric, _, _ in panels
+    }
+
+    # one chart per panel; the y label names the metric, its unit and its better direction
     charts = []
-    for metric, slice_name in panels:
-        selected = [row for row in rows if row["metric"] == metric and row["slice"] == slice_name]
-        # the y label names the metric; three panels per row leave room only for the slice
+    for (metric, _, panel_title), lines in zip(panels, curves):
         charts.append(
             LineChart(
-                _curves(selected, algorithms, vocab_sizes, "value"),
-                subtitle=algorithms,
-                title=slice_name.capitalize(),
+                lines,
+                subtitle=[ALGORITHM_LABELS[name] for name in algorithms],
+                style=_line_styles(algorithms),
+                show_yerr=any("yerr" in point for points in lines for point in points),
+                title=panel_title,
                 xlabel="Vocabulary size",
-                ylabel=METRIC_LABELS[metric],
+                ylabel=metric_label(metric),
                 show_grid=SHOW_GRID.Y,
+                **limits[metric],
                 **_vocab_ticks(vocab_sizes),
             )
         )
+
     # one legend below the grid, where it covers no panel's curves
-    legend = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": len(algorithms)}
-    return Grid(charts, max_cols=3, title=title, figsize=FULL_WIDTH, show_legend=True, legend=legend)
+    legend = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": legend_cols or len(algorithms)}
+    return Grid(charts, max_cols=max_cols, title=title, figsize=figsize, show_legend=True, legend=legend)
 
 
 def rare_vocabulary_figure(
-    rows: list[dict[str, Any]], rare_labels: set[str], algorithms: list[str], vocab_sizes: list[int]
+    rows: list[dict[str, Any]], edges: list[int], rare_below: int, algorithms: list[str], vocab_sizes: list[int]
 ) -> Any:
     """Draw the share of each vocabulary that is rare in each sample, one line per algorithm (D12).
 
+    A token is rare in the training sample when it occurs fewer than
+    `rare_below` times. The evaluation sample is smaller, so its count bar is
+    `rare_below` scaled by the ratio of the two samples' tokens, snapped to the
+    nearest count bin edge, so both panels hold a token to about one rate.
+
     Args:
         rows: The rows of `vocabulary_count_rows`.
-        rare_labels: The count bins below the rare threshold.
+        edges: The lower edges of the count bins.
+        rare_below: The count under which a token is rare in the training sample.
         algorithms: The algorithms, in legend order.
         vocab_sizes: The vocabulary sizes, ascending.
 
     Returns:
         The datachart grid.
     """
+    # each tokenizer's token count per sample, to scale the bar to the sample's size
+    tokens = {(row["sample"], row["algorithm"], row["vocab_size"]): row["sample_tokens"] for row in rows}
+    training = SAMPLE_NAMES["train"]
+    labels = count_bin_labels(edges)
+
     charts = []
-    for position, sample in enumerate(SAMPLE_NAMES.values()):
+    for sample in SAMPLE_NAMES.values():
+        # the bin edge nearest, on a log scale, to the training bar at this sample's size
+        ratio = float(
+            np.median(
+                [
+                    tokens[(sample, name, size)] / tokens[(training, name, size)]
+                    for name in algorithms
+                    for size in vocab_sizes
+                ]
+            )
+        )
+        below = min((edge for edge in edges if edge > 0), key=lambda edge: abs(np.log(edge / (rare_below * ratio))))
+        rare = {label for label, low in zip(labels, edges) if low < below}
+
+        # sum the rare bins of each tokenizer
         shares: dict[tuple[str, int], float] = Counter()
         for row in rows:
-            if row["sample"] == sample and row["count_bin"] in rare_labels:
+            if row["sample"] == sample and row["count_bin"] in rare:
                 shares[(row["algorithm"], row["vocab_size"])] += row["vocab_share"]
         points = [{"algorithm": name, "vocab_size": size, "share": share} for (name, size), share in shares.items()]
+        rule = "never seen" if below == 1 else f"under {below} occurrences"
         charts.append(
             LineChart(
                 _curves(points, algorithms, vocab_sizes, "share"),
-                subtitle=algorithms,
-                title=f"Rare tokens, {sample}",
+                subtitle=[ALGORITHM_LABELS[name] for name in algorithms],
+                style=_line_styles(algorithms),
+                title=f"{sample.capitalize()},\n{rule}",
                 xlabel="Vocabulary size",
                 ylabel="Share of the vocabulary",
                 show_grid=SHOW_GRID.Y,
-                show_legend=position == 0,
                 **_vocab_ticks(vocab_sizes),
             )
         )
-    return Grid(charts, max_cols=2, title="Rare vocabulary tokens", figsize=ONE_COLUMN)
+    legend = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": len(algorithms) // 2}
+    return Grid(
+        charts,
+        max_cols=2,
+        title="Rare vocabulary tokens",
+        figsize=ONE_COLUMN,
+        sharey=True,
+        show_legend=True,
+        legend=legend,
+    )
 
 
 def draw_figures(cfg: SweepConfig, analysis: AnalysisConfig) -> list[Path]:
@@ -1564,16 +1762,14 @@ def draw_figures(cfg: SweepConfig, analysis: AnalysisConfig) -> list[Path]:
     save_table(morph, written[1])
 
     # define the figures
-    edges = list(analysis.count_bins)
-    rare = {label for label, low in zip(count_bin_labels(edges), edges) if low < analysis.rare_below}
-    morph_panels = [(metric, f"{slice_name} forms") for slice_name in ("all", "manual") for metric in MORPH_METRICS]
-    corpus_panels = [(metric, "evaluation sample") for metric in CORPUS_METRICS]
-    # the ranking-pair scatter and the three-panel grids take a section's own fold
-    full_width = {
-        "sweep-rank-agreement-by-ranking-pair",
-        "sweep-morph-metrics-by-vocab",
-        "sweep-corpus-metrics-by-vocab",
-    }
+    morph_panels = [
+        (metric, f"{slice_name} forms", f"{slice_name.capitalize()} forms")
+        for slice_name in ("all", "manual")
+        for metric in MORPH_METRICS
+    ]
+    corpus_panels = [(metric, "evaluation sample", METRIC_NAMES[metric][0]) for metric in CORPUS_FIGURE_METRICS]
+    # the ranking-pair scatter and the three-panel grid take a section's own fold
+    full_width = {"sweep-rank-agreement-by-ranking-pair", "sweep-morph-metrics-by-vocab"}
     figures = {
         "sweep-rank-agreement-by-ranking-pair": lambda: rank_agreement_figure(agreement),
         "sweep-boundary-f1-by-gold": lambda: boundary_f1_figure(boundary, algorithms),
@@ -1581,10 +1777,17 @@ def draw_figures(cfg: SweepConfig, analysis: AnalysisConfig) -> list[Path]:
             metrics, morph_panels, algorithms, vocab_sizes, "Morph metrics against vocabulary size"
         ),
         "sweep-corpus-metrics-by-vocab": lambda: metric_curves_figure(
-            metrics, corpus_panels, algorithms, vocab_sizes, "Corpus metrics against vocabulary size"
+            metrics,
+            corpus_panels,
+            algorithms,
+            vocab_sizes,
+            "Corpus metrics, evaluation sample",
+            max_cols=len(corpus_panels),
+            figsize=ONE_COLUMN,
+            legend_cols=len(algorithms) // 2,
         ),
         "sweep-rare-vocabulary-share-by-vocab": lambda: rare_vocabulary_figure(
-            vocabulary, rare, algorithms, vocab_sizes
+            vocabulary, list(analysis.count_bins), analysis.rare_below, algorithms, vocab_sizes
         ),
     }
 

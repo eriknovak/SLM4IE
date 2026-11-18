@@ -1,0 +1,6 @@
+source,stage,largest_stage_loss
+povejmo_vemo_med,quality,0.8252
+oss,quality,0.6883
+coleslaw,quality,0.4786
+legal_mc4,exact dedup,0.3461
+kas,quality,0.2918

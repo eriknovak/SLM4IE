@@ -295,7 +295,7 @@ concluded: 2026-09-30
 - **Summary**: More than half of what each content filter drops is text the judge would keep.
 - **Key number**: 0.44 — drop precision of the language filter, the highest of the four content filters, at the lenient bar
 - **Runs**: no runs; `analysis.py` at daeba94 over the judged stratified sample (Sonnet 5 rubric verdicts)
-- **Result**: ![Share of bad text among the documents each stage drops and keeps](figures/judge-rubric-drop-precision-by-stage.svg) Each row is one stage. The red dot is drop precision, the share of its dropped documents that are bad text, and the blue dot is the residual bad rate among what it keeps, both at the lenient bar. The intervals and the strict bar are in the stage table under the finding on kept text.
+- **Result**: ![At every content filter under half of the dropped documents are bad text, from 44% at the language filter down to 11% at the repetition filter, all left of the 60% line under which the clause is refuted. Purple dots are dropped documents, grey dots kept ones; the solid line is 60% and the dashed line the 80% confirmation bar.](figures/judge-rubric-drop-precision-by-stage.svg) Both rates are at the lenient bar. The dedup stages, read by whether a copy survives, and the intervals and the strict bar are in the stage table under the finding on kept text.
 - **Reading**:
   - **Drop precision is low at every content filter.** It falls from under half of drops at the language filter, where text in other languages counts as a correct drop, to about a tenth at the repetition filter. The strict bar, one coherence point stricter, raises every stage but leaves each short of the clause's bar.
   - **[H1] is refuted.** The clause fails if any stage's drop precision, pooled over sources, is below 0.6, and every content filter is below it at both bars. The dedup stages are lower still, but they remove copies rather than bad text, so they are read by whether a copy survives ([F6]).
@@ -304,21 +304,24 @@ concluded: 2026-09-30
 - **History**:
   - 2026-09-29 first result, rubric pass over 8,930 documents at both bars
   - 2026-09-30 language filter rescored with other languages counted as a correct drop ([D8]), raising its drop precision from 33% to 44%
+  - 2026-11-18 figure redrawn after a figure review: dedup stages left out, both bars drawn; caption names the right dot colours.
 
 ### F2 — A filter's precision depends heavily on the source · key
 
 - **Summary**: The spam filter drops mostly real spam on the fineweb2 web crawl and almost nothing but good text on every curated source.
 - **Key number**: 0.90 — spam-filter drop precision on the fineweb2 web crawl, over 40 judged drops
 - **Runs**: no runs; `analysis.py` at daeba94 over the judged stratified sample
-- **Result**: ![Drop precision of every source at every stage](figures/judge-rubric-drop-precision-by-source.svg) Blank cells are source and stage pairs the sample never reached. Most coloured cells rest on 40 dropped documents, so a cell's 95% interval spans about fifteen points either way.
+- **Result**: ![Drop precision is high only on raw web crawls: c4 reaches 93% at the language filter and fineweb2 90% at the spam filter. At the spam, quality and repetition filters every curated source is at 15% or below. Rows run from the highest mean precision down.](figures/judge-rubric-drop-precision-by-source.svg) Blank cells have fewer than 20 judged drops. Most coloured cells rest on 40 dropped documents, so a cell's 95% interval spans about fifteen points either way.
 - **Reading**:
-  - **Raw web crawls get their drops right far more often than curated sources.** The high cells sit on crawls such as c4, cc100, hplt and fineweb2. The parliamentary transcripts (parlamint_si, siparl), the medical source (povejmo_vemo_med) and the edited reference corpora (gigafida, kas) sit at or near zero at every content filter.
+  - **Raw web crawls get their drops right far more often than curated sources.** The high cells sit on crawls such as c4, cc100, hplt and fineweb2. At the spam, quality and repetition filters every curated source is at or below 15%. At the language filter the scientific theses (oss) and one legal source (legal_mc4) reach 100% and 80% over 40 drops each.
   - **[H2] is refuted.** The clause needs every source to reach 0.6 at every stage, and most sources fall below it at most stages. The spam filter shows why: it counts every occurrence of a lexicon word, so a repeated ordinary word triggers it. One such word is *replika*, a rebuttal in parliamentary debate.
   - **Neither sampling noise nor the judge run explains the zeros.** Forty drops with no bad text among them put the true rate under about 9%. The judge run sits below the agreement gate ([F12]), but its errors would have to fall on curated sources alone to erase the gap. The cells of coleslaw, a collection of Slovene legal texts, undercount its drops, because that source repeats document ids and the sampler recovers drops by id.
 - **Implication**: A per-source switch for each stage would let curated sources skip filters built for web crawls. The pipeline already groups sources by their settings, so the switch is small.
 - **History**:
   - 2026-09-29 first result; spam-lexicon mechanism read from the sampled clean drops the same day
   - 2026-09-30 language column rescored under the language rule of the bad-text bar ([D8]); raw crawls such as c4 and fineweb2 rise above 0.6 there, curated sources stay near zero
+  - 2026-11-18 Reading corrected after a figure review: at the language filter oss and legal_mc4 reach 100% and 80%, so curated sources are not near zero there; the verdict stands.
+  - 2026-11-18 figure redrawn after a figure review: cells under 20 judged drops left blank, rows ordered by mean precision.
 
 ### F3 — What the stages keep is clean · key
 
@@ -337,13 +340,14 @@ concluded: 2026-09-30
 
 - **Summary**: Shown one kept and one dropped document side by side, the judge prefers the dropped one in nearly a third of all spam-filter pairs.
 - **Runs**: no runs; `analysis.py` at daeba94 over the pairwise pass (Opus 5)
-- **Result**: ![Outcome of every kept-against-dropped pair per stage](figures/judge-pairwise-outcome-by-stage.svg) A pair counts for one side only when the judge gives the same answer with the two documents in both orders. Per-source counts are in `tables/pairwise-outcomes.csv`.
+- **Result**: ![The judge prefers the dropped document in 31% of spam-filter pairs, about twice the share at any other filter (7% language, 15% quality, 16% repetition). Grey parts are ties, pairs whose two orders disagree, and pairs where the kept document is better.](figures/judge-pairwise-outcome-by-stage.svg) A pair counts for one side only when the judge gives the same answer with the two documents in both orders. Per-source counts are in `tables/pairwise-outcomes.csv`.
 - **Reading**:
   - **The forced choice agrees with the rubric that the language filter is the most accurate, and ranks the spam filter last.** By drop precision the rubric orders the content filters language, spam, quality, repetition ([F1]). By how rarely the dropped document wins, the forced choice orders them language, quality, repetition, spam. The two differ on spam because a forced choice asks whether the dropped text is better, not only whether it is bad.
   - **Dropped text is often as good as kept text, which supports the drop-precision result ([F1]) from a second angle.** A forced choice needs no shared 1-5 scale, the weakest part of the rubric. A different model gave it, so the reading does not rest on one judge's calibration.
   - **Position bias would overturn it, and there is little.** Swapping the two documents changes the answer in under one pair in twenty, so the outcome reflects the documents rather than their order.
 - **History**:
   - 2026-09-29 first result, 1,549 pairs asked in both orders
+  - 2026-11-18 figure redrawn after a figure review: the dropped-better share starts each bar; caption says what to see.
 
 ### F5 — A person confirms the judge on drops but not on keeps · supporting F1
 
@@ -375,14 +379,15 @@ concluded: 2026-09-30
 - **Summary**: The quality filter removes most of the medical source, and the judge calls none of the sampled drops bad text.
 - **Key number**: 0.83 — share of the medical source's language-filter output that the quality filter removes
 - **Runs**: no runs; `analysis.py` at daeba94 over the stage sentinels and the judged sample
-- **Result**: ![Where each source's documents went, stage by stage](figures/curate-losses-by-source.svg) Sources marked with an asterisk reached the language filter doubled by stale output files. Their shares are of the language filter's output rather than of their converted documents.
+- **Result**: ![Two of the five domain sources lose more than half their documents to one stage, both at the quality filter: the medical source 0.83 and the scientific theses (oss) 0.69. The other three stay below the line: coleslaw 0.48, legal_mc4 0.35 at exact dedup, and kas 0.29.](figures/curate-largest-stage-loss-by-domain-source.svg)
 - **Reading**:
-  - **The quality filter is the largest single loss for most sources.** It removes about four in five of the medical source's documents that reach it. After every stage 1.5% of its converted documents remain; the doubling it carried from the language filter is removed again by dedup. The scientific theses (oss) also lose most of theirs at that filter, and one in ten of their sampled quality drops is bad text.
+  - **The quality filter is the largest single loss for most sources** ([every source's losses, stage by stage; asterisked sources reached the language filter doubled by stale output files, so their shares are of that filter's output](figures/curate-losses-by-source.svg)). It removes about four in five of the medical source's documents that reach it. After every stage 1.5% of its converted documents remain; the doubling it carried from the language filter is removed again by dedup. The scientific theses (oss) also lose most of theirs at that filter, and one in ten of their sampled quality drops is bad text.
   - **[H4] is refuted.** The clause fails when a medical, scientific or legal source loses more than half its documents to a stage whose drops the judge does not confirm. The medical source does so at the quality filter, where none of its 40 sampled drops is bad text ([F2], the per-source precision). The scientific theses (oss) lose 0.6883 at the quality filter, and the judge confirms only 4 of 40 sampled drops (0.10, 0.04–0.23), so oss also meets the refutation (the oss row of [H4] in `clause-readings.csv`).
   - **A judge blind to what makes medical text bad would overturn it.** The person-checked conflicts give no sign of that ([F5]), but they include only two medical documents, and the judge run sits below the agreement gate ([F12]).
 - **Implication**: Curated domain sources need their own quality settings or a way to skip the quality filter. Both are testable in the planned threshold experiment.
 - **History**:
   - 2026-09-30 first result from the stage sentinels
+  - 2026-11-18 Result moved to a figure of each domain source's largest single-stage loss against one half; the losses figure stays as an overview.
 
 ### F8 — Surviving text reads as ordinary Slovene · minor
 
@@ -415,10 +420,11 @@ concluded: 2026-09-30
 
 - **Summary**: Sentence deduplication uses about three quarters of the processor time of the stages that run once over the whole corpus.
 - **Runs**: no runs; `analysis.py` at daeba94 over the executor logs of the tracked build (MLflow 90765f34b34a45d080507c7150b2a454)
-- **Result**: ![Processor hours per pipeline step](figures/curate-cpu-hours-by-step.svg) The four content filters run once per group of sources that share settings, and every group writes its logs to the same folder, so only the last group, the news source, left timings; those steps are marked one bucket. The dedup and statistics stages run once over the whole corpus and are measured in full.
+- **Result**: ![Sentence dedup takes 390 of the 529 processor hours spent on the stages that run once over the whole corpus, 74%; statistics takes 134 hours and exact dedup 5.](figures/curate-cpu-hours-by-stage.svg) The four content filters run once per group of sources that share settings, and every group writes its logs to the same folder, so only the last group, the news source, left timings, from a June run. They are in `tables/throughput.csv`.
 - **Reading**: On the one source whose filter timings survive, the spam filter costs far less per document than any other filter, so the case for changing it rests on the text it drops ([F2]).
 - **History**:
   - 2026-09-30 first result, checked within 3% against the build log's stage times
+  - 2026-11-18 figure redrawn after a figure review: one bar per corpus-wide stage; the June filter timings stay in the table.
 
 ### F12 — Two runs of the same judge agree with each other more than with the person · supporting F1
 
