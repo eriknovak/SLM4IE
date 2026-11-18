@@ -24,10 +24,12 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import yaml
 from datachart.charts import BarChart
-from datachart.constants import BAR_MODE, EMPHASIS, LEGEND_LOCATION, ORIENTATION, SORT
+from datachart.config import config as chart_theme
+from datachart.constants import AXIS_SCALE, BAR_MODE, EMPHASIS, LEGEND_LOCATION, ORIENTATION, SORT
 
 EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
 TOOLS = EXPERIMENTS / "tools"
@@ -145,9 +147,31 @@ KPI2_EXAMPLES = 10_000
 KPI4_TOKENS = 500_000
 PERCENT = 100
 
-# F1's figure reads H2 off each domain's native share; its data table sits beside it
+# F1's figure: open documents by provenance, its data table beside it
 NATIVE_SHARE_FIGURE = "documents-by-domain-and-provenance"
-NATIVE_SHARE_CLAIM = Claim("H2", "share of open documents written in Slovene")
+NATIVE_SHARE_CLAIM = Claim("H2", "share of open documents by provenance")
+# F2's figure reads H2: native documents outside the registry against KPI 2
+CLAUSE_FIGURE = "new-native-documents-by-domain-and-access"
+CLAUSE_CLAIM = Claim("H2", "native documents outside the registry", threshold=KPI2_EXAMPLES)
+# the clause figure's log axis starts a decade under KPI 2, so every bar shows
+CLAUSE_AXIS_FLOOR = 1_000
+CLAUSE_AXIS_CEILING = 2_000_000
+CLAUSE_AXIS_TICKS: list[int] = [1_000, 10_000, 100_000, 1_000_000]
+
+# the three provenance readings in stacking order, each with its legend name;
+# the palette's first three colours follow this order, so blue is always native
+PROVENANCE_SERIES: list[tuple[str, str]] = [
+    ("native", "native"),
+    ("translated", "translated"),
+    ("generated", "machine-generated"),
+]
+# palette slots by meaning, so a colour keeps it across figures: blue native,
+# green translated, rust for medicine wherever it is a series of its own
+NATIVE_COLOUR, TRANSLATED_COLOUR, MEDICAL_COLOUR = 0, 1, 3
+# value labels drawn as text, not as haloed outlines the report cannot style
+TEXT_VALUES = {"plot_value_halo_width": 0}
+# count suffixes for the short totals beside each domain name
+COUNT_SUFFIXES: list[tuple[int, str]] = [(1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")]
 
 CATALOGUE_COLUMNS: list[str] = [
     "name",
@@ -720,48 +744,161 @@ def clause_supply(rows: list[dict[str, str]]) -> list[dict[str, object]]:
     return lines
 
 
-def draw_figures(summary: list[dict[str, str]]) -> None:
-    """Draws the share of each domain's open documents written in Slovene, the figure F1 links.
+def short_count(count: int) -> str:
+    """Writes a count in three significant figures with a size suffix.
 
-    The figure carries H2's claim, so its data table is written first.
+    Args:
+        count: A document count.
+
+    Returns:
+        The count as `3.04M`, `269k` or `972`.
+    """
+    for size, suffix in COUNT_SUFFIXES:
+        if count >= size:
+            return f"{count / size:.3g}{suffix}"
+    return str(count)
+
+
+def palette(slot: int) -> str:
+    """Reads one colour of the session theme's palette, by its slot.
+
+    Args:
+        slot: The colour's position in the theme's palette.
+
+    Returns:
+        The colour as a hex string.
+    """
+    return chart_theme["color_general_multiple"][slot]
+
+
+def draw_native_share_figure(summary: list[dict[str, str]], rows: list[dict[str, str]]) -> None:
+    """Draws each domain's open documents split by provenance, the figure F1 links.
+
+    The figure carries H2's claim, so its data table is written first. The
+    totals come from the catalogue and must agree with the supply table.
 
     Args:
         summary: The per-domain summary, as `supply-by-domain-and-access.csv` holds it.
+        rows: The annotated Slovene catalogue, as `catalogue.csv` holds it.
+
+    Raises:
+        ValueError: If a domain's catalogue totals disagree with the supply table.
     """
+    # total each domain's open documents per provenance
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     opened = {r["domain"]: r for r in summary if r["access_filter"] == "open"}
     shares = []
     for d in DOMAINS:
-        documents, native = int(opened[d]["documents"]), int(opened[d]["documents_native"])
-        share = PERCENT * native / documents if documents else 0
-        shares.append({"domain": d, "documents": documents, "documents_native": native, "native_share_percent": share})
+        in_domain = [
+            r for r in rows if r["access"] == "open" and d in {x.strip() for x in str(r["domains"]).split(",")}
+        ]
+        counts = {
+            p: sum(number(r["documents"]) or 0 for r in in_domain if r["provenance"] == p) for p, _ in PROVENANCE_SERIES
+        }
+        documents = sum(counts.values())
+        if documents != int(opened[d]["documents"]) or counts["native"] != int(opened[d]["documents_native"]):
+            raise ValueError(f"domain {d!r}: catalogue totals {counts} disagree with the supply table")
+        line: dict[str, object] = {"domain": d, "documents": documents}
+        line.update({f"documents_{p}": counts[p] for p, _ in PROVENANCE_SERIES})
+        line.update(
+            {f"{p}_share_percent": PERCENT * counts[p] / documents if documents else 0 for p, _ in PROVENANCE_SERIES}
+        )
+        shares.append(line)
     save_table(shares, TABLES_DIR / f"{NATIVE_SHARE_FIGURE}.csv")
 
-    # medicine is the subject of F1, so its bar is outlined; the rest keep their value labels
-    native_share = [
-        {
-            "label": f"{r['domain']}  ({r['documents']:,} docs)",
-            "y": r["native_share_percent"],
-            "emphasis": EMPHASIS.HIGHLIGHT if r["domain"] == "medical" else None,
-        }
-        for r in shares
+    # stacked value labels collide, so only medicine's cited native share is given, in its row name
+    names = {}
+    for r in shares:
+        names[r["domain"]] = f"{r['domain']} ({short_count(int(r['documents']))} docs"
+        if r["domain"] == "medical":
+            names[r["domain"]] += f", {float(r['native_share_percent']):.1f}% native"
+        names[r["domain"]] += ")"
+
+    # one series per provenance; medicine, F1's subject, has the highlighted edge
+    series = [
+        [
+            {
+                "label": names[r["domain"]],
+                "y": r[f"{p}_share_percent"],
+                "emphasis": EMPHASIS.HIGHLIGHT if r["domain"] == "medical" else None,
+            }
+            for r in shares
+        ]
+        for p, _ in PROVENANCE_SERIES
     ]
     save_figure(
-        BarChart(
-            native_share,
-            title="Slovene share by domain",
-            xlabel="documents written in Slovene (%)",
+        lambda: BarChart(
+            series,
+            title="Open documents by provenance",
+            xlabel="share of open documents (%)",
             ylabel="domain (open documents)",
+            subtitle=[name for _, name in PROVENANCE_SERIES],
+            bar_mode=BAR_MODE.STACK,
             orientation=ORIENTATION.HORIZONTAL,
             sort=SORT.ASCENDING,
-            show_values=True,
-            value_format="{x:.0f}%",
+            sort_by=PROVENANCE_SERIES[0][1],
+            show_legend=True,
+            legend={"location": LEGEND_LOCATION.OUTSIDE_TOP, "ncols": len(PROVENANCE_SERIES)},
             xmin=0,
-            xmax=100,
+            xmax=PERCENT,
             figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / f"{NATIVE_SHARE_FIGURE}.svg",
         claim=NATIVE_SHARE_CLAIM,
+    )
+
+
+def draw_clause_figure(clauses: list[dict[str, str]]) -> None:
+    """Draws native documents outside the registry against KPI 2, the reading H2 is decided on.
+
+    Args:
+        clauses: The clause supply, as `supply-by-clause.csv` holds it.
+    """
+    # the clause's reading per domain and access filter, its data table first
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    lines = [
+        {
+            "domain": r["domain"],
+            "access_filter": r["access_filter"],
+            "datasets": int(r["datasets"]),
+            "documents": int(r["documents"]),
+            "datasets_without_document_count": int(r["datasets_without_document_count"]),
+            "meets_kpi2": r["meets_kpi2"],
+        }
+        for r in clauses
+    ]
+    save_table(lines, TABLES_DIR / f"{CLAUSE_FIGURE}.csv")
+
+    # filters loosen down each domain, so input order stays; the count rides in the row name, clear of the KPI line
+    bars = [
+        {
+            "label": f"{r['domain']}, {r['access_filter']} ({r['documents']:,})",
+            "y": r["documents"],
+            "emphasis": EMPHASIS.HIGHLIGHT if r["domain"] == "medicine" else None,
+        }
+        for r in reversed(lines)
+    ]
+    save_figure(
+        lambda: BarChart(
+            bars,
+            title="Native documents outside the registry",
+            xlabel="documents (count, log scale)",
+            ylabel="domain, access filter",
+            orientation=ORIENTATION.HORIZONTAL,
+            scalex=AXIS_SCALE.LOG,
+            xmin=CLAUSE_AXIS_FLOOR,
+            xmax=CLAUSE_AXIS_CEILING,
+            # plain ticks: the default powers of ten render as glyph outlines
+            xticks=CLAUSE_AXIS_TICKS,
+            xticks_format="{x:,.0f}",
+            vlines={"x": KPI2_EXAMPLES, "label": f"KPI 2: {KPI2_EXAMPLES:,} documents"},
+            show_legend=True,
+            legend={"location": LEGEND_LOCATION.UPPER_RIGHT},
+            style={"plot_bar_color": palette(NATIVE_COLOUR)},
+            figsize=ONE_COLUMN,
+        ),
+        FIGURES_DIR / f"{CLAUSE_FIGURE}.svg",
+        claim=CLAUSE_CLAIM,
     )
 
 
@@ -770,13 +907,14 @@ def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, 
 
     The first splits the checked rows by class into medical and other domains,
     since F6 is about where machine-made text gathers. The second counts the
-    machine-translated datasets behind each named translation system.
+    datasets involving machine translation that name each system, a dataset
+    naming several systems counted once under each.
 
     Args:
         rows: The annotated Slovene catalogue, as `catalogue.csv` holds it.
         systems: One line per translation system, as `translation-systems.csv` holds it.
     """
-    legend_out = {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM}
+    # split each checked class into medical and other domains
     checked = [r for r in rows if r["provenance_checked"] == "yes"]
     split: dict[str, list[dict[str, object]]] = {"medical": [], "other": []}
     for klass in PROVENANCE_CLASSES:
@@ -787,52 +925,101 @@ def draw_provenance_figures(rows: list[dict[str, str]], systems: list[dict[str, 
         is_medical = sum(1 for r in in_class if "medical" in r["domains"])
         split["medical"].append({"label": label, "y": is_medical})
         split["other"].append({"label": label, "y": len(in_class) - is_medical})
+
+    # medicine keeps its own colour and the highlighted edge; the rest recede
     save_figure(
-        BarChart(
+        lambda: BarChart(
             [split["medical"], split["other"]],
             title="Checked datasets by provenance class",
             xlabel="datasets (count)",
             ylabel="provenance class",
             subtitle=["medical", "other domains"],
+            emphasis=[EMPHASIS.HIGHLIGHT, None],
             bar_mode=BAR_MODE.STACK,
             orientation=ORIENTATION.HORIZONTAL,
             sort=SORT.ASCENDING,
             show_legend=True,
-            legend=legend_out,
+            legend={"location": LEGEND_LOCATION.LOWER_RIGHT},
             xmin=0,
+            style=[{"plot_bar_color": palette(MEDICAL_COLOUR)}, {"plot_bar_color": chart_theme["muted_color"]}],
             figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / "datasets-by-provenance-class.svg",
     )
+
+    # count each named system once per dataset that names it
+    per_system: dict[str, int] = {}
+    for line in systems:
+        for system in str(line["translation_system"]).split(", "):
+            label = SYSTEM_LABELS.get(system, system)
+            per_system[label] = per_system.get(label, 0) + int(line["datasets"])
+    save_table(
+        [{"translation_system": s, "datasets": n} for s, n in per_system.items()],
+        TABLES_DIR / "datasets-by-translation-system.csv",
+    )
+
+    # unknown recedes and Google Translate, F7's subject, is highlighted
+    emphasis = {"unknown": EMPHASIS.BACKGROUND, "Google Translate": EMPHASIS.HIGHLIGHT}
     save_figure(
-        BarChart(
-            [
-                {
-                    "label": SYSTEM_LABELS.get(str(line["translation_system"]), str(line["translation_system"])),
-                    "y": int(line["datasets"]),
-                }
-                for line in systems
-            ],
-            title="Machine-translated datasets by system",
-            xlabel="datasets (count)",
-            ylabel="translation system",
-            orientation=ORIENTATION.HORIZONTAL,
-            sort=SORT.ASCENDING,
-            show_values=True,
-            value_format="{x:.0f}",
-            xmin=0,
-            figsize=ONE_COLUMN,
+        lambda: label_receded_bar(
+            BarChart(
+                [{"label": s, "y": n, "emphasis": emphasis.get(s)} for s, n in per_system.items()],
+                title="Datasets involving machine translation",
+                xlabel="datasets naming the system (count)",
+                ylabel="translation system",
+                orientation=ORIENTATION.HORIZONTAL,
+                sort=SORT.ASCENDING,
+                show_values=True,
+                value_format="{x:.0f}",
+                xmin=0,
+                style={"plot_bar_color": palette(TRANSLATED_COLOUR), **TEXT_VALUES},
+                figsize=ONE_COLUMN,
+            ),
+            "unknown",
+            per_system.get("unknown"),
         ),
         FIGURES_DIR / "datasets-by-translation-system.svg",
     )
 
 
+def label_receded_bar(figure: Any, label: str, value: int | None) -> Any:
+    """Writes the value label of a receded bar, which datachart leaves out, as the other bars' labels are written.
+
+    Args:
+        figure: A horizontal bar chart with value labels on its other bars.
+        label: The row name of the receded bar.
+        value: The bar's value; none leaves the figure as it is.
+
+    Returns:
+        The same figure.
+    """
+    if value is None:
+        return figure
+
+    # copy the place and the type of a drawn value label onto the receded row
+    ax = figure.axes[0]
+    rows = {tick.get_text(): y for tick, y in zip(ax.get_yticklabels(), ax.get_yticks(), strict=True)}
+    drawn = next(text for text in ax.texts if hasattr(text, "xyann"))
+    ax.annotate(
+        f"{value:.0f}",
+        (value, rows[label]),
+        xytext=drawn.xyann,
+        textcoords=drawn.anncoords,
+        ha=drawn.get_ha(),
+        va=drawn.get_va(),
+        fontproperties=drawn.get_fontproperties(),
+        color=drawn.get_color(),
+        zorder=drawn.get_zorder(),
+    )
+    return figure
+
+
 def draw_figures_from_tables() -> None:
     """Draws every figure the record links from the committed tables alone."""
-    draw_figures(read_table(TABLES_DIR / "supply-by-domain-and-access.csv"))
-    draw_provenance_figures(
-        read_table(TABLES_DIR / "catalogue.csv"), read_table(TABLES_DIR / "translation-systems.csv")
-    )
+    catalogue = read_table(TABLES_DIR / "catalogue.csv")
+    draw_native_share_figure(read_table(TABLES_DIR / "supply-by-domain-and-access.csv"), catalogue)
+    draw_clause_figure(read_table(TABLES_DIR / "supply-by-clause.csv"))
+    draw_provenance_figures(catalogue, read_table(TABLES_DIR / "translation-systems.csv"))
 
 
 def read_table(path: Path) -> list[dict[str, str]]:

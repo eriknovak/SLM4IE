@@ -309,7 +309,7 @@ concluded: 2026-11-17
 - **Summary**: Claude Opus leads Gemma 4 12B by more than 5 points of strict span F1 on SUK and Janes-Tag, not on SlavicNER.
 - **Key number**: −12.2 — local minus Claude strict span F1 on Janes-Tag, in points, the largest gap.
 - **Runs**: 975ce06299ad40c582c33c5efd561868, cba2a0f325b34e038d4d6e5807f6c124, 4bcc93a2130a427585044a80a64c8be2, e91b67248fbf44a7ae47b2c8a4594521, 3e652fee565c4407a9db83ee78cbf837, d1490f51e1eb4ff99afc9d5750bd2f60, b98a9235581d4d63be33ead543c08dce, ca379f166da74b5db2243b63a02edde4
-- **Result**: ![Gemma 4 12B minus Claude Opus in strict span F1 per test set, with 95% paired-bootstrap intervals; the shaded band is the 5-point equivalence margin. SUK and Janes-Tag lie wholly below the band, ssj500k crosses its lower edge, and SlavicNER, the one public set, lies inside it.](figures/benchmark-models-c1-difference-by-test-set.svg)
+- **Result**: ![Gemma 4 12B minus Claude Opus in strict span F1 per test set, with 95% paired-bootstrap intervals; the shaded band is the 5-point equivalence margin. SUK and Janes-Tag lie wholly below the band, ssj500k crosses its lower edge, and SlavicNER, the one public set, lies inside it. The intervals cover the sampling of test documents only; each model ran once, so Claude's run-to-run spread is not in them.](figures/benchmark-models-c1-difference-by-test-set.svg)
 - **Reading**:
   - **The local model trails on every test set, by a size that depends on the set.** The gap is largest on Janes-Tag, the social-media set, at about 12 points. SUK follows at about 7 points and ssj500k at about 5. On SlavicNER the two models are within one point, and the interval includes zero.
   - **[C1] is worse on SUK and Janes-Tag, undecided on ssj500k and equivalent on SlavicNER, so the Verdict rule reads partial.** Partial was written as a genre reading, but the split does not follow genre. SUK's news articles are the same genre as SlavicNER, and there the local model still trails by about 6 points ([table per SUK subcorpus](tables/benchmark-models-strict-f1-by-suk-subcorpus.csv)). The one equivalent set is also the only one public on the web since 2017. It is the only set without the two labels the local model handles worst, and the set where Claude misses more windows than on any other. Any of these may carry the equivalence, and one set cannot separate them.
@@ -318,6 +318,7 @@ concluded: 2026-11-17
   - [C1]: two sets worse, one undecided, one equivalent; partial by the rule.
 - **History**:
   - 2026-11-17 first result, eight tracked test runs at ac2e506; the best of each arm picked on the validation splits.
+  - 2026-11-18 caption states what the intervals leave out, after a figure review.
 
 ### F2 — The SlavicNER tie leaves less room inside the margin once Claude's unanswered windows are set aside · supporting F1
 
@@ -347,15 +348,16 @@ concluded: 2026-11-17
 
 - **Summary**: The highest zero-shot strict span F1 any model reaches ranges from 78 on ssj500k to 94 on SUK, the reference the project's small models must approach.
 - **Key number**: 8.5 — peak GPU memory in GiB of Gemma 4 12B, the best local model.
-- **Result**: [Strict span F1 with its 95% interval, per model, test set and split](tables/benchmark-models-strict-f1-by-model-and-split.csv)
+- **Result**: ![Test strict span F1 with its 95% bootstrap interval over documents, one panel per test set, for the seven local and three Claude models scored on all four sets. A Claude model scores highest in every panel, from 77.6 on ssj500k to 94.4 on SUK, and Gemma 4 12B is the best local model in each; on SlavicNER its 87.5 sits within a point of Claude Opus's 88.2.](figures/benchmark-models-test-strict-f1-by-test-set.svg) Every model, split and interval is in [the score table](tables/benchmark-models-strict-f1-by-model-and-split.csv).
 - **Reading**:
-  - **A Claude model scores highest on every test set, and Gemma 4 12B is the best local model on each.** The three Claude models sit within one point of each other on ssj500k. Gemma 4 12B needs 8.5 GiB of GPU memory. The table holds seven local models, those scored on all four test sets; Llama 3.2 3B and GaMS 9B ran on one set only ([D7]). The second-best local model, Qwen3.5 9B, needs 10.5 GiB and trails it by about 9 points on average ([mean test strict F1 over the four test sets against peak GPU memory, for the seven local models scored on all four](figures/benchmark-models-strict-f1-by-memory.svg)). Claude Sonnet beats Opus on three test sets but was excluded for missing more than 10% of validation windows ([D6]).
+  - **A Claude model scores highest on every test set, and Gemma 4 12B is the best local model on each.** The three Claude models sit within one point of each other on ssj500k. The table holds nine local models: seven scored on all four test sets, while Llama 3.2 3B and GaMS 9B ran on ssj500k only ([D7]). The second-best local model, Qwen3.5 9B, needs 10.5 GiB and trails it by about 9 points on average, 3.6 to 12.7 by test set ([Gemma 4 12B scores highest of the local models, a mean of 81.7 ranging 72.4 to 87.5, at 8.5 GiB, the second-lowest peak GPU memory; the two slower-mode models at 13.4 GiB keep 2.6 GiB below the 16 GiB limit](figures/benchmark-models-strict-f1-by-memory.svg)). Claude Sonnet beats Opus on three test sets but was excluded for missing more than 10% of validation windows ([D6]).
   - **[Q1] is answered: strict F1 with its interval is reported for every model and test set.** It is a diagnostic clause and does not move the verdict. All models ran zero-shot, with no fine-tuning, so these scores are the bar a fine-tuned small model is compared against.
   - **The reference moves with how Claude's misses are counted.** On answered windows only, Opus reads about 3 points higher on SUK and SlavicNER ([F2]), and Sonnet, the reference on three sets, misses windows at similar rates. A small model measured against the lower values gets an easier bar.
 - **Implication**: the project's margin is measured against these values; later small-model experiments reuse the test sets and scorer, so their scores join this table directly.
   - [Q1]: answered; the reference per test set is the highest strict span F1 any Claude model reaches there, with its interval: Sonnet on three sets, Opus on Janes-Tag.
 - **History**:
   - 2026-11-17 first result, 83 scored tracked runs at ac2e506; six extra runs of three Sonnet model-and-split pairs set aside, logged again from the same saved answers when an interrupted launch resumed.
+  - 2026-11-18 Reading corrected after a figure review: the table holds nine local models, seven of them scored on all four test sets. Result drawn as one panel per test set with intervals; the memory figure gains ranges and the GPU limit.
 
 ### F5 — Every local miss is an answer cut off at the token cap · minor
 
@@ -384,30 +386,33 @@ concluded: 2026-11-17
 ### F8 — Model size does not order the local models' scores · supporting F4
 
 - **Summary**: The three local models near 12 billion parameters span 31 to 82 points of mean test strict span F1.
-- **Result**: ![Mean test strict span F1 over the four test sets against total parameters for the seven local models scored on all four; Gemma 4 12B, served as a 4-bit checkpoint, is highlighted, and the line marks Claude Opus's mean of 87.8. The three models near 12 billion parameters sit far apart; Gemma 3 12B and GaMS3 12B were served at 8-bit floating point. Gemma 4 E4B counts 7.9 billion stored parameters although its name says 4, and scores like Gemma 3 12B.](figures/benchmark-models-strict-f1-by-parameters.svg)
+- **Result**: ![Mean test strict span F1 over the four test sets, with whiskers from the lowest to the highest set, against total parameters for the seven local models scored on all four; Gemma 4 12B, served as a 4-bit checkpoint, is highlighted, and the line marks Claude Opus's mean of 87.8. In the shaded band near 12 billion parameters GaMS3 12B scores 31.4, Gemma 3 12B 68.8 and Gemma 4 12B 81.7, and GaMS3's whole range lies below the other two; Gemma 3 12B and GaMS3 12B were served at 8-bit floating point. Gemma 4 E4B counts 7.9 billion stored parameters although its name says 4, and scores like Gemma 3 12B.](figures/benchmark-models-strict-f1-by-parameters.svg)
 - **Reading**:
   - **Model generation and training separate the local models more than their size does.** Gemma 4 12B leads its predecessor Gemma 3 12B by about 13 points at the same size. GaMS3 12B, trained further on Slovene, trails both ([F7]). The 8-billion Gemma 4 E4B matches Gemma 3 12B.
   - **This qualifies the reference table ([F4]): a smaller local model is not ruled out by size alone.** [Q1] is answered on this cut too: within this range the best model is the newest family, not the largest.
   - **A sweep with more sizes per family would show the size effect this spread hides.** Here most families have two sizes, and the counts include vision and audio parts that NER never uses.
 - **History**:
   - 2026-11-17 first result, parameter counts taken once from the safetensors headers of the downloaded weights into the model list, scores from the test runs of the reference table.
+  - 2026-11-18 figure redrawn after a figure review: whiskers for the range over test sets, the 12-billion band shaded, product names.
 
 ### F9 — The best local model is also among the fastest, about three times Claude Opus · supporting F4
 
 - **Summary**: Gemma 4 12B answers about 0.63 windows per second against 0.21 for Claude Opus, each asked one window at a time.
-- **Result**: ![Mean test strict span F1 against test throughput, every model asked one sentence window of up to about 2,000 characters at a time, on a log scale. Local models are circles, the two served in a slower mode to fit the GPU are squares, and the Claude models are triangles, each window a separate command-line call whose time includes its reasoning. Gemma 4 12B answered 0.63 windows per second against 0.21 for Claude Opus, at 6 points lower F1; neither side ran batched, so neither speed is a ceiling.](figures/benchmark-models-strict-f1-by-speed.svg)
+- **Result**: ![Mean test strict span F1 against test throughput, every model asked one sentence window of up to about 2,000 characters at a time, on a log scale. Local models are circles, the two served in a slower mode to fit the GPU are squares, and the Claude models are triangles, each window a separate command-line call whose time includes its reasoning. Whiskers run from the lowest to the highest test set. Gemma 4 12B answered 0.63 windows per second against 0.21 for Claude Opus, at a mean 6 points lower F1, though their ranges overlap (72.4 to 87.5 against 77.3 to 93.8); neither side ran batched, so neither speed is a ceiling.](figures/benchmark-models-strict-f1-by-speed.svg)
 - **Reading**:
-  - **Speed and score do not trade off among the local models.** Only Gemma 4 E4B is faster than Gemma 4 12B, by about twice, at about 12 points lower. The two eager-mode models are the slowest, by an order of magnitude.
+  - **Speed and score do not trade off among the local models.** Only Gemma 4 E4B is faster than Gemma 4 12B, by about twice, at about 12 points lower. The two eager-mode models are the slowest: GaMS3 12B is about 3 times slower than Gemma 3 12B, which is 3 to 17 times slower than the other local models.
   - **This qualifies the reference table ([F4]): the local model that scores best also labels fastest on this hardware.** [Q1] is answered on this cut too. Claude's three models run at 0.19 to 0.27 windows per second, a speed that includes the command-line tool's start-up and the network call.
   - **Batched requests would change these speeds.** Every model was asked one window at a time, so a local server answering many windows at once would widen the gap, and Claude's rate limits would keep it from closing.
 - **History**:
   - 2026-11-17 first result, throughput pooled over each model's four test runs.
+  - 2026-11-18 Reading corrected after a figure review: the eager-mode models are 3 to 50 times slower, not an order of magnitude throughout.
+  - 2026-11-18 figure redrawn after a figure review with whiskers for the range over test sets and product names.
 
 ## Verdict
 
 - **Outcome**: partial — the genre reading, which the Discussion finds unsupported
 - **Evidence**: [F1] Claude Opus leads Gemma 4 12B beyond the 5-point margin on SUK and Janes-Tag, is undecided against it on ssj500k and equivalent on SlavicNER; [F4] the reference strict span F1 of every model on the four test sets.
-- **Decision figure**: ![Gemma 4 12B minus Claude Opus in strict span F1 per test set, each with its 95% paired-bootstrap interval, its two scores and its reading; the shaded band is the 5-point equivalence margin, and only SlavicNER, the public set, falls inside it.](figures/benchmark-models-c1-difference-by-test-set.svg)
+- **Decision figure**: ![Gemma 4 12B minus Claude Opus in strict span F1 per test set, each with its 95% paired-bootstrap interval, its two scores and its reading; the shaded band is the 5-point equivalence margin, and only SlavicNER, the public set, falls inside it. The intervals cover the sampling of test documents only; each model ran once, so Claude's run-to-run spread is not in them.](figures/benchmark-models-c1-difference-by-test-set.svg)
 - **Discussion**:
   - **The best open LLM on one 16 GB GPU comes within the margin of Claude on one Slovene NER test set of four.** Gemma 4 12B trails Claude Opus by 5 to 12 points of strict span F1 on the download-gated sets, most on social-media text ([F1]). Its deficit is largest on rare labels ([F3]). The outcome judges the local annotator: the Statement's Claude lead held on two sets. Silver labels for the later experiments need Claude.
   - **The rule's word stands, but the genre explanation it names does not.** Partial was written to let the local model label the genres where it holds. Yet on SUK's news articles it still trails by about 6 points, while it ties on SlavicNER news ([F1]). The tie comes with three confounds: public text, no rare labels, and Claude's most frequent misses there ([F2]).

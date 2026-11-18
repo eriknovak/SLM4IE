@@ -53,7 +53,7 @@ from tqdm import tqdm
 EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
 TOOLS = EXPERIMENTS / "tools"
 sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
-from create_assets import FULL_WIDTH, HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402  — path set above
+from create_assets import FULL_WIDTH, HALF_TALL, ONE_COLUMN, Claim, save_figure  # noqa: E402  — path set above
 
 from slm4ie.data.curate.config import (  # noqa: E402
     effective_stage_config,
@@ -109,6 +109,9 @@ DEFAULT_WORKERS = 30
 
 #: Colour of the stacked bar for documents kept; the palette holds six colours.
 KEPT_BAR_COLOR = "#b8b8b8"
+
+#: Right end of the routes figure's retention axis, a little past 1 so a dot at 0.99 is drawn whole.
+ROUTES_AXIS_MAX = 1.03
 
 #: Salt that fixes the SVG clip-path ids.
 SVG_HASH_SALT = "curation-thresholds-slovenian"
@@ -235,9 +238,12 @@ MAX_BAD_RATE_RISE = 0.02
 #: The build every residual bad rate is compared against (D17).
 BASELINE_BUILD = "baseline"
 
-#: F12's figure, which reads Q1 against the baseline's rate plus two points; its data table shares the name.
-RESIDUAL_FIGURE = "residual-bad-rate-by-build"
-RESIDUAL_QUANTITY = "volume-weighted residual bad rate"
+#: F12's figure, which reads Q1's rise against the two-point bar; its data table shares the name.
+RESIDUAL_FIGURE = "residual-bad-rate-rise-by-build"
+RESIDUAL_QUANTITY = "rise in volume-weighted residual bad rate"
+
+#: Half-width of the band of retention changes read as unchanged between two builds (F1).
+UNCHANGED_RETENTION = 0.03
 
 
 # ===============================
@@ -2104,14 +2110,14 @@ def figure_tables(tables_dir: Path, stem: str) -> tuple[list[dict[str, Any]], ..
         stem: The candidate config's stem, naming its tables.
 
     Returns:
-        The losses, the two retention comparisons and the residual bad rates,
-        in `draw_figures` order.
+        The losses, the two retention comparisons and the rises in residual
+        bad rate, in `draw_figures` order.
     """
     names = (
         "curate-losses-by-source",
         "curate-retention-by-build-and-source",
         f"{stem}-retention-by-build-and-source",
-        "residual-bad-rate-by-build-and-source",
+        RESIDUAL_FIGURE,
     )
     return tuple(read_csv_values(tables_dir / f"{name}.csv") for name in names)
 
@@ -2142,24 +2148,20 @@ def _parse_cell(cell: str) -> Any:
 
 def draw_figures(
     figures_dir: Path,
-    tables_dir: Path,
     losses: list[dict[str, Any]],
     comparison: list[dict[str, Any]],
     route_comparison: list[dict[str, Any]],
-    residuals: list[dict[str, Any]],
+    rises: list[dict[str, Any]],
     stem: str,
 ) -> list[Path]:
     """Draw the record's figures from the tables `main` has already built.
 
-    The residual figure carries Q1's claim, so its data table is written first.
-
     Args:
         figures_dir: Where the SVGs go.
-        tables_dir: Where the residual figure's data table goes.
         losses: Rows from `loss_rows`.
         comparison: Rows from `build_comparison_rows`.
         route_comparison: Rows from `route_comparison_rows`.
-        residuals: Rows from `residual_rows`.
+        rises: Rows from `residual_rise_rows`, the data table of Q1's figure.
         stem: The candidate config's stem, naming its figures.
 
     Returns:
@@ -2178,9 +2180,10 @@ def draw_figures(
     def below(ncols: int) -> dict[str, Any]:
         return {"show_legend": True, "legend": {"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": ncols}}
 
-    # losses by source
+    # losses by source; a thin light edge keeps the thin parts apart from their outline
     figures: dict[str, Any] = {}
     parts = (*DROP_STAGES, "kept")
+    edge = {"plot_bar_edge_color": "#ffffff", "plot_bar_edge_width": 0.5}
     figures["curate-losses-by-source"] = BarChart(
         [[{"label": row["source"], "y": row[part]} for row in reversed(losses)] for part in parts],
         title="Document losses per source",
@@ -2191,85 +2194,79 @@ def draw_figures(
         bar_mode=BAR_MODE.STACK,
         orientation=ORIENTATION.HORIZONTAL,
         # the seventh part gets a neutral colour
-        style=[None] * len(DROP_STAGES) + [{"plot_bar_color": KEPT_BAR_COLOR}],
+        style=[edge] * len(DROP_STAGES) + [{**edge, "plot_bar_color": KEPT_BAR_COLOR}],
         figsize=HALF_TALL,
         # one legend column: the half-width figure has no room for more
         **below(1),
     )
 
-    # retention in the audit's build and the rebuild
+    # retention change from the audit's build to the baseline build; the bars draw bottom up
     both = [row for row in comparison if row["change"] != ""]
-    both.sort(key=lambda row: row["retained_rebuild"])
-    figures["curate-retention-by-build-and-source"] = DumbbellChart(
-        [
-            {
-                "label": row["source"] + (" *" if row["doubled_in_audit"] else ""),
-                "start": row["retained_audit"],
-                "end": row["retained_rebuild"],
-            }
-            for row in both
-        ],
-        title="Retention in two builds",
-        start_name="earlier audit's build",
-        end_name="rebuild at main's settings",
-        xlabel="share of converted documents kept",
+    both.sort(key=lambda row: row["change"])
+    figures["curate-retention-by-build-and-source"] = BarChart(
+        [{"label": row["source"] + (" *" if row["doubled_in_audit"] else ""), "y": row["change"]} for row in both],
+        title="Retention change per source",
+        xlabel="change in share kept\n(baseline build minus\nearlier audit's build)",
         ylabel="source (* doubled in the audit's build)",
-        xmin=0.0,
-        xmax=1.0,
+        orientation=ORIENTATION.HORIZONTAL,
+        vspans={"xmin": -UNCHANGED_RETENTION, "xmax": UNCHANGED_RETENTION, "label": "within three points"},
         figsize=HALF_TALL,
         **below(1),
     )
 
-    # retention under routes
-    sources = sorted((row for row in route_comparison if row["source"] != "TOTAL"), key=lambda row: row["change"])
+    # retention under routes: one block and one colour per route, largest rise first
+    sources = [row for row in route_comparison if row["source"] != "TOTAL"]
+    blocks: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in sorted(sources, key=lambda row: -row["change"]):
+        blocks[row["route"]].append(row)
     figures[f"{stem}-retention-by-build-and-source"] = DumbbellChart(
         [
-            {
-                "label": f"{row['source']} ({ROUTE_NAMES.get(row['route'], row['route'])})",
-                "start": row["retained_baseline"],
-                "end": row["retained_candidate"],
-            }
-            for row in sources
+            [
+                {"label": row["source"], "start": row["retained_baseline"], "end": row["retained_candidate"]}
+                for row in rows
+            ]
+            for rows in blocks.values()
         ],
         title="Retention under routes",
+        subtitle=[ROUTE_NAMES.get(route, route) for route in blocks],
         start_name="baseline build",
-        end_name="build with routes",
+        end_name="candidate-routes build",
         xlabel="share of converted documents kept",
-        ylabel="source (route)",
+        ylabel="source",
         xmin=0.0,
-        xmax=1.0,
-        # full width: the source and route labels leave a half column no room to plot
+        xmax=ROUTES_AXIS_MAX,
+        # full width: 18 rows need more height than one column gives
         figsize=FULL_WIDTH,
-        **below(2),
+        show_legend=True,
+        # one route per legend pair, beside the plot; three pairs below would run past the edge
+        legend={"location": LEGEND_LOCATION.OUTSIDE_RIGHT, "ncols": 1},
     )
 
-    # residual bad rate by build
-    pooled = [row for row in residuals if row["source"] == "pooled"]
-    baseline_rate = next(row["bad_rate"] for row in pooled if row["build"] == BASELINE_BUILD)
-    bar = baseline_rate + MAX_BAD_RATE_RISE
-    residual_table = tables_dir / f"{RESIDUAL_FIGURE}.csv"
-    save_table([{key: value for key, value in row.items() if key != "source"} for row in pooled], residual_table)
+    # rise in residual bad rate per build against the two-point bar
     figures[RESIDUAL_FIGURE] = BarChart(
         [
-            {"label": f"{row['build']} build", "y": row["bad_rate"], "yerr": row["bad_rate_high"] - row["bad_rate"]}
-            for row in pooled
+            {
+                "label": f"{row['build']} build",
+                "y": row["bad_rate_rise"],
+                "yerr": (row["bad_rate_rise_high"] - row["bad_rate_rise_low"]) / 2,
+            }
+            for row in rises
         ],
-        title="Bad text left per build",
+        title="Rise in bad text",
         xlabel="build",
-        ylabel="share of kept documents judged bad",
-        ymin=0.0,
+        ylabel="rise in share of kept\ndocuments judged bad",
         show_yerr=True,
         show_values=True,
-        value_format="{x:.3f}",
-        hlines={"y": bar, "label": "baseline plus two points"},
+        value_format="{x:.4f}",
+        hlines={"y": MAX_BAD_RATE_RISE, "label": "bar: two points"},
         figsize=ONE_COLUMN,
         **below(1),
     )
 
     # save the figures
-    claims = {RESIDUAL_FIGURE: Claim("Q1", RESIDUAL_QUANTITY, threshold=bar)}
+    claims = {RESIDUAL_FIGURE: Claim("Q1", RESIDUAL_QUANTITY, threshold=MAX_BAD_RATE_RISE)}
     full_width = {f"{stem}-retention-by-build-and-source"}
-    written = [residual_table]
+    written = []
     for name, figure in figures.items():
         path = figures_dir / f"{name}.svg"
         width = "full-width" if name in full_width else "one-column"
@@ -2360,7 +2357,7 @@ def main() -> None:
         return
     if args.figures_only:
         stem = args.routes_config.stem
-        for path in draw_figures(args.figures, args.tables, *figure_tables(args.tables, stem), stem):
+        for path in draw_figures(args.figures, *figure_tables(args.tables, stem), stem):
             print(f"wrote {path}")
         return
 
@@ -2599,7 +2596,7 @@ def main() -> None:
         write_csv(args.tables / "audit-precision-by-filter-and-source.csv", precision),
     ]
     # draw the figures from the tables just written, as --figures-only does
-    written += draw_figures(args.figures, args.tables, *figure_tables(args.tables, stem), stem)
+    written += draw_figures(args.figures, *figure_tables(args.tables, stem), stem)
     for path in written:
         print(f"wrote {path}")
 

@@ -30,533 +30,407 @@ z
   </g>
   <g id="axes_1">
    <g id="patch_2">
-    <path d="M 103.891033 447.817888 
-L 212.99976 447.817888 
+    <path d="M 103.891033 467.075941 
+L 212.99976 467.075941 
 L 212.99976 22.550095 
 L 103.891033 22.550095 
-L 103.891033 447.817888 
+L 103.891033 467.075941 
 z
 " style="fill: none"/>
    </g>
-   <g clip-path="url(#pa760012d69)">
+   <g clip-path="url(#p7124cd1231)">
     <image xlink:href="data:image/png;base64,
-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" id="imagedc75cf416f" transform="scale(1 -1) translate(0 -425.28)" x="103.891033" y="-22.537888" width="109.2" height="425.28"/>
+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" id="image4be8141f6c" transform="scale(1 -1) translate(0 -444.72)" x="103.891033" y="-22.355941" width="109.2" height="444.72"/>
    </g>
    <g id="matplotlib.axis_1">
     <g id="xtick_1">
      <g id="line2d_1"/>
      <g id="text_1">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="114.544365" y="452.878826" transform="rotate(-45 114.544365 452.878826)">language</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="119.090562" y="472.13688" transform="rotate(-45 119.090562 472.13688)">language</text>
      </g>
     </g>
     <g id="xtick_2">
      <g id="line2d_2"/>
      <g id="text_2">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="132.729153" y="452.878826" transform="rotate(-45 132.729153 452.878826)">spam</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="146.367744" y="472.13688" transform="rotate(-45 146.367744 472.13688)">spam</text>
      </g>
     </g>
     <g id="xtick_3">
      <g id="line2d_3"/>
      <g id="text_3">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="150.913941" y="452.878826" transform="rotate(-45 150.913941 452.878826)">quality</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="173.644925" y="472.13688" transform="rotate(-45 173.644925 472.13688)">quality</text>
      </g>
     </g>
     <g id="xtick_4">
      <g id="line2d_4"/>
      <g id="text_4">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="169.098728" y="452.878826" transform="rotate(-45 169.098728 452.878826)">repetition</text>
-     </g>
-    </g>
-    <g id="xtick_5">
-     <g id="line2d_5"/>
-     <g id="text_5">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="187.204851" y="452.800161" transform="rotate(-45 187.204851 452.800161)">exact_dedup</text>
-     </g>
-    </g>
-    <g id="xtick_6">
-     <g id="line2d_6"/>
-     <g id="text_6">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="205.389639" y="452.800161" transform="rotate(-45 205.389639 452.800161)">sentence_dedup</text>
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="200.922107" y="472.13688" transform="rotate(-45 200.922107 472.13688)">repetition</text>
      </g>
     </g>
    </g>
    <g id="matplotlib.axis_2">
     <g id="ytick_1">
-     <g id="line2d_7"/>
-     <g id="text_7">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="35.38929" transform="rotate(-0 100.391033 35.38929)">c4</text>
+     <g id="line2d_5"/>
+     <g id="text_5">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="35.870741" transform="rotate(-0 100.391033 35.870741)">c4</text>
      </g>
     </g>
     <g id="ytick_2">
-     <g id="line2d_8"/>
-     <g id="text_8">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="56.652679" transform="rotate(-0 100.391033 56.652679)">cc100</text>
+     <g id="line2d_6"/>
+     <g id="text_6">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="58.097033" transform="rotate(-0 100.391033 58.097033)">cc100</text>
      </g>
     </g>
     <g id="ytick_3">
-     <g id="line2d_9"/>
-     <g id="text_9">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="77.804819" transform="rotate(-0 100.391033 77.804819)">classla_web_sl</text>
+     <g id="line2d_7"/>
+     <g id="text_7">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="80.323326" transform="rotate(-0 100.391033 80.323326)">fineweb2</text>
      </g>
     </g>
     <g id="ytick_4">
-     <g id="line2d_10"/>
-     <g id="text_10">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="99.068209" transform="rotate(-0 100.391033 99.068209)">classlawiki_sl</text>
+     <g id="line2d_8"/>
+     <g id="text_8">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="102.438368" transform="rotate(-0 100.391033 102.438368)">macocu_sl</text>
      </g>
     </g>
     <g id="ytick_5">
-     <g id="line2d_11"/>
-     <g id="text_11">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="120.442848" transform="rotate(-0 100.391033 120.442848)">coleslaw</text>
+     <g id="line2d_9"/>
+     <g id="text_9">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="124.77591" transform="rotate(-0 100.391033 124.77591)">hplt</text>
      </g>
     </g>
     <g id="ytick_6">
-     <g id="line2d_12"/>
-     <g id="text_12">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="141.706238" transform="rotate(-0 100.391033 141.706238)">culturax</text>
+     <g id="line2d_10"/>
+     <g id="text_10">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="147.002203" transform="rotate(-0 100.391033 147.002203)">oss</text>
      </g>
     </g>
     <g id="ytick_7">
-     <g id="line2d_13"/>
-     <g id="text_13">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="162.969628" transform="rotate(-0 100.391033 162.969628)">finepdf</text>
+     <g id="line2d_11"/>
+     <g id="text_11">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="169.117245" transform="rotate(-0 100.391033 169.117245)">classla_web_sl</text>
      </g>
     </g>
     <g id="ytick_8">
-     <g id="line2d_14"/>
-     <g id="text_14">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="184.233017" transform="rotate(-0 100.391033 184.233017)">fineweb2</text>
+     <g id="line2d_12"/>
+     <g id="text_12">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="191.343537" transform="rotate(-0 100.391033 191.343537)">legal_mc4</text>
      </g>
     </g>
     <g id="ytick_9">
-     <g id="line2d_15"/>
-     <g id="text_15">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="205.496407" transform="rotate(-0 100.391033 205.496407)">gigafida</text>
+     <g id="line2d_13"/>
+     <g id="text_13">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="213.68108" transform="rotate(-0 100.391033 213.68108)">finepdf</text>
      </g>
     </g>
     <g id="ytick_10">
-     <g id="line2d_16"/>
-     <g id="text_16">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="226.759797" transform="rotate(-0 100.391033 226.759797)">hplt</text>
+     <g id="line2d_14"/>
+     <g id="text_14">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="235.907372" transform="rotate(-0 100.391033 235.907372)">culturax</text>
      </g>
     </g>
     <g id="ytick_11">
-     <g id="line2d_17"/>
-     <g id="text_17">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="248.023186" transform="rotate(-0 100.391033 248.023186)">kas</text>
+     <g id="line2d_15"/>
+     <g id="text_15">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="258.133664" transform="rotate(-0 100.391033 258.133664)">solar</text>
      </g>
     </g>
     <g id="ytick_12">
-     <g id="line2d_18"/>
-     <g id="text_18">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="269.286576" transform="rotate(-0 100.391033 269.286576)">kzb</text>
+     <g id="line2d_16"/>
+     <g id="text_16">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="280.248707" transform="rotate(-0 100.391033 280.248707)">slovenian_news</text>
      </g>
     </g>
     <g id="ytick_13">
-     <g id="line2d_19"/>
-     <g id="text_19">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="290.438716" transform="rotate(-0 100.391033 290.438716)">legal_mc4</text>
+     <g id="line2d_17"/>
+     <g id="text_17">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="302.586249" transform="rotate(-0 100.391033 302.586249)">siparl</text>
      </g>
     </g>
     <g id="ytick_14">
-     <g id="line2d_20"/>
-     <g id="text_20">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="311.702105" transform="rotate(-0 100.391033 311.702105)">macocu_sl</text>
+     <g id="line2d_18"/>
+     <g id="text_18">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="324.701291" transform="rotate(-0 100.391033 324.701291)">parlamint_si</text>
      </g>
     </g>
     <g id="ytick_15">
-     <g id="line2d_21"/>
-     <g id="text_21">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="333.076745" transform="rotate(-0 100.391033 333.076745)">oss</text>
+     <g id="line2d_19"/>
+     <g id="text_19">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="346.927584" transform="rotate(-0 100.391033 346.927584)">classlawiki_sl</text>
      </g>
     </g>
     <g id="ytick_16">
-     <g id="line2d_22"/>
-     <g id="text_22">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="354.228885" transform="rotate(-0 100.391033 354.228885)">parlamint_si</text>
+     <g id="line2d_20"/>
+     <g id="text_20">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="369.265126" transform="rotate(-0 100.391033 369.265126)">gigafida</text>
      </g>
     </g>
     <g id="ytick_17">
-     <g id="line2d_23"/>
-     <g id="text_23">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="375.492274" transform="rotate(-0 100.391033 375.492274)">povejmo_vemo_med</text>
+     <g id="line2d_21"/>
+     <g id="text_21">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="391.491418" transform="rotate(-0 100.391033 391.491418)">coleslaw</text>
      </g>
     </g>
     <g id="ytick_18">
-     <g id="line2d_24"/>
-     <g id="text_24">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="396.866914" transform="rotate(-0 100.391033 396.866914)">siparl</text>
+     <g id="line2d_22"/>
+     <g id="text_22">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="413.717711" transform="rotate(-0 100.391033 413.717711)">kas</text>
      </g>
     </g>
     <g id="ytick_19">
-     <g id="line2d_25"/>
-     <g id="text_25">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="418.019054" transform="rotate(-0 100.391033 418.019054)">slovenian_news</text>
+     <g id="line2d_23"/>
+     <g id="text_23">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="435.944003" transform="rotate(-0 100.391033 435.944003)">kzb</text>
      </g>
     </g>
     <g id="ytick_20">
-     <g id="line2d_26"/>
-     <g id="text_26">
-      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="439.393693" transform="rotate(-0 100.391033 439.393693)">solar</text>
+     <g id="line2d_24"/>
+     <g id="text_24">
+      <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: end; fill: #06102b" x="100.391033" y="458.059045" transform="rotate(-0 100.391033 458.059045)">povejmo_vemo_med</text>
      </g>
     </g>
    </g>
+   <g id="text_25">
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="35.870741" transform="rotate(-0 117.529623 35.870741)">93</text>
+   </g>
+   <g id="text_26">
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="35.870741" transform="rotate(-0 144.806805 35.870741)">63</text>
+   </g>
    <g id="text_27">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="35.38929" transform="rotate(-0 112.983426 35.38929)">92</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="35.870741" transform="rotate(-0 172.083987 35.870741)">40</text>
    </g>
    <g id="text_28">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="35.38929" transform="rotate(-0 131.168214 35.38929)">62</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="35.870741" transform="rotate(-0 199.361169 35.870741)">43</text>
    </g>
    <g id="text_29">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="35.38929" transform="rotate(-0 149.353002 35.38929)">40</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="58.097033" transform="rotate(-0 117.529623 58.097033)">75</text>
    </g>
    <g id="text_30">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="35.38929" transform="rotate(-0 167.53779 35.38929)">42</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="58.097033" transform="rotate(-0 144.806805 58.097033)">58</text>
    </g>
    <g id="text_31">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="35.38929" transform="rotate(-0 185.722578 35.38929)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="58.097033" transform="rotate(-0 172.083987 58.097033)">55</text>
    </g>
    <g id="text_32">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="35.38929" transform="rotate(-0 203.907366 35.38929)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="58.097033" transform="rotate(-0 199.361169 58.097033)">40</text>
    </g>
    <g id="text_33">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="56.652679" transform="rotate(-0 112.983426 56.652679)">75</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="80.323326" transform="rotate(-0 117.529623 80.323326)">88</text>
    </g>
    <g id="text_34">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="56.652679" transform="rotate(-0 131.168214 56.652679)">57</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="144.806805" y="80.323326" transform="rotate(-0 144.806805 80.323326)">90</text>
    </g>
    <g id="text_35">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="56.652679" transform="rotate(-0 149.353002 56.652679)">55</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="80.323326" transform="rotate(-0 172.083987 80.323326)">23</text>
    </g>
    <g id="text_36">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="56.652679" transform="rotate(-0 167.53779 56.652679)">40</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="80.323326" transform="rotate(-0 199.361169 80.323326)">20</text>
    </g>
    <g id="text_37">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="56.652679" transform="rotate(-0 185.722578 56.652679)">10</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="102.549618" transform="rotate(-0 117.529623 102.549618)">78</text>
    </g>
    <g id="text_38">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="56.652679" transform="rotate(-0 203.907366 56.652679)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="102.549618" transform="rotate(-0 144.806805 102.549618)">18</text>
    </g>
    <g id="text_39">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="77.916069" transform="rotate(-0 112.983426 77.916069)">48</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="102.549618" transform="rotate(-0 172.083987 102.549618)">53</text>
    </g>
    <g id="text_40">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="77.916069" transform="rotate(-0 131.168214 77.916069)">30</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="102.549618" transform="rotate(-0 199.361169 102.549618)">20</text>
    </g>
    <g id="text_41">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="77.916069" transform="rotate(-0 149.353002 77.916069)">12</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="124.77591" transform="rotate(-0 117.529623 124.77591)">70</text>
    </g>
    <g id="text_42">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="77.916069" transform="rotate(-0 167.53779 77.916069)">15</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="124.77591" transform="rotate(-0 144.806805 124.77591)">48</text>
    </g>
    <g id="text_43">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="77.916069" transform="rotate(-0 203.907366 77.916069)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="124.77591" transform="rotate(-0 172.083987 124.77591)">5</text>
    </g>
    <g id="text_44">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="99.179459" transform="rotate(-0 112.983426 99.179459)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="124.77591" transform="rotate(-0 199.361169 124.77591)">15</text>
    </g>
    <g id="text_45">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="99.179459" transform="rotate(-0 131.168214 99.179459)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="147.002203" transform="rotate(-0 117.529623 147.002203)">100</text>
    </g>
    <g id="text_46">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="99.179459" transform="rotate(-0 149.353002 99.179459)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="147.002203" transform="rotate(-0 144.806805 147.002203)">15</text>
    </g>
    <g id="text_47">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="99.179459" transform="rotate(-0 167.53779 99.179459)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="147.002203" transform="rotate(-0 172.083987 147.002203)">10</text>
    </g>
    <g id="text_48">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="99.179459" transform="rotate(-0 185.722578 99.179459)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="147.002203" transform="rotate(-0 199.361169 147.002203)">13</text>
    </g>
    <g id="text_49">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="99.179459" transform="rotate(-0 203.907366 99.179459)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="169.228495" transform="rotate(-0 117.529623 169.228495)">48</text>
    </g>
    <g id="text_50">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="120.442848" transform="rotate(-0 112.983426 120.442848)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="169.228495" transform="rotate(-0 144.806805 169.228495)">30</text>
    </g>
    <g id="text_51">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="120.442848" transform="rotate(-0 131.168214 120.442848)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="169.228495" transform="rotate(-0 172.083987 169.228495)">13</text>
    </g>
    <g id="text_52">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="120.442848" transform="rotate(-0 149.353002 120.442848)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="169.228495" transform="rotate(-0 199.361169 169.228495)">15</text>
    </g>
    <g id="text_53">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="120.442848" transform="rotate(-0 167.53779 120.442848)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="191.454787" transform="rotate(-0 117.529623 191.454787)">80</text>
    </g>
    <g id="text_54">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="120.442848" transform="rotate(-0 185.722578 120.442848)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="191.454787" transform="rotate(-0 144.806805 191.454787)">15</text>
    </g>
    <g id="text_55">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="120.442848" transform="rotate(-0 203.907366 120.442848)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="191.454787" transform="rotate(-0 172.083987 191.454787)">5</text>
    </g>
    <g id="text_56">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="141.706238" transform="rotate(-0 112.983426 141.706238)">8</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="191.454787" transform="rotate(-0 199.361169 191.454787)">5</text>
    </g>
    <g id="text_57">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="141.706238" transform="rotate(-0 131.168214 141.706238)">42</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="117.529623" y="213.68108" transform="rotate(-0 117.529623 213.68108)">73</text>
    </g>
    <g id="text_58">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="141.706238" transform="rotate(-0 149.353002 141.706238)">10</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="213.68108" transform="rotate(-0 144.806805 213.68108)">3</text>
    </g>
    <g id="text_59">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="141.706238" transform="rotate(-0 167.53779 141.706238)">10</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="213.68108" transform="rotate(-0 172.083987 213.68108)">8</text>
    </g>
    <g id="text_60">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="141.706238" transform="rotate(-0 185.722578 141.706238)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="213.68108" transform="rotate(-0 199.361169 213.68108)">18</text>
    </g>
    <g id="text_61">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="141.706238" transform="rotate(-0 203.907366 141.706238)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="235.907372" transform="rotate(-0 117.529623 235.907372)">8</text>
    </g>
    <g id="text_62">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="162.969628" transform="rotate(-0 112.983426 162.969628)">72</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="235.907372" transform="rotate(-0 144.806805 235.907372)">43</text>
    </g>
    <g id="text_63">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="162.969628" transform="rotate(-0 131.168214 162.969628)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="235.907372" transform="rotate(-0 172.083987 235.907372)">10</text>
    </g>
    <g id="text_64">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="162.969628" transform="rotate(-0 149.353002 162.969628)">8</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="235.907372" transform="rotate(-0 199.361169 235.907372)">10</text>
    </g>
    <g id="text_65">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="162.969628" transform="rotate(-0 167.53779 162.969628)">18</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="258.133664" transform="rotate(-0 117.529623 258.133664)">3</text>
    </g>
    <g id="text_66">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="162.969628" transform="rotate(-0 203.907366 162.969628)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="258.133664" transform="rotate(-0 144.806805 258.133664)">10</text>
    </g>
    <g id="text_67">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="184.233017" transform="rotate(-0 112.983426 184.233017)">88</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="258.133664" transform="rotate(-0 172.083987 258.133664)">13</text>
    </g>
    <g id="text_68">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="131.168214" y="184.233017" transform="rotate(-0 131.168214 184.233017)">90</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="258.133664" transform="rotate(-0 199.361169 258.133664)">8</text>
    </g>
    <g id="text_69">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="184.233017" transform="rotate(-0 149.353002 184.233017)">22</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="280.359957" transform="rotate(-0 117.529623 280.359957)">13</text>
    </g>
    <g id="text_70">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="184.233017" transform="rotate(-0 167.53779 184.233017)">20</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="280.359957" transform="rotate(-0 144.806805 280.359957)">3</text>
    </g>
    <g id="text_71">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="184.233017" transform="rotate(-0 185.722578 184.233017)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="280.359957" transform="rotate(-0 172.083987 280.359957)">0</text>
    </g>
    <g id="text_72">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="184.233017" transform="rotate(-0 203.907366 184.233017)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="280.359957" transform="rotate(-0 199.361169 280.359957)">0</text>
    </g>
    <g id="text_73">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="205.496407" transform="rotate(-0 112.983426 205.496407)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="302.586249" transform="rotate(-0 117.529623 302.586249)">10</text>
    </g>
    <g id="text_74">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="205.496407" transform="rotate(-0 131.168214 205.496407)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="302.586249" transform="rotate(-0 144.806805 302.586249)">0</text>
    </g>
    <g id="text_75">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="205.496407" transform="rotate(-0 149.353002 205.496407)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="302.586249" transform="rotate(-0 172.083987 302.586249)">5</text>
    </g>
    <g id="text_76">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="205.496407" transform="rotate(-0 167.53779 205.496407)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="302.586249" transform="rotate(-0 199.361169 302.586249)">0</text>
    </g>
    <g id="text_77">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="205.496407" transform="rotate(-0 203.907366 205.496407)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="324.812541" transform="rotate(-0 117.529623 324.812541)">3</text>
    </g>
    <g id="text_78">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="226.759797" transform="rotate(-0 112.983426 226.759797)">70</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="324.812541" transform="rotate(-0 144.806805 324.812541)">3</text>
    </g>
    <g id="text_79">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="226.759797" transform="rotate(-0 131.168214 226.759797)">48</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="324.812541" transform="rotate(-0 172.083987 324.812541)">3</text>
    </g>
    <g id="text_80">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="226.759797" transform="rotate(-0 149.353002 226.759797)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="324.812541" transform="rotate(-0 199.361169 324.812541)">0</text>
    </g>
    <g id="text_81">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="226.759797" transform="rotate(-0 167.53779 226.759797)">15</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="347.038834" transform="rotate(-0 117.529623 347.038834)">5</text>
    </g>
    <g id="text_82">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="226.759797" transform="rotate(-0 185.722578 226.759797)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="347.038834" transform="rotate(-0 144.806805 347.038834)">0</text>
    </g>
    <g id="text_83">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="226.759797" transform="rotate(-0 203.907366 226.759797)">2</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="347.038834" transform="rotate(-0 172.083987 347.038834)">3</text>
    </g>
    <g id="text_84">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="248.023186" transform="rotate(-0 112.983426 248.023186)">100</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="347.038834" transform="rotate(-0 199.361169 347.038834)">0</text>
    </g>
    <g id="text_85">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="248.023186" transform="rotate(-0 131.168214 248.023186)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="369.265126" transform="rotate(-0 117.529623 369.265126)">0</text>
    </g>
    <g id="text_86">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="248.023186" transform="rotate(-0 149.353002 248.023186)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="369.265126" transform="rotate(-0 144.806805 369.265126)">0</text>
    </g>
    <g id="text_87">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="248.023186" transform="rotate(-0 167.53779 248.023186)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="369.265126" transform="rotate(-0 172.083987 369.265126)">3</text>
    </g>
    <g id="text_88">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="248.023186" transform="rotate(-0 185.722578 248.023186)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="369.265126" transform="rotate(-0 199.361169 369.265126)">5</text>
    </g>
    <g id="text_89">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="248.023186" transform="rotate(-0 203.907366 248.023186)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="117.529623" y="391.491418" transform="rotate(-0 117.529623 391.491418)">3</text>
    </g>
    <g id="text_90">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="269.286576" transform="rotate(-0 131.168214 269.286576)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="391.491418" transform="rotate(-0 144.806805 391.491418)">0</text>
    </g>
    <g id="text_91">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="269.286576" transform="rotate(-0 149.353002 269.286576)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="391.491418" transform="rotate(-0 172.083987 391.491418)">3</text>
    </g>
    <g id="text_92">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="269.286576" transform="rotate(-0 167.53779 269.286576)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="391.491418" transform="rotate(-0 199.361169 391.491418)">0</text>
    </g>
    <g id="text_93">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="290.549966" transform="rotate(-0 112.983426 290.549966)">80</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="413.717711" transform="rotate(-0 144.806805 413.717711)">0</text>
    </g>
    <g id="text_94">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="290.549966" transform="rotate(-0 131.168214 290.549966)">15</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="413.717711" transform="rotate(-0 172.083987 413.717711)">0</text>
    </g>
    <g id="text_95">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="290.549966" transform="rotate(-0 149.353002 290.549966)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="413.717711" transform="rotate(-0 199.361169 413.717711)">0</text>
    </g>
    <g id="text_96">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="290.549966" transform="rotate(-0 167.53779 290.549966)">5</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="435.944003" transform="rotate(-0 144.806805 435.944003)">0</text>
    </g>
    <g id="text_97">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="290.549966" transform="rotate(-0 185.722578 290.549966)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="435.944003" transform="rotate(-0 172.083987 435.944003)">0</text>
    </g>
    <g id="text_98">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="290.549966" transform="rotate(-0 203.907366 290.549966)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="144.806805" y="458.170295" transform="rotate(-0 144.806805 458.170295)">0</text>
    </g>
    <g id="text_99">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="311.813355" transform="rotate(-0 112.983426 311.813355)">78</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="172.083987" y="458.170295" transform="rotate(-0 172.083987 458.170295)">0</text>
    </g>
    <g id="text_100">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="311.813355" transform="rotate(-0 131.168214 311.813355)">18</text>
-   </g>
-   <g id="text_101">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="311.813355" transform="rotate(-0 149.353002 311.813355)">52</text>
-   </g>
-   <g id="text_102">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="311.813355" transform="rotate(-0 167.53779 311.813355)">20</text>
-   </g>
-   <g id="text_103">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="311.813355" transform="rotate(-0 185.722578 311.813355)">12</text>
-   </g>
-   <g id="text_104">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="311.813355" transform="rotate(-0 203.907366 311.813355)">2</text>
-   </g>
-   <g id="text_105">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #ffffff" x="112.983426" y="333.076745" transform="rotate(-0 112.983426 333.076745)">100</text>
-   </g>
-   <g id="text_106">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="333.076745" transform="rotate(-0 131.168214 333.076745)">15</text>
-   </g>
-   <g id="text_107">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="333.076745" transform="rotate(-0 149.353002 333.076745)">10</text>
-   </g>
-   <g id="text_108">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="333.076745" transform="rotate(-0 167.53779 333.076745)">12</text>
-   </g>
-   <g id="text_109">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="333.076745" transform="rotate(-0 185.722578 333.076745)">0</text>
-   </g>
-   <g id="text_110">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="333.076745" transform="rotate(-0 203.907366 333.076745)">15</text>
-   </g>
-   <g id="text_111">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="354.340135" transform="rotate(-0 112.983426 354.340135)">2</text>
-   </g>
-   <g id="text_112">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="354.340135" transform="rotate(-0 131.168214 354.340135)">2</text>
-   </g>
-   <g id="text_113">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="354.340135" transform="rotate(-0 149.353002 354.340135)">2</text>
-   </g>
-   <g id="text_114">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="354.340135" transform="rotate(-0 167.53779 354.340135)">0</text>
-   </g>
-   <g id="text_115">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="354.340135" transform="rotate(-0 185.722578 354.340135)">0</text>
-   </g>
-   <g id="text_116">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="354.340135" transform="rotate(-0 203.907366 354.340135)">0</text>
-   </g>
-   <g id="text_117">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="375.603524" transform="rotate(-0 112.983426 375.603524)">25</text>
-   </g>
-   <g id="text_118">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="375.603524" transform="rotate(-0 131.168214 375.603524)">0</text>
-   </g>
-   <g id="text_119">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="375.603524" transform="rotate(-0 149.353002 375.603524)">0</text>
-   </g>
-   <g id="text_120">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="375.603524" transform="rotate(-0 167.53779 375.603524)">0</text>
-   </g>
-   <g id="text_121">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="375.603524" transform="rotate(-0 185.722578 375.603524)">0</text>
-   </g>
-   <g id="text_122">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="375.603524" transform="rotate(-0 203.907366 375.603524)">0</text>
-   </g>
-   <g id="text_123">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="396.866914" transform="rotate(-0 112.983426 396.866914)">10</text>
-   </g>
-   <g id="text_124">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="396.866914" transform="rotate(-0 131.168214 396.866914)">0</text>
-   </g>
-   <g id="text_125">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="396.866914" transform="rotate(-0 149.353002 396.866914)">5</text>
-   </g>
-   <g id="text_126">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="396.866914" transform="rotate(-0 167.53779 396.866914)">0</text>
-   </g>
-   <g id="text_127">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="396.866914" transform="rotate(-0 185.722578 396.866914)">0</text>
-   </g>
-   <g id="text_128">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="396.866914" transform="rotate(-0 203.907366 396.866914)">2</text>
-   </g>
-   <g id="text_129">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="418.130304" transform="rotate(-0 112.983426 418.130304)">12</text>
-   </g>
-   <g id="text_130">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="418.130304" transform="rotate(-0 131.168214 418.130304)">2</text>
-   </g>
-   <g id="text_131">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="418.130304" transform="rotate(-0 149.353002 418.130304)">0</text>
-   </g>
-   <g id="text_132">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="418.130304" transform="rotate(-0 167.53779 418.130304)">0</text>
-   </g>
-   <g id="text_133">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="418.130304" transform="rotate(-0 185.722578 418.130304)">5</text>
-   </g>
-   <g id="text_134">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="418.130304" transform="rotate(-0 203.907366 418.130304)">0</text>
-   </g>
-   <g id="text_135">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="112.983426" y="439.393693" transform="rotate(-0 112.983426 439.393693)">2</text>
-   </g>
-   <g id="text_136">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="131.168214" y="439.393693" transform="rotate(-0 131.168214 439.393693)">10</text>
-   </g>
-   <g id="text_137">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="149.353002" y="439.393693" transform="rotate(-0 149.353002 439.393693)">12</text>
-   </g>
-   <g id="text_138">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="167.53779" y="439.393693" transform="rotate(-0 167.53779 439.393693)">8</text>
-   </g>
-   <g id="text_139">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="185.722578" y="439.393693" transform="rotate(-0 185.722578 439.393693)">0</text>
-   </g>
-   <g id="text_140">
-    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="203.907366" y="439.393693" transform="rotate(-0 203.907366 439.393693)">0</text>
+    <text style="font-size: 8px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="199.361169" y="458.170295" transform="rotate(-0 199.361169 458.170295)">0</text>
    </g>
    <g id="patch_3">
-    <path d="M 103.891033 447.817888 
+    <path d="M 103.891033 467.075941 
 L 103.891033 22.550095 
 " style="fill: none; stroke: #9aa4ae; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="patch_4">
-    <path d="M 212.99976 447.817888 
+    <path d="M 212.99976 467.075941 
 L 212.99976 22.550095 
 " style="fill: none; stroke: #9aa4ae; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="patch_5">
-    <path d="M 103.891033 447.817888 
-L 212.99976 447.817888 
+    <path d="M 103.891033 467.075941 
+L 212.99976 467.075941 
 " style="fill: none; stroke: #9aa4ae; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="patch_6">
@@ -565,19 +439,19 @@ L 212.99976 22.550095
 " style="fill: none; stroke: #9aa4ae; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
   </g>
-  <g id="text_141">
+  <g id="text_101">
    <text style="font-size: 14px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle; fill: #06102b" x="108" y="13.638052" transform="rotate(-0 108 13.638052)">Drop precision (%)</text>
   </g>
-  <g id="text_142">
+  <g id="text_102">
    <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif; text-anchor: middle" x="108" y="513.528041" transform="rotate(-0 108 513.528041)">stage</text>
   </g>
-  <g id="text_143">
+  <g id="text_103">
    <text style="font-size: 9px; font-family: 'Instrument Sans', 'Helvetica', 'Arial', sans-serif" transform="translate(9.838834 274.141406) rotate(-90)">source</text>
   </g>
  </g>
  <defs>
-  <clipPath id="pa760012d69">
-   <rect x="103.891033" y="22.550095" width="109.108728" height="425.267793"/>
+  <clipPath id="p7124cd1231">
+   <rect x="103.891033" y="22.550095" width="109.108728" height="444.525846"/>
   </clipPath>
  </defs>
 </svg>

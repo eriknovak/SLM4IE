@@ -32,8 +32,10 @@ from typing import Any, NamedTuple
 
 import sklearn
 import yaml
-from datachart.charts import BarChart, DumbbellChart, LineChart
-from datachart.constants import AXIS_SCALE, BAR_MODE, LEGEND_LOCATION, ORIENTATION, SORT
+from datachart.charts import BarChart, DumbbellChart
+from datachart.config import config as chart_theme
+from datachart.constants import AXIS_SCALE, BAR_MODE, LEGEND_LOCATION, LINE_STYLE, ORIENTATION, SORT
+from datachart.utils import Grid
 
 from slm4ie.data.curate.inspect.domains import DecisionRule, DomainLexicons, assign_domain, load_lexicons, score_text
 from slm4ie.data.curate.inspect.judge import DOMAINS
@@ -46,7 +48,7 @@ from slm4ie.utils.config import load_yaml
 EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
 TOOLS = EXPERIMENTS / "tools"
 sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
-from create_assets import HALF_TALL, ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402
+from create_assets import ONE_COLUMN, Claim, save_figure, save_table  # noqa: E402
 
 # ===============================
 # Defaults
@@ -147,6 +149,13 @@ DOMAIN_TOKEN_TARGET = 500_000
 DOMAIN_DOCUMENT_TARGET = 10_000
 #: Documents per thousand, the unit of the per-source figure's axis.
 THOUSAND = 1_000
+#: A source whose every build holds fewer medical documents than this joins the per-source figure's other row.
+MINOR_SOURCE_DOCUMENTS = 3_000
+OTHER_SOURCES = "other sources"
+#: The lowest multiple the target figure's log axis shows, one decade under the smallest count.
+KPI_AXIS_MIN = 0.01
+#: The target figure's row whose two counts the record cites, labelled with their values.
+KPI_CITED_ROW = "medical documents"
 #: The claims F1's and F2's figures show; each figure's data table sits beside it under its name.
 KPI_FIGURE = "kpi-target-multiple-by-rule"
 KPI_CLAIM = Claim("H3", "count as a multiple of its target", threshold=1.0)
@@ -1591,24 +1600,61 @@ def draw_kpi_figure(kpi: list[dict[str, Any]]) -> None:
         for record in kpi_figure_rows(kpi, build)
     ]
     save_table(multiples, TABLES_DIR / f"{KPI_FIGURE}.csv")
-    save_figure(
-        lambda: DumbbellChart(
-            [kpi_figure_rows(kpi, build) for build in BUILDS],
+
+    # label the two counts the record cites, in the first build's panel only
+    records = {build: kpi_figure_rows(kpi, build) for build in BUILDS}
+    cited_build = next(iter(BUILDS))
+    row = next(index for index, record in enumerate(records[cited_build]) if record["label"] == KPI_CITED_ROW)
+    cited = [
+        {
+            "text": f"{value:.2f}" if value < 1 else f"{value:.0f}",
+            "x": value,
+            # rows run top-down from index 0, so a smaller y sits above the dot
+            "y": row - 0.3,
+            "style": {"plot_text_halign": "center", "plot_text_valign": "bottom"},
+        }
+        for value in (records[cited_build][row]["start"], records[cited_build][row]["end"])
+    ]
+
+    # one panel per build, so neither build's dots hide the other's
+    def draw() -> Any:
+        """Lay the builds' panels side by side under one legend, the row names drawn once."""
+        panels = [
+            DumbbellChart(
+                records[build],
+                title=f"{build} build",
+                start_name="source labels",
+                end_name="document labels",
+                scaley=AXIS_SCALE.LOG,
+                xmin=KPI_AXIS_MIN,
+                vlines={"x": 1, "label": "target", "style": {"plot_vline_style": LINE_STYLE.DASHED}},
+                texts=cited if build == cited_build else None,
+                # the grid draws the one legend; a subplot chart would draw none
+                show_legend=False,
+            )
+            for build in BUILDS
+        ]
+        figure = Grid(
+            panels,
             title="Data targets per labelling rule",
             xlabel="count (multiple of its target)",
             ylabel="target",
-            subtitle=[f"{build} build" for build in BUILDS],
-            start_name="source labels",
-            end_name="document labels",
-            scaley=AXIS_SCALE.LOG,
-            vlines=[{"x": 1, "label": "target"}],
+            max_cols=len(BUILDS),
+            sharex=True,
+            sharey=True,
+            show_legend=True,
             legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": 3},
             # one column: the target names need the width a half column lacks
             figsize=ONE_COLUMN,
-        ),
-        FIGURES_DIR / f"{KPI_FIGURE}.svg",
-        claim=KPI_CLAIM,
-    )
+        )
+        # the grid shares the rows but repeats their names, so only the first panel keeps them
+        later_panels = {f"{build} build" for build in list(BUILDS)[1:]}
+        for ax in figure.axes:
+            if ax.get_title() in later_panels:
+                ax.tick_params(axis="y", labelleft=False)
+        return figure
+
+    save_figure(draw, FIGURES_DIR / f"{KPI_FIGURE}.svg", claim=KPI_CLAIM)
 
 
 def draw_medical_funnel_figure(funnel: list[dict[str, Any]]) -> None:
@@ -1628,21 +1674,26 @@ def draw_medical_funnel_figure(funnel: list[dict[str, Any]]) -> None:
         ],
         TABLES_DIR / f"{FUNNEL_FIGURE}.csv",
     )
-    series = [[{"x": index, "y": count} for index, count in enumerate(counts[build].values())] for build in BUILDS]
+    # two-word stage names break over two lines, so no tick label is turned
+    series = [
+        [{"label": stage.replace("_", "\n"), "y": documents} for stage, documents in counts[build].items()]
+        for build in BUILDS
+    ]
     save_figure(
-        lambda: LineChart(
+        lambda: BarChart(
             series,
             title="Medical source documents per stage",
             xlabel="curation stage",
             ylabel="documents (count)",
             subtitle=[f"{build} build" for build in BUILDS],
-            scaley=AXIS_SCALE.LOG,
-            xticks=list(range(len(STAGE_COLUMNS))),
-            xticklabels=[column.replace("_", " ") for column in STAGE_COLUMNS],
-            xtickrotate=30,
-            hlines=[{"y": DOMAIN_DOCUMENT_TARGET, "label": "examples target"}],
+            hlines={
+                "y": DOMAIN_DOCUMENT_TARGET,
+                "label": "examples target",
+                "style": {"plot_hline_style": LINE_STYLE.DASHED},
+            },
             show_legend=True,
-            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
+            legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM, "ncols": 3},
+            ymin=0,
             figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / f"{FUNNEL_FIGURE}.svg",
@@ -1656,19 +1707,27 @@ def draw_medical_sources_figure(by_source: list[dict[str, Any]]) -> None:
     Args:
         by_source: Rows from `corpus_source_rows`, both builds.
     """
-    medical = {
-        (row["build"], row["source"]): row["documents"] for row in by_source if row["assigned_domain"] == "medical"
-    }
-    # horizontal bars draw the first label at the bottom, so the largest source goes last
-    names = sorted({source for _, source in medical}, key=lambda source: medical.get(("loosened", source), 0))
+    # name each source with its kind, and sum the minor ones into one row
+    medical_rows = [row for row in by_source if row["assigned_domain"] == "medical"]
+    largest: dict[str, int] = defaultdict(int)
+    for row in medical_rows:
+        largest[row["source"]] = max(largest[row["source"]], row["documents"])
+    medical: dict[tuple[str, str], int] = defaultdict(int)
+    for row in medical_rows:
+        is_minor = largest[row["source"]] < MINOR_SOURCE_DOCUMENTS
+        name = OTHER_SOURCES if is_minor else f"{row['source']} ({row['source_domain']})"
+        medical[row["build"], name] += row["documents"]
+
+    # horizontal bars draw the first label at the bottom: other sources there, the largest source on top
+    named = {name for _, name in medical}
+    names = sorted(named - {OTHER_SOURCES}, key=lambda name: medical["loosened", name])
+    if OTHER_SOURCES in named:
+        names.insert(0, OTHER_SOURCES)
     save_figure(
         lambda: BarChart(
-            [
-                [{"label": source, "y": medical.get((build, source), 0) / THOUSAND} for source in names]
-                for build in BUILDS
-            ],
+            [[{"label": name, "y": medical[build, name] / THOUSAND} for name in names] for build in BUILDS],
             title="Medical documents per source",
-            # thousands keep the tick labels apart in a half-width figure
+            # thousands keep the tick labels short
             xlabel="documents labelled medical (thousands)",
             ylabel="source",
             subtitle=[f"{build} build" for build in BUILDS],
@@ -1676,17 +1735,19 @@ def draw_medical_sources_figure(by_source: list[dict[str, Any]]) -> None:
             show_legend=True,
             legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
             xmin=0,
-            figsize=HALF_TALL,
+            # one column: the source names with their kind leave a half column's bars too narrow
+            figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / "corpus-medical-documents-by-source.svg",
     )
 
 
 def draw_figures_from_tables() -> None:
-    """Draw the three Result figures from the committed tables alone."""
+    """Draw the three Result figures and the gold dataset figure from the committed tables alone."""
     draw_kpi_figure(read_csv(TABLES_DIR / "kpi-pass-by-rule.csv"))
     draw_medical_funnel_figure(read_csv(TABLES_DIR / "funnel-documents-by-source.csv"))
     draw_medical_sources_figure(read_csv(TABLES_DIR / "corpus-documents-by-source.csv"))
+    draw_gold_figure(read_csv(TABLES_DIR / "dataset-gold-statistics.csv"))
 
 
 def read_csv(path: Path) -> list[dict[str, Any]]:
@@ -1717,18 +1778,20 @@ def _parse_cell(cell: str) -> Any:
 def draw_gold_figure(rows: list[dict[str, Any]]) -> None:
     """Draw the judged gold's documents per judge domain, split by the drawn stage's decision.
 
+    Kept is the theme's grey and dropped the violet of the document-label dots, as the
+    sibling audit draws them, so neither reuses a build's colour from the other figures.
+
     Args:
         rows: Rows from `gold_rows`.
     """
-    FIGURES_DIR.mkdir(exist_ok=True)
     save_figure(
-        BarChart(
+        lambda: BarChart(
             [
                 [{"label": row["judge_domain"], "y": row["kept_at_drawn_stage"]} for row in rows],
                 [{"label": row["judge_domain"], "y": row["documents"] - row["kept_at_drawn_stage"]} for row in rows],
             ],
-            title="Judged gold documents per judge domain",
-            xlabel="documents",
+            title="Judged gold per domain",
+            xlabel="documents (count)",
             ylabel="domain the judge assigned",
             subtitle=["kept at the stage it was drawn", "dropped at the stage it was drawn"],
             bar_mode=BAR_MODE.STACK,
@@ -1737,6 +1800,10 @@ def draw_gold_figure(rows: list[dict[str, Any]]) -> None:
             show_legend=True,
             legend={"location": LEGEND_LOCATION.OUTSIDE_BOTTOM},
             xmin=0,
+            style=[
+                {"plot_bar_color": chart_theme["muted_color"]},
+                {"plot_bar_color": chart_theme["plot_dumbbell_end_color"]},
+            ],
             figsize=ONE_COLUMN,
         ),
         FIGURES_DIR / "dataset-gold-documents-by-domain.svg",
@@ -1753,7 +1820,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--figures-only", action="store_true", help="redraw the Result figures from the committed tables and stop"
+        "--figures-only", action="store_true", help="redraw the figures from the committed tables and stop"
     )
     args = parser.parse_args()
 
@@ -1790,7 +1857,6 @@ def main() -> None:
     # summarise the gold and seed the lexicons
     gold = gold_rows(documents, side_of)
     write_csv(TABLES_DIR / "dataset-gold-statistics.csv", gold)
-    draw_gold_figure(gold)
     print(f"gold: {sum(row['documents'] for row in gold):,} judged documents over {len(gold)} judge domains")
     seed = lexicon_seed_rows(GOLD_SAMPLE, documents, side_of)
     write_csv(TABLES_DIR / "classifier-lexicon-seed-words-by-domain.csv", seed)

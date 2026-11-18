@@ -403,19 +403,21 @@ concluded: 2026-10-20
 
 - **Summary**: Every source keeps within three points of the share it kept in the earlier audit's build, except the student-essay source solar.
 - **Runs**: 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over its stage sentinels and the earlier audit's source funnel table.
-- **Result**: ![Share of each source's converted documents that reaches the finished corpus, in the earlier audit's build and in the baseline rebuild. Sources marked with an asterisk were doubled by stale output files in the audit's build, so their old share was taken over the language filter's output.](figures/curate-retention-by-build-and-source.svg)
+- **Result**: ![Change per source in the share of converted documents that reaches the finished corpus, from the earlier audit's build to the baseline build; the band marks changes within three points. Only solar leaves it, rising 32 points from 0.55 to 0.87; the next largest change is siparl's 2.7 points. Sources marked with an asterisk were doubled in the audit's build, and the two sources only in that build are not shown.](figures/curate-retention-by-build-and-source.svg)
 - **Reading**: The earlier audit's per-source picture still holds as the starting point for tuning, since solar's rise only undoes the doubled converted count its old share was computed on.
 - **History**:
   - 2026-10-08 first result, from the baseline rebuild ([D5])
+  - 2026-11-18 figure redrawn after a figure review as the change per source against a three-point band.
 
-### F2 — The quality filter still removes most of the curated domain text · minor
+### F2 — The quality filter is still the largest single loss on every curated domain source · minor
 
 - **Summary**: The quality filter drops four in five of the medical source's documents, the largest loss of any source at any stage.
 - **Runs**: 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over its stage sentinels and the statistics stage.
-- **Result**: ![Where each source's converted documents went, stage by stage, in the baseline rebuild. The grey band is what reaches the finished corpus, and the sources are ordered by that share.](figures/curate-losses-by-source.svg)
+- **Result**: ![Where each source's converted documents went, stage by stage, in the baseline build; grey is what reaches the finished corpus. The quality filter (orange) is the largest loss on the medical source (povejmo_vemo_med, top row, 83%) and on the scientific theses (oss, 69%).](figures/curate-losses-by-source.svg)
 - **Reading**: The quality filter is the largest single loss on the curated domain sources, so the medical and academic route is where retuning its floors can win back the most text.
 - **History**:
   - 2026-10-08 first result, from the baseline rebuild ([D5])
+  - 2026-11-18 retitled after a figure review: the filter drops more than half of only two curated domain sources, the medical source and oss.
 
 ### F3 — The baseline corpus clears every volume target · minor
 
@@ -430,11 +432,12 @@ concluded: 2026-10-20
 
 - **Summary**: Every source keeps a larger share of its converted documents under the routes, and the corpus keeps 0.60 of what it converted.
 - **Runs**: f7810f13462d4f089b7814b359be3feb, the candidate-routes build under `slm4ie/data/curation-thresholds-slovenian`; `analysis.py` at 4425f23 over its stage sentinels beside the baseline rebuild's.
-- **Result**: ![Share of each source's converted documents that reaches the finished corpus, in the baseline rebuild and in the candidate-routes build. Each line runs from the baseline's share to the candidate's, the sources are ordered by the size of that change, and the label names the route the source took.](figures/curation-routes-retention-by-build-and-source.svg)
+- **Result**: ![Share of each source's converted documents that reaches the finished corpus, in the baseline build (light dot) and the candidate-routes build (dark dot), grouped and coloured by route, largest rise first. Every source keeps more. The seven largest rises are all on the medical-and-academic and curated-prose routes, such as oss from 0.21 to 0.87; the largest raw-crawl rise is c4, from 0.39 to 0.59.](figures/curation-routes-retention-by-build-and-source.svg)
 - **Reading**: The largest rises sit on the medical-and-academic and curated-prose routes, where the scientific source oss goes from keeping one document in five to seven in eight. The routes win back text where the earlier audit found the filters most wrong, before any threshold is tuned.
 - **History**:
   - 2026-10-12 first result, from the candidate-routes build with the committed routes as the first candidate ([M1])
   - 2026-10-14 revised from the second candidate build (run f7810f13…, replacing daca0abb…), with the curated-prose quality settings of [D9]; the corpus share rose from 0.58 to 0.60, all of it on curated prose
+  - 2026-11-18 figure redrawn after a figure review: rows grouped and coloured by route, largest rise first.
 
 ### F5 — The quality filter drives the gain, through the repaired letter rule and the curated-prose floors · minor
 
@@ -509,7 +512,7 @@ concluded: 2026-10-20
 - **Summary**: The loosened build keeps about a quarter more good documents than the baseline, and the interval on its rise in bad text spans the bar.
 - **Key number**: +11.6M — good documents the loosened build keeps beyond the baseline's 41.0M, read after the repetition filter
 - **Runs**: 41b6d164a0674c98b7e9104f4575e605, the loosened build, and f7810f13462d4f089b7814b359be3feb, the frozen build, both under `slm4ie/data/curation-thresholds-slovenian`; 6af9c1e7f8c942e08aeddef25666a9f2, the baseline rebuild under `slm4ie/data/curate`; `analysis.py` over the three builds' counts and the verdicts of the earlier audit's draw, the fresh draw and the third draw ([M12]).
-- **Result**: ![Share of the documents each build keeps after the repetition filter that the judge calls bad text, weighted by each source's volume, with the upper end of its 95% interval. The horizontal line is the bar of the amended question: the baseline's rate plus two points. The loosened build's rate is 0.089 against the baseline's 0.059, a rise of 3.0 points whose interval runs from −1.9 to +7.9 points, and it keeps 11.6M more good documents, 52.6M against 41.0M. The frozen build sits between the two, at a rise of 2.2 points. The per-source rates behind the weighted ones are in the table linked from the Reading.](figures/residual-bad-rate-by-build.svg)
+- **Result**: ![How much more of each new build's kept documents the judge calls bad text than of the baseline's, weighted by source volume, with its 95% interval; the line is the two-point bar of the amended question. The loosened build rises 3.0 points, from 0.059 to 0.089, with an interval from −1.9 to +7.9 points, and keeps 11.6M more good documents, 52.6M against 41.0M. The frozen build, the candidate-routes build with its settings frozen, rises 2.2 points (−2.6 to +6.9). Both intervals reach below the bar. The per-source rates are in the table linked from the Reading.](figures/residual-bad-rate-rise-by-build.svg)
 - **Reading**:
   - **The good documents kept grow by over a quarter while the bad share rises by about three points, within the noise of the draws.** Kept here means what leaves the repetition filter, the last stage all three draws sample, so the dedup stages are not counted. Weighted by volume, the loosened build's rate sits 3.0 points above the baseline's, and the 95% interval on that rise reaches below zero at one end and past the bar at the other. The [per-source rates](tables/residual-bad-rate-by-build-and-source.csv) rest on about forty judged kept documents each, so no source's rise is separable from chance either.
   - **The amended question, [Q1], is answered yes, while every H clause stays inconclusive.** Under the rule of reading the bar against the interval's low end ([D17]), the loosened build keeps more good text without a rise the draws can place above two points. Each of [H1], [H2], [H3], [H4] and [H5] is inconclusive, since every judge run they read sits below the agreement gate ([F9]).
@@ -517,6 +520,7 @@ concluded: 2026-10-20
 - **Implication**: The loosened settings are the ones to carry into the shared corpus at conclusion, with the rise in bad text recorded as a cost the draws could not bound. Judging a draw of the baseline rebuild in one run with the loosened build's would tighten that bound.
 - **History**:
   - 2026-10-20 first result, from the three builds' kept counts and the earlier audit's, fresh and third draws ([D17], the amended question read against the interval's low end)
+  - 2026-11-18 figure redrawn after a figure review as the rise per build with the interval the answer reads, in place of the rates per build.
 
 ## Verdict
 

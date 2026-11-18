@@ -335,42 +335,45 @@ concluded: 2026-10-25
 - **Summary**: The two golds rank the tokenizers with a Kendall's τ of 0.86, and the whole bootstrap interval sits above the 0.8 bar.
 - **Key number**: 0.86 — Kendall's τ between the heuristic-gold and Sloleks-gold rankings of the 24 tokenizers
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee (the sweep's parent run, 24 child runs), scored by `analysis.py` at 8f408e8 on the scored-form golds
-- **Result**: ![Morpheme-boundary F1 of every tokenizer under the heuristic gold against the Sloleks gold, one series per algorithm](figures/sweep-boundary-f1-by-gold.svg)
+- **Result**: ![Rank of every tokenizer by morpheme-boundary F1 under the heuristic gold and under the Sloleks gold. Both golds place Unigram 32k to 128k on top and BPE, character BPE and MorphPiece at the bottom. Under the Sloleks gold MorphBPE climbs from ranks 7, 8, 9 and 11 to 6, 5, 4 and 7, past WordPiece 64k and 128k and Unigram 16k. Two crossings rest on ties at four decimals, so the chart draws 20 crossings for the 19 swapped pairs behind τ.](figures/sweep-boundary-f1-by-gold.svg)
 - **Reading**:
-  - **Both golds put the same algorithms at the top and the same at the bottom.** Under either gold Unigram ranks above MorphBPE, which ranks above WordPiece, and a gap separates those three from character BPE, BPE and MorphPiece. The disagreement sits inside an algorithm, where its four vocabulary sizes swap places. On the tokenizers that train without a morpheme table the agreement rises to 0.95. The frequency-weighted and the multi-token readings agree with the main one, while the manual-only reading and the forms with an ending have intervals that cross the bar.
+  - **Both golds put the same tokenizers at the top and the same at the bottom.** Under either gold Unigram from 32k up ranks first, and a gap separates the top group from character BPE, BPE and MorphPiece. The disagreement is MorphBPE's: the Sloleks gold lifts its four sizes past WordPiece 64k and 128k and Unigram 16k, and at least 16 of the 19 swapped pairs behind τ involve it. On the tokenizers that train without a morpheme table the agreement rises to 0.95. The frequency-weighted and the multi-token readings agree with the main one, while the manual-only reading and the forms with an ending have intervals that cross the bar.
   - **The claim that the two golds rank the tokenizers alike ([H1]) is confirmed, since τ and its whole interval lie above the bar of 0.8.** The corrected heuristic places its cut differently from the authors' split on many forms, yet which tokenizer looks morphologically best does not depend on that placement.
-  - **A vocabulary-size order that reversed between the golds inside one algorithm would overturn the reading.** The scatter shows each algorithm's four points moving along the diagonal, so the gold shifts a score without reordering the family.
+  - **A vocabulary-size order that reversed between the golds beyond its intervals would overturn the reading.** MorphBPE's sizes do reverse order, but by about 0.001, inside their intervals of about ±0.002, so the gold moves MorphBPE as a block rather than reordering it.
 - **Implication**: The tokenizer sweep of June 2026, written up in `docs/notes/`, rests on the uncorrected gold, whose ranking agrees with the Sloleks one at only τ 0.64. The later experiments score on the Sloleks gold and reread the June comparisons on it.
 - **History**:
   - 2026-10-25 first result, run 73b5a885e4bf4f2994b285573dab10ee, analysis commit 8f408e8.
+  - 2026-11-18 Reading corrected and figure redrawn as a rank chart after a figure review: the golds disagree on MorphBPE across algorithms, not within one; τ and the verdict stand. The Verdict's Discussion amended to match, with the user's approval.
 
 ### F2 — The manually checked forms rank the tokenizers differently from all forms · key
 
 - **Summary**: Ranking the tokenizers on the manually checked forms alone agrees with the all-forms ranking at τ 0.69, below the 0.9 bar.
 - **Key number**: 0.69 — Kendall's τ between the manual-forms and all-forms rankings of the 24 tokenizers
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee, scored by `analysis.py` at 8f408e8 on the scored-form golds
-- **Result**: ![Kendall's τ with its bootstrap interval and its bar for every pair of tokenizer rankings](figures/sweep-rank-agreement-by-ranking-pair.svg)
+- **Result**: ![Kendall's τ with its bootstrap interval for every pair of tokenizer rankings. The two golds agree at 0.86 (0.82 to 0.87), wholly above the 0.8 bar; manual against all forms agree at 0.69 (0.68 to 0.72), wholly under the 0.9 bar. Grey rows are readings beside the clauses.](figures/sweep-rank-agreement-by-ranking-pair.svg)
 - **Reading**:
-  - **On the manual forms MorphBPE overtakes Unigram at every size but the largest, and the algorithms that train without a morpheme table score higher with smaller vocabularies.** On all forms Unigram leads from 32k upwards and BPE, character BPE and MorphPiece improve as the vocabulary grows. On the manual forms their order by size reverses, so a larger vocabulary scores lower on the forms the lexicon's authors checked.
+  - **On the manual forms MorphBPE overtakes Unigram at every size but the largest, and four of the six algorithms score lower with a larger vocabulary.** On all forms Unigram leads from 32k upwards and BPE, character BPE and MorphPiece improve as the vocabulary grows. On the manual forms BPE, character BPE, MorphPiece and MorphBPE score lower at 128k than at 16k, while WordPiece and Unigram score higher ([F3] draws both slices).
   - **The claim that the manual slice ranks the tokenizers as all forms do ([H2]) is refuted, since the whole interval ends below the bar of 0.9.** By the verdict rule this is the automatic-rows reading: the golds agree, but the morph score is reported on the manual forms first.
   - **A manual slice drawn at random from all forms would have to agree with them, and only noise could then separate the rankings.** The slice is not random: its word-class mix differs from the whole, which is where the disagreement comes from ([F4]).
 - **Implication**: Every morph score of the later tokenizer experiments is reported on the manually checked forms first, with the all-forms score beside it, since the automatic rows move the ranking.
 - **History**:
   - 2026-10-25 first result, run 73b5a885e4bf4f2994b285573dab10ee, analysis commit 8f408e8.
+  - 2026-11-18 Reading corrected after a figure review: WordPiece and Unigram score higher at 128k on the manual forms, not lower; the verdict stands. Figure redrawn with the clause rows marked and the bars named.
 
 ### F3 — On all forms only Unigram's morpheme-boundary F1 still rises at the largest vocabulary, while compression and Morph-Edit-Distance keep improving for every algorithm · key
 
-- **Summary**: From 64k to 128k every algorithm still gains on fertility and Morph-Edit-Distance, but on all forms morpheme-boundary F1 rises for Unigram alone.
+- **Summary**: From 64k to 128k every algorithm still gains on fertility and Morph-Edit-Distance, but on all forms morpheme-boundary F1 rises beyond its interval for Unigram alone.
 - **Key number**: 0.93 — Unigram's morpheme-boundary F1 gain from 64k to 128k as a share of its 16k-to-32k gain, on all forms
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee, scored by `analysis.py` at 8f408e8 on the scored-form golds and the evaluation sample
-- **Result**: ![Morpheme-boundary F1, Morph-Edit-Distance and Morph-Consistency against vocabulary size per algorithm, on all forms and on manual forms](figures/sweep-morph-metrics-by-vocab.svg)
+- **Result**: ![Morpheme-boundary F1 with its bootstrap band, Morph-Edit-Distance and Morph-Consistency against vocabulary size per algorithm, on all forms and on manual forms. On all forms only Unigram's boundary F1 rises clearly from 64k to 128k, 0.240 to 0.251, well past its band; edit distance falls and consistency rises at every step for every algorithm on both slices.](figures/sweep-morph-metrics-by-vocab.svg)
 - **Reading**:
-  - **Compression and edit distance have not levelled off for any algorithm, and Rényi efficiency falls at every step.** Over the last size step, fertility and compression still gain half to three quarters of what they gained over the first, for all six algorithms. Morph-Edit-Distance gains as much over the last step as over the first. Rényi efficiency, how evenly the tokens are used, falls at every step, which the rule records as no early gain. Morpheme-boundary F1 rises at the largest size for Unigram on both slices and for WordPiece on the manual forms only. On all forms it falls for WordPiece, character BPE and MorphBPE and barely moves for the rest. Each reading is in `sweep-levelling-by-algorithm.csv`.
-  - **The question which metrics still improve as the vocabulary grows ([Q1]) is partial: compression and Morph-Edit-Distance improve for every algorithm on both slices, but the other two morph metrics do not read alike.** Morpheme-boundary F1 or Morph-Consistency reads differently on the manual and the all-forms score for every algorithm but Unigram. The compression answer is robust; the morph answer holds for Unigram only.
+  - **Compression and edit distance have not levelled off for any algorithm, and Rényi efficiency falls at every step.** Over the last size step, fertility still gains half to three quarters of what it gained over the first, for all six algorithms, and the two compression metrics are fertility rescaled ([fertility and Rényi efficiency fall at every step](figures/sweep-corpus-metrics-by-vocab.svg)). Morph-Edit-Distance gains as much over the last step as the first. Rényi efficiency, how evenly the tokens are used, falls at every step. Morpheme-boundary F1 rises at the largest size for Unigram on both slices and for WordPiece on the manual forms only. On all forms it falls for WordPiece, character BPE and MorphBPE. BPE and MorphPiece gain less than their interval, which the quarter rule counts as improving. Each reading is in `sweep-levelling-by-algorithm.csv`.
+  - **The question which metrics still improve as the vocabulary grows ([Q1]) is partial: compression and Morph-Edit-Distance improve for every algorithm on both slices, but the other two morph metrics do not read alike.** Morpheme-boundary F1 or Morph-Consistency reads differently on the manual and the all-forms score for every algorithm but Unigram.
   - **A larger vocabulary that bent Unigram's curve down, or a band rule in place of the quarter rule, would overturn the reading.** A band rule reads a change narrower than its bootstrap interval as flat. The other algorithms' changes at the largest size are that narrow, so a band would call them flat, not falls.
 - **Implication**: The later tokenizer experiments keep 128k in the sweep for Unigram and for compression, and read a morpheme-boundary F1 change narrower than its interval as flat rather than by the quarter rule.
 - **History**:
   - 2026-10-25 first result, run 73b5a885e4bf4f2994b285573dab10ee, analysis commit 8f408e8.
+  - 2026-11-18 Summary and Reading qualified after a figure review: BPE and MorphPiece still gain on all forms, but by less than their interval. Figure redrawn with the boundary F1 band and one y range per metric.
 
 ### F4 — The manual slice reorders the tokenizers through its word-class mix · supporting F2
 
@@ -389,10 +392,11 @@ concluded: 2026-10-25
 
 - **Summary**: At the largest vocabulary, tokens seen fewer than ten times in the training sample are about 1% of BPE's vocabulary and 27% of MorphPiece's.
 - **Runs**: 73b5a885e4bf4f2994b285573dab10ee, scored by `analysis.py` at 8f408e8 on both corpus samples
-- **Result**: ![Share of each vocabulary seen fewer than ten times in the training and the evaluation sample, against vocabulary size](figures/sweep-rare-vocabulary-share-by-vocab.svg)
+- **Result**: ![Share of each vocabulary that is rare, against vocabulary size: seen under 10 times in the training sample, and never seen in the evaluation sample, a count ten times lower on a sample about ten times smaller, so about the same rate. At 128k both give about 27% for MorphPiece, 8% for MorphBPE and 1% for BPE.](figures/sweep-rare-vocabulary-share-by-vocab.svg)
 - **Reading**: A vocabulary trained on a morpheme table spends tokens on morphemes the corpus rarely uses, and a small model learns little for those embeddings, so this share ([D12]) weighs against MorphBPE and MorphPiece.
 - **History**:
   - 2026-10-25 first result, run 73b5a885e4bf4f2994b285573dab10ee, analysis commit 8f408e8.
+  - 2026-11-18 figure redrawn after a figure review: the evaluation panel counts tokens never seen, matching the training panel's rate.
 
 ### F6 — The capped alphabet touches almost no text and does not move the rankings · minor
 
@@ -408,7 +412,7 @@ concluded: 2026-10-25
 - **Outcome**: partial — the automatic-rows reading
 - **Evidence**: [F1] the two golds rank the tokenizers alike, with τ above its bar; [F2] the manually checked forms rank them differently from all forms, with τ below its bar; [F3] only Unigram's morpheme-boundary F1 still rises at the largest vocabulary, while compression improves everywhere.
 - **Discussion**:
-  - **The Sloleks 3.2 split ranks the tokenizers as the corrected heuristic does, but which forms are scored matters more than which gold cuts them.** The two golds put the same algorithms in the same order and only swap vocabulary sizes within an algorithm ([F1]). Scoring the manually checked forms alone reorders the tokenizers ([F2]), so the first bar holds and the second fails: the automatic-rows reading the Verdict rule named.
+  - **The Sloleks 3.2 split ranks the tokenizers as the corrected heuristic does, but which forms are scored matters more than which gold cuts them.** The golds agree on the top and bottom groups and disagree mainly on MorphBPE, which the Sloleks gold ranks higher ([F1]). Scoring the manually checked forms alone reorders the tokenizers ([F2]), so the first bar holds and the second fails: the automatic-rows reading the Verdict rule named.
   - **The reordering is a word-class effect the design did not anticipate.** The manual slice holds about half the share of nouns that all forms hold, and the word classes rank the tokenizers apart ([F4]). A pooled morph score therefore follows the class mix of the scored set, and is only comparable between sets with the same mix.
   - **The verdict rule named this split without an outcome word, and the levelling rule reads noise as movement.** The split takes the word partial, added to the rule at conclusion: yes for the gold, no for the slice. Q1's quarter rule turns morpheme-boundary F1 changes narrower than their intervals into falls or gains ([F3]). A follow-up inherits the Sloleks gold, the manual-first score and a band rule for levelling.
 - **Adoption candidate**: the project's shared tokenizer sweep, `scripts/sweep_tokenizers.py`, scores on the Sloleks 3.2 gold with the manual-forms score first.
