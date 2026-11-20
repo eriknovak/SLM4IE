@@ -3712,6 +3712,7 @@ evaluation = [
 tokenizers = [
     { name = "mlflow" },
     { name = "numpy" },
+    { name = "protobuf" },
     { name = "sentencepiece" },
     { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" } },
     { name = "transformers", version = "4.57.6", source = { registry = "https://pypi.org/simple" } },
@@ -3785,6 +3786,7 @@ evaluation = [
 tokenizers = [
     { name = "mlflow", specifier = ">=3.13.0" },
     { name = "numpy", specifier = ">=2.4.3" },
+    { name = "protobuf", specifier = ">=6.0" },
     { name = "sentencepiece", specifier = ">=0.2.1" },
     { name = "tokenizers", specifier = ">=0.20" },
     { name = "transformers", specifier = ">=4.45" },

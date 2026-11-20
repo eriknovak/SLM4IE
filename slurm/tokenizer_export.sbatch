@@ -27,7 +27,7 @@ echo "# Export the trained tokenizers as HuggingFace dirs"
 echo "# ==============================================="
 echo ""
 
-# Write a HuggingFace tokenizer directory into every trained artifact, the
+# Write a HuggingFace tokenizer directory per export target into every trained artifact, the
 # bridge to LM pretraining. The tokenizers group pulls in tokenizers, transformers,
 # and sentencepiece.
 uv run --group tokenizers python scripts/sweep_tokenizers.py export \

@@ -14,6 +14,7 @@
 #   eval            Held-out evaluation sample + Rényi alpha.
 #   stats           Bootstrap CI + significance settings (see Notes: stats).
 #   mlflow          Tracking (see Notes: mlflow).
+#   export          HuggingFace export settings per export target (see Notes: export).
 #
 # Notes:
 #   backends     bpe = byte-level (canonical); charbpe = char-level (clean
@@ -30,6 +31,12 @@
 #     morph_consistency are global functionals that stay point estimates (no CI).
 #   mlflow       train + analyze both log to MLflow. tracking_uri null falls back
 #     to $MLFLOW_TRACKING_URI (localhost:5555 here), then to a local SQLite store.
+#   export       Each target is one training project's needs: the special-token
+#     roles (every token must be in special_tokens), the templates that wrap a
+#     single text and a pair (tokenizers TemplateProcessing syntax), and the
+#     model's maximum input length. `export --target <name>` writes
+#     <run>/hf-<name>/; parity_lines evaluation-sample lines must encode to the
+#     same ids as the trained backend, or that run's export fails.
 #
 # Secrets / machine-specific overrides (e.g. mlflow.tracking_uri) belong in a
 # gitignored sibling sweep.local.yaml, deep-merged over this file.
@@ -81,3 +88,20 @@ mlflow:                           # see Notes: mlflow
   enabled: true                   # sweep always logs; train + analyze both log
   experiment: slm4ie/tokenizers/sweep
   tracking_uri: null              # null -> $MLFLOW_TRACKING_URI -> sqlite fallback
+
+# --- HuggingFace export -------------------------------------------------
+export:                           # see Notes: export
+  parity_lines: 1000
+  targets:
+    modernbert:                   # ModernBERT pretraining (ModernSloBERT repo)
+      roles:
+        pad_token: "<pad>"
+        unk_token: "<unk>"
+        mask_token: "<mask>"
+        cls_token: "<s>"
+        sep_token: "</s>"
+        bos_token: "<s>"
+        eos_token: "</s>"
+      single: "<s> $A </s>"
+      pair: "<s> $A </s> $B:1 </s>:1"
+      model_max_length: 8192      # ModernBERT's context length

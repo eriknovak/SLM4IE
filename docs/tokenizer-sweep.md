@@ -62,7 +62,7 @@ change after a crash. Pass `--force` to rebuild it.
 `train` / `evaluate` / `export` share a one-or-all selection: `--all`, or one
 `--tokenizer <name>` optionally narrowed by `--vocab-size <n>` (the two modes
 are mutually exclusive). `train` and `evaluate` also take `--force` and
-`--max-workers`.
+`--max-workers`; `export` takes `--target` and `--force` (see below).
 
 Artifacts land under `/vault/data/SLM4IE/tokenizers/<name>-<vocab>/`; the
 comparison report is written to `tokenizers/_reports/report.md`. The sweep logs
@@ -84,13 +84,73 @@ comparators, not absolute morphological accuracy.
 
 ## Using a tokenizer downstream
 
-The `export` step writes a HuggingFace tokenizer directory into each artifact.
-The five fast tokenizers load with `AutoTokenizer.from_pretrained(<dir>)` and
-expose `decode` and `return_offsets_mapping` natively; MorphPiece is a custom
-slow tokenizer loaded with
-`slm4ie.tokenizers.hf_export.load_pretrained(<dir>)`, exposing
-`encode_with_offsets`. Offset mapping (token → source-character span) is the
-mechanism for aligning encoder predictions back to the original text.
+Model training runs in other projects, and each model expects its own special
+tokens and input wrapping. The `export` section of the sweep config holds one
+**target** per training project: the HuggingFace role of each special token
+(for example `cls_token: <s>`), the templates that wrap a single text and a
+text pair, and the model's maximum input length. The `modernbert` target names
+`<s>` as classifier and start token and `</s>` as separator and end token, and
+wraps a text as `<s> … </s>` and a pair as `<s> A </s> B </s>`. A new training
+project gets a new target there, not new code.
+
+```bash
+uv run python scripts/sweep_tokenizers.py export --config "$SWEEP" --all                      # every target
+uv run python scripts/sweep_tokenizers.py export --config "$SWEEP" --all --target modernbert  # one target
+```
+
+Each export lands in its own directory, so one trained tokenizer serves several
+training projects:
+
+```text
+tokenizers/<name>-<vocab>/hf-<target>/
+  tokenizer.json            vocabulary, normalizer, pre-tokenizer, template post-processor
+  tokenizer_config.json     special-token roles and model_max_length
+  special_tokens_map.json
+  export_lineage.json       digests of the trained artifact and the target settings, files written
+tokenizers/_reports/export-summary.json   one record per <run>/<target>
+```
+
+A MorphPiece export has no `tokenizer.json`. In its place it holds the
+tokenizer's code, `hf_morph_piece.py`, and the model files that code reads:
+`morphpiece.json` (the vocabulary), `morphpiece_bpe.json` (the byte-level BPE
+path) and `morpheme_table.jsonl.gz`.
+
+A fast export loads with `AutoTokenizer.from_pretrained(<dir>)` and no code from
+this repository. MorphPiece looks up each word in its morpheme table, a step the
+fast `tokenizers` library does not have, so its export is a slow tokenizer whose
+code travels with it. It loads with
+`AutoTokenizer.from_pretrained(<dir>, trust_remote_code=True)`, which runs the
+copied `hf_morph_piece.py`. A training project whose code calls
+`AutoTokenizer.from_pretrained(<dir>)` without that flag, as ModernBERT's export
+and check scripts do, must add it before it can use a MorphPiece export. Before an export is moved into place, it is reloaded and must
+encode the first `export.parity_lines` lines of the evaluation sample to the
+same ids as the trained tokenizer, or that run fails and the command exits
+non-zero. For Unigram, two splits whose total scores differ by at most two
+float32 steps at that score's size also pass. SentencePiece sums a split's
+score in float32, so it cannot tell such splits apart, and the `tokenizers`
+library may pick the other one; on very long documents such splits can differ
+by a token.
+
+An export is skipped while its lineage digests match the trained artifact and
+the target; retraining a run or editing a target exports it again, and
+`--force` exports regardless. When a re-export fails, the earlier directory is
+kept and its summary record says `stale`. Its `export_digest` (the artifact it
+was built from) and `artifact_digest` (the artifact now) differ when the run was
+retrained since that export. Every `exported` or `stale` record also gives the
+path, the vocabulary size and the id of each special token, which a training
+project's own config may need; a `failed` record gives the reason instead. An export run rewrites the records of the runs it selects and
+keeps the others, so `export --all` brings the whole summary up to date.
+
+The special-token ids differ by backend, because SentencePiece reserves its own
+ids first: the Unigram runs give `<unk>` 0, `<s>` 1, `</s>` 2, `<pad>` 3 and
+`<mask>` 4, while the other backends give `<pad>` 0, `<unk>` 1, `<s>` 2, `</s>` 3
+and `<mask>` 4. Read the ids of each export from its summary record, for example
+for the special-token flags of ModernBERT's conversion scripts.
+
+The fast tokenizers expose `decode` and `return_offsets_mapping` natively. A slow
+tokenizer has no `return_offsets_mapping`, so MorphPiece exposes
+`encode_with_offsets` instead. Offset mapping (token → source-character span) is
+the mechanism for aligning encoder predictions back to the original text.
 
 ## SLURM
 

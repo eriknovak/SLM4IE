@@ -157,3 +157,75 @@ def test_character_coverage_outside_the_unit_interval_rejected(tmp_path: Path, v
     text = _BASE_CONFIG + f"character_coverage: {value}\n"
     with pytest.raises(ValueError, match="character_coverage"):
         load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+_EXPORT_SECTION = dedent(
+    """\
+    special_tokens: ["<pad>", "<unk>", "<s>", "</s>", "<mask>"]
+    export:
+      parity_lines: 50
+      targets:
+        modernbert:
+          roles: {pad_token: "<pad>", cls_token: "<s>", sep_token: "</s>"}
+          single: "<s> $A </s>"
+          pair: "<s> $A </s> $B:1 </s>:1"
+          model_max_length: 8192
+    """
+)
+
+
+def _with_export(section: str) -> str:
+    """Return the base config with its special tokens replaced by `section`.
+
+    Args:
+        section: YAML holding `special_tokens` and an `export` mapping.
+
+    Returns:
+        The combined config text.
+    """
+    return _BASE_CONFIG.replace('special_tokens: ["<unk>"]\n', "") + section
+
+
+def test_export_section_absent_gives_no_targets_and_default_parity(tmp_path: Path):
+    """A config without an export section has no targets and the default parity count."""
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", _BASE_CONFIG))
+    assert cfg.export_targets == {}
+    assert cfg.export_parity_lines == 1000
+
+
+def test_export_target_loads(tmp_path: Path):
+    """An export target loads with its roles, templates and maximum length."""
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", _with_export(_EXPORT_SECTION)))
+    target = cfg.export_targets["modernbert"]
+    assert target.roles == {"pad_token": "<pad>", "cls_token": "<s>", "sep_token": "</s>"}
+    assert target.single == "<s> $A </s>"
+    assert target.model_max_length == 8192
+    assert cfg.export_parity_lines == 50
+
+
+def test_export_target_with_token_outside_special_tokens_rejected(tmp_path: Path):
+    """A role mapped to a token the sweep does not reserve is rejected."""
+    text = _with_export(_EXPORT_SECTION.replace('cls_token: "<s>"', 'cls_token: "[CLS]"'))
+    with pytest.raises(ValueError, match=r"\[CLS\]"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+def test_export_template_with_token_outside_special_tokens_rejected(tmp_path: Path):
+    """A template naming a token the sweep does not reserve is rejected."""
+    text = _with_export(_EXPORT_SECTION.replace('single: "<s> $A </s>"', 'single: "[CLS] $A </s>"'))
+    with pytest.raises(ValueError, match=r"\[CLS\]"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+def test_export_target_with_unknown_role_rejected(tmp_path: Path):
+    """A role name HuggingFace does not know is rejected."""
+    text = _with_export(_EXPORT_SECTION.replace("cls_token:", "start_token:"))
+    with pytest.raises(ValueError, match="start_token"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+def test_export_target_without_template_rejected(tmp_path: Path):
+    """A target missing its pair template is rejected."""
+    text = _with_export(_EXPORT_SECTION.replace('      pair: "<s> $A </s> $B:1 </s>:1"\n', ""))
+    with pytest.raises(ValueError, match="pair"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))

@@ -357,3 +357,9 @@ _Avoid_: dictionary, vocabulary, gold set
 The morpheme segmentation the morph metrics score against. It is inflectional
 rather than true morphology, so what it feeds are relative comparators.
 _Avoid_: gold standard, ground truth, reference segmentation
+
+**Export target**:
+What one training project needs from an exported tokenizer: the role of each
+special token, the templates that wrap a single text and a pair, and the
+model's maximum input length. Each sweep run is exported once per target.
+_Avoid_: profile, preset, model config

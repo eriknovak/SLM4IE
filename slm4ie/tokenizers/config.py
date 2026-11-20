@@ -17,8 +17,63 @@ from slm4ie.tokenizers.corpus import SampleBudget
 from slm4ie.utils.config import load_yaml
 
 # ===============================
+# Constants
+# ===============================
+
+# the special-token roles a HuggingFace tokenizer accepts as keyword arguments
+SPECIAL_TOKEN_ROLE_NAMES = frozenset(
+    {"bos_token", "eos_token", "unk_token", "sep_token", "pad_token", "cls_token", "mask_token"}
+)
+DEFAULT_PARITY_LINES = 1000
+
+# ===============================
 # Sweep config
 # ===============================
+
+
+@dataclass(frozen=True)
+class ExportTarget:
+    """How one training project needs an exported tokenizer to be set up.
+
+    Attributes:
+        name: Target name, used in the export directory `hf-<name>/`.
+        roles: HuggingFace special-token role to token string, such as
+            `cls_token: <s>`. Every token is one of the sweep's special tokens.
+        single: Template for one text, in `TemplateProcessing` syntax.
+        pair: Template for a text pair, in `TemplateProcessing` syntax.
+        model_max_length: Longest input the target model accepts, in tokens.
+    """
+
+    name: str
+    roles: dict[str, str]
+    single: str
+    pair: str
+    model_max_length: int
+
+    @property
+    def template_tokens(self) -> frozenset[str]:
+        """Return the special tokens the target's templates name.
+
+        Returns:
+            The tokens of `single` and `pair`, as `template_special_tokens` reads them.
+        """
+        return template_special_tokens(self.single, self.pair)
+
+
+def template_special_tokens(single: str, pair: str) -> frozenset[str]:
+    """Return the special tokens named in a pair of `TemplateProcessing` templates.
+
+    A template piece is `$A`/`$B` or a special token, each with an optional
+    `:<type id>` suffix.
+
+    Args:
+        single: Template for one text.
+        pair: Template for a text pair.
+
+    Returns:
+        The special tokens, suffixes stripped.
+    """
+    return frozenset(piece.split(":")[0] for piece in f"{single} {pair}".split() if not piece.startswith("$"))
 
 
 @dataclass
@@ -60,6 +115,10 @@ class SweepConfig:
             stem-ending split, whose lexemes are split for held-out scoring.
         heldout_lexeme_share (float | None): Share of those lexemes held out
             of the morpheme table, or None to hold none out.
+        export_targets (dict[str, ExportTarget]): Export settings by target
+            name, one per training project the tokenizers are exported for.
+        export_parity_lines (int): Evaluation-sample lines on which an export
+            must give the same ids as the trained backend.
     """
 
     corpus_root: Path
@@ -87,6 +146,8 @@ class SweepConfig:
     heldout_lexeme_share: float | None = None
     mlflow_tags: dict[str, str] = field(default_factory=dict)
     character_coverage: float = 1.0
+    export_targets: dict[str, ExportTarget] = field(default_factory=dict)
+    export_parity_lines: int = DEFAULT_PARITY_LINES
 
     @property
     def corpus_split_path(self) -> Path:
@@ -188,6 +249,61 @@ def _budget_from_dict(raw: dict[str, Any]) -> SampleBudget:
     )
 
 
+def _export_targets_from_dict(
+    raw: dict[str, Any], special_tokens: list[str], config_path: Path
+) -> dict[str, ExportTarget]:
+    """Build the export targets from the config's `export.targets` mapping.
+
+    Args:
+        raw: Target name to its settings mapping.
+        special_tokens: The sweep's reserved tokens, which every role must name.
+        config_path: The config file, named in error messages.
+
+    Returns:
+        The export targets by name.
+
+    Raises:
+        ValueError: If a target misses a field, names an unknown role, uses a
+            token outside `special_tokens` in a role or a template, or has a
+            non-positive `model_max_length`.
+    """
+    targets: dict[str, ExportTarget] = {}
+    for name, settings in raw.items():
+        settings = settings or {}
+        where = f"Tokenizer config {config_path}: export target {name!r}"
+
+        # check the required fields
+        missing = [key for key in ("roles", "single", "pair", "model_max_length") if not settings.get(key)]
+        if missing:
+            raise ValueError(f"{where} missing {', '.join(missing)}")
+
+        # check the roles and their tokens
+        roles = {str(role): str(token) for role, token in settings["roles"].items()}
+        unknown_roles = sorted(set(roles) - SPECIAL_TOKEN_ROLE_NAMES)
+        if unknown_roles:
+            raise ValueError(f"{where} has unknown roles {unknown_roles}")
+        template_tokens = template_special_tokens(str(settings["single"]), str(settings["pair"]))
+        unknown_tokens = sorted({*roles.values(), *template_tokens} - set(special_tokens))
+        if unknown_tokens:
+            raise ValueError(
+                f"{where} uses tokens {unknown_tokens} in a role or template, outside special_tokens {special_tokens}"
+            )
+
+        # check the length
+        model_max_length = int(settings["model_max_length"])
+        if model_max_length <= 0:
+            raise ValueError(f"{where} model_max_length {model_max_length} not positive")
+
+        targets[str(name)] = ExportTarget(
+            name=str(name),
+            roles=roles,
+            single=str(settings["single"]),
+            pair=str(settings["pair"]),
+            model_max_length=model_max_length,
+        )
+    return targets
+
+
 def load_sweep_config(config_path: Path) -> SweepConfig:
     """Load the tokenizer-sweep config, applying any local overlay.
 
@@ -214,6 +330,7 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     evaluation = raw.get("eval") or {}
     mlflow_cfg = raw.get("mlflow") or {}
     stats_cfg = raw.get("stats") or {}
+    export_cfg = raw.get("export") or {}
 
     tokenizers = raw.get("tokenizers") or []
     vocab_sizes = raw.get("vocab_sizes") or []
@@ -238,6 +355,13 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     if not isinstance(character_coverage, (int, float)) or not 0.0 < character_coverage <= 1.0:
         raise ValueError(f"Tokenizer config {config_path}: character_coverage {character_coverage!r} outside (0, 1]")
 
+    # read the export targets
+    special_tokens = list(raw.get("special_tokens") or [])
+    export_targets = _export_targets_from_dict(export_cfg.get("targets") or {}, special_tokens, config_path)
+    export_parity_lines = int(export_cfg.get("parity_lines", DEFAULT_PARITY_LINES))
+    if export_parity_lines <= 0:
+        raise ValueError(f"Tokenizer config {config_path}: export.parity_lines {export_parity_lines} not positive")
+
     # resolve the output paths
     output_root = Path(output["root"])
     report_dir = Path(output.get("report_dir") or output_root / "_reports")
@@ -249,7 +373,7 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         train_budget=_budget_from_dict(corpus.get("budget") or {}),
         tokenizers=list(tokenizers),
         vocab_sizes=[int(v) for v in vocab_sizes],
-        special_tokens=list(raw.get("special_tokens") or []),
+        special_tokens=special_tokens,
         sloleks_path=Path(morphology["sloleks_path"]),
         min_stem_len=int(morphology.get("min_stem_len", 2)),
         sloleks_relations_path=(
@@ -271,6 +395,8 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         heldout_lexeme_share=_optional_float(morphology.get("heldout_lexeme_share")),
         mlflow_tags={str(k): str(v) for k, v in (mlflow_cfg.get("tags") or {}).items()},
         character_coverage=float(character_coverage),
+        export_targets=export_targets,
+        export_parity_lines=export_parity_lines,
     )
 
 
