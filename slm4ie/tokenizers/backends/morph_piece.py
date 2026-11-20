@@ -9,6 +9,8 @@ MorphTable is Sloleks-derived (substituting the paper's MorphyNet for English).
 
 Inference is genuinely non-standard (a per-word table lookup), so this is the one
 backend exported as a custom slow `PreTrainedTokenizer` rather than a fast one.
+The segmentation itself lives in `hf_morph_piece.compose_pieces`, which the
+exported tokenizer runs too, so training and export encode text the same way.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from slm4ie.tokenizers.base import BaseTokenizer, TrainContext, split_words
+from slm4ie.tokenizers.hf_morph_piece import ARTIFACT_FILES, compose_pieces, read_morpheme_table
 from slm4ie.tokenizers.registry import register_tokenizer
 
 # ===============================
@@ -142,34 +145,7 @@ class MorphPieceTokenizer(BaseTokenizer):
                 known words yield morpheme pieces and others yield byte-level
                 BPE pieces.
         """
-        # encode with the BPE path
-        encoding = self._bpe.encode(text)
-        tokens, offsets, word_ids = encoding.tokens, encoding.offsets, encoding.word_ids
-        result: list[tuple[str, int, int]] = []
-        index = 0
-        count = len(tokens)
-        while index < count:
-            word_id = word_ids[index]
-            if word_id is None:
-                result.append((tokens[index], offsets[index][0], offsets[index][1]))
-                index += 1
-                continue
-            stop = index
-            while stop < count and word_ids[stop] == word_id:
-                stop += 1
-            word_start, word_end = offsets[index][0], offsets[stop - 1][1]
-            surface = text[word_start:word_end]
-            morphemes = self._table.get(surface)
-            if morphemes is not None:
-                cursor = word_start
-                for morpheme in morphemes:
-                    result.append((morpheme, cursor, cursor + len(morpheme)))
-                    cursor += len(morpheme)
-            else:
-                for position in range(index, stop):
-                    result.append((tokens[position], offsets[position][0], offsets[position][1]))
-            index = stop
-        return result
+        return compose_pieces(self._bpe, self._table, text)
 
     def encode(self, text: str) -> list[str]:
         """Return the two-path pieces for `text`.
@@ -223,12 +199,12 @@ class MorphPieceTokenizer(BaseTokenizer):
             out_dir: Destination directory.
         """
         # save the BPE tokenizer and the vocabulary
-        self._bpe.save(str(out_dir / "tokenizer.json"))
+        self._bpe.save(str(out_dir / ARTIFACT_FILES["bpe_file"]))
         meta = {"special_tokens": self._special_tokens, "vocab": self._vocab}
-        (out_dir / "morphpiece.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        (out_dir / ARTIFACT_FILES["vocab_file"]).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
         # save the morpheme table
-        with gzip.open(out_dir / "morpheme_table.jsonl.gz", "wt", encoding="utf-8") as handle:
+        with gzip.open(out_dir / ARTIFACT_FILES["table_file"], "wt", encoding="utf-8") as handle:
             for form, morphemes in self._table.items():
                 handle.write(json.dumps({"form": form, "morphemes": morphemes}, ensure_ascii=False) + "\n")
 
@@ -245,16 +221,11 @@ class MorphPieceTokenizer(BaseTokenizer):
         from tokenizers import Tokenizer
 
         # load the BPE tokenizer and the vocabulary
-        tokenizer = cls(Tokenizer.from_file(str(out_dir / "tokenizer.json")))
-        meta = json.loads((out_dir / "morphpiece.json").read_text(encoding="utf-8"))
+        tokenizer = cls(Tokenizer.from_file(str(out_dir / ARTIFACT_FILES["bpe_file"])))
+        meta = json.loads((out_dir / ARTIFACT_FILES["vocab_file"]).read_text(encoding="utf-8"))
         tokenizer._special_tokens = meta.get("special_tokens", [])
         tokenizer._vocab = {token: int(i) for token, i in meta["vocab"].items()}
 
         # load the morpheme table
-        with gzip.open(out_dir / "morpheme_table.jsonl.gz", "rt", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    payload = json.loads(line)
-                    tokenizer._table[payload["form"]] = payload["morphemes"]
+        tokenizer._table = read_morpheme_table(out_dir / ARTIFACT_FILES["table_file"])
         return tokenizer

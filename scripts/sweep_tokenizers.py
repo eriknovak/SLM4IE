@@ -8,7 +8,9 @@ same way: `--all`, or `--tokenizer` optionally narrowed by `--vocab-size`.
               corpus split the split itself and the evaluation sample
     train     train the selected tokenizers, logging runs to MLflow
     evaluate  score trained artifacts and write the comparison report
-    export    write HuggingFace tokenizer files into each artifact directory
+    export    write a HuggingFace tokenizer directory `<run>/hf-<target>/` per training
+              target in the config's export.targets, check its ids against the
+              trained tokenizer, and list every export in `_reports/export-summary.json`
 
 `sample` is optional: `train` prepares the same inputs when they are missing.
 Running it up front decouples the expensive sampling from training, so repeated
@@ -28,6 +30,10 @@ Examples:
 
         uv run python scripts/sweep_tokenizers.py evaluate --config $SWEEP --all
         uv run python scripts/sweep_tokenizers.py export --config $SWEEP --all
+
+    Export every run for ModernBERT pretraining, rewriting existing exports:
+
+        uv run python scripts/sweep_tokenizers.py export --config $SWEEP --all --target modernbert --force
 """
 
 import argparse
@@ -39,7 +45,7 @@ from pathlib import Path
 from slm4ie.utils.parallel import configure_script_logging
 from slm4ie.tokenizers.evaluate import evaluate_sweep
 from slm4ie.tokenizers.config import SweepConfig, load_sweep_config
-from slm4ie.tokenizers.hf_export import export_sweep_runs
+from slm4ie.tokenizers.hf_export import EXPORT_SUMMARY_FILENAME, export_sweep_runs, read_parity_texts
 from slm4ie.tokenizers.corpus import check_sample_side, materialize_sample
 from slm4ie.tokenizers.train import corpus_split_for, prepare_inputs, resolve_sweep_runs, train_sweep
 from slm4ie.utils.cli import add_workers
@@ -169,6 +175,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     export_parser = subparsers.add_parser("export", help="Export trained tokenizers as HuggingFace directories.")
     _add_config_argument(export_parser)
     _add_run_selection(export_parser, "export")
+    export_parser.add_argument(
+        "--target",
+        action="append",
+        default=None,
+        help="Export target from the config's export.targets; repeat for several. Default: every target.",
+    )
+    export_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Export again even when an export was built from the same artifact and target.",
+    )
 
     return parser.parse_args(argv)
 
@@ -319,7 +336,28 @@ def _run_export(cfg: SweepConfig, args: argparse.Namespace) -> int:
         Process exit code.
     """
     configure_script_logging(parallel=False, console_level=logging.INFO)
-    summary = export_sweep_runs(cfg.output_root, _trained_runs(cfg, args))
+
+    # resolve the targets and the texts each export is checked on
+    names = args.target or list(cfg.export_targets)
+    unknown = [name for name in names if name not in cfg.export_targets]
+    if not names or unknown:
+        logger.error("Unknown or no export targets %s; the config defines %s", unknown, list(cfg.export_targets))
+        return FAILED_EXIT_CODE
+    try:
+        parity_texts = read_parity_texts(cfg.eval_sample_path, cfg.export_parity_lines)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        return FAILED_EXIT_CODE
+
+    # export each selected run for each target
+    summary = export_sweep_runs(
+        cfg.output_root,
+        _trained_runs(cfg, args),
+        [cfg.export_targets[name] for name in names],
+        parity_texts,
+        cfg.report_dir / EXPORT_SUMMARY_FILENAME,
+        force=args.force,
+    )
     return FAILED_EXIT_CODE if summary.failed else 0
 
 

@@ -127,6 +127,7 @@ _DERIV_DECOMPOSABLE_METRICS = [
 #: Filename of the per-run sufficient-statistics sidecar consumed by the
 #: aggregation. Stored as compact integer arrays under each artifact dir.
 EVAL_UNITS_FILENAME = "eval_units.npz"
+METRICS_FILENAME = "metrics.json"
 
 #: Arrow shown next to each metric header indicating the better direction.
 _DIRECTION_ARROW = {"higher": "↑", "lower": "↓"}
@@ -352,7 +353,7 @@ def evaluate_artifact(
         )
 
     # write the record and the sidecar
-    (artifact_dir / "metrics.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    (artifact_dir / METRICS_FILENAME).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     np.savez_compressed(artifact_dir / EVAL_UNITS_FILENAME, **arrays)
     return record
 

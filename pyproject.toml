@@ -146,6 +146,7 @@ tokenizers = [
     "sentencepiece>=0.2.1",           # Unigram (SentencePiece) trainer
     "transformers>=4.45",             # PreTrainedTokenizerFast export + offsets
     "numpy>=2.4.3",                   # tokenizers/stats.py + evaluate.py
+    "protobuf>=6.0",                  # hf_export.py reads the SentencePiece normalizer table
 ]
 
 # The showcase site (mkdocs.yml + website/); Material bundles the blog plugin.

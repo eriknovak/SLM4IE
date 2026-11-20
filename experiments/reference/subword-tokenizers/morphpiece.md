@@ -106,13 +106,13 @@ tokenizer.
 \caption{MorphPiece training}
 \Require corpus $D$, morpheme lexicon $L$, vocabulary size $B$, special tokens $S$
 \Ensure morpheme table $T$, byte-level BPE $(V_b, M)$, vocabulary $V$
-\State $f(w) \gets$ count of each word $w$ in $D$, words split from punctuation \Comment{`slm4ie/tokenizers/backends/morph_piece.py:71-73`}
-\State $g(m) \gets \sum f(w)$ over every word $w$ in $L$ whose cut $L(w)$ holds the morpheme $m$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:74-79`}
-\State $K \gets$ the $\lfloor (B - |S|) / 2 \rfloor$ morphemes with the highest $g$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:81-83`}
-\State $T \gets \{w \mapsto L(w)\}$ for every $w$ in $L$ with two or more morphemes, all of them in $K$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:85-89`}
-\State $(V_b, M) \gets$ byte-level BPE trained on $D$ with vocabulary size $\max(|S| + 256,\ B - |K|)$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:91-101`}
-\State $V \gets V_b$, then every $m$ in $K$ not already in $V_b$, each with the next free id \Comment{`slm4ie/tokenizers/backends/morph_piece.py:103`}
-\Return $T$, $(V_b, M)$ and $V$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:112-118`}
+\State $f(w) \gets$ count of each word $w$ in $D$, words split from punctuation \Comment{`slm4ie/tokenizers/backends/morph_piece.py:84-86`}
+\State $g(m) \gets \sum f(w)$ over every word $w$ in $L$ whose cut $L(w)$ holds the morpheme $m$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:87-92`}
+\State $K \gets$ the $\lfloor (B - |S|) / 2 \rfloor$ morphemes with the highest $g$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:96-97`}
+\State $T \gets \{w \mapsto L(w)\}$ for every $w$ in $L$ with two or more morphemes, all of them in $K$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:99-103`}
+\State $(V_b, M) \gets$ byte-level BPE trained on $D$ with vocabulary size $\max(|S| + 256,\ B - |K|)$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:106-116`}
+\State $V \gets V_b$, then every $m$ in $K$ not already in $V_b$, each with the next free id \Comment{`slm4ie/tokenizers/backends/morph_piece.py:120`}
+\Return $T$, $(V_b, M)$ and $V$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:119-121`}
 ```
 
 - **1**: Words are counted once, as $f(w)$. The splitter keeps letters together and makes each punctuation mark its own word, the same splitter the lexicon was built with.
@@ -126,16 +126,16 @@ tokenizer.
 \caption{MorphPiece encoding}
 \Require text $t$, table $T$, byte-level BPE $(V_b, M)$
 \Ensure the tokens of $t$, each with the span of $t$ it covers
-\State encode $t$ with the byte-level BPE, keeping each token's span and which word it belongs to \Comment{`slm4ie/tokenizers/backends/morph_piece.py:131-132`}
-\ForAll{words $p$ of $t$, as runs of tokens with the same word} \Comment{`slm4ie/tokenizers/backends/morph_piece.py:136-145`}
-  \State $u \gets$ the characters of $t$ that the run covers, the space before the word left out \Comment{`slm4ie/tokenizers/backends/morph_piece.py:145-146`}
+\State encode $t$ with the byte-level BPE, keeping each token's span and which word it belongs to \Comment{`slm4ie/tokenizers/hf_morph_piece.py:73-74`}
+\ForAll{words $p$ of $t$, as runs of tokens with the same word} \Comment{`slm4ie/tokenizers/hf_morph_piece.py:79-88`}
+  \State $u \gets$ the characters of $t$ that the run covers, the space before the word left out \Comment{`slm4ie/tokenizers/hf_morph_piece.py:88-89`}
   \If{$u$ is in $T$}
-    \Changed \State emit the morphemes $T(u)$, each spanning its own characters of $t$ \Comment{`slm4ie/tokenizers/backends/morph_piece.py:147-152`}
+    \Changed \State emit the morphemes $T(u)$, each spanning its own characters of $t$ \Comment{`slm4ie/tokenizers/hf_morph_piece.py:90-94`}
   \Else
-    \State emit the run's BPE tokens unchanged \Comment{`slm4ie/tokenizers/backends/morph_piece.py:153-155`}
+    \State emit the run's BPE tokens unchanged \Comment{`slm4ie/tokenizers/hf_morph_piece.py:95-96`}
   \EndIf
 \EndFor
-\Return the emitted tokens in order \Comment{`slm4ie/tokenizers/backends/morph_piece.py:169`}
+\Return the emitted tokens in order \Comment{`slm4ie/tokenizers/hf_morph_piece.py:98`}
 ```
 
 - **1**: The BPE path runs first over the whole text. It supplies the word boundaries, the spans and the fallback tokens in one pass.
@@ -150,13 +150,13 @@ tokenizer.
 \Ensure the text
 \ForAll{tokens $s_i$}
   \If{$s_i$ is in $K'$}
-    \State if the previous token was not in $K'$, decode the pending BPE tokens and start a new word with a space \Comment{`slm4ie/tokenizers/hf_morph_piece.py:130-133`}
-    \State append $s_i$ as it is \Comment{`slm4ie/tokenizers/hf_morph_piece.py:134-135`}
+    \State if the previous token was not in $K'$, decode the pending BPE tokens and start a new word with a space \Comment{`slm4ie/tokenizers/hf_morph_piece.py:332-335`}
+    \State append $s_i$ as it is \Comment{`slm4ie/tokenizers/hf_morph_piece.py:336`}
   \Else
-    \State hold $s_i$ for the byte-level decoder \Comment{`slm4ie/tokenizers/hf_morph_piece.py:137-138`}
+    \State hold $s_i$ for the byte-level decoder \Comment{`slm4ie/tokenizers/hf_morph_piece.py:338-339`}
   \EndIf
 \EndFor
-\Return the parts joined, with the pending BPE tokens decoded \Comment{`slm4ie/tokenizers/hf_morph_piece.py:139-140`}
+\Return the parts joined, with the pending BPE tokens decoded \Comment{`slm4ie/tokenizers/hf_morph_piece.py:341-342`}
 ```
 
 - **1-2**: A token is a morpheme token only when it is not also a BPE token. A shared token, such as `a`, is decoded as bytes.

@@ -46,7 +46,7 @@ class TestSelectionFlags:
                 sweep.parse_args([command, "--all"])
 
     def test_tier_defaults_to_scratch_on_tracked_subcommands(self):
-        """train and evaluate tag runs scratch unless --tier tracked is given."""
+        """The train and evaluate steps tag runs scratch unless --tier tracked is given."""
         for command in ("train", "evaluate"):
             assert sweep.parse_args([command, "--config", "sweep.yaml", "--all"]).tier == "scratch"
             assert sweep.parse_args([command, "--config", "sweep.yaml", "--all", "--tier", "tracked"]).tier == "tracked"
@@ -107,6 +107,87 @@ class TestSample:
 
         args = sweep.parse_args(["sample", "--config", "sweep.yaml"])
         assert sweep._run_sample(cfg, args) == 1
+
+
+class TestExport:
+    """Tests for the `export` subcommand wiring."""
+
+    @staticmethod
+    def _cfg(tmp_path: Path) -> SimpleNamespace:
+        """Build a stand-in sweep config with one trained run and two targets.
+
+        Args:
+            tmp_path: Test directory.
+
+        Returns:
+            The config fields `_run_export` reads.
+        """
+        output_root = tmp_path / "tokenizers"
+        (output_root / "bpe-16000").mkdir(parents=True)
+        (output_root / "bpe-16000" / "metadata.json").write_text("{}")
+        sample = output_root / "eval_sample.txt"
+        sample.write_text("prva vrstica\ndruga vrstica\n")
+        return SimpleNamespace(
+            output_root=output_root,
+            report_dir=output_root / "_reports",
+            eval_sample_path=sample,
+            export_parity_lines=1,
+            export_targets={"modernbert": "modernbert-target", "deberta": "deberta-target"},
+            tokenizers=["bpe"],
+            vocab_sizes=[16000],
+        )
+
+    @staticmethod
+    def _patch(monkeypatch, recorder: dict, failed: list[str] | None = None) -> None:
+        """Stub logging and capture the export_sweep_runs call.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            recorder: Mutated with the arguments export_sweep_runs saw.
+            failed: Exports the stub reports as failed.
+        """
+        monkeypatch.setattr(sweep, "configure_script_logging", lambda **_kwargs: None)
+        monkeypatch.setattr(sweep, "resolve_sweep_runs", lambda _cfg, **_kwargs: ["bpe-16000"])
+
+        def fake_export(output_root, keys, targets, parity_texts, summary_path, force=False):
+            recorder.update(keys=keys, targets=targets, texts=parity_texts, summary=summary_path, force=force)
+            return SimpleNamespace(failed=failed or [])
+
+        monkeypatch.setattr(sweep, "export_sweep_runs", fake_export)
+
+    def test_exports_every_target_by_default(self, monkeypatch, tmp_path: Path):
+        """Without `--target` every configured target is exported, checked on the sample's first lines."""
+        cfg, recorder = self._cfg(tmp_path), {}
+        self._patch(monkeypatch, recorder)
+        assert sweep._run_export(cfg, sweep.parse_args(["export", "--config", "sweep.yaml", "--all"])) == 0
+        assert recorder["targets"] == ["modernbert-target", "deberta-target"]
+        assert recorder["texts"] == ["prva vrstica"]
+        assert recorder["summary"] == cfg.report_dir / "export-summary.json"
+        assert recorder["force"] is False
+
+    def test_target_and_force_are_passed_through(self, monkeypatch, tmp_path: Path):
+        """`--target` narrows the targets and `--force` reaches the export."""
+        cfg, recorder = self._cfg(tmp_path), {}
+        self._patch(monkeypatch, recorder)
+        args = sweep.parse_args(["export", "--config", "sweep.yaml", "--all", "--target", "modernbert", "--force"])
+        assert sweep._run_export(cfg, args) == 0
+        assert recorder["targets"] == ["modernbert-target"]
+        assert recorder["force"] is True
+
+    def test_unknown_target_fails_before_exporting(self, monkeypatch, tmp_path: Path):
+        """A target the config does not define fails without exporting anything."""
+        cfg, recorder = self._cfg(tmp_path), {}
+        self._patch(monkeypatch, recorder)
+        args = sweep.parse_args(["export", "--config", "sweep.yaml", "--all", "--target", "bert"])
+        assert sweep._run_export(cfg, args) == sweep.FAILED_EXIT_CODE
+        assert recorder == {}
+
+    def test_failed_export_gives_the_failed_exit_code(self, monkeypatch, tmp_path: Path):
+        """Any failed export makes the subcommand exit non-zero."""
+        cfg = self._cfg(tmp_path)
+        self._patch(monkeypatch, {}, failed=["bpe-16000/modernbert"])
+        args = sweep.parse_args(["export", "--config", "sweep.yaml", "--all"])
+        assert sweep._run_export(cfg, args) == sweep.FAILED_EXIT_CODE
 
 
 class TestMainExits:
