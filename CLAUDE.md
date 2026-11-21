@@ -30,8 +30,9 @@ than synonyms when writing code, configs or records.
   `uv run <cmd>` to execute scripts. Do not invoke `pip` directly.
 - Dependencies are **named groups**, not extras: `uv sync` gives base + `dev`,
   and each workstream adds its own (`data`, `corpus`, `tokenizers`,
-  `analysis`, all of which pull in `tracking` for MLflow; `docs` builds the
-  showcase site).
+  `pretokenize`, `analysis`, all of which pull in `tracking` for MLflow;
+  `docs` builds the showcase site). `pretokenize` installs alongside
+  `tokenizers`, so one environment exports tokenizers and converts the corpus.
 - **Ruff** is configured with `line-length = 120`, `target-version = "py313"`,
   double quotes, `docstring-code-format = true`. Match this when generating
   code; do not raise the line length.
@@ -48,10 +49,10 @@ slm4ie/      Library code — importable modules only, no CLI logic.
 scripts/     Thin CLI wrappers around slm4ie/. Argument parsing + config load.
              One script per pipeline, named verb + object, with one subcommand
              per step: prepare_datasets, curate_pretraining_corpus,
-             sweep_tokenizers.
+             sweep_tokenizers, pretokenize_corpus.
 configs/     Shared registries only: the dataset catalogs, the task registry,
-             the curation settings and the tokenizer sweep, each named for the
-             subcommand that reads it.
+             the curation settings, the tokenizer sweep and the pretokenize
+             registry, each named for the subcommand that reads it.
 slurm/       SLURM batch scripts for HPC training.
 tests/       pytest suite mirroring slm4ie/, scripts/ and website/.
 docs/        Operator documentation and agent-skill config (agents/).
@@ -133,7 +134,7 @@ filterable.
 Datasets live **outside the repo** at `/vault/data/SLM4IE/`. Never commit
 data files; respect the `.gitignore`. `data/` in the repo is a gitignored
 symlink to that root, so the paths below are reachable as `data/<tier>/…`. The
-tree has seven tiers:
+tree has eight tiers:
 
 ```text
 raw/<key>/...                                  # prepare_datasets.py download
@@ -148,6 +149,8 @@ tasks/<task>/<dataset>/{train,val,test}.jsonl.gz  # prepare_datasets.py tasks
 tokenization/<dataset>.jsonl.gz                # prepare_datasets.py tokenization
 tokenizers/<sweep run>/                        # sweep_tokenizers.py artifacts
   _reports/                                      # the sweep comparison report
+pretokenized/<corpus>/<tokenizer>-<length>/    # pretokenize_corpus.py run
+  <format>/{train,validation}/  manifest.json    # pretokenized outputs for other projects
 experiments/<slug>/                            # per-experiment derived data
   raw/ interim/ final/                           # as downloaded / partial / consumed
 ```
@@ -170,8 +173,8 @@ Use `slm4ie.data.extract.records.iter_joined_records` to consume both together.
 
 ## Conversion routes — keep them separate
 
-Downstream consumers fork after extraction. There are three routes, and
-they own disjoint output trees:
+Downstream consumers fork after extraction or, for the pretokenized corpus,
+after curation. There are four routes, and they own disjoint output trees:
 
 1. **Pretraining (`curate_pretraining_corpus.py run`):** a thin CLI over
    `slm4ie/data/curate/run.py`, which runs eight sentinel-skippable stages
@@ -219,6 +222,18 @@ they own disjoint output trees:
    `configs/data/tokenization.yaml`, writes `tokenization/<dataset>.jsonl.gz`.
    Lexicon-derived (Sloleks, etc.); never enters the pretraining corpus.
 
+4. **Pretokenized corpus (`pretokenize_corpus.py run`):** reads
+   `configs/data/pretokenize.yaml` and writes
+   `pretokenized/<corpus>/<tokenizer>-<length>/` (library code in
+   `slm4ie/data/pretokenize/`). Model training runs in other projects, so
+   this route turns a curated corpus stage into each training project's
+   layout: it tokenizes with an exported tokenizer, chunks at sentence
+   boundaries, splits by document, and writes every output format an entry
+   names from the same samples. Formats are registered writers
+   (`formats/`: `mds`, `mds-streaming`, `parquet`); a new trainer's layout
+   is a new writer, not a new script. `check` verifies an output against
+   its manifest. See `docs/pretokenized-corpus.md`.
+
 All routes skip existing outputs unless `--force` is passed and accept either
 positional keys (`<task>/<dataset>` entry keys for the task route) or `--all`.
 
@@ -234,7 +249,7 @@ tokenizer for LM-pretraining. `sample` is optional: it materializes the shared
 seeded training sample + morpheme lexicon up front so reruns reuse an identical
 persistent sample.
 
-- It is a **consumer**, not a fourth conversion route: it reads the deduplicated
+- It is a **consumer**, not a conversion route: it reads the deduplicated
   corpus (`pretrain/06_sentence_dedup/`) for training and
   `tokenization/sloleks.jsonl.gz` for the morpheme-derived gold, and writes
   artifacts + a report under `/vault/data/SLM4IE/tokenizers/`.
@@ -384,9 +399,9 @@ checks structure but not semantic agreement with the code.
 - Reintroducing the retired data tiers `processed/`, `final/`, `benchmarks/`,
   or the retired `--schema {gliner|conll|generic}` flag; only the GLiNER task
   schema remains.
-- Adding a fourth conversion route alongside pretraining curation / task
-  conversion / tokenization without discussing it first — the split is
-  intentional. New task families belong as new entries in `tasks.yaml`,
+- Adding a fifth conversion route alongside pretraining curation / task
+  conversion / tokenization / pretokenization without discussing it first —
+  the split is intentional. New task families belong as new entries in `tasks.yaml`,
   not as new scripts.
 
 ## Agent skills

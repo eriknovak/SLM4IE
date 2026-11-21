@@ -1,0 +1,56 @@
+# pretokenize.yaml — Pretokenized outputs of the pretraining corpus, one per training setup.
+#
+# Pipeline: pretokenize_corpus.py run
+#           pretrain/<stage>/<dataset>/*.jsonl.gz + tokenizers/<run>/hf-<target>/
+#           -> pretokenized/<corpus>/<tokenizer>-<length>/<format>/{train,validation}/ + manifest.json
+#
+# Top-level keys:
+#   roots        corpus (pretrain tier), tokenizers (exported tokenizers), output (pretokenized tier).
+#   defaults     Settings every entry takes unless it sets its own (see Entry fields).
+#   mlflow       Lineage tracking (see Notes: mlflow).
+#   entries      Map of <corpus>/<tokenizer>-<length> -> entry spec. The key IS the output dir.
+#
+# Entry fields:
+#   corpus              Corpus stage under roots.corpus, holding <dataset>/*.jsonl.gz.
+#   tokenizer           Exported tokenizer folder under roots.tokenizers (sweep_tokenizers.py export).
+#   max_seq_len         Longest sample in tokens, special tokens included.
+#   min_chunk_tokens    Shorter chunks are dropped and counted in the manifest.
+#   formats             Output writers: mds (ModernBERT non-streaming loader, sequence
+#                       packing), mds-streaming (ModernBERT streaming loader), parquet
+#                       (HuggingFace datasets). Default mds and parquet.
+#   validation_share    Share of documents in the validation split, the same in every source.
+#   min_validation_docs Fewest validation documents; raises the share when needed.
+#   seed                Seed of the document hash that assigns the split.
+#   shard_size_mb       Target size of one output shard.
+#   language            Language tag on the lineage run.
+#
+# Notes:
+#   mlflow       Each run logs its lineage under slm4ie/data/pretokenize with the
+#     manifest as artifact. tracking_uri null falls back to $MLFLOW_TRACKING_URI.
+#
+# Selection: pass entry keys positionally, or --all.
+
+roots:
+  corpus: ./data/pretrain
+  tokenizers: ./data/tokenizers
+  output: ./data/pretokenized
+
+defaults:
+  formats: [mds, parquet]
+  min_chunk_tokens: 8
+  validation_share: 0.001
+  min_validation_docs: 10000
+  seed: 13
+  shard_size_mb: 64
+
+mlflow:
+  enabled: true
+  experiment: slm4ie/data/pretokenize
+  tracking_uri: null
+
+# --- Entries ------------------------------------------------------------
+entries:
+  sentence-dedup/bpe-32000-modernbert-1024:    # ModernSloBERT pretraining
+    corpus: 06_sentence_dedup
+    tokenizer: bpe-32000/hf-modernbert
+    max_seq_len: 1024
