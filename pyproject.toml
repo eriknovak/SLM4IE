@@ -31,6 +31,7 @@ conflicts = [
     [{ group = "evaluation" }, { group = "corpus" }],
     [{ group = "evaluation" }, { group = "tokenizers" }],
     [{ group = "evaluation" }, { group = "embeddings" }],
+    [{ group = "evaluation" }, { group = "pretokenize" }],
 ]
 
 # the theme entry-point hook is on datachart's main and not yet in a PyPI
@@ -174,6 +175,21 @@ analysis = [
 embeddings = [
     "sentence-transformers>=3.3",     # multilingual-e5 encoder
     "torch>=2.5",
+]
+
+# Tokenizing the curated corpus into shards for training projects:
+# scripts/pretokenize_corpus.py + slm4ie/data/pretokenize/. mosaicml-streaming
+# stays below 0.11 because 0.13 needs numpy<2.2, which the tokenizers group
+# cannot share; 0.10 writes the same MDS format, so one environment can export
+# tokenizers and convert the corpus.
+pretokenize = [
+    {include-group = "tracking"},
+    "mosaicml-streaming>=0.10,<0.11", # MDS shard writer and reader
+    "pyarrow>=17",                    # Parquet writer
+    "datasets>=3.0.0",                # Parquet layout read back as the trainers do
+    "transformers>=4.45",             # AutoTokenizer over the exported tokenizer folder
+    "tokenizers>=0.20",               # fast tokenizer runtime
+    "numpy>=2.4.3",                   # token id arrays
 ]
 
 # Prompting chat models and scoring their answers: slm4ie/evaluation/.

@@ -32,6 +32,8 @@ pretrain/                                      # corpus-wide curation output
   07_statistics/                                 # corpus-wide stats
 tasks/<task>/<dataset>/{train,val,test}.jsonl.gz  # SFT + eval
 tokenization/<dataset>.jsonl.gz                # tokenizer-quality data
+pretokenized/<corpus>/<tokenizer>-<length>/    # pretokenized outputs for other projects
+  <format>/{train,validation}/  manifest.json
 ```
 
 ## Configs and scripts
@@ -57,7 +59,10 @@ uv run python scripts/prepare_datasets.py tasks        --all      # every family
 ```
 
 Curation is documented separately in
-[pretraining-corpus.md](pretraining-corpus.md).
+[pretraining-corpus.md](pretraining-corpus.md). Tokenizing the curated corpus
+into pretokenized outputs for other projects (`scripts/pretokenize_corpus.py`,
+registry [`configs/data/pretokenize.yaml`](../configs/data/pretokenize.yaml))
+is documented in [pretokenized-corpus.md](pretokenized-corpus.md).
 
 ## Parallelism and per-dataset logs
 

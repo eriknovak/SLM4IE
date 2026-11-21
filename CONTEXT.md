@@ -10,8 +10,9 @@ instead.
 ### Pipeline shape
 
 **Conversion route**:
-One of the three ways an extracted dataset is consumed downstream — pretraining
-curation, task conversion, tokenizer quality. Each owns a disjoint output tree.
+One of the four ways the pipeline's data is consumed downstream — pretraining
+curation, task conversion, tokenizer quality, pretokenization (which reads a
+curated corpus stage). Each owns a disjoint output tree.
 _Avoid_: pipeline, path, fork
 
 **Step package**:
@@ -27,7 +28,7 @@ subcommand of the same name; a stage module exposes `run` for the same reason.
 _Avoid_: driver, runner, main
 
 **Data tier**:
-One of the seven top-level folders under the data root, each holding the output
+One of the eight top-level folders under the data root, each holding the output
 of one stretch of the pipeline. A tier is larger than a stage: all eight
 curation stages write inside `pretrain/`.
 _Avoid_: layer, level, stage
@@ -284,6 +285,32 @@ _Avoid_: split strategy, split rule
 Which translation of SuperGLUE-SL an entry reads, human-translated or
 machine-translated.
 _Avoid_: version, edition, flavor
+
+### Pretokenized corpus
+
+**Pretokenized output**:
+One pretokenize registry entry's result: a corpus stage tokenized with one
+exported tokenizer at one maximum length, written in each of its output formats
+with one manifest.
+_Avoid_: pretokenized dataset, shards, tokenized corpus
+
+**Output format**:
+A layout of a pretokenized output that one kind of trainer reads (`mds`,
+`mds-streaming`, `parquet`), registered as a writer. Every format holds the same
+samples in the same order.
+_Avoid_: layout writer, export format
+
+**Part**:
+What one input shard becomes in one output format and split; parts are numbered
+in input-shard order and merged per split. A part is an output, never another
+name for the input shard.
+_Avoid_: piece, sub-shard
+
+**Chunk**:
+A run of whole sentences of one document, at most the maximum length less the
+template's special tokens, that becomes one training sample once wrapped. Not a
+shard of the corpus.
+_Avoid_: window, segment, block
 
 ### Configs
 
