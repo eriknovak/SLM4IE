@@ -364,6 +364,14 @@ checks structure but not semantic agreement with the code.
   only in-code backend registries. Plumbing that knows nothing of the data
   tiers (`io`, `parallel`, `versioning`, `config`) lives in `slm4ie/utils/`,
   which never imports from `slm4ie/data/`.
+- A parallel step's own pool is sized through `choose_workers` in
+  `slm4ie/utils/parallel.py`, never from the core count alone (datatrove sizes
+  curation stages 1–7 itself, and download stays at 4 threads): it takes the
+  smallest of half the cores, the items and 80% of available memory divided by
+  the step's memory per worker. That figure and the optional items-per-worker
+  limit come from the `workers:` mapping of the step's registry, read by its
+  `config.py` through `parse_worker_settings` in `slm4ie/utils/parallel.py`;
+  without one it assumes 8 GB. See `docs/data-pipeline.md`, "Worker count by memory".
 - Long-running steps show progress with tqdm, unless the library driving
   them already draws a bar (datatrove readers). Inside a parallel pool only
   one task draws it; `workers_quiet()` in `slm4ie/utils/parallel.py` tells

@@ -14,6 +14,9 @@
 #   eval            Held-out evaluation sample + Rényi alpha.
 #   stats           Bootstrap CI + significance settings (see Notes: stats).
 #   mlflow          Tracking (see Notes: mlflow).
+#   workers         Optional; train and evaluate, each with memory_per_worker_gb (positive
+#                   number, GB of peak memory of one worker; absent assumes 8 GB) and
+#                   max_items_per_worker (positive integer; absent keeps workers for the run).
 #   export          HuggingFace export settings per export target (see Notes: export).
 #
 # Notes:

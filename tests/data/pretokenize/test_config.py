@@ -6,6 +6,7 @@ from textwrap import dedent
 import pytest
 
 from slm4ie.data.pretokenize.config import load_pretokenize_config
+from slm4ie.utils.parallel import WorkerSettings
 
 _CONFIG = dedent(
     """\
@@ -124,3 +125,41 @@ def test_committed_registry_loads():
     """The committed registry loads and declares the ModernSloBERT entry."""
     config = load_pretokenize_config(Path(__file__).parents[3] / "configs" / "data" / "pretokenize.yaml")
     assert "sentence-dedup/bpe-32000-modernbert-1024" in config.entries
+
+
+def test_workers_absent_leave_memory_and_item_limit_unset(tmp_path: Path):
+    """An entry with no workers section declares no memory and no item limit."""
+    entry = load_pretokenize_config(_write(tmp_path, _CONFIG)).entries["sentence-dedup/bpe-32000-modernbert-1024"]
+    assert entry.workers == WorkerSettings(memory_per_worker_gb=None, max_items_per_worker=None)
+
+
+def test_entry_workers_override_the_defaults(tmp_path: Path):
+    """An entry's workers section replaces the one in the defaults."""
+    text = _CONFIG.replace("  seed: 7\n", "  workers: {memory_per_worker_gb: 4}\n")
+    text += "    workers: {memory_per_worker_gb: 6.5, max_items_per_worker: 20}\n"
+    entry = load_pretokenize_config(_write(tmp_path, text)).entries["sentence-dedup/bpe-32000-modernbert-1024"]
+    assert entry.workers == WorkerSettings(memory_per_worker_gb=6.5, max_items_per_worker=20)
+
+
+@pytest.mark.parametrize(
+    "workers", ["{memory_per_worker_gb: 0}", "{memory_per_worker_gb: -2}", "{memory_per_worker_gb: big}"]
+)
+def test_non_positive_memory_per_worker_rejected(tmp_path: Path, workers: str):
+    """A memory per worker that is not a positive number is rejected, naming the value."""
+    text = _CONFIG + f"    workers: {workers}\n"
+    with pytest.raises(ValueError, match="memory_per_worker_gb"):
+        load_pretokenize_config(_write(tmp_path, text))
+
+
+@pytest.mark.parametrize("workers", ["{max_items_per_worker: 0}", "{max_items_per_worker: 2.5}"])
+def test_non_positive_item_limit_rejected(tmp_path: Path, workers: str):
+    """An item limit that is not a positive integer is rejected, naming the value."""
+    text = _CONFIG + f"    workers: {workers}\n"
+    with pytest.raises(ValueError, match="max_items_per_worker"):
+        load_pretokenize_config(_write(tmp_path, text))
+
+
+def test_committed_registry_declares_four_gb_per_worker():
+    """The committed registry declares the measured 4 GB per worker for its entries."""
+    config = load_pretokenize_config(Path(__file__).parents[3] / "configs" / "data" / "pretokenize.yaml")
+    assert {entry.workers.memory_per_worker_gb for entry in config.entries.values()} == {4.0}

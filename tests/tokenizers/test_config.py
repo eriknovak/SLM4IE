@@ -6,6 +6,7 @@ from textwrap import dedent
 import pytest
 
 from slm4ie.tokenizers.config import load_sweep_config
+from slm4ie.utils.parallel import WorkerSettings
 
 _BASE_CONFIG = dedent(
     """\
@@ -228,4 +229,32 @@ def test_export_target_without_template_rejected(tmp_path: Path):
     """A target missing its pair template is rejected."""
     text = _with_export(_EXPORT_SECTION.replace('      pair: "<s> $A </s> $B:1 </s>:1"\n', ""))
     with pytest.raises(ValueError, match="pair"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+def test_workers_default_to_unset_for_both_pools(tmp_path: Path):
+    """Without a workers section train and evaluate declare no memory and no item limit."""
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", _BASE_CONFIG))
+    assert (cfg.train_workers, cfg.eval_workers) == (WorkerSettings(), WorkerSettings())
+
+
+def test_workers_load_per_pool(tmp_path: Path):
+    """The train and evaluate pools each read their own memory per worker."""
+    text = _BASE_CONFIG + "workers:\n  train: {memory_per_worker_gb: 12}\n  evaluate: {memory_per_worker_gb: 3}\n"
+    cfg = load_sweep_config(_write(tmp_path / "s.yaml", text))
+    assert cfg.train_workers == WorkerSettings(memory_per_worker_gb=12.0)
+    assert cfg.eval_workers == WorkerSettings(memory_per_worker_gb=3.0)
+
+
+def test_evaluate_max_items_per_worker_rejected(tmp_path: Path):
+    """Evaluation workers inherit their inputs by fork, so an item limit is rejected."""
+    text = _BASE_CONFIG + "workers:\n  evaluate: {max_items_per_worker: 5}\n"
+    with pytest.raises(ValueError, match="max_items_per_worker"):
+        load_sweep_config(_write(tmp_path / "s.yaml", text))
+
+
+def test_workers_with_unknown_pool_rejected(tmp_path: Path):
+    """A pool other than train and evaluate is rejected, naming it."""
+    text = _BASE_CONFIG + "workers:\n  sample: {memory_per_worker_gb: 1}\n"
+    with pytest.raises(ValueError, match="sample"):
         load_sweep_config(_write(tmp_path / "s.yaml", text))

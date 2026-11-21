@@ -128,6 +128,19 @@ def _write_registry(tmp_path: Path, entries: dict, catalog: Optional[dict] = Non
     return path
 
 
+def test_workers_section_absent_unset_and_present_read(tmp_path: Path) -> None:
+    """The registry's `workers` section is read; absent, memory and item limit are unset."""
+    entries = {"ner/a": _ner_entry("finetune_and_eval", ["small"])}
+    path = _write_registry(tmp_path, entries, _CATALOG_FOR_WORKERS)
+    assert load_tasks_config(path, tmp_path / "download.yaml").workers.memory_per_worker_gb is None
+    body = yaml.safe_load(path.read_text())
+    path.write_text(yaml.safe_dump({**body, "workers": {"memory_per_worker_gb": 5, "max_items_per_worker": 3}}))
+    workers = load_tasks_config(path, tmp_path / "download.yaml").workers
+    assert (workers.memory_per_worker_gb, workers.max_items_per_worker) == (5.0, 3)
+
+
+_CATALOG_FOR_WORKERS = {"small": {"role": "benchmark"}}
+
 _CATALOG = {
     "big": {"role": "benchmark", "contains": ["small"]},
     "small": {"role": "benchmark"},

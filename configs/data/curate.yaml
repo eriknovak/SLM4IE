@@ -6,6 +6,9 @@
 #   input_dir    Root of the extracted/ tier.
 #   output_dir   Root of the pretrain-owned stage tree.
 #   mlflow       Tracking for full (--all) corpus builds (see Notes: mlflow).
+#   workers      Optional; the convert pool. memory_per_worker_gb (positive number, GB of
+#                peak memory of one worker; absent assumes 8 GB) and max_items_per_worker
+#                (positive integer; absent keeps workers for the run). Hashed by no stage.
 #   stopwords    Language code for the bundled stopword list (see Notes: stopwords).
 #   convert…stats  One section per datatrove stage; each section is the
 #                exclusive input to that stage's sentinel hash (see Notes: sentinels).

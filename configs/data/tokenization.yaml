@@ -6,6 +6,10 @@
 #   input_dir    Root of raw downloads (download.yaml's output_dir).
 #   output_dir   Root for tokenizer-eval outputs.
 #   datasets     Dataset keys to convert (see Notes: datasets).
+#   workers      Optional; the process pool of the step. memory_per_worker_gb: peak
+#                memory of one worker in GB (positive number; absent assumes 8 GB and
+#                the run logs it). max_items_per_worker: items a worker handles before
+#                it is replaced (positive integer; absent keeps workers for the run).
 #
 # Notes:
 #   datasets     Each key must (1) be declared in configs/data/download.yaml

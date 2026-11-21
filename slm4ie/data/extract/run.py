@@ -31,7 +31,8 @@ from slm4ie.data.extract.config import load_extract_config
 from slm4ie.data.extract.extractors import BaseExtractor, FileBasedExtractor, get_extractor
 from slm4ie.utils.io import resolve_project_path
 from slm4ie.utils.parallel import (
-    resolve_workers,
+    WorkerSettings,
+    choose_workers,
     run_parallel,
     workers_quiet,
 )
@@ -583,6 +584,7 @@ def _extract_sharded(
     text_file: Path,
     ann_file: Path,
     shard_workers: int,
+    max_items_per_worker: int | None = None,
 ) -> int:
     """Parse a dataset's files in parallel shards, then merge in order.
 
@@ -604,6 +606,8 @@ def _extract_sharded(
         text_file: Final destination for the text JSONL.
         ann_file: Final destination for the gzipped annotations.
         shard_workers: Number of worker processes.
+        max_items_per_worker: Chunks one worker parses before it is replaced,
+            or None to keep workers for the whole dataset.
 
     Returns:
         Total number of documents written.
@@ -620,8 +624,8 @@ def _extract_sharded(
     results: list[ShardResult | None] = [None] * len(chunks)
 
     try:
-        # parse the shards; the dataset loop is serial, so forking the pool is safe
-        with ProcessPoolExecutor(max_workers=shard_workers) as executor:
+        # parse the shards; the dataset loop is serial, so forking the pool is safe (spawn when workers are replaced)
+        with ProcessPoolExecutor(max_workers=shard_workers, max_tasks_per_child=max_items_per_worker) as executor:
             future_to_index = {
                 executor.submit(
                     _extract_shard,
@@ -699,6 +703,7 @@ def _extract_one(
     output_base: Path,
     force: bool,
     requested_workers: int = 0,
+    worker_settings: WorkerSettings = WorkerSettings(),
 ) -> int | None:
     """Extract one dataset to unified JSONL (and optional annotations).
 
@@ -710,9 +715,12 @@ def _extract_one(
             `<key>.annotations.jsonl.gz`) into.
         force: When True, overwrite an existing output file.
         requested_workers: Shard-worker count for intra-dataset
-            parallelism. `0` means auto (all cores). Sharding only
-            engages for `FileBasedExtractor`s with at least
+            parallelism. `0` means auto (by cores, files and memory); an
+            explicit count is capped at the cores and the files. Sharding
+            only engages for `FileBasedExtractor`s with at least
             `_SHARD_MIN_FILES` input files and more than one worker.
+        worker_settings: Memory per worker and items per worker of the shard
+            pool, from the extraction registry.
 
     Returns:
         Document count written, or None when the input
@@ -773,9 +781,6 @@ def _extract_one(
     # pick the extractor and worker count
     extractor = get_extractor(extractor_name)
 
-    cores = os.cpu_count() or 1
-    shard_workers = resolve_workers(requested_workers, cores, cores)
-
     # select the input files
     include = ds_cfg.get("include")
     if isinstance(extractor, FileBasedExtractor):
@@ -785,8 +790,23 @@ def _extract_one(
     else:
         files = None
 
+    # run serially when there are too few files to shard
+    if files is None or len(files) < _SHARD_MIN_FILES:
+        n_files = "no input files" if files is None else f"{len(files)} files"
+        logger.info("extract %s: 1 worker, not sharded (%s, sharding needs %d)", key, n_files, _SHARD_MIN_FILES)
+        return _extract_serial(key, extractor, domain, metadata_cfg, input_dir, text_file, ann_file, files=files)
+
+    # size the shard pool; an explicit count stays capped at the cores
+    cores = os.process_cpu_count() or 1
+    shard_workers = choose_workers(
+        min(requested_workers, cores),
+        len(files),
+        worker_settings.memory_per_worker_gb,
+        label=f"extract {key}",
+    )
+
     # extract sharded or serial
-    if files is not None and shard_workers > 1 and len(files) >= _SHARD_MIN_FILES:
+    if shard_workers > 1:
         return _extract_sharded(
             key,
             extractor_name,
@@ -797,6 +817,7 @@ def _extract_one(
             text_file,
             ann_file,
             shard_workers,
+            worker_settings.max_items_per_worker,
         )
 
     return _extract_serial(
@@ -880,6 +901,7 @@ def extract_datasets(
             "output_base": output_base,
             "force": force,
             "requested_workers": max_workers,
+            "worker_settings": cfg.workers,
         }
 
     # datasets run sequentially and shard inside `_extract_one`: one process pool at a time

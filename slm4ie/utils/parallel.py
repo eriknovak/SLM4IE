@@ -4,6 +4,11 @@ Provides a small dispatcher that runs a worker function over a list of
 dataset keys with a bounded process or thread pool. Per-key exceptions
 are isolated so a single failure does not abort the whole run.
 
+Sizes pools by cores, items and free memory, so a pool of memory-hungry
+workers does not fill the machine's RAM. Process pools can replace workers
+after a set number of items, and give each worker's tokenizer its share
+of the cores.
+
 Also provides per-task file logging and a single self-updating tqdm
 bar in parallel mode, so that worker output does not interleave on the
 console.
@@ -20,6 +25,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +62,83 @@ _NOISY_THIRD_PARTY_LOGGERS = (
     "fsspec",
 )
 
+#: Share of the machine's available RAM a worker pool may fill.
+MEMORY_BUDGET_SHARE = 0.8
+
+#: Memory per worker (GB) assumed when a step declares none.
+DEFAULT_MEMORY_PER_WORKER_GB = 8.0
+
+#: Keys a step's `workers:` mapping may hold.
+_WORKER_SETTINGS_KEYS = frozenset({"memory_per_worker_gb", "max_items_per_worker"})
+
+#: Linux file holding the `MemAvailable` reading.
+_MEMINFO_PATH = Path("/proc/meminfo")
+
+_KIB_PER_GB = 1024**2
+
+#: Env var that sets the HuggingFace fast tokenizers' thread count.
+_TOKENIZER_THREADS_ENV_VAR = "RAYON_NUM_THREADS"
+
+# ===============================
+# Worker settings
+# ===============================
+
+
+@dataclass(frozen=True)
+class WorkerSettings:
+    """What a step declares about one worker of its pool.
+
+    Attributes:
+        memory_per_worker_gb: Peak memory of one worker in GB, or None when the
+            step declares none and `DEFAULT_MEMORY_PER_WORKER_GB` applies.
+        max_items_per_worker: Items one worker handles before it is replaced,
+            or None to keep workers for the whole run.
+    """
+
+    memory_per_worker_gb: float | None = None
+    max_items_per_worker: int | None = None
+
+
+def parse_worker_settings(raw: Any, where: str) -> WorkerSettings:
+    """Read and validate the `workers:` mapping of a step's YAML registry.
+
+    Args:
+        raw: The mapping as loaded from YAML; None gives the defaults.
+        where: The config location, named in errors.
+
+    Returns:
+        The validated settings.
+
+    Raises:
+        ValueError: If the section is not a mapping, holds an unknown key,
+            a memory that is not a positive number, or an item limit that is
+            not a positive integer.
+    """
+    # read the section
+    if raw is None:
+        return WorkerSettings()
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where}: workers must be a mapping, got {raw!r}")
+    unknown = sorted(set(raw) - _WORKER_SETTINGS_KEYS)
+    if unknown:
+        raise ValueError(f"{where}: workers has unknown keys {unknown}; allowed: {sorted(_WORKER_SETTINGS_KEYS)}")
+
+    # validate the memory per worker
+    memory = raw.get("memory_per_worker_gb")
+    if memory is not None and (isinstance(memory, bool) or not isinstance(memory, (int, float)) or memory <= 0):
+        raise ValueError(f"{where}: workers.memory_per_worker_gb must be a positive number, got {memory!r}")
+
+    # validate the item limit
+    max_items = raw.get("max_items_per_worker")
+    if max_items is not None and (isinstance(max_items, bool) or not isinstance(max_items, int) or max_items <= 0):
+        raise ValueError(f"{where}: workers.max_items_per_worker must be a positive integer, got {max_items!r}")
+
+    return WorkerSettings(
+        memory_per_worker_gb=None if memory is None else float(memory),
+        max_items_per_worker=max_items,
+    )
+
+
 # ===============================
 # Worker counts
 # ===============================
@@ -87,6 +170,146 @@ def cpu_default(n_items: int) -> int:
     """
     cores = os.cpu_count() or 2
     return max(1, min(cores // 2, max(1, n_items)))
+
+
+@dataclass(frozen=True)
+class WorkerCount:
+    """A pool size and the limit that set it.
+
+    Attributes:
+        workers: Number of pool workers, at least 1.
+        limit: The binding limit: `"cores"`, `"items"`, `"memory"` or `"cap"`.
+        memory_per_worker_gb: Memory per worker the count was sized for.
+        is_memory_assumed: True when the step declared no memory per worker
+            and `DEFAULT_MEMORY_PER_WORKER_GB` was used.
+    """
+
+    workers: int
+    limit: str
+    memory_per_worker_gb: float
+    is_memory_assumed: bool
+
+
+def size_workers(
+    cores: int,
+    n_items: int,
+    available_gb: float,
+    memory_per_worker_gb: float | None,
+    cap: int | None = None,
+) -> WorkerCount:
+    """Size a pool by cores, items and available memory.
+
+    The count is the minimum of half the cores, the item count, the workers
+    that fit in `MEMORY_BUDGET_SHARE` of the available memory, and `cap`
+    when given; never below 1. On a tie the limit named first in that order
+    is reported.
+
+    Args:
+        cores: CPU cores the process may use.
+        n_items: Number of items the pool will process.
+        available_gb: Memory available on the machine, in GB.
+        memory_per_worker_gb: Peak memory of one worker, in GB, as the step
+            declares it; None assumes `DEFAULT_MEMORY_PER_WORKER_GB`.
+        cap: Optional step-specific upper bound on the count.
+
+    Returns:
+        The worker count, its binding limit and the memory it assumed.
+    """
+    # fall back to the default memory per worker
+    is_memory_assumed = memory_per_worker_gb is None
+    per_worker = DEFAULT_MEMORY_PER_WORKER_GB if memory_per_worker_gb is None else memory_per_worker_gb
+
+    # take the tightest limit
+    limits = [
+        ("cores", cores // 2),
+        ("items", n_items),
+        ("memory", int(MEMORY_BUDGET_SHARE * available_gb // per_worker)),
+    ]
+    if cap is not None:
+        limits.append(("cap", cap))
+    limit, workers = min(limits, key=lambda pair: pair[1])
+
+    return WorkerCount(
+        workers=max(1, workers),
+        limit=limit,
+        memory_per_worker_gb=per_worker,
+        is_memory_assumed=is_memory_assumed,
+    )
+
+
+def available_memory_gb(meminfo: Path = _MEMINFO_PATH) -> float:
+    """Read the machine's available memory from the kernel.
+
+    Args:
+        meminfo: Path to the Linux `meminfo` file.
+
+    Returns:
+        The `MemAvailable` reading in GB.
+
+    Raises:
+        OSError: If `meminfo` cannot be read.
+        ValueError: If `meminfo` has no `MemAvailable` line.
+    """
+    for line in meminfo.read_text().splitlines():
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) / _KIB_PER_GB
+    raise ValueError(f"no 'MemAvailable' line in {meminfo}")
+
+
+def choose_workers(
+    requested: int,
+    n_items: int,
+    memory_per_worker_gb: float | None,
+    *,
+    label: str,
+    cap: int | None = None,
+) -> int:
+    """Choose a pool size from the CLI flag or the machine, and log it.
+
+    An explicit `requested` count wins, capped only by the item count, as
+    `resolve_workers` does. Otherwise the count comes from `size_workers`
+    over this process's cores and the machine's available memory.
+
+    Args:
+        requested: Value passed by the user (0 means "auto").
+        n_items: Number of items the pool will process.
+        memory_per_worker_gb: Peak memory of one worker, in GB, from the
+            step's config; None assumes `DEFAULT_MEMORY_PER_WORKER_GB`.
+        label: Step name used in the log lines.
+        cap: Optional step-specific upper bound on the automatic count.
+
+    Returns:
+        The worker count, at least 1.
+    """
+    # honour an explicit worker count
+    if requested:
+        workers = resolve_workers(requested, n_items, requested)
+        logger.info("%s: %d workers, set by --max-workers", label, workers)
+        return workers
+
+    # size the pool by the machine
+    cores = os.process_cpu_count() or 2
+    available_gb = available_memory_gb()
+    count = size_workers(cores, n_items, available_gb, memory_per_worker_gb, cap)
+
+    # log the count and the limit that set it
+    if count.is_memory_assumed:
+        logger.info(
+            "%s: no memory per worker declared, assuming %.1f GB",
+            label,
+            DEFAULT_MEMORY_PER_WORKER_GB,
+        )
+    logger.info(
+        "%s: %d workers, limited by %s (cores=%d items=%d available=%.1f GB per worker=%.1f GB)",
+        label,
+        count.workers,
+        count.limit,
+        cores,
+        n_items,
+        available_gb,
+        count.memory_per_worker_gb,
+    )
+    return count.workers
 
 
 def io_default(n_items: int, cap: int = 4) -> int:
@@ -202,6 +425,18 @@ class _ThreadFilter(logging.Filter):
         return record.thread == self._ident
 
 
+def _limit_tokenizer_threads(threads: int) -> None:
+    """Cap the HuggingFace fast tokenizers' threads in a pool worker.
+
+    Top-level so it pickles cleanly as a `ProcessPoolExecutor` initializer,
+    which runs before the worker builds its first tokenizer.
+
+    Args:
+        threads: Thread count the worker's tokenizers may use.
+    """
+    os.environ[_TOKENIZER_THREADS_ENV_VAR] = str(threads)
+
+
 def _worker_with_log(
     func: Callable[..., Any],
     key: str,
@@ -260,6 +495,7 @@ def run_parallel(
     pool: str = "process",
     kwargs_for: Callable[[str], dict[str, Any]] = lambda _k: {},
     log_dir: Path | None = None,
+    max_items_per_worker: int | None = None,
 ) -> tuple[dict[str, Any], list[tuple[str, BaseException]]]:
     """Run `func(key, **kwargs_for(key))` over `keys` with bounded concurrency.
 
@@ -271,6 +507,10 @@ def run_parallel(
     with a postfix showing running/done/skipped/failed/waiting counts.
     The start timestamp is logged once before the bar opens; elapsed
     time is shown inside the bar itself.
+
+    In a process pool, each worker's HuggingFace fast tokenizers get
+    `max(1, cores // max_workers)` threads, so the workers together do not
+    oversubscribe the cores.
 
     Args:
         func: Worker callable. Must be picklable when `pool="process"`.
@@ -284,6 +524,11 @@ def run_parallel(
         log_dir: When set, every task's `logger` output is captured into
             `log_dir / f"{key}.log"` for the duration of the call.
             Applies to both serial and parallel paths.
+        max_items_per_worker: When set, each process-pool worker is
+            replaced by a fresh one after this many items, so memory does
+            not grow across items. Fresh workers are spawned rather than
+            forked, so `func` and its arguments must be importable. None
+            keeps each worker for the whole run.
 
     Returns:
         `(results_by_key, failures)`. `results_by_key` maps each key
@@ -292,8 +537,13 @@ def run_parallel(
         the exit code from `len(failures)`.
 
     Raises:
-        ValueError: If `pool` is not `"process"` or `"thread"`.
+        ValueError: If `pool` is not `"process"` or `"thread"`, or if
+            `max_items_per_worker` is set with a thread pool.
     """
+    # reject worker replacement in a thread pool
+    if pool == "thread" and max_items_per_worker is not None:
+        raise ValueError(f"max_items_per_worker={max_items_per_worker} needs a process pool, not a thread pool")
+
     # prepare the results and the log folder
     keys_list = list(keys)
     results: dict[str, Any] = {}
@@ -325,10 +575,23 @@ def run_parallel(
 
     # pick the pool kind
     if pool == "process":
-        executor_cls = ProcessPoolExecutor
+        cores = os.process_cpu_count() or 2
+        tokenizer_threads = max(1, cores // max_workers)
+
+        def _make_executor() -> ProcessPoolExecutor:
+            return ProcessPoolExecutor(
+                max_workers=max_workers,
+                initializer=_limit_tokenizer_threads,
+                initargs=(tokenizer_threads,),
+                max_tasks_per_child=max_items_per_worker,
+            )
+
         use_thread_filter = False
     elif pool == "thread":
-        executor_cls = ThreadPoolExecutor
+
+        def _make_executor() -> ThreadPoolExecutor:
+            return ThreadPoolExecutor(max_workers=max_workers)
+
         use_thread_filter = True
     else:
         raise ValueError(f"Unknown pool kind: {pool!r}")
@@ -345,7 +608,7 @@ def run_parallel(
     ticker_thread: threading.Thread | None = None
     try:
         with (
-            executor_cls(max_workers=max_workers) as executor,
+            _make_executor() as executor,
             tqdm(
                 total=total,
                 desc=desc,

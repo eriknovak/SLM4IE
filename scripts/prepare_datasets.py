@@ -135,7 +135,7 @@ def _add_extract_parser(subparsers: argparse._SubParsersAction) -> None:
     add_workers(
         parser,
         (
-            "Shard workers used WITHIN each dataset (datasets run sequentially). 0=auto (all cores), "
+            "Shard workers used WITHIN each dataset (datasets run sequentially). 0=auto (by cores, files and memory), "
             "1=serial single pass, N=N worker processes. Only file-based extractors with enough input "
             "files are sharded."
         ),
@@ -169,7 +169,7 @@ def _add_tasks_parser(subparsers: argparse._SubParsersAction) -> None:
         default=DEFAULT_VARIANT,
         help=f"SuperGLUE-SL variant to read; ignored by other families (default: {DEFAULT_VARIANT}).",
     )
-    add_workers(parser, "Entries processed in parallel. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
+    add_workers(parser, "Entries processed in parallel. 0=auto (by cores, items and memory), 1=serial, N=N workers.")
 
 
 def _add_tokenization_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -193,7 +193,7 @@ def _add_tokenization_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Path to download.yaml, used to resolve per-dataset raw subdirectories.",
     )
     parser.add_argument("--force", action="store_true", help="Overwrite existing <key>.jsonl.gz outputs.")
-    add_workers(parser, "Datasets processed in parallel. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
+    add_workers(parser, "Datasets processed in parallel. 0=auto (by cores, items and memory), 1=serial, N=N workers.")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

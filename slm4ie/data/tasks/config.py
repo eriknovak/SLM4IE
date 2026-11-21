@@ -16,6 +16,7 @@ import yaml
 
 from slm4ie.data.download.config import contained_in, load_download_config
 from slm4ie.utils.io import find_project_root, resolve_project_path
+from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 
 # ===============================
 # Constants
@@ -154,12 +155,14 @@ class TasksConfig:
         entries: All task entries in declaration order.
         mlflow: MLflow tracking settings (`enabled`, `experiment`,
             `tracking_uri`) for post-hoc per-dataset tracking.
+        workers: Memory per worker and items per worker of the conversion pool.
     """
 
     roots: TasksRoots
     converter_defaults: dict[str, str]
     entries: list[TaskEntry]
     mlflow: dict[str, Any] = dataclasses.field(default_factory=dict)
+    workers: WorkerSettings = dataclasses.field(default_factory=WorkerSettings)
 
 
 # ===============================
@@ -183,7 +186,8 @@ def load_tasks_config(yaml_path: Path, download_config: Path | None = None) -> T
         FileNotFoundError: If `yaml_path` does not exist.
         ValueError: If the YAML structure violates any registry
             invariant (missing fields, malformed keys, unknown role
-            or source kind, empty source keys, etc.), or a training and a
+            or source kind, empty source keys, a malformed `workers`
+            section, etc.), or a training and a
             held-out entry of one task share documents (see
             `check_source_isolation`).
         KeyError: If an entry's task has no default converter in the
@@ -222,6 +226,7 @@ def load_tasks_config(yaml_path: Path, download_config: Path | None = None) -> T
         converter_defaults=converter_defaults,
         entries=entries,
         mlflow=raw.get("mlflow") or {},
+        workers=parse_worker_settings(raw.get("workers"), f"Task registry {yaml_path}"),
     )
 
 

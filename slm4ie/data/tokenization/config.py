@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from slm4ie.utils.io import resolve_project_path
+from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 
 
 @dataclass
@@ -16,11 +17,13 @@ class TokenizationConfig:
         input_dir: Root holding the per-dataset raw download directories.
         output_dir: Directory the `<key>.jsonl.gz` outputs are written to.
         datasets: Dataset keys declared for conversion.
+        workers: Memory per worker and items per worker of the conversion pool.
     """
 
     input_dir: Path
     output_dir: Path
     datasets: list[str] = field(default_factory=list)
+    workers: WorkerSettings = field(default_factory=WorkerSettings)
 
 
 def load_tokenization_config(config_path: Path) -> TokenizationConfig:
@@ -64,4 +67,5 @@ def load_tokenization_config(config_path: Path) -> TokenizationConfig:
         input_dir=resolve_project_path(input_dir),
         output_dir=resolve_project_path(output_dir),
         datasets=list(datasets),
+        workers=parse_worker_settings(raw.get("workers"), f"Tokenization config {config_path}"),
     )

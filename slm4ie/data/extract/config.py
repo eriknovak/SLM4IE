@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
+
 # ===============================
 # Config class
 # ===============================
@@ -21,12 +23,14 @@ class ExtractConfig:
         datasets: Dict mapping dataset key to config dict with 'extractor' and 'domain' keys.
         mlflow: MLflow tracking settings (`enabled`, `experiment`,
             `tracking_uri`) for post-hoc extraction-build logging.
+        workers: Memory per worker and items per worker of the extraction pool.
     """
 
     input_dir: str
     output_dir: str
     datasets: dict[str, dict] = field(default_factory=dict)
     mlflow: dict[str, Any] = field(default_factory=dict)
+    workers: WorkerSettings = field(default_factory=WorkerSettings)
 
 
 # ===============================
@@ -45,6 +49,7 @@ def load_extract_config(config_path: Path) -> ExtractConfig:
 
     Raises:
         FileNotFoundError: If config file does not exist.
+        ValueError: If the `workers` section is malformed.
     """
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -59,4 +64,5 @@ def load_extract_config(config_path: Path) -> ExtractConfig:
         output_dir=raw.get("output_dir", "data/extracted"),
         datasets=raw.get("datasets", {}),
         mlflow=raw.get("mlflow") or {},
+        workers=parse_worker_settings(raw.get("workers"), f"Extract config {config_path}"),
     )

@@ -90,8 +90,10 @@ uv run --group pretokenize python scripts/pretokenize_corpus.py run   sentence-d
 uv run --group pretokenize python scripts/pretokenize_corpus.py check sentence-dedup/bpe-32000-modernbert-1024
 ```
 
-`run` converts input shards in parallel (`--max-workers`, default half the
-cores) and writes each through `_partial/`, so an interrupted run resumes
+`run` converts input shards in parallel (`--max-workers`, default sized by
+cores and memory, see
+[Worker count by memory](data-pipeline.md#worker-count-by-memory)) and writes
+each through `_partial/`, so an interrupted run resumes
 without rewriting finished shards. It refuses to resume parts built from other
 settings or another corpus. An output whose manifest matches its settings and
 inputs is skipped; `--force` converts from scratch. Each written or skipped
@@ -102,9 +104,10 @@ corpus stage it read.
 Size the workers by memory, not cores. Each worker tokenizes its shard in
 batches capped at 1,000 documents and 4 million characters, so one worker peaks
 at about 4 GB on the long theses of `kas` and 3 GB on the largest web shard
-(measured 2026-11-21 with `bpe-32000/hf-modernbert`). Allow twice that per
-worker (10 workers under a 90 GB cap), and run under a memory cap so an overrun
-stops only the run, not every process on the machine:
+(measured 2026-11-21 with `bpe-32000/hf-modernbert`). The registry declares
+4 GB per worker in `defaults.workers`, so the automatic count follows the free
+memory. Under a cap, allow twice the peak per worker (10 workers under a 90 GB
+cap), so an overrun stops only the run, not every process on the machine:
 
 ```bash
 systemd-run --user --scope --unit=pretokenize -p MemoryMax=90G -p MemorySwapMax=0 \

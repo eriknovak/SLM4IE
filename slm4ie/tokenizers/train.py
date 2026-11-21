@@ -50,8 +50,7 @@ from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.utils.parallel import (
     configure_script_logging,
-    cpu_default,
-    resolve_workers,
+    choose_workers,
     run_parallel,
 )
 from slm4ie.utils.versioning import corpus_digest, file_sha256
@@ -757,7 +756,7 @@ def train_sweep(
 
     # set up workers and logging
     cfg.output_root.mkdir(parents=True, exist_ok=True)
-    workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
+    workers = choose_workers(max_workers, len(keys), cfg.train_workers.memory_per_worker_gb, label="tokenizer-train")
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
     # prepare the shared inputs
@@ -791,6 +790,7 @@ def train_sweep(
         pool="process",
         kwargs_for=kwargs_for,
         log_dir=stamped_log_dir("tokenizer-train"),
+        max_items_per_worker=cfg.train_workers.max_items_per_worker,
     )
 
     # summarise the outcome

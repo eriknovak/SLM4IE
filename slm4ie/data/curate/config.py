@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -46,6 +46,7 @@ from slm4ie.utils.config import deep_merge
 from slm4ie.utils.io import find_project_root as _find_project_root
 from slm4ie.utils.io import resolve_project_path
 from slm4ie.utils.versioning import config_hash
+from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 
 if TYPE_CHECKING:
     from slm4ie.data.curate.stages.spam import SpamAssets
@@ -594,6 +595,7 @@ class CurateConfig:
         stopwords: Loaded stopword set.
         stopwords_raw: Raw stopword bytes folded into config hashes.
         spam_assets: Loaded spam lexicons and domain blocklist.
+        workers: Memory per worker and items per worker of the convert pool; no stage hashes it.
     """
 
     cfg: dict[str, Any]
@@ -607,6 +609,7 @@ class CurateConfig:
     stopwords: set[str]
     stopwords_raw: bytes
     spam_assets: SpamAssets
+    workers: WorkerSettings = field(default_factory=WorkerSettings)
 
     def extra(self, stage: str) -> bytes:
         """Return the extra bytes folded into *stage*'s config hash.
@@ -722,6 +725,7 @@ def load_curate_config(
         OverrideConfigError: If the global `spam:` slice is out of bounds,
             a dedup block holds an unknown key or an out-of-range
             `min_kept_fraction`, or a profile is invalid or unknown.
+        ValueError: If the `workers` section is malformed or sets `max_items_per_worker`.
         ConfigError: If the download catalog's relations are invalid.
     """
     # resolve the paths
@@ -740,6 +744,14 @@ def load_curate_config(
     declared = _list_datasets(extract_path)
     selection = load_selection(download_config or (project_root / "configs" / "data" / "download.yaml"), declared)
 
+    # read the convert pool settings
+    workers = parse_worker_settings(cfg.get("workers"), f"Curate config {pretrain_config}")
+    if workers.max_items_per_worker is not None:
+        raise ValueError(
+            f"Curate config {pretrain_config}: workers.max_items_per_worker is not supported; "
+            "the convert stage cannot be edited without rebuilding the corpus"
+        )
+
     # assemble the config
     return CurateConfig(
         cfg=cfg,
@@ -753,4 +765,5 @@ def load_curate_config(
         stopwords=stopwords,
         stopwords_raw=stopwords_raw,
         spam_assets=_load_spam_assets(cfg),
+        workers=workers,
     )

@@ -458,6 +458,27 @@ def test_loader_resolves_profiles_into_overrides(tmp_path: Path) -> None:
     assert setup.overrides == {"a": {"spam": {"enabled": False}, "quality": {"min_doc_words": 5}}}
 
 
+def test_loader_rejects_max_items_per_worker(tmp_path: Path) -> None:
+    """The convert stage cannot replace workers, so a set item limit fails at load."""
+    config = tmp_path / "curate.yaml"
+    config.write_text("convert:\n  text_field: text\nworkers:\n  max_items_per_worker: 7\n")
+    with pytest.raises(ValueError, match="max_items_per_worker"):
+        load_curate_config(tmp_path, tmp_path, config, None)
+
+
+def test_loader_reads_workers_without_changing_any_stage_hash(tmp_path: Path) -> None:
+    """The `workers` section is read, absent leaves it unset, and no stage's config hash moves."""
+    config = tmp_path / "curate.yaml"
+    config.write_text("convert:\n  text_field: text\n")
+    plain = load_curate_config(tmp_path, tmp_path, config, None)
+    assert plain.workers.memory_per_worker_gb is None
+    config.write_text("convert:\n  text_field: text\nworkers:\n  memory_per_worker_gb: 3\n")
+    declared = load_curate_config(tmp_path, tmp_path, config, None)
+    assert (declared.workers.memory_per_worker_gb, declared.workers.max_items_per_worker) == (3.0, None)
+    assert declared.expected_hash("convert", "a") == plain.expected_hash("convert", "a")
+    assert declared.expected_hash("language") == plain.expected_hash("language")
+
+
 # ---------------------------------------------------------------------------
 # Dedup blocks: known keys and the kept-fraction range, checked at load.
 # ---------------------------------------------------------------------------
