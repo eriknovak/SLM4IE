@@ -147,7 +147,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Retrain existing artifacts; the sample and table are kept (redraw with `sample --force`).",
     )
-    add_workers(train_parser, "Parallel runs. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
+    add_workers(train_parser, "Parallel runs. 0=auto (by cores, items and memory), 1=serial, N=N workers.")
 
     evaluate_parser = subparsers.add_parser("evaluate", help="Score trained tokenizers and write the report.")
     _add_config_argument(evaluate_parser)
@@ -170,7 +170,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Rebuild the gold lexicons; the evaluation sample is kept (redraw with `sample --force`).",
     )
-    add_workers(evaluate_parser, "Parallel evaluations. 0=auto, 1=serial, N=N workers.")
+    add_workers(
+        evaluate_parser, "Parallel evaluations. 0=auto (by cores, items and memory, at most 8), 1=serial, N=N workers."
+    )
 
     export_parser = subparsers.add_parser("export", help="Export trained tokenizers as HuggingFace directories.")
     _add_config_argument(export_parser)

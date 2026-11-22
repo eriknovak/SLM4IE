@@ -59,8 +59,7 @@ from slm4ie.data.tasks.tracking import log_tasks_runs
 from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.utils.parallel import (
     configure_script_logging,
-    cpu_default,
-    resolve_workers,
+    choose_workers,
     run_parallel,
 )
 
@@ -560,7 +559,7 @@ def convert_tasks(
     # prepare the converters and the workers
     ctx = ConvertContext(options=options)
     converters = {key: get_converter(by_key[key].converter) for key in keys}
-    workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
+    workers = choose_workers(max_workers, len(keys), tasks_config.workers.memory_per_worker_gb, label="tasks")
     configure_script_logging(parallel=workers > 1)
     roots = tasks_config.roots
 
@@ -590,6 +589,7 @@ def convert_tasks(
         pool="process",
         kwargs_for=kwargs_for,
         log_dir=stamped_log_dir("tasks"),
+        max_items_per_worker=tasks_config.workers.max_items_per_worker,
     )
 
     # summarize the run

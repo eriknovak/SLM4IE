@@ -69,9 +69,79 @@ is documented in [pretokenized-corpus.md](pretokenized-corpus.md).
 Every `prepare_datasets.py` subcommand accepts a `--max-workers` flag and
 processes multiple datasets concurrently:
 
-- `--max-workers 0` (default) — auto: `min(cpu_count // 2, n_datasets)` for CPU-bound steps, capped at 4 for `download` to stay polite to remote servers.
+- `--max-workers 0` (default) — auto: the memory-aware default below for CPU-bound steps, capped at 4 for `download` to stay polite to remote servers.
 - `--max-workers 1` — serial path; tracebacks are unwrapped, console keeps the verbose output, and the inner per-dataset progress bar is shown.
-- `--max-workers N` — that many workers, capped at the number of selected datasets.
+- `--max-workers N` — that many workers, capped at the number of selected datasets. Memory is not checked.
+
+### Worker count by memory
+
+The automatic worker count is the smallest of three limits, and at least 1:
+
+- half the cores the process may use (CPU affinity, so SLURM and `taskset` limits count);
+- the number of items to process;
+- 80% of the machine's available memory (`MemAvailable`) divided by the step's memory per worker.
+
+Tokenizer evaluation also caps the count at 8. Every run logs the count and the limit that set it, for example
+`tasks: 11 workers, limited by memory (cores=40 items=30 available=111.8 GB per worker=8.0 GB)`.
+The same default sizes the pools of extraction, tokenizer-quality data, task
+datasets, the curation convert stage, tokenizer training and evaluation, and
+the pretokenized corpus.
+
+Each step declares its memory per worker in the `workers:` mapping of its
+registry. A step without one assumes 8 GB, and the log says so:
+
+```yaml
+workers:
+  memory_per_worker_gb: 4        # peak memory of one worker, in GB
+  max_items_per_worker: 50       # optional: replace a worker after 50 items
+```
+
+The mapping sits at the top level of `extract.yaml`, `tokenization.yaml`,
+`tasks.yaml` and `curate.yaml` (no curation stage hashes it, so changing it
+rebuilds nothing). `pretokenize.yaml` keeps it in `defaults`, and an entry's
+own `workers:` replaces it. `configs/tokenizers/sweep.yaml` has one mapping per
+pool, `workers: {train: {...}, evaluate: {...}}`.
+
+`max_items_per_worker` replaces each pool worker after that many items, so
+memory that grows across items is returned to the system. It is off by
+default. Replaced workers start fresh instead of forking, so they re-import
+their modules. Curation and tokenizer evaluation reject it at load, since
+their pools cannot replace workers.
+
+Inside each worker of the shared process pool, the HuggingFace tokenizers'
+thread count (`RAYON_NUM_THREADS`) is set to the cores divided by the workers, so 20
+workers do not each start one thread per core. Extraction runs its own shard
+pool and builds no tokenizer, so it does not set it.
+
+### Measuring memory per worker
+
+Run the step on one worker over its largest item, and read the peak resident
+memory:
+
+```bash
+/usr/bin/time -v uv run python scripts/prepare_datasets.py tasks <largest-entry> --max-workers 1 --force \
+  2>&1 | grep "Maximum resident"
+```
+
+Declare about 1.2 to 2 times the peak, rounded up to a whole GB, with the date
+and the item it was measured on in a comment. One worker's peak can vary
+threefold between datasets, so measure on the heaviest one.
+
+### Running a long job under a memory cap
+
+A job that overruns memory can bring down the whole machine: the kernel's
+out-of-memory killer may pick the systemd user manager first, which closes
+every tmux pane. Run long jobs in a systemd scope with a memory cap, so an
+overrun stops only that job:
+
+```bash
+systemd-run --user --scope --unit=<job-name> -p MemoryMax=90G -p MemorySwapMax=0 \
+  -p CollectMode=inactive-or-failed \
+  uv run python scripts/prepare_datasets.py tasks --all
+```
+
+The automatic count reads the machine's available memory, not the cap. Under a
+cap well below the free memory, pass `--max-workers` sized from the cap.
 
 Per-dataset logs are always written to
 `logs/<step>/<UTC-timestamp>/<key>.log`, regardless of worker count. The log

@@ -80,7 +80,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     run_parser = subparsers.add_parser("run", help="Convert the selected entries.")
     _add_common_arguments(run_parser, "convert")
     run_parser.add_argument("--force", action="store_true", help="Convert from scratch, replacing existing output.")
-    add_workers(run_parser, "Input shards converted in parallel. 0=auto (cpu_count // 2), 1=serial, N=N workers.")
+    add_workers(
+        run_parser, "Input shards converted in parallel. 0=auto (by cores, items and memory), 1=serial, N=N workers."
+    )
 
     check_parser = subparsers.add_parser("check", help="Verify finished outputs against their manifest.")
     _add_common_arguments(check_parser, "check")

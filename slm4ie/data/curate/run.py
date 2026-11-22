@@ -78,6 +78,7 @@ from slm4ie.data.curate.stages import (
     upstream_stage,
 )
 from slm4ie.data.curate.status import orphaned_units, selection_report
+from slm4ie.utils.parallel import choose_workers
 from slm4ie.utils.versioning import EMPTY_DIGEST, merge_digests, shard_files
 
 # ===============================
@@ -450,7 +451,13 @@ def _run_bucket_stage(
 
 
 def _curate_scoped(
-    setup: CurateConfig, stage: str, dataset_keys: list[str], workers: int, log_dir: Path, info: dict[str, Any]
+    setup: CurateConfig,
+    stage: str,
+    dataset_keys: list[str],
+    workers: int,
+    requested_workers: int,
+    log_dir: Path,
+    info: dict[str, Any],
 ) -> None:
     """Rebuild every stale unit of one scoped stage.
 
@@ -459,6 +466,7 @@ def _curate_scoped(
         stage: Scoped stage name.
         dataset_keys: Keys this run covers.
         workers: Worker count.
+        requested_workers: The `--max-workers` value; 0 sizes the convert pool by the machine.
         log_dir: Per-task log folder for the convert stage.
         info: Informational sentinel fields.
     """
@@ -511,7 +519,12 @@ def _curate_scoped(
         if stage == "convert":
             n_datasets, input_bytes = _extracted_input_summary(paths.input_folder, bucket_keys)
             logger.info("[convert] starting (%d dataset(s), %s)", n_datasets, human_bytes(input_bytes))
+            # the convert stage takes this count as given, so its sizing lives here
+            stage_workers = choose_workers(
+                requested_workers, len(bucket_keys), setup.workers.memory_per_worker_gb, label="curate convert"
+            )
         else:
+            stage_workers = workers
             logger.info("[%s] starting%s", stage, _starting_input_hint(paths, stage))
         records_in, records_out = _run_scoped_bucket(
             setup,
@@ -520,7 +533,7 @@ def _curate_scoped(
             effective,
             bucket_hash,
             inputs,
-            workers,
+            stage_workers,
             log_dir if stage == "convert" else None,
             info,
         )
@@ -708,9 +721,10 @@ def curate(
         else:
             logger.info("[selection] %s", line)
     dataset_keys = list(setup.roster) if run_all else list(datasets)
-    # `workers` is a CPU budget, not an item count: the convert stage caps it at
-    # the dataset count itself, the datatrove stages use it as their task count.
+    # `workers` is a CPU budget, not an item count: the convert pool is sized
+    # separately from the machine, the datatrove stages use it as their task count.
     # An explicit --max-workers is honored as-is; auto (0) is cpu_count // 2.
+    requested_workers = workers
     workers = workers if workers > 0 else max(1, (os.cpu_count() or 2) // 2)
     if run_all:
         logger.info("Running on all %d datasets (workers=%d)", len(dataset_keys), workers)
@@ -743,7 +757,7 @@ def curate(
     convert_log_dir = setup.project_root / "logs" / "curate" / stamp / "convert"
     for stage_name in _resolve_requested_stages(stage, run_all):
         if is_scoped(stage_name):
-            _curate_scoped(setup, stage_name, dataset_keys, workers, convert_log_dir, info)
+            _curate_scoped(setup, stage_name, dataset_keys, workers, requested_workers, convert_log_dir, info)
         elif run_all:
             _curate_corpus(setup, stage_name, workers, info)
         else:

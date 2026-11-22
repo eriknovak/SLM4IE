@@ -45,8 +45,7 @@ from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.utils.io import open_output
 from slm4ie.utils.parallel import (
     configure_script_logging,
-    cpu_default,
-    resolve_workers,
+    choose_workers,
     run_parallel,
     workers_quiet,
 )
@@ -212,7 +211,7 @@ def convert_tokenization_datasets(
     dataset_dirs = {key: config.input_dir / _resolve_dataset_subdir(download_config_path, key) for key in keys}
 
     # set up workers and logging
-    workers = resolve_workers(max_workers, len(keys), cpu_default(len(keys)))
+    workers = choose_workers(max_workers, len(keys), config.workers.memory_per_worker_gb, label="tokenization")
     configure_script_logging(parallel=workers > 1)
 
     def kwargs_for(key: str) -> dict[str, Any]:
@@ -235,6 +234,7 @@ def convert_tokenization_datasets(
         pool="process",
         kwargs_for=kwargs_for,
         log_dir=stamped_log_dir("tokenization"),
+        max_items_per_worker=config.workers.max_items_per_worker,
     )
 
     # summarise the outcome

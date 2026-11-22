@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -313,6 +314,15 @@ class TestLoadExtractionConfig:
         """FileNotFoundError raised for non-existent config."""
         with pytest.raises(FileNotFoundError):
             load_extract_config(Path("/nonexistent/extract.yaml"))
+
+    def test_workers_section_is_validated(self, tmp_path: Path):
+        """A non-positive memory per worker is rejected, an absent section leaves it unset."""
+        config_file = _write_config(tmp_path, {"ds1": {"extractor": "stub", "domain": "web"}})
+        assert load_extract_config(config_file).workers.memory_per_worker_gb is None
+        raw = yaml.safe_load(config_file.read_text())
+        config_file.write_text(yaml.dump({**raw, "workers": {"memory_per_worker_gb": 0}}))
+        with pytest.raises(ValueError, match="memory_per_worker_gb"):
+            load_extract_config(config_file)
 
 
 class TestExtractDatasets:
@@ -792,6 +802,22 @@ def _read_gz_lines(path: Path) -> List[str]:
     """
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         return fh.read().splitlines()
+
+
+def test_too_few_files_logs_one_unsharded_worker(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A dataset below the shard threshold logs one worker, not a pool it never starts."""
+    src = tmp_path / "raw" / "tei_ds"
+    src.mkdir(parents=True)
+    for i in range(3):
+        _write_tei_file(src / f"doc{i:03d}.xml", f"doc{i:03d}", [f"w{i}a"])
+    out = tmp_path / "out"
+    out.mkdir()
+
+    with caplog.at_level(logging.INFO):
+        _extract_one("tei_ds", {"extractor": "tei", "domain": "mixed"}, tmp_path / "raw", out, force=True)
+
+    assert "extract tei_ds: 1 worker, not sharded (3 files" in caplog.text
+    assert "limited by" not in caplog.text
 
 
 def test_sharded_matches_serial(tmp_path: Path) -> None:

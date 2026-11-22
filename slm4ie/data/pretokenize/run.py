@@ -27,7 +27,7 @@ from slm4ie.data.pretokenize.config import PretokenizeConfig, PretokenizeEntry
 from slm4ie.data.pretokenize.formats import PartWriter, Sample, get_format
 from slm4ie.data.pretokenize.splits import SPLITS, resolve_validation_share, split_of
 from slm4ie.utils.cli import stamped_log_dir
-from slm4ie.utils.parallel import cpu_default, resolve_workers, run_parallel
+from slm4ie.utils.parallel import choose_workers, run_parallel
 from slm4ie.utils.versioning import config_hash, corpus_digest, file_sha256, shard_listing
 
 # ===============================
@@ -511,7 +511,7 @@ def convert_entry(entry: PretokenizeEntry, *, force: bool = False, max_workers: 
     Args:
         entry: The conversion settings.
         force: Delete the output and convert from scratch.
-        max_workers: Parallel input shards; 0 picks half the cores.
+        max_workers: Parallel input shards; 0 sizes by cores, shards and memory.
 
     Returns:
         The outcome (`written`, `skipped` or `failed`) and the failed parts.
@@ -547,7 +547,9 @@ def convert_entry(entry: PretokenizeEntry, *, force: bool = False, max_workers: 
     # convert the shards in parallel, one part each; parts done earlier are reused
     log_dir = stamped_log_dir("pretokenize")
     resumed = {part for part in parts if part_marker(entry.output_dir, part).exists()}
-    workers = resolve_workers(max_workers, len(parts), cpu_default(len(parts)))
+    workers = choose_workers(
+        max_workers, len(parts), entry.workers.memory_per_worker_gb, label=f"pretokenize {entry.key}"
+    )
     results, failures = run_parallel(
         _convert_part,
         list(parts),
@@ -555,6 +557,7 @@ def convert_entry(entry: PretokenizeEntry, *, force: bool = False, max_workers: 
         desc=f"pretokenize {entry.key}",
         kwargs_for=lambda part: {"shard_path": parts[part], "entry": entry, "share": share},
         log_dir=log_dir,
+        max_items_per_worker=entry.workers.max_items_per_worker,
     )
     if failures:
         return "failed", sorted(part for part, _ in failures)
@@ -594,7 +597,7 @@ def run_pretokenize(
         config: The loaded pretokenize registry.
         keys: Entry keys to convert.
         force: Convert entries again from scratch, and replace their MLflow runs.
-        max_workers: Parallel input shards per entry; 0 picks half the cores.
+        max_workers: Parallel input shards per entry; 0 sizes by cores, shards and memory.
 
     Returns:
         The written, skipped and failed entries.

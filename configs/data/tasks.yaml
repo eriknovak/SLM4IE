@@ -7,6 +7,10 @@
 # Top-level keys:
 #   roots        extracted / raw / tasks — path roots for I/O.
 #   mlflow       Tracking for task conversion (see Notes: mlflow).
+#   workers      Optional; the process pool of the step. memory_per_worker_gb: peak
+#                memory of one worker in GB (positive number; absent assumes 8 GB and
+#                the run logs it). max_items_per_worker: items a worker handles before
+#                it is replaced (positive integer; absent keeps workers for the run).
 #   converters   Default converter backend per task family.
 #   entries      Map of <task>/<dataset> -> entry spec. The key IS the output dir.
 #

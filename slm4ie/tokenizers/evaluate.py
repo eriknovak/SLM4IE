@@ -58,8 +58,7 @@ from slm4ie.utils import mlflow as ml
 from slm4ie.utils.cli import stamped_log_dir
 from slm4ie.utils.parallel import (
     configure_script_logging,
-    cpu_default,
-    resolve_workers,
+    choose_workers,
     run_parallel,
 )
 
@@ -994,7 +993,13 @@ def evaluate_sweep(
         The metric records, failed keys, and report paths.
     """
     # cap the auto worker count for CPU-bound metrics so a many-core box is not saturated
-    workers = resolve_workers(max_workers, len(keys), min(DEFAULT_MAX_WORKERS, cpu_default(len(keys))))
+    workers = choose_workers(
+        max_workers,
+        len(keys),
+        cfg.eval_workers.memory_per_worker_gb,
+        label="tokenizer-evaluate",
+        cap=DEFAULT_MAX_WORKERS,
+    )
     configure_script_logging(parallel=workers > 1, console_level=logging.INFO)
 
     # resolve the overrides

@@ -27,3 +27,11 @@ class TestLoadTokenizationConfig:
         assert cfg.input_dir == Path("/tmp/raw")
         assert cfg.output_dir == Path("/tmp/out")
         assert cfg.datasets == ["sloleks"]
+
+    def test_reads_workers_section(self, tmp_path: Path):
+        """The workers section reaches the config; absent, the settings are unset."""
+        config = tmp_path / "tokenization.yaml"
+        config.write_text(
+            "input_dir: /tmp/raw\noutput_dir: /tmp/out\nworkers: {memory_per_worker_gb: 2}\n", encoding="utf-8"
+        )
+        assert tokenization.load_tokenization_config(config).workers.memory_per_worker_gb == 2.0

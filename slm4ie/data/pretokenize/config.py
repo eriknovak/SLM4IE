@@ -10,6 +10,7 @@ from typing import Any
 from slm4ie.data.pretokenize.formats import FORMATS
 from slm4ie.utils.config import load_yaml
 from slm4ie.utils.io import resolve_project_path
+from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 
 # ===============================
 # Constants
@@ -26,6 +27,7 @@ _DEFAULTS = {
     "min_validation_docs": 10_000,
     "seed": 13,
     "shard_size_mb": 64,
+    "workers": None,
 }
 BYTES_PER_MB = 1 << 20
 
@@ -52,6 +54,7 @@ class PretokenizeEntry:
         seed: Seed of the document hash that assigns the split.
         shard_size_bytes: Target size of one output shard.
         language: Language tag logged with the lineage.
+        workers: Memory per worker and items per worker of the conversion pool.
     """
 
     key: str
@@ -66,6 +69,7 @@ class PretokenizeEntry:
     seed: int
     shard_size_bytes: int
     language: str
+    workers: WorkerSettings = field(default_factory=WorkerSettings)
 
 
 @dataclass
@@ -180,6 +184,7 @@ def _entry_from_dict(
         seed=int(settings["seed"]),
         shard_size_bytes=_positive_int(settings["shard_size_mb"], f"{where}: shard_size_mb") * BYTES_PER_MB,
         language=str(raw.get("language", "sl")),
+        workers=parse_worker_settings(settings["workers"], where),
     )
 
 

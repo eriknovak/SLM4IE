@@ -15,6 +15,7 @@ from typing import Any
 
 from slm4ie.tokenizers.corpus import SampleBudget
 from slm4ie.utils.config import load_yaml
+from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 
 # ===============================
 # Constants
@@ -119,6 +120,9 @@ class SweepConfig:
             name, one per training project the tokenizers are exported for.
         export_parity_lines (int): Evaluation-sample lines on which an export
             must give the same ids as the trained backend.
+        train_workers (WorkerSettings): Memory per worker and items per worker
+            of the training pool.
+        eval_workers (WorkerSettings): The same for the evaluation pool.
     """
 
     corpus_root: Path
@@ -148,6 +152,8 @@ class SweepConfig:
     character_coverage: float = 1.0
     export_targets: dict[str, ExportTarget] = field(default_factory=dict)
     export_parity_lines: int = DEFAULT_PARITY_LINES
+    train_workers: WorkerSettings = field(default_factory=WorkerSettings)
+    eval_workers: WorkerSettings = field(default_factory=WorkerSettings)
 
     @property
     def corpus_split_path(self) -> Path:
@@ -362,6 +368,21 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
     if export_parity_lines <= 0:
         raise ValueError(f"Tokenizer config {config_path}: export.parity_lines {export_parity_lines} not positive")
 
+    # read the worker settings
+    workers_cfg = raw.get("workers") or {}
+    unknown_pools = sorted(set(workers_cfg) - {"train", "evaluate"})
+    if unknown_pools:
+        raise ValueError(f"Tokenizer config {config_path}: workers has unknown pools {unknown_pools}")
+    train_workers = parse_worker_settings(workers_cfg.get("train"), f"Tokenizer config {config_path} workers.train")
+    eval_workers = parse_worker_settings(
+        workers_cfg.get("evaluate"), f"Tokenizer config {config_path} workers.evaluate"
+    )
+    if eval_workers.max_items_per_worker is not None:
+        raise ValueError(
+            f"Tokenizer config {config_path}: workers.evaluate.max_items_per_worker is not supported; "
+            "evaluation workers inherit the eval inputs by fork, and replaced workers are spawned"
+        )
+
     # resolve the output paths
     output_root = Path(output["root"])
     report_dir = Path(output.get("report_dir") or output_root / "_reports")
@@ -397,6 +418,8 @@ def load_sweep_config(config_path: Path) -> SweepConfig:
         character_coverage=float(character_coverage),
         export_targets=export_targets,
         export_parity_lines=export_parity_lines,
+        train_workers=train_workers,
+        eval_workers=eval_workers,
     )
 
 
