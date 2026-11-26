@@ -21,14 +21,16 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
+
 EXPERIMENTS = next(p for p in Path(__file__).resolve().parents if p.name == "experiments")
 TOOLS = EXPERIMENTS / "tools"
 sys.path.insert(0, str(TOOLS if (TOOLS / "create_assets.py").is_file() else EXPERIMENTS))
 
-from create_assets import FULL_WIDTH, Claim, save_figure, save_table
-from datachart.charts import LineChart
-from datachart.constants import SHOW_GRID
-from datachart.utils import Grid
+from create_assets import FULL_WIDTH, Claim, save_figure, save_table  # noqa: E402
+from datachart.charts import LineChart  # noqa: E402
+from datachart.constants import SHOW_GRID  # noqa: E402
+from datachart.utils import Grid  # noqa: E402
 
 # ===============================
 # Constants
@@ -38,6 +40,17 @@ RECORD_DIR = Path(__file__).resolve().parent
 TABLES = RECORD_DIR / "tables"
 FIGURES = RECORD_DIR / "figures"
 MANIFEST = RECORD_DIR / "configs" / "corpus-manifest.json"
+TRAIN_CONFIG = RECORD_DIR / "configs" / "pretrain-modernbert-base.yaml"
+TRAINING_KEYS = (
+    "max_duration",
+    "optimizer.lr",
+    "global_train_batch_size",
+    "mlm_probability",
+    "scheduler.t_warmup",
+    "scheduler.t_decay",
+    "eval_interval",
+    "eval_loader.dataset.mlm_probability",
+)
 DECAY_START_B = 60.14  # tokens seen (billions) when the learning rate starts to fall (D3)
 GRAD_SPIKE_RATIO = 3.0  # a 10-batch gradient-norm reading above 3x its bin mean is a spike (Q2)
 LOSS_SPIKE_EXCESS = 0.5  # a batch's training loss 0.5 above its bin mean is a spike (Q2)
@@ -72,6 +85,17 @@ def spike_rows(train: list[dict[str, float]]) -> list[dict[str, object]]:
                 "loss_spike": int(excess > LOSS_SPIKE_EXCESS),
             }
         )
+    return rows
+
+
+def training_settings(config: dict) -> list[dict[str, object]]:
+    """Return the training settings the record cites, read from the run's resolved config."""
+    rows = []
+    for key in TRAINING_KEYS:
+        value = config
+        for part in key.split("."):
+            value = value[part]
+        rows.append({"key": key, "value": str(value)})
     return rows
 
 
@@ -155,7 +179,7 @@ def validation_figure(evals: list[dict[str, float]]) -> Grid:
             vspans=decay_span(),
         ),
     ]
-    return Grid(charts, max_cols=2, title="Validation loss and accuracy", figsize=FULL_WIDTH)
+    return Grid(charts, max_cols=2, title="Validation loss and accuracy", figsize=FULL_WIDTH, show_legend=True)
 
 
 def dynamics_figure(train: list[dict[str, float]]) -> Grid:
@@ -165,15 +189,17 @@ def dynamics_figure(train: list[dict[str, float]]) -> Grid:
         LineChart(
             [curve(after_warmup, "train_loss"), curve(after_warmup, "train_loss_max")],
             subtitle=["bin mean", "bin maximum"],
-            title="Training loss, 30% masked",
+            title="Training loss after warmup",
             xlabel="Tokens seen (billions)",
             ylabel="Cross-entropy (nats)",
             show_grid=SHOW_GRID.Y,
             vspans=decay_span(),
         ),
         LineChart(
-            [curve(train, "grad_norm"), curve(train, "grad_norm_max")],
-            subtitle=["bin mean", "bin maximum"],
+            [curve(train, "grad_norm"), curve(train, "grad_norm_max"), curve(train, "grad_norm", GRAD_SPIKE_RATIO)],
+            subtitle=["bin mean", "bin maximum", "spike threshold, 3 x bin mean"],
+            style=[None, None, {"plot_line_style": "--", "plot_line_color": "#888888"}],
+            scaley="log",
             title="Gradient norm",
             xlabel="Tokens seen (billions)",
             ylabel="L2 norm (unitless)",
@@ -206,6 +232,8 @@ def main(args: argparse.Namespace) -> None:
         if not MANIFEST.is_file():
             raise FileNotFoundError(f"corpus manifest missing: {MANIFEST}")
         dataset_tables(json.loads(MANIFEST.read_text(encoding="utf8")))
+        config = yaml.safe_load(TRAIN_CONFIG.read_text(encoding="utf8"))
+        save_table(training_settings(config), TABLES / "training-value-by-setting.csv")
         return
 
     if args.step == "tables":

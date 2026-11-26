@@ -188,6 +188,10 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 
 ## Other
 
+- **Warmup**: the first stretch of training, where the learning rate rises from zero to its peak, here over 2 billion tokens.
+- **Learning-rate decay** (decay): the last stretch of training, where the learning rate falls to zero, here linearly over the last 6.7 billion tokens.
+- **Nat**: the unit of a cross-entropy computed with the natural logarithm.
+
 - **q05, q50, q95** (q05, q50, q95): the 5th, 50th (median) and 95th percentiles of a distribution.
 - **Grill** (grill round): a structured design interview that questions a plan one decision at a time; a history line's `Q15` names its fifteenth question.
 - **SLING**: the Slovenian national supercomputing network, whose clusters the project can use for jobs that do not fit on one machine.

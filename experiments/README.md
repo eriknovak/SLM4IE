@@ -36,6 +36,11 @@ the experiment record behind it, with terms in [GLOSSARY.md](GLOSSARY.md).
 - **[F1](programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/#f1--claude-leads-the-best-local-model-beyond-the-margin-on-two-of-four-test-sets--key) — Claude leads the best local model beyond the margin on two of four test sets.** Claude Opus leads Gemma 4 12B by more than 5 points of strict span F1 on SUK and Janes-Tag, not on SlavicNER. No earlier experiment scored Slovene extraction.
 - **[F4](programmes/zero-shot-ie-slovenian/ie-benchmark-slovenian/#f4--the-reference-scores-stand-on-four-slovene-test-sets-for-seven-local-and-three-claude-models--key) — The reference scores stand on four Slovene test sets for seven local and three Claude models.** The highest zero-shot strict span F1 any model reaches ranges from 78 on ssj500k to 94 on SUK, the reference the project's small models must approach. The later small-model experiments score on the same test sets.
 
+## Can a small encoder pretrained on Slovene alone beat multilingual encoders on Slovene tasks?
+
+- **[F1](programmes/slovene-encoders/modernbert-pilot-slovenian/#f1--the-model-was-still-improving-at-the-end-of-the-fourth-pass--key) — The model was still improving at the end of the fourth pass.** Validation loss fell from 1.053 to 1.038 over the fourth pass at constant learning rate, more than the noise of the validation set. From the [ModernBERT pilot](programmes/slovene-encoders/modernbert-pilot-slovenian/): the first encoder pretrained on the curated Slovene corpus, ModernBERT-base with its published recipe, reported from a run made before the record. No earlier experiment pretrained a model.
+- **[F4](programmes/slovene-encoders/modernbert-pilot-slovenian/#f4--training-stayed-stable-after-warmup--key) — Training stayed stable after warmup.** No 500-batch window held a gradient spike, and the mean gradient norm stayed between 0.25 and 0.29 after warmup.
+
 ## Notes for maintainers
 
 Two slugs are reserved, and the settings and runs they once held now live outside experiments/.

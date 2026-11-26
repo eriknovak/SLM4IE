@@ -1,0 +1,9 @@
+key,value
+max_duration,66_836_000_000tok
+optimizer.lr,0.0008
+global_train_batch_size,4608
+mlm_probability,0.3
+scheduler.t_warmup,2_000_000_000tok
+scheduler.t_decay,6_700_000_000tok
+eval_interval,500ba
+eval_loader.dataset.mlm_probability,0.15
