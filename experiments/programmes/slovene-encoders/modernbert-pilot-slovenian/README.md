@@ -20,6 +20,7 @@ evidence:
 types: [baseline]
 concluded: 2026-11-26
 ---
+
 # How low do masked-token loss and error fall when ModernBERT-base is pretrained on the curated Slovene corpus, and does it train stably?
 
 ## TL;DR
