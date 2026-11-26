@@ -1,0 +1,21 @@
+run_name: modernbert-base_slm4ie-pretrain_bpe-32000
+config_file: <ModernSloBERT>/configs/pretrain-base.yaml
+overrides: []
+gpus: 2,3
+processes: 2
+host: e3black
+started: '2026-11-23T23:05:36+01:00'
+repo:
+  commit: f27cda3f7f49b04aee8c8fce1b8171d3326c6b41
+  changed_files:
+  - README.md
+  - configs/pretrain-base.yaml
+modernbert:
+  commit: c6d942312f1b0b24d423628b8e477a3e97c7038f
+  changed_files:
+  - main.py
+command: <ModernSloBERT>/.venv/bin/composer -n 2 main.py <ModernSloBERT>/configs/pretrain-base.yaml
+  loggers.mlflow.tags.repo_commit=f27cda3f7f49b04aee8c8fce1b8171d3326c6b41 loggers.mlflow.tags.host=e3black
+  loggers.mlflow.tags.gpus='2,3'
+finished: '2026-11-25T19:09:43+01:00'
+exit_code: 0

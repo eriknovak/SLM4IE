@@ -1,0 +1,7 @@
+statistic,value,note
+documents,22783175,training split
+sources,18,
+tokens,16709182973,training split
+samples,31850909,"1,024-token sequences"
+validation documents,22904,held out by document
+validation tokens,16989791,

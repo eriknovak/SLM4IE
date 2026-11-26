@@ -33,6 +33,10 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 - **Precision@k** (P@k): precision over the top k ranked items only.
 - **Recall@k** (R@k): the share of correct items found within the top k.
 - **Accuracy**: the share of all decisions that are correct; misleading when classes are imbalanced.
+- **Masked-token cross-entropy** (validation loss, MLM loss): the average negative log-probability a masked language model gives the true token at each masked position; lower is better, and its exponent is the perplexity. Values compare only between models that share a tokenizer and an evaluation set.
+- **Masked-token accuracy**: the share of masked positions where the model's most probable token is the true one.
+- **Masking rate**: the share of tokens hidden from a masked language model and predicted; ModernBERT trains at 30% and is evaluated at 15%.
+- **Gradient norm** (L2 gradient norm): the length of the vector of all parameter gradients at one training step; a sudden rise signals an unstable run.
 - **Cohen's κ** (κ, kappa): agreement between two raters beyond what chance would give; 1 is full agreement, 0 chance level, below 0 worse than chance.
 - **Quadratic-weighted κ** (weighted kappa): Cohen's κ for an ordered scale such as 1-5, where a disagreement costs the square of its distance, so a one-point miss counts far less than a three-point one.
 - **Wilson interval** (Wilson score interval): a confidence interval for a share that, unlike the textbook one, never runs below 0 or above 1, which matters for shares near either end.
