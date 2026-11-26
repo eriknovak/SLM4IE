@@ -1,0 +1,2 @@
+samples,masked_tokens,loss,ci_low,ci_high,resamples,seed
+32237,2537480,0.9750,0.9698,0.9804,1000,17

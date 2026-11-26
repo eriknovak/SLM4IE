@@ -1,0 +1,5 @@
+variants:
+  modernbert-base:
+    round: R1
+    what: ModernBERT-base pretrained on the curated Slovene corpus with the upstream recipe for four passes
+    changes: {vocab_size: 32000, tokenizer: bpe-32000, max_duration: 66.8B tokens, warmup: 2B tokens}

@@ -1,0 +1,322 @@
+{
+  "key": "sentence-dedup/bpe-32000-modernbert-1024",
+  "settings": {
+    "formats": [
+      "mds",
+      "parquet"
+    ],
+    "max_seq_len": 1024,
+    "min_chunk_tokens": 8,
+    "min_validation_docs": 10000,
+    "seed": 13,
+    "tokenizer_digest": "sha256:5baea54ab54e2555cf82eadc8a06228d559cacbe4e19efad56265daa4d273ee1",
+    "validation_share": 0.001
+  },
+  "validation_share_used": 0.001,
+  "totals": {
+    "train": {
+      "documents": 22783175,
+      "dropped_chunks": 4708,
+      "dropped_tokens": 17841,
+      "samples": 31850909,
+      "tokens": 16709182973
+    },
+    "validation": {
+      "documents": 22904,
+      "dropped_chunks": 3,
+      "dropped_tokens": 7,
+      "samples": 32237,
+      "tokens": 16989791
+    }
+  },
+  "counts": {
+    "c4": {
+      "train": {
+        "documents": 2324227,
+        "dropped_chunks": 225,
+        "dropped_tokens": 935,
+        "samples": 3375823,
+        "tokens": 1990728363
+      },
+      "validation": {
+        "documents": 2360,
+        "dropped_chunks": 1,
+        "dropped_tokens": 3,
+        "samples": 3527,
+        "tokens": 2124358
+      }
+    },
+    "cc100": {
+      "train": {
+        "documents": 1754319,
+        "dropped_chunks": 156,
+        "dropped_tokens": 638,
+        "samples": 2056781,
+        "tokens": 738850211
+      },
+      "validation": {
+        "documents": 1738,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 2054,
+        "tokens": 748244
+      }
+    },
+    "classla_web_sl": {
+      "train": {
+        "documents": 2802057,
+        "dropped_chunks": 1141,
+        "dropped_tokens": 4406,
+        "samples": 3701059,
+        "tokens": 1925476643
+      },
+      "validation": {
+        "documents": 2898,
+        "dropped_chunks": 1,
+        "dropped_tokens": 2,
+        "samples": 3972,
+        "tokens": 2147495
+      }
+    },
+    "classlawiki_sl": {
+      "train": {
+        "documents": 39375,
+        "dropped_chunks": 9,
+        "dropped_tokens": 38,
+        "samples": 53683,
+        "tokens": 27338741
+      },
+      "validation": {
+        "documents": 40,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 53,
+        "tokens": 28872
+      }
+    },
+    "coleslaw": {
+      "train": {
+        "documents": 155501,
+        "dropped_chunks": 678,
+        "dropped_tokens": 2042,
+        "samples": 451422,
+        "tokens": 302469554
+      },
+      "validation": {
+        "documents": 158,
+        "dropped_chunks": 1,
+        "dropped_tokens": 2,
+        "samples": 519,
+        "tokens": 360299
+      }
+    },
+    "culturax": {
+      "train": {
+        "documents": 2125315,
+        "dropped_chunks": 25,
+        "dropped_tokens": 76,
+        "samples": 3263461,
+        "tokens": 1918904105
+      },
+      "validation": {
+        "documents": 2121,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 3177,
+        "tokens": 1853679
+      }
+    },
+    "finepdf": {
+      "train": {
+        "documents": 305327,
+        "dropped_chunks": 170,
+        "dropped_tokens": 665,
+        "samples": 1430920,
+        "tokens": 1233423870
+      },
+      "validation": {
+        "documents": 301,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 1185,
+        "tokens": 1000833
+      }
+    },
+    "fineweb2": {
+      "train": {
+        "documents": 4505417,
+        "dropped_chunks": 464,
+        "dropped_tokens": 1843,
+        "samples": 5502767,
+        "tokens": 2384650707
+      },
+      "validation": {
+        "documents": 4600,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 5514,
+        "tokens": 2342740
+      }
+    },
+    "gigafida": {
+      "train": {
+        "documents": 613989,
+        "dropped_chunks": 126,
+        "dropped_tokens": 510,
+        "samples": 1021210,
+        "tokens": 664884761
+      },
+      "validation": {
+        "documents": 615,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 1243,
+        "tokens": 880340
+      }
+    },
+    "hplt": {
+      "train": {
+        "documents": 2488625,
+        "dropped_chunks": 310,
+        "dropped_tokens": 1254,
+        "samples": 3148700,
+        "tokens": 1581080271
+      },
+      "validation": {
+        "documents": 2415,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 3112,
+        "tokens": 1554192
+      }
+    },
+    "kas": {
+      "train": {
+        "documents": 45370,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 1006334,
+        "tokens": 987456933
+      },
+      "validation": {
+        "documents": 50,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 974,
+        "tokens": 953077
+      }
+    },
+    "kzb": {
+      "train": {
+        "documents": 492,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 14088,
+        "tokens": 13786417
+      },
+      "validation": {
+        "documents": 0,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 0,
+        "tokens": 0
+      }
+    },
+    "macocu_sl": {
+      "train": {
+        "documents": 2583307,
+        "dropped_chunks": 1022,
+        "dropped_tokens": 4079,
+        "samples": 3024875,
+        "tokens": 1109907660
+      },
+      "validation": {
+        "documents": 2653,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 3148,
+        "tokens": 1165556
+      }
+    },
+    "oss": {
+      "train": {
+        "documents": 18134,
+        "dropped_chunks": 15,
+        "dropped_tokens": 51,
+        "samples": 468064,
+        "tokens": 456211354
+      },
+      "validation": {
+        "documents": 20,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 535,
+        "tokens": 519677
+      }
+    },
+    "povejmo_vemo_med": {
+      "train": {
+        "documents": 321,
+        "dropped_chunks": 2,
+        "dropped_tokens": 6,
+        "samples": 2904,
+        "tokens": 2786447
+      },
+      "validation": {
+        "documents": 0,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 0,
+        "tokens": 0
+      }
+    },
+    "siparl": {
+      "train": {
+        "documents": 615078,
+        "dropped_chunks": 300,
+        "dropped_tokens": 1121,
+        "samples": 689802,
+        "tokens": 263624453
+      },
+      "validation": {
+        "documents": 626,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 698,
+        "tokens": 265849
+      }
+    },
+    "slovenian_news": {
+      "train": {
+        "documents": 2401568,
+        "dropped_chunks": 65,
+        "dropped_tokens": 177,
+        "samples": 2633981,
+        "tokens": 1105339686
+      },
+      "validation": {
+        "documents": 2303,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 2520,
+        "tokens": 1042434
+      }
+    },
+    "solar": {
+      "train": {
+        "documents": 4753,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 5035,
+        "tokens": 2262797
+      },
+      "validation": {
+        "documents": 6,
+        "dropped_chunks": 0,
+        "dropped_tokens": 0,
+        "samples": 6,
+        "tokens": 2146
+      }
+    }
+  }
+}
