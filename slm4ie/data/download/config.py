@@ -10,7 +10,8 @@ from slm4ie.utils.config import load_yaml
 # ===============================
 
 #: Allowed `role` values in the download catalog. Unrelated to the `role`
-#: field in configs/data/tasks.yaml (`finetune_and_eval` | `held_out`).
+#: field in configs/data/tasks.yaml (`finetune_and_eval` | `held_out` |
+#: `finetune_only`).
 DATASET_ROLES = frozenset({"pretrain", "benchmark", "lexicon"})
 
 #: Entry fields that name other registry keys: full and partial inclusion.

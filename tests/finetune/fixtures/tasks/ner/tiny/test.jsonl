@@ -1,0 +1,3 @@
+{"id": "tiny:3", "text": "Včeraj je deževalo ves dan.", "spans": []}
+{"id": "tiny:4", "text": "Ana Horvat in Marko Zupan sta odšla v Koper, kjer je Luka Koper zaposlil nove delavce za vse leto.", "spans": [{"start": 0, "end": 10, "label": "PER"}, {"start": 14, "end": 25, "label": "PER"}, {"start": 38, "end": 43, "label": "LOC"}, {"start": 53, "end": 63, "label": "ORG"}]}
+{"id": "tiny:5", "text": "Gorenje izdeluje gospodinjske aparate v Velenju.", "spans": [{"start": 0, "end": 7, "label": "ORG"}, {"start": 40, "end": 47, "label": "LOC"}]}

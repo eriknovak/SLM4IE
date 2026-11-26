@@ -33,15 +33,15 @@ def test_loads_successfully(tasks_config: TasksConfig) -> None:
     assert isinstance(tasks_config, TasksConfig)
 
 
-def test_has_thirteen_entries(tasks_config: TasksConfig) -> None:
-    """The registry currently declares 13 task entries."""
-    assert len(tasks_config.entries) == 13
+def test_has_sixteen_entries(tasks_config: TasksConfig) -> None:
+    """The registry currently declares 16 task entries."""
+    assert len(tasks_config.entries) == 16
 
 
 def test_every_entry_has_required_fields(tasks_config: TasksConfig) -> None:
     """Every entry exposes role / source / splits / language / license."""
     for entry in tasks_config.entries:
-        assert entry.role in {"finetune_and_eval", "held_out"}
+        assert entry.role in {"finetune_and_eval", "held_out", "finetune_only"}
         assert entry.source is not None
         assert entry.source.kind in {"extracted", "raw"}
         assert entry.source.keys, f"{entry.task}/{entry.dataset} has empty source keys"
@@ -100,7 +100,7 @@ def _ner_entry(role: str, keys: list, exclude: Optional[list] = None) -> dict:
     if exclude is not None:
         source["exclude"] = exclude
     splits = {"val": "val.jsonl.gz", "test": "test.jsonl.gz"}
-    if role == "finetune_and_eval":
+    if role in {"finetune_and_eval", "finetune_only"}:
         splits = {"train": "train.jsonl.gz", **splits}
     return {
         "role": role,
@@ -141,6 +141,14 @@ def test_workers_section_absent_unset_and_present_read(tmp_path: Path) -> None:
 
 _CATALOG_FOR_WORKERS = {"small": {"role": "benchmark"}}
 
+
+def test_finetune_only_role_is_accepted(tmp_path: Path) -> None:
+    """A `finetune_only` entry loads with its role and its train split kept."""
+    path = _write_registry(tmp_path, {"ner/a": _ner_entry("finetune_only", ["small"])}, _CATALOG_FOR_WORKERS)
+    entry = load_tasks_config(path, tmp_path / "download.yaml").entries[0]
+    assert (entry.role, "train" in entry.splits) == ("finetune_only", True)
+
+
 _CATALOG = {
     "big": {"role": "benchmark", "contains": ["small"]},
     "small": {"role": "benchmark"},
@@ -169,6 +177,18 @@ class TestSourceIsolation:
             _CATALOG,
         )
         with pytest.raises(ValueError, match="share source other"):
+            load_tasks_config(path, tmp_path / "download.yaml")
+
+    def test_finetune_only_sharing_a_training_source_is_rejected(self, tmp_path: Path) -> None:
+        """A `finetune_only` entry is isolated from a same-task training entry like a held-out one."""
+        path = _write_registry(
+            tmp_path,
+            {"ner/a": _ner_entry("finetune_and_eval", ["other"]), "ner/b": _ner_entry("finetune_only", ["other"])},
+            _CATALOG,
+        )
+        with pytest.raises(
+            ValueError, match=r"ner/a \(finetune_and_eval\) and ner/b \(finetune_only\) share source other"
+        ):
             load_tasks_config(path, tmp_path / "download.yaml")
 
     def test_disjoint_pair_is_accepted(self, tmp_path: Path) -> None:

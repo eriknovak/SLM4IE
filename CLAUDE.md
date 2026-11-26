@@ -49,10 +49,11 @@ slm4ie/      Library code — importable modules only, no CLI logic.
 scripts/     Thin CLI wrappers around slm4ie/. Argument parsing + config load.
              One script per pipeline, named verb + object, with one subcommand
              per step: prepare_datasets, curate_pretraining_corpus,
-             sweep_tokenizers, pretokenize_corpus.
+             sweep_tokenizers, pretokenize_corpus, finetune_encoders.
 configs/     Shared registries only: the dataset catalogs, the task registry,
-             the curation settings, the tokenizer sweep and the pretokenize
-             registry, each named for the subcommand that reads it.
+             the curation settings, the tokenizer sweep, the pretokenize
+             registry and the shared fine-tuning config, each named for
+             the subcommand that reads it.
 slurm/       SLURM batch scripts for HPC training.
 tests/       pytest suite mirroring slm4ie/, scripts/ and website/.
 docs/        Operator documentation and agent-skill config (agents/).
@@ -209,12 +210,16 @@ after curation. There are four routes, and they own disjoint output trees:
      Requires a `spans` field in the annotations payload.
    - `sentiment` handles `sentiment/*` entries with normalized
      `{negative, neutral, positive}` labels.
+   - `pos` handles every `pos/*` entry (`{id, words, tags}`); it refuses
+     sentences whose word and tag counts differ.
    - `superglue` handles every SuperGLUE-SL subtask, dissolved into
      `nli/`, `qa/`, `coref/`, `wsd/`, `commonsense/`. The `--variant`
      flag picks `humant` (default) or `googlemt`.
 
    Train/test isolation is enforced by each entry's `role` field
-   (`finetune_and_eval` vs `held_out`), **not** by directory placement.
+   (`finetune_and_eval`, `held_out`, or `finetune_only`, which keeps train
+   for per-entry fine-tuning but counts as `held_out` in the isolation check),
+   **not** by directory placement.
    Document-shaped sources use `source.kind: extracted`; task-native
    bundles (SuperGLUE-SL) bypass `extracted/` via `source.kind: raw`.
 
@@ -236,6 +241,15 @@ after curation. There are four routes, and they own disjoint output trees:
 
 All routes skip existing outputs unless `--force` is passed and accept either
 positional keys (`<task>/<dataset>` entry keys for the task route) or `--all`.
+
+### Per-entry fine-tuning (shared machinery, not a conversion route)
+
+`scripts/finetune_encoders.py run` fine-tunes pretrained encoders on the
+`tasks/` entries (`--dry-run` prints the planned runs; `--all` skips unbuilt
+entries). Library code is `slm4ie/finetune/`, which needs the `evaluation`
+group. The shared fine-tuning config is `configs/evaluation/finetune.yaml`;
+encoders come from `--encoder` or an experiment dial (`--dial`) merged over it.
+Each encoder, entry, learning rate and seed is one MLflow run.
 
 ### Tokenizer-comparison sweep (shared machinery, not a conversion route)
 

@@ -1,0 +1,3 @@
+{"id": "tiny:0", "premise": "Moški je padel.", "choice1": "Spodrsnilo mu je.", "choice2": "Zapel je pesem.", "question": "cause", "label": 0}
+{"id": "tiny:1", "premise": "Okno je bilo odprto.", "choice1": "Soba se je ohladila.", "choice2": "Soba se je segrela.", "question": "effect", "label": 0}
+{"id": "tiny:2", "premise": "Deklica je jokala.", "choice1": "Dobila je darilo.", "choice2": "Izgubila je igračo.", "question": "cause", "label": 1}

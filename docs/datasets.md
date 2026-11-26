@@ -245,23 +245,36 @@ Other pairs, row in column (sentences, URLs): `parlamint_si` in `siparl` 100%;
 `finepdf` 13%; `kas` in `finepdf` 11%; `gigafida` in `slovenian_news` 14% and
 back 14%; `kzb` in `oss` 1%; `solar` under 1% anywhere.
 
-### SUK held out against ssj500k
+### SUK isolated from ssj500k
 
 SUK 1.1 integrates ssj500k 2.3, and `ner/ssj500k` trains on ssj500k while
-`ner/suk` is held out, so the held-out splits would contain training
-documents. SUK keeps the ssj500k document ids (`ssj1` … `ssj1655`; all 1,655
+`ner/suk` is `finetune_only` (isolated like a held-out entry), so its splits
+would contain training documents. SUK keeps the ssj500k document ids (`ssj1` … `ssj1655`; all 1,655
 recur in SUK, 1,654 with identical text), so `ner/suk` drops them with
 `source.exclude: [ssj500k]` in `configs/data/tasks.yaml`. The task registry
-refuses to load a `finetune_and_eval` / `held_out` pair of one task whose
-sources are equal or where one contains the other without that exclusion.
+refuses to load a `finetune_and_eval` / `held_out` (or `finetune_only`) pair
+of one task whose sources are equal or where one contains the other without that exclusion.
 
-Documents per split, from the extracted tier of 2026-10-04:
+Documents per split, from the extracted tier of 2026-10-04, when `ner/suk` was
+held out and wrote no train split:
 
 | Entry         | Exclusion      | train | val | test |
 | ------------- | -------------- | ----: | --: | ---: |
 | `ner/ssj500k` | —              | 1,164 | 258 |  233 |
 | `ner/suk`     | none (before)  |     — | 641 |  733 |
 | `ner/suk`     | ssj500k by id  |     — | 364 |  393 |
+
+After the switch to `finetune_only`, the entries take a hash split with a train
+split. Records per split (not documents), rebuilt 2026-11-26:
+
+| Entry               | train |   val |  test |
+| ------------------- | ----: | ----: | ----: |
+| `ner/suk`           | 1,937 |   401 |   442 |
+| `ner/janes_tag`     | 2,094 |   439 |   424 |
+| `ner/slavicner`     |   301 |    52 |   138 |
+| `pos/ssj500k`       | 19,303 | 4,350 | 4,176 |
+| `pos/suk`           | 14,797 | 2,961 | 3,011 |
+| `pos/janes_tag`     | 5,502 | 1,190 | 1,089 |
 
 ## Benchmarks
 
@@ -278,6 +291,15 @@ datasets.
 | [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `prepare_datasets.py tasks`.                                                                                           |
 | [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `prepare_datasets.py tasks`.                                                                                              |
 | [Sloleks 3.1](https://www.clarin.si/repository/xmlui/handle/11356/2080)       | CLARIN.SI | TOKENIZER                                 | Slovenian inflectional lexicon (lemmas + word forms with MULTEXT-East V6 / JOS MSDs). **Tokenizer / morphology evaluation only** — intentionally absent from `extract.yaml`, never enters the pretraining corpus. Distributed as TEI XML. License: CC BY-SA 4.0. Convert with `prepare_datasets.py tokenization`. |
+
+Task roles: `ner/suk`, `ner/janes_tag`, `ner/slavicner` and
+`sentiment/twitter_15eu_sl` are `finetune_only` (train, val and test, never in a
+zero-shot training mix); `pos/ssj500k`, `pos/suk` and `pos/janes_tag` copy the
+role of the NER entry on the same source. The Twitter source has no download
+entry yet. See [Task datasets](data-pipeline.md#task-datasets). Every entry
+with train, val and test is a target of per-entry fine-tuning: an encoder is
+trained on its train split, picked on val and scored on test; see
+[Per-entry fine-tuning](data-pipeline.md#per-entry-fine-tuning).
 
 ### Task abbreviations
 

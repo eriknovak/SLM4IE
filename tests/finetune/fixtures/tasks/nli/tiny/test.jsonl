@@ -1,0 +1,3 @@
+{"id": "tiny:3", "premise": "Ana je kupila kruh.", "hypothesis": "Ana ni bila v trgovini.", "label": "contradiction"}
+{"id": "tiny:4", "premise": "Dežuje že tri dni.", "hypothesis": "Vreme je mokro.", "label": "entailment"}
+{"id": "tiny:5", "premise": "Vlak je zamudil.", "hypothesis": "Vlak je prišel točno.", "label": "contradiction"}

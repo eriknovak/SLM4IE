@@ -76,7 +76,7 @@ def _make_ner_layout(tmp_path: Path, dataset_key: str, role: str, records: List[
     Args:
         tmp_path: pytest tmp_path root.
         dataset_key: Source key written under ``extracted/<key>.jsonl``.
-        role: Entry role (``finetune_and_eval`` or ``held_out``).
+        role: Entry role (``finetune_and_eval``, ``held_out`` or ``finetune_only``).
         records: Joined extraction records carrying ``uid`` + ``annotations.spans``.
 
     Returns:
@@ -339,6 +339,13 @@ class TestRoleGatingAcceptance:
         # Nothing dropped — just re-bucketed across the remaining eval splits.
         assert ho_total == ft_total == 40
 
+    def test_finetune_only_writes_train_val_and_test(self, tmp_path: Path) -> None:
+        """finetune_only keeps the train split, writing all three splits."""
+        cfg = _make_ner_layout(tmp_path, "kzb", "finetune_only", _ner_records(40))
+        convert_tasks(cfg, entry_keys=["ner/kzb"], max_workers=1)
+        out = tmp_path / "tasks" / "ner" / "kzb"
+        assert all(_count_rows(out / f"{s}.jsonl.gz") > 0 for s in ("train", "val", "test"))
+
 
 def test_converters_declare_split_policy() -> None:
     """Each converter declares its split policy in one place (the class)."""
@@ -452,6 +459,28 @@ class TestSplitOn:
         out_dir = tmp_path / "tasks" / "ner" / "kzb"
         assert _count_rows(out_dir / "test.jsonl.gz") == 3
         assert _count_rows(out_dir / "val.jsonl.gz") == 7
+
+    def test_list_fallback_hash_splits_the_rest_across_the_listed_splits(self, tmp_path: Path) -> None:
+        """Documents of the listed topic land in test; the rest spread over train and val only."""
+        records = _ner_records(40)
+        for i, record in enumerate(records):
+            record["metadata"] = {"topic": "elections" if i < 3 else "covid"}
+        tasks_yaml = _make_ner_layout(tmp_path, "kzb", "finetune_only", records)
+        body = yaml.safe_load(tasks_yaml.read_text())
+        body["entries"]["ner/kzb"]["split_on"] = {
+            "field": "topic",
+            "values": {"test": ["elections"]},
+            "otherwise": ["train", "val"],
+        }
+        tasks_yaml.write_text(yaml.safe_dump(body))
+
+        convert_tasks(tasks_yaml, entry_keys=["ner/kzb"], max_workers=1)
+
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
+        counts = {split: _count_rows(out_dir / f"{split}.jsonl.gz") for split in ("train", "val", "test")}
+        assert counts["test"] == 3
+        assert counts["train"] > 0 and counts["val"] > 0
+        assert counts["train"] + counts["val"] == 37
 
     def test_rejects_a_split_the_entry_does_not_write(self, tmp_path: Path) -> None:
         """A held_out entry cannot send documents to train."""

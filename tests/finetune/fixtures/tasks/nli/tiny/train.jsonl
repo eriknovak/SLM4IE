@@ -1,0 +1,6 @@
+{"id": "tiny:0", "premise": "Mačka spi na mizi.", "hypothesis": "Na mizi je žival.", "label": "entailment"}
+{"id": "tiny:1", "premise": "Pes laja na dvorišču.", "hypothesis": "Dvorišče je prazno.", "label": "contradiction"}
+{"id": "tiny:2", "premise": "Janez bere knjigo.", "hypothesis": "Janez nekaj bere.", "label": "entailment"}
+{"id": "tiny:3", "premise": "Ana je kupila kruh.", "hypothesis": "Ana ni bila v trgovini.", "label": "contradiction"}
+{"id": "tiny:4", "premise": "Dežuje že tri dni.", "hypothesis": "Vreme je mokro.", "label": "entailment"}
+{"id": "tiny:5", "premise": "Vlak je zamudil.", "hypothesis": "Vlak je prišel točno.", "label": "contradiction"}

@@ -1,0 +1,6 @@
+{"id": "tiny:0", "text": "Janez Novak živi v Ljubljani in dela pri podjetju Krka. Vsak dan se vozi z vlakom.", "spans": [{"start": 0, "end": 11, "label": "PER"}, {"start": 19, "end": 28, "label": "LOC"}, {"start": 50, "end": 54, "label": "ORG"}]}
+{"id": "tiny:1", "text": "Maja Kovač je obiskala Maribor.", "spans": [{"start": 0, "end": 10, "label": "PER"}, {"start": 23, "end": 30, "label": "LOC"}]}
+{"id": "tiny:2", "text": "Podjetje Petrol ima sedež v Ljubljani.", "spans": [{"start": 9, "end": 15, "label": "ORG"}, {"start": 28, "end": 37, "label": "LOC"}]}
+{"id": "tiny:3", "text": "Včeraj je deževalo ves dan.", "spans": []}
+{"id": "tiny:4", "text": "Ana Horvat in Marko Zupan sta odšla v Koper, kjer je Luka Koper zaposlil nove delavce za vse leto.", "spans": [{"start": 0, "end": 10, "label": "PER"}, {"start": 14, "end": 25, "label": "PER"}, {"start": 38, "end": 43, "label": "LOC"}, {"start": 53, "end": 63, "label": "ORG"}]}
+{"id": "tiny:5", "text": "Gorenje izdeluje gospodinjske aparate v Velenju.", "spans": [{"start": 0, "end": 7, "label": "ORG"}, {"start": 40, "end": 47, "label": "LOC"}]}

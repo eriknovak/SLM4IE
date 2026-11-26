@@ -1,0 +1,66 @@
+# finetune.yaml — the shared fine-tuning config: per-entry fine-tuning of pretrained encoders.
+#
+# Read by: slm4ie/finetune/config.py (load_finetune_config).
+#
+# An experiment's dial is deep-merged over this file: it names its encoders and
+# overrides only the keys it changes, for example one family's batch size.
+#
+# Top-level keys:
+#   tasks_config  The task registry the entries come from.
+#   encoders      HuggingFace names or local paths; empty here, named by a dial.
+#   defaults      The settings of a family with no block under `families`.
+#   families      Per task family (the first segment of an entry key), the
+#                 settings that differ from `defaults`.
+#
+# Settings:
+#   epochs                 Passes over train; val is scored after each and the
+#                          best epoch's weights are scored on test.
+#   batch_size             Examples per forward pass in training.
+#   eval_batch_size        Examples per forward pass on val and test.
+#   gradient_accumulation  Forward passes per optimizer step; raise it and lower
+#                          batch_size to fit a large encoder in 16 GB.
+#   max_length             Most tokens per input. Token tagging (ner, pos) cuts a
+#                          longer input into windows; classification truncates.
+#   learning_rates         The learning-rate grid, one run per value.
+#   seeds                  One run per seed for every learning rate.
+#   weight_decay           AdamW weight decay on weight matrices.
+#   warmup_ratio           Share of optimizer steps with a linear warmup.
+#   max_grad_norm          The gradient norm is clipped to this before each step.
+#   precision              bf16 (bfloat16 autocast on a GPU) or fp32.
+
+tasks_config: configs/data/tasks.yaml
+encoders: []
+
+defaults:
+  epochs: 5
+  batch_size: 16
+  eval_batch_size: 64
+  gradient_accumulation: 1
+  max_length: 256
+  learning_rates: [2.0e-5, 3.0e-5, 5.0e-5]
+  seeds: [0, 1, 2]
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  precision: bf16
+
+# ner takes the defaults
+families:
+  pos:
+    batch_size: 32
+    max_length: 128
+  sentiment:
+    epochs: 4
+    max_length: 512
+  nli:
+    epochs: 10
+  qa:
+    max_length: 512
+  coref:
+    epochs: 10
+    max_length: 128
+  wsd:
+    max_length: 128
+  commonsense:
+    epochs: 10
+    max_length: 128

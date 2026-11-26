@@ -192,7 +192,8 @@ pretokenize = [
     "numpy>=2.4.3",                   # token id arrays
 ]
 
-# Prompting chat models and scoring their answers: slm4ie/evaluation/.
+# Prompting chat models and scoring their answers: slm4ie/evaluation/; fine-tuning
+# encoders on the task registry: slm4ie/finetune/.
 # Resolved apart from the other HuggingFace groups; see [tool.uv] conflicts.
 evaluation = [
     {include-group = "tracking"},
@@ -200,7 +201,9 @@ evaluation = [
     "bitsandbytes>=0.45",             # slm4ie/evaluation/backends/huggingface.py 4-bit and 8-bit loading
     "compressed-tensors>=0.12",       # slm4ie/evaluation/backends/huggingface.py Gemma 4 QAT checkpoints
     "numpy>=2.4.3",                   # slm4ie/evaluation/scoring.py document bootstrap
-    "torch>=2.5",                     # slm4ie/evaluation/backends/huggingface.py local generation
-    "transformers>=5.22",             # slm4ie/evaluation/backends/huggingface.py tokenizer and model
+    "torch>=2.5",                     # slm4ie/evaluation/backends/huggingface.py local generation,
+                                      #   slm4ie/finetune/ training loop
+    "transformers>=5.22",             # slm4ie/evaluation/backends/huggingface.py tokenizer and model,
+                                      #   slm4ie/finetune/ encoders and task heads
     "xgrammar>=0.2.8",                # slm4ie/evaluation/backends/huggingface.py schema-constrained decoding
 ]

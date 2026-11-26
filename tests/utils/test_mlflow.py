@@ -65,6 +65,11 @@ class TestDisabledIsNoOp:
         result = mlflow_utils.git_commit()
         assert result is None or isinstance(result, str)
 
+    def test_git_branch_names_the_checked_out_branch(self):
+        """git_branch returns a non-empty branch name inside this repository."""
+        result = mlflow_utils.git_branch()
+        assert isinstance(result, str) and result
+
 
 def test_default_artifact_location_is_local():
     """The default artifact location is a local relative path."""

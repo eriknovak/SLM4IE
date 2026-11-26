@@ -5,11 +5,14 @@ import pytest
 from slm4ie.evaluation.scoring import (
     Alignment,
     Counts,
+    accuracy,
     align_mentions,
+    classification_macro_f1,
     f1_interval,
     macro_f1,
     paired_difference_interval,
     score_document,
+    token_accuracy,
 )
 
 # ===============================
@@ -329,3 +332,33 @@ def test_paired_difference_rejects_unmatched_documents():
         paired_difference_interval(
             {"a": Counts(), "c": Counts()}, {"a": Counts(), "b": Counts()}, n_resamples=10, seed=0
         )
+
+
+def test_token_accuracy_pools_tokens_over_sentences():
+    """Three of the five tokens are right across two sentences."""
+    predicted = [["NOUN", "VERB"], ["ADJ", "NOUN", "ADP"]]
+    gold = [["NOUN", "VERB"], ["ADJ", "VERB", "NOUN"]]
+    assert token_accuracy(predicted, gold) == pytest.approx(3 / 5)
+
+
+def test_token_accuracy_rejects_length_mismatch():
+    """A sentence with a different tag count raises."""
+    with pytest.raises(ValueError, match="sentence 0"):
+        token_accuracy([["NOUN"]], [["NOUN", "VERB"]])
+
+
+def test_accuracy_counts_equal_labels():
+    """Two of three labels match."""
+    assert accuracy(["pos", "neg", "pos"], ["pos", "pos", "pos"]) == pytest.approx(2 / 3)
+
+
+def test_classification_macro_f1_averages_classes_equally():
+    """Class a has F1 0.8 and class b has F1 2/3."""
+    predicted = ["a", "a", "b", "a"]
+    gold = ["a", "a", "b", "b"]
+    assert classification_macro_f1(predicted, gold) == pytest.approx((0.8 + 2 / 3) / 2)
+
+
+def test_classification_macro_f1_scores_a_never_predicted_class_zero():
+    """A gold class the model never predicts drags the average down."""
+    assert classification_macro_f1(["a", "a"], ["a", "b"]) == pytest.approx((2 / 3 + 0) / 2)

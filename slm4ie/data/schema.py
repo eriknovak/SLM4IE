@@ -336,3 +336,17 @@ class CommonsenseCopaExample(TypedDict):
     choice2: str
     question: str
     label: int
+
+
+class PosExample(TypedDict):
+    """A single part-of-speech tagging example: one sentence.
+
+    Attributes:
+        id: Sentence identifier, `"<document uid>:s<sentence index>"`.
+        words: The sentence's words in reading order.
+        tags: One UPOS tag per word, parallel to `words`.
+    """
+
+    id: str
+    words: list[str]
+    tags: list[str]

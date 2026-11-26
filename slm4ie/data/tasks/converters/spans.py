@@ -27,6 +27,7 @@ from slm4ie.data.tasks.run import (
     iter_extracted_records,
     label_allow_set,
     register_converter,
+    split_key_of,
     synthesize_id,
 )
 
@@ -167,8 +168,7 @@ class SpansConverter(TaskConverter):
             example = _record_to_example(record, index, label_allow, dropped_labels)
             if example is None:
                 continue
-            split_key = entry.split_on.split_of(record.get("metadata") or {}) if entry.split_on else example["id"]
-            yield split_key, dict(example)
+            yield split_key_of(entry, record.get("metadata") or {}, example["id"]), dict(example)
 
         # warn once about dropped labels
         if dropped_labels:

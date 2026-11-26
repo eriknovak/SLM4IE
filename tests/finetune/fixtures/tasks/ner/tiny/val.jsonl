@@ -1,0 +1,3 @@
+{"id": "tiny:0", "text": "Janez Novak živi v Ljubljani in dela pri podjetju Krka. Vsak dan se vozi z vlakom.", "spans": [{"start": 0, "end": 11, "label": "PER"}, {"start": 19, "end": 28, "label": "LOC"}, {"start": 50, "end": 54, "label": "ORG"}]}
+{"id": "tiny:1", "text": "Maja Kovač je obiskala Maribor.", "spans": [{"start": 0, "end": 10, "label": "PER"}, {"start": 23, "end": 30, "label": "LOC"}]}
+{"id": "tiny:2", "text": "Podjetje Petrol ima sedež v Ljubljani.", "spans": [{"start": 9, "end": 15, "label": "ORG"}, {"start": 28, "end": 37, "label": "LOC"}]}

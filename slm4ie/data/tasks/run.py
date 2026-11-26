@@ -26,7 +26,8 @@ the population is spread across the remaining eval splits (`val`/`test` split
 ~50/50 when `train` is absent) rather than collapsing the whole train bucket
 into one split; for source-policy families (SuperGLUE) the `train.jsonl` source
 file is simply never read. Held-out eval uses the labeled `val` split, so
-`train` -- not the blind, unlabeled `test` set -- is the split dropped.
+`train` -- not the blind, unlabeled `test` set -- is the split dropped. A
+`finetune_only` entry keeps every declared split, as `finetune_and_eval` does.
 """
 
 from __future__ import annotations
@@ -386,7 +387,8 @@ def target_splits(entry: TaskEntry) -> list[str]:
     """Return the split names to write for `entry`, applying the role gate.
 
     A `held_out` entry never writes a `train` split; every other declared split
-    is kept. `finetune_and_eval` entries keep every declared split.
+    is kept. `finetune_and_eval` and `finetune_only` entries keep every
+    declared split.
 
     Args:
         entry: The task entry.
@@ -419,6 +421,28 @@ def assign_hash_split(key: str, targets: list[str]) -> str:
     if SPLIT_TRAIN in targets:
         return hash_split(key, targets)
     return hash_split(key, targets, train_pct=0, val_pct=_HELD_OUT_VAL_PCT)
+
+
+def split_key_of(entry: TaskEntry, metadata: dict[str, Any], doc_key: str) -> str:
+    """Return the split key a converter yields for one document.
+
+    Without a `split_on` rule the document's stable id is returned, and the run
+    loop hashes it into a split. With one, the rule's split is returned; a
+    document whose value falls to a list-valued `otherwise` is hash-split
+    across the listed splits by its id.
+
+    Args:
+        entry: The task entry.
+        metadata: The document's metadata, read by the entry's `split_on`.
+        doc_key: The document's stable id.
+
+    Returns:
+        The stable id to hash, or the split name when the entry sets `split_on`.
+    """
+    if entry.split_on is None:
+        return doc_key
+    split = entry.split_on.split_of(metadata)
+    return split if isinstance(split, str) else assign_hash_split(doc_key, list(split))
 
 
 def convert_entry(
