@@ -8,7 +8,7 @@ base_commit: cb2bf3b
 status: concluded
 kind: measured
 ticket: "#70"
-pr:
+pr: https://github.com/eriknovak/SLM4IE/pull/71
 mlflow: http://localhost:5000/#/experiments/2
 builds_on: []
 varies: [encoder-transformers/modernbert]
