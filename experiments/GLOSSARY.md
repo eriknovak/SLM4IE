@@ -188,6 +188,9 @@ The repository's own vocabulary — tier, stage, entry, slug, backend and the re
 
 ## Other
 
+- **ModernBERT**: an encoder from AnswerDotAI (2024) with rotary positions, alternating local and global attention and unpadded batches; its base size has 22 layers and is trained with masked-token prediction at a 30% masking rate.
+- **SloBERTa**: a RoBERTa-style encoder pretrained on Slovene text by CJVT; the strongest existing Slovene-only encoder the project compares against.
+- **RTX PRO 6000** (NVIDIA, RTX): NVIDIA's Blackwell-generation workstation GPU with 96 GB of memory; the ModernBERT pilot trained on two of them.
 - **Warmup**: the first stretch of training, where the learning rate rises from zero to its peak, here over 2 billion tokens.
 - **Learning-rate decay** (decay): the last stretch of training, where the learning rate falls to zero, here linearly over the last 6.7 billion tokens.
 - **Nat**: the unit of a cross-entropy computed with the natural logarithm.

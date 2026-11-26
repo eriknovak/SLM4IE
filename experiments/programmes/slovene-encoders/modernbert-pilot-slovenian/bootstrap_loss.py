@@ -15,7 +15,8 @@ Args:
     --batch-size    Samples per forward pass (default: 64).
 
 Example:
-    cd ~/code/ModernSloBERT && CUDA_VISIBLE_DEVICES=2 uv run --no-sync <record>/bootstrap_loss.py \
+    cd ~/code/ModernSloBERT && CUDA_VISIBLE_DEVICES=2 .venv/bin/python \
+        ~/code/SLM4IE/experiments/programmes/slovene-encoders/modernbert-pilot-slovenian/bootstrap_loss.py \
         --model models/modernbert-base_slm4ie-pretrain_bpe-32000/hf \
         --validation data/corpora/slm4ie-pretrain/bpe-32000/validation
 
@@ -28,14 +29,16 @@ from pathlib import Path
 import numpy as np
 import torch
 from streaming import LocalDataset
-from transformers import AutoTokenizer, DataCollatorForLanguageModeling, ModernBertForMaskedLM
+from transformers import AutoTokenizer, DataCollatorForLanguageModeling, ModernBertForMaskedLM, PreTrainedTokenizerBase
 
 # ===============================
 # Constants
 # ===============================
 
 RECORD_DIR = Path(__file__).resolve().parent
-MASKING_RATE = 0.15
+MASKING_RATE = 0.15  # the evaluation masking rate of the run, eval_loader.dataset.mlm_probability
+IGNORE_INDEX = -100  # the label the HuggingFace collator gives unmasked tokens
+INTERVAL = (2.5, 97.5)  # percentiles of the 95% interval
 SEED = 17
 
 # ===============================
@@ -43,10 +46,27 @@ SEED = 17
 # ===============================
 
 
-def score_samples(model, tokenizer, dataset, batch_size: int, device: str) -> np.ndarray:
-    """Return one row per sample: its masked-token count and summed masked-token cross-entropy."""
+def score_samples(
+    model: ModernBertForMaskedLM,
+    tokenizer: PreTrainedTokenizerBase,
+    dataset: LocalDataset,
+    batch_size: int,
+    device: str,
+) -> np.ndarray:
+    """Score every validation sequence with one fixed mask draw each.
+
+    Args:
+        model: The exported masked language model, in evaluation mode.
+        tokenizer: Its tokenizer, which the collator masks with.
+        dataset: The validation sequences.
+        batch_size: Sequences per forward pass.
+        device: Where the model runs.
+
+    Returns:
+        One row per sequence: its masked-token count and its summed masked-token cross-entropy.
+    """
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=MASKING_RATE)
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-100)
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=IGNORE_INDEX)
     rows = []
     for start in range(0, len(dataset), batch_size):
         samples = [
@@ -57,18 +77,31 @@ def score_samples(model, tokenizer, dataset, batch_size: int, device: str) -> np
         with torch.no_grad():
             logits = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
         losses = loss_fn(logits.transpose(1, 2).float(), batch["labels"])
-        masked = batch["labels"] != -100
+        masked = batch["labels"] != IGNORE_INDEX
         rows.append(torch.stack([masked.sum(dim=1).float(), (losses * masked).sum(dim=1)], dim=1).cpu().numpy())
     return np.concatenate(rows)
 
 
-def bootstrap(per_sample: np.ndarray, resamples: int) -> tuple[float, float, float]:
-    """Return the token-weighted mean loss and its 95% percentile interval over resampled samples."""
-    rng = np.random.default_rng(SEED)
+def bootstrap(per_sample: np.ndarray, resamples: int, seed: int) -> tuple[float, float, float]:
+    """Resample the sequences with replacement and take the token-weighted mean loss of each draw.
+
+    Args:
+        per_sample: The output of `score_samples`.
+        resamples: How many draws.
+        seed: The seed of the draws.
+
+    Returns:
+        The mean loss over all sequences and the 2.5th and 97.5th percentiles of the draws.
+    """
+    rng = np.random.default_rng(seed)
     counts, sums = per_sample[:, 0], per_sample[:, 1]
     draws = rng.integers(0, len(per_sample), size=(resamples, len(per_sample)))
     means = sums[draws].sum(axis=1) / counts[draws].sum(axis=1)
-    return float(sums.sum() / counts.sum()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+    return (
+        float(sums.sum() / counts.sum()),
+        float(np.percentile(means, INTERVAL[0])),
+        float(np.percentile(means, INTERVAL[1])),
+    )
 
 
 # ===============================
@@ -87,6 +120,14 @@ def get_args() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace) -> None:
+    """Score the validation split with the exported model and write both tables.
+
+    Args:
+        args: The parsed arguments.
+
+    Raises:
+        FileNotFoundError: If the model or the validation shards are missing.
+    """
     if not (args.model / "config.json").is_file():
         raise FileNotFoundError(f"no HuggingFace model in {args.model}")
     if not args.validation.is_dir():
@@ -101,7 +142,7 @@ def main(args: argparse.Namespace) -> None:
 
     # score every sample, then bootstrap over samples
     per_sample = score_samples(model, tokenizer, dataset, args.batch_size, device)
-    loss, low, high = bootstrap(per_sample, args.resamples)
+    loss, low, high = bootstrap(per_sample, args.resamples, SEED)
 
     # write both tables
     tables = RECORD_DIR / "tables"
