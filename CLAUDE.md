@@ -249,7 +249,10 @@ positional keys (`<task>/<dataset>` entry keys for the task route) or `--all`.
 entries). Library code is `slm4ie/finetune/`, which needs the `evaluation`
 group. The shared fine-tuning config is `configs/evaluation/finetune.yaml`;
 encoders come from `--encoder` or an experiment dial (`--dial`) merged over it.
-Each encoder, entry, learning rate and seed is one MLflow run.
+Each encoder, entry, learning rate and seed is one MLflow run. The `search`
+subcommand runs a dial's `search` block instead: one Optuna study per encoder
+and entry (grid for ablations, TPE for optimising), picked on val, whose best
+setting is rerun over the seeds and scored on test.
 
 ### Tokenizer-comparison sweep (shared machinery, not a conversion route)
 

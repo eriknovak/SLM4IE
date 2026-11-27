@@ -2,7 +2,9 @@
 
 `finetune` trains the encoder with its family's task head on the entry's train
 split, scores val after every epoch and keeps the weights of the best epoch,
-then scores test with them. It returns the test scores with the costs of the
+then scores test with them. A hyperparameter search instead skips test, so a
+trial never sees it, and watches the val scores of each epoch through a
+callback that may stop the run. It returns the test scores with the costs of the
 run: the parameter count, the peak GPU memory of training and of inference,
 and the wall time of fine-tuning. It logs nothing to MLflow; a caller wraps
 it in a tracked run.
@@ -19,7 +21,7 @@ are on disk.
 import logging
 import math
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,12 +62,13 @@ class FinetuneResult:
     """The scores and costs of one fine-tuning run.
 
     Attributes:
-        scores: Test scores of the best epoch's weights, by name.
+        scores: Test scores of the best epoch's weights, by name; empty when test was skipped.
         val_scores: Val scores of the best epoch, by name.
         best_epoch: The epoch whose weights were kept, counted from 1.
         parameters: Parameters of the model, task head included.
         train_peak_gpu_memory_bytes: Peak GPU memory of training; `None` on a CPU.
-        inference_peak_gpu_memory_bytes: Peak GPU memory of scoring test; `None` on a CPU.
+        inference_peak_gpu_memory_bytes: Peak GPU memory of scoring test; `None` on a CPU
+            or when test was skipped.
         train_seconds: Wall time of training, val scoring included.
     """
 
@@ -84,7 +87,14 @@ class FinetuneResult:
 
 
 def finetune(
-    entry: TaskEntry, encoder: str, settings: FinetuneSettings, roots: TasksRoots, *, device: str | None = None
+    entry: TaskEntry,
+    encoder: str,
+    settings: FinetuneSettings,
+    roots: TasksRoots,
+    *,
+    device: str | None = None,
+    score_test: bool = True,
+    on_epoch: Callable[[int, Mapping[str, float]], None] | None = None,
 ) -> FinetuneResult:
     """Fine-tune an encoder on an entry, keep the best epoch on val and score test.
 
@@ -94,6 +104,9 @@ def finetune(
         settings: The run's settings.
         roots: The task registry roots; the splits are read under `roots.tasks`.
         device: The torch device to train on; the first GPU when one is visible, else the CPU.
+        score_test: Score test with the best epoch's weights; a search trial turns it off.
+        on_epoch: Called after each epoch with the epoch, counted from 1, and its val
+            scores; an exception it raises, such as a pruned trial's, stops the run.
 
     Returns:
         The test scores and the costs of the run.
@@ -132,23 +145,28 @@ def finetune(
     # train, keeping the weights of the best epoch on val
     _reset_peak_memory(device)
     started = time.perf_counter()
-    best_state, best_epoch, val_scores = _train(network, head, features, examples, entry.labels, tokenizer, settings)
+    best_state, best_epoch, val_scores = _train(
+        network, head, features, examples, entry.labels, tokenizer, settings, on_epoch
+    )
     train_seconds = time.perf_counter() - started
     train_peak = _peak_memory(device)
 
-    # score test with the best weights
-    network.load_state_dict(best_state)
-    _reset_peak_memory(device)
-    logits = _predict(network, head, features[SPLIT_TEST], tokenizer.pad_token_id, settings)
-    scores = head.score(examples[SPLIT_TEST], features[SPLIT_TEST], logits, entry.labels)
-    logger.info("entry=%s encoder=%s best_epoch=%d test=%s", entry.key, encoder, best_epoch, scores)
+    # score test with the best weights, unless a search trial skips it
+    scores, inference_peak = {}, None
+    if score_test:
+        network.load_state_dict(best_state)
+        _reset_peak_memory(device)
+        logits = _predict(network, head, features[SPLIT_TEST], tokenizer.pad_token_id, settings)
+        scores = head.score(examples[SPLIT_TEST], features[SPLIT_TEST], logits, entry.labels)
+        inference_peak = _peak_memory(device)
+    logger.info("entry=%s encoder=%s best_epoch=%d val=%s test=%s", entry.key, encoder, best_epoch, val_scores, scores)
     return FinetuneResult(
         scores=scores,
         val_scores=val_scores,
         best_epoch=best_epoch,
         parameters=parameters,
         train_peak_gpu_memory_bytes=train_peak,
-        inference_peak_gpu_memory_bytes=_peak_memory(device),
+        inference_peak_gpu_memory_bytes=inference_peak,
         train_seconds=train_seconds,
     )
 
@@ -210,8 +228,9 @@ def _train(
     labels: Sequence[Any],
     tokenizer: Any,
     settings: FinetuneSettings,
+    on_epoch: Callable[[int, Mapping[str, float]], None] | None,
 ) -> tuple[dict[str, torch.Tensor], int, dict[str, float]]:
-    """Train for every epoch and score val after each.
+    """Train for every epoch, score val after each and pass the scores to `on_epoch`.
 
     Returns:
         The best epoch's weights on the CPU, the epoch counted from 1, and its val scores.
@@ -255,6 +274,8 @@ def _train(
         if not best_state or scores[head.primary_metric] > best_scores[head.primary_metric]:
             best_state = {k: v.detach().to("cpu", copy=True) for k, v in network.state_dict().items()}
             best_epoch, best_scores = epoch, scores
+        if on_epoch is not None:
+            on_epoch(epoch, scores)
     return best_state, best_epoch, best_scores
 
 

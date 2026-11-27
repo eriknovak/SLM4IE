@@ -11,6 +11,9 @@
 #   defaults      The settings of a family with no block under `families`.
 #   families      Per task family (the first segment of an entry key), the
 #                 settings that differ from `defaults`.
+#   search        The hyperparameter search `finetune_encoders.py search` runs,
+#                 or null. A dial names the whole block, since a dial merged
+#                 over a shared space could not drop a key of it.
 #
 # Settings:
 #   epochs                 Passes over train; val is scored after each and the
@@ -27,9 +30,36 @@
 #   warmup_ratio           Share of optimizer steps with a linear warmup.
 #   max_grad_norm          The gradient norm is clipped to this before each step.
 #   precision              bf16 (bfloat16 autocast on a GPU) or fp32.
+#
+# Search (one Optuna study per encoder and entry, picked on val; the best
+# setting is then fine-tuned once per seed and scored on test):
+#   sampler   grid (every combination of the space's lists, an ablation table)
+#             or tpe (Optuna's Tree-structured Parzen Estimator).
+#   trials    Trials of a tpe search; a grid takes none, its size is the count.
+#   seed      Sampler seed (default 0). Trials train with the family's first seed.
+#   pruning   tpe only: stop a trial whose val score after an epoch is below the
+#             median of earlier trials at that epoch (default false).
+#   space     Per searched setting (learning_rate, epochs, batch_size,
+#             gradient_accumulation, max_length, weight_decay, warmup_ratio,
+#             max_grad_norm): a list of values, or for tpe a range
+#             {low, high, log}. A setting outside the space keeps the family's
+#             value, the learning rate the family's first one.
+#
+# Example dial block:
+#   search:
+#     sampler: tpe
+#     trials: 20
+#     pruning: true
+#     space:
+#       learning_rate: {low: 1.0e-5, high: 1.0e-4, log: true}
+#       warmup_ratio: [0.0, 0.06, 0.1]
+#       batch_size: [16, 32]
 
 tasks_config: configs/data/tasks.yaml
 encoders: []
+
+# no search unless a dial names one
+search: null
 
 defaults:
   epochs: 5

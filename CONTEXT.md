@@ -283,6 +283,12 @@ Training a pretrained encoder with a task head on one entry's train split,
 choosing the checkpoint on its val split and scoring it on its test split.
 _Avoid_: downstream training, probing, transfer
 
+**Hyperparameter search**:
+One Optuna study per encoder and entry that picks the fine-tuning settings on
+the val split, by grid or by TPE, and then scores the best setting on the test
+split once per seed. Each attempted setting is a trial.
+_Avoid_: sweep, tuning run, HPO
+
 **Split policy**:
 How a converter's yielded key becomes an output split: hashed across the target
 splits, or kept verbatim from the source.

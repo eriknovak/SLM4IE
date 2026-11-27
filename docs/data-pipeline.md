@@ -342,3 +342,27 @@ uv run --group evaluation python scripts/finetune_encoders.py run pos/ssj500k \
 uv run --group evaluation python scripts/finetune_encoders.py run --all \
     --encoder <name> --experiment slm4ie/<slug> --tag tier=local
 ```
+
+The `search` subcommand runs a hyperparameter search instead, from a `search`
+block that a dial supplies. Each encoder and entry gets one Optuna study: a
+`grid` sampler runs every combination of the listed values, for an ablation
+table, and a `tpe` sampler draws a fixed number of trials with Optuna's
+Tree-structured Parzen Estimator, optionally pruning trials whose per-epoch val
+score falls below the median. Trials train with the family's first seed and are
+picked on val; test is never scored inside a study. The best setting is then
+fine-tuned once per seed and scored on test. The study lives in `--storage` (or
+`$OPTUNA_STORAGE`), so a stopped search resumes. With `--experiment`, each
+study is one MLflow parent run with a child run per trial and per final seed;
+the parent logs the best setting and the final seeds' mean and standard
+deviation of each test score.
+
+```bash
+# Print the planned studies and trials without training
+uv run --group evaluation python scripts/finetune_encoders.py search pos/ssj500k \
+    --encoder EMBEDDIA/sloberta --dial <dial>.yaml --dry-run
+
+# Run them, stored for resumption
+uv run --group evaluation python scripts/finetune_encoders.py search pos/ssj500k \
+    --encoder EMBEDDIA/sloberta --dial <dial>.yaml --storage sqlite:////abs/path/optuna.db \
+    --experiment slm4ie/<slug> --tag tier=local
+```

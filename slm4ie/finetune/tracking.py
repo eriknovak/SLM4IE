@@ -52,6 +52,7 @@ def track_finetune(
     tags: Mapping[str, str],
     *,
     device: str | None = None,
+    nested: bool = False,
 ) -> FinetuneResult:
     """Fine-tune one planned run inside its own MLflow run and log its settings, scores and costs.
 
@@ -62,6 +63,7 @@ def track_finetune(
         tags: Extra MLflow tags; `tier` is required when tracking, and any tag
             here overrides the default tag of the same name.
         device: The torch device to train on; `finetune` picks one when `None`.
+        nested: Open the run as a child of the active run, as a search's final seeds are.
 
     Returns:
         The result of `finetune`.
@@ -85,7 +87,7 @@ def track_finetune(
         "base_commit": ml.git_commit() or UNKNOWN_GIT,
         **tags,
     }
-    with ml.mlflow_run(run_name(planned), enabled=tracking, tags=run_tags):
+    with ml.mlflow_run(run_name(planned), enabled=tracking, nested=nested, tags=run_tags):
         ml.log_params(
             {
                 "encoder": planned.encoder,
