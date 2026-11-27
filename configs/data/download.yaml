@@ -495,9 +495,28 @@ datasets:
     note: >
       Slovene news sentiment corpus with three-level annotations (sentence,
       paragraph, document) and 3-class labels (negative/neutral/positive).
-      ~10K documents from Slovenian news outlets. Tab-separated text files,
-      directly downloadable (no API rehydration needed). License: CC BY-SA 4.0.
-      Convert to evaluation JSONL with `prepare_datasets.py tasks`.
+      10,427 articles from Slovenian news portals. Tab-separated text files
+      with a header row, extracted by the `tsv` extractor from the
+      document-level file only. License: CC BY-SA 4.0.
+
+  parlasent:
+    enabled: true
+    role: benchmark
+    source: http
+    publisher: clarin.si
+    name: "ParlaSent 1.0 (Slovenian file)"
+    urls:
+      - "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1868/ParlaSent_SL.jsonl?sequence=7&isAllowed=y"
+    output_dir: parlasent
+    overlaps: [siparl, parlamint_si]
+    tasks:
+      - SA
+    note: >
+      Slovenian part of the multilingual ParlaSent 1.0 (11356/1868, 2023-09-18):
+      2,600 parliament sentences with a 3-class sentiment label (Neutral 1,409,
+      Negative 1,010, Positive 181). JSONL; md5 1117ec542bd1812681a2fff7f0eae1e2.
+      The sentences come from Slovenian parliament transcripts, so they recur
+      in siparl and parlamint_si. License: CC BY-SA 4.0.
 
   sloleks:
     enabled: true

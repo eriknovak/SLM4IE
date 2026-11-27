@@ -219,6 +219,13 @@ class TestJsonlExtractor:
         docs = _extract(tmp_path, records)
         assert docs[0].doc_id == "42"
 
+    def test_positional_doc_id_when_id_field_missing(self, tmp_path: Path) -> None:
+        """A record without the id field gets `<unit>:<line ordinal>`, unique per line."""
+        records = [{"text": "Prvi."}, {"text": "Drugi.", "doc_id": "d2"}, {"text": "Tretji."}]
+        docs = _extract(tmp_path, records)
+        assert [d.doc_id for d in docs] == ["test:00000000", "d2", "test:00000002"]
+        assert docs[0].native_id is None
+
     def test_registered_as_jsonl(self) -> None:
         """JsonlExtractor is registered under the 'jsonl' key."""
         from slm4ie.data.extract.extractors import get_extractor

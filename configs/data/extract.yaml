@@ -22,7 +22,7 @@
 #   include      Optional; shell globs matched against each input file's path
 #                under raw/<key>/ (`*` also crosses `/`). Keeps only matching
 #                files; file-based extractors only (conllu, tei, text, macocu, json,
-#                slavicner).
+#                slavicner, tsv).
 #                Use it when a source ships the same documents twice (layers,
 #                corrected/original versions), since doc_id must be unique
 #                within a dataset (CONTEXT.md, "Document id").
@@ -37,15 +37,17 @@
 #   extractors   jsonl (line-delimited JSON), json (single doc/array), text
 #     (plain text), conllu (CoNLL-U columns), tei (TEI XML, parliamentary/academic),
 #     macocu (MaCoCu monolingual XML), coleslaw (COLESLAW legal), huggingface
-#     (locally cached HF dataset), slavicner (SlavicNER text + offset TSV pairs).
+#     (locally cached HF dataset), slavicner (SlavicNER text + offset TSV pairs),
+#     tsv (tab-separated rows with a header, one document per row).
 #     Registry lives in slm4ie/data/extract/extractors/.
 #   metadata     (a) conllu/tei extractors: per-document metadata loaded from an
 #     external TSV — keys path, key_column, key_from ("filename_stem" only),
 #     key_pattern (regex, group 1 = key), fields ({tsv_column: metadata_field}),
 #     splits ({tsv_column: separator} to explode list columns into JSON arrays).
-#     (b) jsonl extractor: field-mapping knobs — text_field (default "text"),
-#     id_field (default "doc_id"), metadata_fields (whitelist; default every
-#     non-structural field).
+#     (b) jsonl, json and tsv extractors: field-mapping knobs — text_field
+#     (default "text"), id_field (default "doc_id"; in jsonl and tsv a record
+#     without it gets the positional id <unit>:<ordinal>), metadata_fields
+#     (whitelist; default every non-structural field).
 #     (c) conllu extractor: sentence_documents (list of `# newdoc id` values
 #     whose sentences are unrelated) yields one document per sentence, keyed by
 #     its `# sent_id`.
@@ -260,3 +262,24 @@ datasets:
     role: benchmark
     # Slovene part only; the extractor pairs each text with its ner/ offsets.
     include: ["*/raw/*/sl/*.txt"]
+
+  sentinews:
+    extractor: tsv
+    domain: news
+    role: benchmark
+    # Document level only: the paragraph and sentence files repeat each article.
+    include: ["SentiNews_document-level.txt"]
+    metadata:
+      text_field: content
+      id_field: nid
+      metadata_fields: [title, main_url, date, sentiment, avg_sentiment, sd_sentiment]
+
+  parlasent:
+    # `(document_id, sentence_id)` repeats across the release's splits, so the
+    # sentences take positional ids.
+    extractor: jsonl
+    domain: parliamentary
+    role: benchmark
+    metadata:
+      text_field: sentence
+      metadata_fields: [label, reconciliation, split, document_id, sentence_id, term, date]

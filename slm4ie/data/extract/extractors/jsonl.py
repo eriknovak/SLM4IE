@@ -54,7 +54,10 @@ Example:
                      text are skipped).
         source:      provided by caller.
         domain:      provided by caller.
-        doc_id:      record[id_field] if present (str-coerced).
+        doc_id:      record[id_field] if present (str-coerced), else
+                     the positional id `<unit>:<ordinal>` (the file's
+                     path under the dataset dir without its suffix,
+                     then the 0-based line number).
         metadata:    the configured metadata_fields, or every other
                      field except the text field, the id field,
                      paragraphs, and conll; None values are dropped.
@@ -75,7 +78,7 @@ from pathlib import Path
 from typing import Any
 
 from slm4ie.data.extract.extractors import BaseExtractor, register_extractor
-from slm4ie.data.extract.extractors.assembly import probe_doc_id, project_metadata
+from slm4ie.data.extract.extractors.assembly import positional_doc_id, probe_doc_id, project_metadata, relative_unit
 from slm4ie.data.schema import Annotations, Document, Token
 
 # ===============================
@@ -197,7 +200,8 @@ class JsonlExtractor(BaseExtractor):
         # parse every file in sorted order
         files: list[Path] = sorted(input_dir.rglob("*.jsonl"))
         for filepath in files:
-            yield from self._parse_file(filepath, source, domain, text_field, id_field, metadata_fields)
+            unit = relative_unit(filepath, input_dir)
+            yield from self._parse_file(filepath, unit, source, domain, text_field, id_field, metadata_fields)
 
     # =================================
     # Private methods
@@ -206,6 +210,7 @@ class JsonlExtractor(BaseExtractor):
     def _parse_file(
         self,
         filepath: Path,
+        unit: str,
         source: str,
         domain: str,
         text_field: str,
@@ -216,10 +221,12 @@ class JsonlExtractor(BaseExtractor):
 
         Args:
             filepath: Path to the JSONL file.
+            unit: The file's unit name for positional ids.
             source: Dataset key.
             domain: Domain label.
             text_field: Record field copied into `text`.
-            id_field: Record field kept as `doc_id`.
+            id_field: Record field kept as `doc_id`; a record without it
+                gets the positional id `<unit>:<line ordinal>`.
             metadata_fields: Explicit whitelist of record fields to keep as
                 metadata, or None to keep every field except the text
                 field, the id field, and the structural fields.
@@ -252,7 +259,8 @@ class JsonlExtractor(BaseExtractor):
                     continue
 
                 # build the document parts
-                doc_id = probe_doc_id(record, [id_field])
+                native_id = probe_doc_id(record, [id_field])
+                doc_id = native_id if native_id is not None else positional_doc_id(unit, lineno - 1)
 
                 paragraphs = record.get("paragraphs")
                 annotations: Annotations | None = None
@@ -270,7 +278,7 @@ class JsonlExtractor(BaseExtractor):
                     source=source,
                     domain=domain,
                     doc_id=doc_id,
-                    native_id=doc_id,
+                    native_id=native_id,
                     metadata=doc_metadata,
                     annotations=annotations,
                 )

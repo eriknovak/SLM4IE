@@ -26,6 +26,7 @@ import slm4ie.data.extract.extractors.macocu  # noqa: F401
 import slm4ie.data.extract.extractors.slavicner  # noqa: F401
 import slm4ie.data.extract.extractors.tei  # noqa: F401
 import slm4ie.data.extract.extractors.text  # noqa: F401
+import slm4ie.data.extract.extractors.tsv  # noqa: F401
 from slm4ie.data.archives import extract_archive
 from slm4ie.data.extract.config import load_extract_config
 from slm4ie.data.extract.extractors import BaseExtractor, FileBasedExtractor, get_extractor
