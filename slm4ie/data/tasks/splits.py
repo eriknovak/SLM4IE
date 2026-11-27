@@ -13,6 +13,7 @@ import gzip
 import hashlib
 import json
 import logging
+import os
 from collections.abc import Iterable, Iterator
 from contextlib import ExitStack
 from pathlib import Path
@@ -27,6 +28,9 @@ logger = logging.getLogger(__name__)
 # ===============================
 # Constants
 # ===============================
+
+#: Suffix of a split file while it is being written.
+PARTIAL_SUFFIX: str = ".partial"
 
 #: Standard split names recognized by the task pipeline.
 SPLIT_TRAIN: str = "train"
@@ -156,6 +160,10 @@ def write_jsonl_splits(
 ) -> dict[str, int]:
     """Stream `(split, example)` pairs to per-split gzipped JSONL files.
 
+    Each file is written to a `.partial` sibling and moved into place only
+    after every split is complete, so a failure leaves no new final file
+    and every existing one untouched.
+
     Args:
         examples: Iterable of `(split_name, example_dict)` tuples.
             Pairs whose split is absent from *outputs* are dropped
@@ -166,26 +174,42 @@ def write_jsonl_splits(
         Mapping `{split_name: written_count}` covering every split
         in *outputs*; values default to `0` when no example landed
         there.
+
+    Raises:
+        BaseException: Any error raised by *examples* or by a write,
+            including `OSError`, re-raised unchanged after the partial
+            files are removed. An `OSError` from the final renames
+            propagates as is.
     """
-    # write each example to its split stream
+    # write each example to its partial stream
+    partials = {split: path.with_name(path.name + PARTIAL_SUFFIX) for split, path in outputs.items()}
     counts: dict[str, int] = {split: 0 for split in outputs}
     warned: set = set()
-    with ExitStack() as stack:
-        streams = _open_split_streams(outputs, stack)
-        for split, example in examples:
-            stream = streams.get(split)
-            if stream is None:
-                if split not in warned:
-                    logger.warning(
-                        "Dropping example for undeclared split %r (known: %s).",
-                        split,
-                        sorted(outputs.keys()),
-                    )
-                    warned.add(split)
-                continue
-            stream.write(json.dumps(example, ensure_ascii=False))
-            stream.write("\n")
-            counts[split] += 1
+    try:
+        with ExitStack() as stack:
+            streams = _open_split_streams(partials, stack)
+            for split, example in examples:
+                stream = streams.get(split)
+                if stream is None:
+                    if split not in warned:
+                        logger.warning(
+                            "Dropping example for undeclared split %r (known: %s).",
+                            split,
+                            sorted(outputs.keys()),
+                        )
+                        warned.add(split)
+                    continue
+                stream.write(json.dumps(example, ensure_ascii=False))
+                stream.write("\n")
+                counts[split] += 1
+    except BaseException:
+        for partial in partials.values():
+            partial.unlink(missing_ok=True)
+        raise
+
+    # move the finished files into place
+    for split, partial in partials.items():
+        os.replace(partial, outputs[split])
     return counts
 
 

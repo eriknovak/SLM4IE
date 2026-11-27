@@ -9,6 +9,7 @@ dropped.
 import gzip
 import json
 import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -27,6 +28,7 @@ from slm4ie.data.tasks.run import (
     target_splits,
 )
 from slm4ie.data.tasks.config import load_tasks_config
+from slm4ie.data.tasks.converters.spans import SpansConverter
 
 
 def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
@@ -345,6 +347,70 @@ class TestRoleGatingAcceptance:
         convert_tasks(cfg, entry_keys=["ner/kzb"], max_workers=1)
         out = tmp_path / "tasks" / "ner" / "kzb"
         assert all(_count_rows(out / f"{s}.jsonl.gz") > 0 for s in ("train", "val", "test"))
+
+
+class TestFailingEntry:
+    """A converter that raises mid-stream leaves no partial split files behind."""
+
+    @staticmethod
+    def _fail_after(monkeypatch: pytest.MonkeyPatch, n_examples: int) -> None:
+        """Make the spans converter raise after yielding *n_examples* examples.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            n_examples: Number of examples yielded before the error.
+        """
+        real = SpansConverter.iter_examples
+
+        def failing(self: Any, entry: Any, roots: Any, ctx: Any, splits: Any) -> Iterator[tuple[str, dict[str, Any]]]:
+            """Yield some real examples, then raise."""
+            for i, pair in enumerate(real(self, entry, roots, ctx, splits)):
+                if i >= n_examples:
+                    break
+                yield pair
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(SpansConverter, "iter_examples", failing)
+
+    def test_failure_leaves_no_split_file_and_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A first build that fails writes no split file and lists the entry as failed."""
+        cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(30))
+        self._fail_after(monkeypatch, 10)
+
+        summary = convert_tasks(cfg_path, entry_keys=["ner/kzb"], max_workers=1)
+
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
+        assert summary.failed == ["ner/kzb"]
+        assert not out_dir.exists() or list(out_dir.iterdir()) == []
+
+    def test_failed_force_rebuild_keeps_earlier_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failed `force` rebuild leaves the earlier split files byte-identical."""
+        cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(30))
+        convert_tasks(cfg_path, entry_keys=["ner/kzb"], max_workers=1)
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
+        before = {p.name: p.read_bytes() for p in out_dir.iterdir()}
+        self._fail_after(monkeypatch, 10)
+
+        summary = convert_tasks(cfg_path, entry_keys=["ner/kzb"], force=True, max_workers=1)
+
+        assert summary.failed == ["ner/kzb"]
+        assert {p.name: p.read_bytes() for p in out_dir.iterdir()} == before
+
+    def test_rerun_after_failure_converts_the_entry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A rerun without `force` converts the entry instead of skipping it."""
+        cfg_path = _make_ner_layout(tmp_path, "kzb", "finetune_and_eval", _ner_records(30))
+        with monkeypatch.context() as patch:
+            self._fail_after(patch, 10)
+            convert_tasks(cfg_path, entry_keys=["ner/kzb"], max_workers=1)
+
+        summary = convert_tasks(cfg_path, entry_keys=["ner/kzb"], max_workers=1)
+
+        out_dir = tmp_path / "tasks" / "ner" / "kzb"
+        assert summary.skipped == []
+        assert summary.records == {"ner/kzb": 30}
+        assert sum(_count_rows(out_dir / f"{s}.jsonl.gz") for s in ("train", "val", "test")) == 30
 
 
 def test_converters_declare_split_policy() -> None:
