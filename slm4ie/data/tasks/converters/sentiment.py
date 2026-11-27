@@ -5,13 +5,16 @@ Turns SA datasets into `SentimentExample` rows:
     {"id": "<source>:<doc_id>", "text": "<...>", "label": "negative"}
 
 Only `kind: extracted` sources are read, from `<roots.extracted>/<key>.jsonl`
-(SentiNews); any other source kind is refused.
+(SentiNews, ParlaSent); any other source kind is refused. A record whose
+label maps to no canonical class is dropped, and the drops are counted and
+logged per entry.
 
 The split policy is HASH: the run loop buckets each record by a deterministic hash
 of its stable id. A single-split entry (e.g. a held-out `test`-only dataset)
 therefore lands entirely in that one split without any special-casing here.
 """
 
+import logging
 from collections.abc import Iterator
 from typing import Any
 
@@ -26,6 +29,12 @@ from slm4ie.data.tasks.run import (
     register_converter,
     synthesize_id,
 )
+
+# ===============================
+# Logging
+# ===============================
+
+logger = logging.getLogger(__name__)
 
 # ===============================
 # Defaults
@@ -91,6 +100,7 @@ def _iter_extracted(
     """
     # convert the extracted records
     index = 0
+    dropped = 0
     for record in iter_extracted_records(entry, roots):
         raw_label = (
             record.get("label")
@@ -100,6 +110,7 @@ def _iter_extracted(
         )
         label = normalize_label(raw_label, allow)
         if label is None:
+            dropped += 1
             continue
         example_id = synthesize_id(record, entry.dataset, index)
         example: SentimentExample = SentimentExample(
@@ -109,6 +120,10 @@ def _iter_extracted(
         )
         index += 1
         yield example_id, example
+
+    # report the dropped records
+    if dropped:
+        logger.warning("%s: dropped %d record(s) whose label maps to no canonical class", entry.key, dropped)
 
 
 # ===============================

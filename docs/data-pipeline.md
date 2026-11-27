@@ -230,6 +230,11 @@ uv run python scripts/prepare_datasets.py extract --all \
     --output-dir /vault/data/SLM4IE/extracted
 ```
 
+Line-delimited JSON (`jsonl`) and tab-separated files with a header row (`tsv`)
+map their fields through the entry's `metadata:` knobs: `text_field`,
+`id_field` and a `metadata_fields` whitelist. A record without the id field
+gets the positional id `<unit>:<ordinal>` (CONTEXT.md, "Document id").
+
 For annotated corpora (CoNLL-U, TEI with `<w>`, CLASSLA-web JSONL, COLESLAW),
 extraction writes two files per dataset under `extracted/`:
 
@@ -296,6 +301,21 @@ and tag counts differ is refused and counted.
 `ner/suk`, `ner/janes_tag` and `ner/slavicner` are `finetune_only` and take the
 standard 70/15/15 hash split (`slavicner` as above). The SuperGLUE entries switch
 roles after #53.
+
+The `sentiment` family has two entries, both read through `extracted/`:
+
+| Entry | Role | Source | Train | Val | Test |
+| --- | --- | --- | ---: | ---: | ---: |
+| `sentiment/sentinews` | `finetune_and_eval` | SentiNews 1.0, one example per news article | 7,261 | 1,576 | 1,579 |
+| `sentiment/parlasent` | `finetune_only` | ParlaSent 1.0, Slovenian parliament sentences | 1,825 | 403 | 372 |
+
+Both take the standard 70/15/15 hash split. SentiNews uses its document-level
+file only, so one article's sentences never fall in different splits; ten
+article pairs repeat their text under two ids, and the entry's
+`exclude_doc_ids` drops the later id of each pair (and both ids of the one pair
+whose labels disagree). ParlaSent ignores the release's own split, whose
+validation part holds 13 positive sentences. Its sentences take positional ids,
+since the release repeats `(document_id, sentence_id)` across its splits.
 
 The registry has no Twitter sentiment entry. The Twitter sentiment corpus of 15
 European languages ([CLARIN.SI 11356/1054](https://www.clarin.si/repository/xmlui/handle/11356/1054))
@@ -384,7 +404,7 @@ uv run python scripts/prepare_datasets.py tasks --all
 
 # A subset, named by entry key
 uv run python scripts/prepare_datasets.py tasks ner/ssj500k ner/suk
-uv run python scripts/prepare_datasets.py tasks sentiment/sentinews
+uv run python scripts/prepare_datasets.py tasks sentiment/sentinews sentiment/parlasent
 uv run python scripts/prepare_datasets.py tasks nli/cb nli/rte
 
 # SuperGLUE-SL reads the HumanT variant by default

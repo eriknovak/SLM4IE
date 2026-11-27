@@ -159,7 +159,22 @@ entries:
 
   sentiment/sentinews:
     role: finetune_and_eval
-    source: { kind: extracted, keys: [sentinews] }
+    # ten article pairs share their text under two ids, so a twin could sit in
+    # another split: drop the later id of each pair, and both of 192/351, whose
+    # labels disagree (positive, neutral)
+    source:
+      kind: extracted
+      keys: [sentinews]
+      exclude_doc_ids: ["192", "351", "349", "1780", "1481", "3459", "7188", "8731", "9069", "9516", "10175"]
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    labels: [negative, neutral, positive]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  sentiment/parlasent:
+    role: finetune_only
+    source: { kind: extracted, keys: [parlasent] }
     splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [negative, neutral, positive]
     suite: null

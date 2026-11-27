@@ -101,6 +101,11 @@ topic and sentiment metadata in the cross-country ParlaMint format, not new or
 corrected text, so the newer-release preference does not apply. Name
 `parlamint_si` positionally to curate it alone.
 
+ParlaSent's sentences come from the same transcripts: 8 of 15 sampled six-word
+runs recur verbatim in both `siparl` and `parlamint_si`, so `parlasent` overlaps
+both. It is a benchmark, so the pretraining selection skips it by role, and no
+task pairs it with either corpus.
+
 **mC4.** Legal-mC4's filter script reads the `train` split of `mc4`, now an
 alias of `allenai/c4`; every one of its URLs and sampled sentences recurs in
 `c4`, its validation file included. `c4` is the representative and
@@ -213,6 +218,8 @@ measured figures read "`a` in `b` / `b` in `a`". Every pair not listed is
 | `metafida` | overlaps | `gigafida` | [metaFida 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1775) |
 | `suk` | contains | `ssj500k` | [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959) |
 | `suk` | overlaps | `sentinews` | [SentiCoref 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1285) |
+| `parlasent` | overlaps | `siparl` | sampled: 8 of 15 six-word runs recur |
+| `parlasent` | overlaps | `parlamint_si` | sampled: 8 of 15 six-word runs recur |
 | `sloleks` | overlaps | `sloleks_relations` | [word relations](https://www.clarin.si/repository/xmlui/handle/11356/1986) |
 
 ### Measured overlap
@@ -289,17 +296,18 @@ datasets.
 | [SUK 1.1](https://www.clarin.si/repository/xmlui/handle/11356/1959)           | CLARIN.SI | POS, LEMMA, DEP, NER, SRL, COREF, WSD, SA | ~1M tokens / 881K words / 2,913 texts manually annotated with MULTEXT-East V6, JOS, and Universal Dependencies. Integrates ssj500k 2.3, Ambiga, ElexisWSD, and SentiCoref subcorpora. License: CC BY-SA 4.0.                                                                                                     |
 | [ssj500k 2.3](https://www.clarin.si/repository/xmlui/handle/11356/1434)       | CLARIN.SI | POS, LEMMA, DEP, NER, SRL                 | ~500K tokens manually annotated with MSD tags, lemmas, UD syntax (UD 2.8), named entities, and semantic role labels. Foundation corpus for SUK 1.1. License: CC BY-NC-SA 4.0.                                                                                                                                    |
 | [Slovene SuperGLUE](https://www.clarin.si/repository/xmlui/handle/11356/1380) | CLARIN.SI | QA, NLI, WSD, COREF, MRC                  | Slovene translation of SuperGLUE (BoolQ, CB, COPA, MultiRC, ReCoRD, RTE, WiC, WSC). Mix of human and Google MT translation. License: CC BY 4.0. Convert to per-task evaluation files with `prepare_datasets.py tasks`.                                                                                           |
-| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `prepare_datasets.py tasks`.                                                                                              |
+| [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels; 10,427 articles. Tab-separated files, read by the `tsv` extractor from the document-level file. License: CC BY-SA 4.0.                                                                                   |
+| [ParlaSent 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1868)     | CLARIN.SI | SA                                        | Slovenian file of the multilingual parliament sentiment set: 2,600 sentences with 3-class labels (1,409 neutral, 1,010 negative, 181 positive). JSONL. License: CC BY-SA 4.0.                                                                                                                                    |
 | [Sloleks 3.1](https://www.clarin.si/repository/xmlui/handle/11356/2080)       | CLARIN.SI | TOKENIZER                                 | Slovenian inflectional lexicon (lemmas + word forms with MULTEXT-East V6 / JOS MSDs). **Tokenizer / morphology evaluation only** — intentionally absent from `extract.yaml`, never enters the pretraining corpus. Distributed as TEI XML. License: CC BY-SA 4.0. Convert with `prepare_datasets.py tokenization`. |
 
-Task roles: `ner/suk`, `ner/janes_tag` and `ner/slavicner` are `finetune_only`
-(train, val and test, never in a zero-shot training mix); `pos/ssj500k`, `pos/suk`
-and `pos/janes_tag` copy the role of the NER entry on the same source. The Twitter
-sentiment corpus of 15 European languages (CLARIN.SI 11356/1054, CC BY-SA 4.0) is
-not used: its Slovenian file holds 112,832 tweet ids with labels and no texts. See
-[Task datasets](data-pipeline.md#task-datasets). Every entry
-with train, val and test is a target of per-entry fine-tuning: an encoder is
-trained on its train split, picked on val and scored on test; see
+Task roles: `ner/suk`, `ner/janes_tag`, `ner/slavicner` and `sentiment/parlasent`
+are `finetune_only` (train, val and test, never in a zero-shot training mix);
+`pos/ssj500k`, `pos/suk` and `pos/janes_tag` copy the role of the NER entry on the
+same source. The Twitter sentiment corpus of 15 European languages (CLARIN.SI
+11356/1054, CC BY-SA 4.0) is not used: its Slovenian file holds 112,832 tweet ids
+with labels and no texts. See [Task datasets](data-pipeline.md#task-datasets).
+Every entry with train, val and test is a target of per-entry fine-tuning: an
+encoder is trained on its train split, picked on val and scored on test; see
 [Per-entry fine-tuning](data-pipeline.md#per-entry-fine-tuning).
 
 ### Task abbreviations

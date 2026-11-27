@@ -144,6 +144,38 @@ class TestConvertExtracted:
         assert set(sample.keys()) == {"id", "text", "label"}
         assert sample["label"] in {"negative", "neutral", "positive"}
 
+    def test_parlasent_shaped_records_fill_every_split_with_lowercase_labels(self, tmp_path: Path) -> None:
+        """Capitalised `metadata.label` values and positional ids convert into all three splits."""
+        records = [
+            {
+                "text": f"Poslanec je rekel stavek {i}.",
+                "source": "parlasent",
+                "domain": "parliamentary",
+                "doc_id": f"ParlaSent_SL:{i}",
+                "metadata": {"label": ["Neutral", "Negative", "Positive"][i % 3], "split": "train"},
+            }
+            for i in range(60)
+        ]
+        config_path = _make_extracted_layout(tmp_path, "parlasent", records)
+        convert_tasks(config_path, entry_keys=["sentiment/parlasent"], max_workers=1)
+
+        out_dir = tmp_path / "tasks" / "sentiment" / "parlasent"
+        splits = {split: _read_jsonl_gz(out_dir / f"{split}.jsonl.gz") for split in ("train", "val", "test")}
+        assert all(splits.values())
+        assert {row["label"] for rows in splits.values() for row in rows} == {"negative", "neutral", "positive"}
+
+    def test_unmapped_labels_are_dropped_and_counted(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        """A record whose label maps to no class is left out, and the run log counts it."""
+        records = [
+            {"text": "Dobro.", "source": "s", "doc_id": "a", "metadata": {"label": "Positive"}},
+            {"text": "Mešano.", "source": "s", "doc_id": "b", "metadata": {"label": "Mixed"}},
+        ]
+        config_path = _make_extracted_layout(tmp_path, "s", records)
+        with caplog.at_level("WARNING"):
+            summary = convert_tasks(config_path, entry_keys=["sentiment/s"], max_workers=1)
+        assert summary.failed == []
+        assert "sentiment/s: dropped 1 record(s)" in caplog.text
+
 
 class TestRejectRaw:
     """The sentiment family reads extracted sources only."""
