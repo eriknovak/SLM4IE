@@ -22,8 +22,11 @@
 #   eval_batch_size        Examples per forward pass on val and test.
 #   gradient_accumulation  Forward passes per optimizer step; raise it and lower
 #                          batch_size to fit a large encoder in 16 GB.
-#   max_length             Most tokens per input. Token tagging (ner, pos) cuts a
-#                          longer input into windows; classification truncates.
+#   max_length             Most tokens per input. Token tagging (ner, pos,
+#                          keyphrase) cuts a longer input into windows, and
+#                          extractive_qa into overlapping windows; relation and
+#                          entity_sentiment crop the text around the marked
+#                          mentions; the other classification heads truncate.
 #   learning_rates         The learning-rate grid, one run per value.
 #   seeds                  One run per seed for every learning rate.
 #   weight_decay           AdamW weight decay on weight matrices.
@@ -74,7 +77,7 @@ defaults:
   max_grad_norm: 1.0
   precision: bf16
 
-# ner takes the defaults
+# ner, relation, keyphrase and topic take the defaults
 families:
   pos:
     batch_size: 32
@@ -94,3 +97,12 @@ families:
   commonsense:
     epochs: 10
     max_length: 128
+  # a passage with its question and one choice per pair
+  reading_mc:
+    max_length: 512
+  # news documents with the target entity's mentions marked
+  entity_sentiment:
+    max_length: 512
+  # a question with its context; a longer context is cut into overlapping windows
+  extractive_qa:
+    max_length: 512

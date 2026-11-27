@@ -22,11 +22,13 @@ from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 # Constants
 # ===============================
 
-_KEY_PATTERN = re.compile(r"^[a-z]+/[a-z0-9_]+$")
+_KEY_PATTERN = re.compile(r"^[a-z_]+/[a-z0-9_]+$")
 _VALID_ROLES = {"finetune_and_eval", "held_out", "finetune_only"}
 # roles kept out of every zero-shot training mix
 _ISOLATED_ROLES = {"held_out", "finetune_only"}
 _VALID_KINDS = {"extracted", "raw"}
+# task families whose records carry no closed label set; every other family must declare `labels`
+LABEL_FREE_FAMILIES = frozenset({"extractive_qa", "keyphrase"})
 # converters that read an entry's `split_on`
 _SPLIT_ON_CONVERTERS = {"spans", "pos"}
 
@@ -128,8 +130,8 @@ class TaskEntry:
         source: Source descriptor.
         splits: Mapping from split name (`"train"` / `"val"` /
             `"test"`) to the output filename for that split.
-        labels: Optional list of label values for the task. `None`
-            when the task family does not need a closed label set.
+        labels: List of label values for the task. `None` only for a family in
+            `LABEL_FREE_FAMILIES`, which has no closed label set.
         suite: Optional benchmark suite name (e.g.
             `"superglue_sl"`).
         language: ISO language code (e.g. `"sl"`).
@@ -390,12 +392,12 @@ def _parse_entry(key: Any, value: Any, converter_defaults: dict[str, str]) -> Ta
         Parsed `TaskEntry`.
 
     Raises:
-        ValueError: On any structural violation.
+        ValueError: On any structural violation, or a labelled family without `labels`.
         KeyError: If no converter can be resolved for the entry.
     """
     if not isinstance(key, str) or not _KEY_PATTERN.match(key):
         raise ValueError(
-            f"Entry key {key!r} must match '<task>/<dataset>' (lowercase task, lowercase/digit/underscore dataset)."
+            f"Entry key {key!r} must match '<task>/<dataset>' (lowercase/underscore task, lowercase/digit/underscore dataset)."
         )
     if not isinstance(value, dict):
         raise ValueError(f"Entry {key!r} body must be a mapping.")
@@ -410,6 +412,11 @@ def _parse_entry(key: Any, value: Any, converter_defaults: dict[str, str]) -> Ta
     source = _parse_source(key, value.get("source"))
     splits = _parse_splits(key, value.get("splits"))
     labels = _parse_labels(key, value.get("labels"))
+    if not labels and task not in LABEL_FREE_FAMILIES:
+        raise ValueError(
+            f"Entry {key!r} needs `labels`: task family {task!r} is labelled "
+            f"(label-free families: {sorted(LABEL_FREE_FAMILIES)})."
+        )
 
     # validate suite, language and license
     if "suite" not in value:

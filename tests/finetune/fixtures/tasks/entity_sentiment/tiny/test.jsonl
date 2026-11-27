@@ -1,0 +1,3 @@
+{"id": "tiny:9", "text": "Telekom je izboljšal storitve.", "mentions": [{"start": 0, "end": 7}], "entity_label": "ORG", "label": "positive"}
+{"id": "tiny:10", "text": "Peter je bil kaznovan.", "mentions": [{"start": 0, "end": 5}], "entity_label": "PER", "label": "negative"}
+{"id": "tiny:11", "text": "NLB je odprla novo poslovalnico.", "mentions": [{"start": 0, "end": 3}], "entity_label": "ORG", "label": "neutral"}

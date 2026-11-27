@@ -38,7 +38,8 @@
 #                hash-split across by document id). For a source with a
 #                published split; `spans` and `pos` converters only.
 #   splits       Split name -> output filename.
-#   labels       Label set for the task.
+#   labels       Label set for the task; required except for the label-free
+#                families `extractive_qa` and `keyphrase`.
 #   suite        Parent benchmark suite, or null.
 #   language     ISO language code.
 #   license      Dataset license identifier.
@@ -75,6 +76,13 @@ converters:
   coref: superglue
   wsd: superglue
   commonsense: superglue
+  # converters not built yet; the loader does not resolve a name until a run
+  relation: relation
+  entity_sentiment: entity_sentiment
+  extractive_qa: extractive_qa
+  keyphrase: keyphrase
+  reading_mc: reading_mc
+  topic: topic
 
 # Per <task>/<dataset> entries. The key IS the directory under tasks/.
 entries:

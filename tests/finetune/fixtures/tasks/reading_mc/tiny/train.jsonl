@@ -1,0 +1,6 @@
+{"id": "tiny:0", "passage": "Ana je zjutraj spila kavo in odšla v službo z avtobusom.", "question": "Kako je Ana šla v službo?", "choices": ["Z avtobusom.", "Peš.", "Z avtom."], "label": 0}
+{"id": "tiny:1", "passage": "Marko je v soboto obiskal babico, ki živi na vasi.", "question": "Kdaj je Marko obiskal babico?", "choices": ["V petek.", "V nedeljo.", "V soboto.", "V ponedeljek."], "label": 2}
+{"id": "tiny:2", "passage": "Pes je lajal, ker je pred vrati stal poštar.", "question": "Zakaj je pes lajal?", "choices": ["Bil je lačen.", "Pred vrati je stal poštar."], "label": 1}
+{"id": "tiny:3", "passage": "Jabolka so zrela jeseni, ko jih kmetje oberejo.", "question": "Kdaj so jabolka zrela?", "choices": ["Spomladi.", "Poleti.", "Jeseni.", "Pozimi."], "label": 2}
+{"id": "tiny:4", "passage": "Luka je knjigo prebral v treh dneh.", "question": "Koliko časa je Luka bral knjigo?", "choices": ["Tri dni.", "En teden.", "En dan."], "label": 0}
+{"id": "tiny:5", "passage": "Reka je po dežju prestopila bregove.", "question": "Kaj se je zgodilo z reko?", "choices": ["Presahnila je.", "Zamrznila je.", "Prestopila je bregove.", "Nič."], "label": 2}

@@ -1,10 +1,12 @@
 """The task-head interface and its registry.
 
 A head turns one task family's examples into model inputs, builds the matching
-HuggingFace model class on an encoder, and turns the model's logits back into
-the family's scores. One head serves one or more families; each family is a
-registration, so a new family is a new `register_head` call rather than a new
-script.
+HuggingFace model class on an encoder, and decodes the model's logits into the
+family's prediction shape. Its scores are the family's scorer from
+`slm4ie.evaluation.scoring` applied to those predictions, so a fine-tuned
+head is scored exactly as any other approach's predictions are. One head
+serves one or more families; each family is a registration, so a new family
+is a new `register_head` call rather than a new script.
 """
 
 import abc
@@ -13,6 +15,8 @@ from typing import Any, ClassVar
 
 import numpy as np
 import torch
+
+from slm4ie.evaluation.scoring import Scorer
 
 # ===============================
 # Constants
@@ -31,15 +35,17 @@ Feature = dict[str, Any]
 
 
 class TaskHead(abc.ABC):
-    """Encodes one task family's examples, builds its model and scores its logits.
+    """Encodes one task family's examples, builds its model and decodes its logits into predictions.
 
     Attributes:
         model_class: The HuggingFace auto class whose `from_pretrained` builds the model.
         primary_metric: The score that picks the best checkpoint on val, one of the keys `score` returns.
+        scorer: The family's scorer, `(examples, predictions) -> scores`, held as a `staticmethod`.
     """
 
     model_class: ClassVar[Any]
     primary_metric: ClassVar[str]
+    scorer: ClassVar[Scorer]
 
     def output_names(self, labels: Sequence[Any]) -> list[str]:
         """Return the name of each model output, in output order.
@@ -90,6 +96,25 @@ class TaskHead(abc.ABC):
         """
 
     @abc.abstractmethod
+    def decode(
+        self,
+        examples: Sequence[Mapping[str, Any]],
+        features: Sequence[Feature],
+        logits: Sequence[np.ndarray],
+        labels: Sequence[Any],
+    ) -> list[Any]:
+        """Turn the model's logits into one prediction per example, in the family's prediction shape.
+
+        Args:
+            examples: The examples the features were encoded from.
+            features: The features, in `encode` order.
+            logits: The model's logits, one array per feature, padded along the token axis.
+            labels: The entry's label values.
+
+        Returns:
+            One prediction per example, in example order, as the family's scorer reads it.
+        """
+
     def score(
         self,
         examples: Sequence[Mapping[str, Any]],
@@ -97,7 +122,7 @@ class TaskHead(abc.ABC):
         logits: Sequence[np.ndarray],
         labels: Sequence[Any],
     ) -> dict[str, float]:
-        """Score the model's logits against the examples' gold labels.
+        """Decode the model's logits and score the predictions with the family's scorer.
 
         Args:
             examples: The examples the features were encoded from.
@@ -108,6 +133,31 @@ class TaskHead(abc.ABC):
         Returns:
             Scores by name, `primary_metric` among them.
         """
+        return self.scorer(examples, self.decode(examples, features, logits, labels))
+
+    def loss(self, network: torch.nn.Module, batch: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """Return the training loss of one collated batch, the model's own loss by default.
+
+        Args:
+            network: The model `load_model` built.
+            batch: A batch from `collate`, its `labels` included.
+
+        Returns:
+            The batch's mean loss, a scalar tensor.
+        """
+        return network(**batch).loss
+
+    def forward_logits(self, network: torch.nn.Module, inputs: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """Return the model's logits for a batch of model inputs, the model's own `logits` by default.
+
+        Args:
+            network: The model `load_model` built.
+            inputs: The model inputs of a batch from `collate`, without its labels.
+
+        Returns:
+            The logits, one row per feature, as `decode` reads them.
+        """
+        return network(**inputs).logits
 
     def collate(self, features: Sequence[Feature], pad_id: int) -> dict[str, torch.Tensor]:
         """Pad a batch of features into tensors the model reads, `labels` included.
@@ -189,6 +239,19 @@ def label_index(labels: Sequence[Any], value: Any, example_id: Any) -> int:
     if value not in labels:
         raise ValueError(f"example {example_id!r} has label {value!r}, not among the entry's labels {list(labels)}")
     return list(labels).index(value)
+
+
+def model_inputs(encoded: Mapping[str, Any], row: int | None = None) -> Feature:
+    """Pick the model inputs out of a tokenizer's output.
+
+    Args:
+        encoded: The tokenizer's output.
+        row: The row to take from a batched output, or `None` to take every value whole.
+
+    Returns:
+        The values of the `MODEL_INPUTS` keys the output has.
+    """
+    return {key: encoded[key] if row is None else encoded[key][row] for key in MODEL_INPUTS if key in encoded}
 
 
 # ===============================

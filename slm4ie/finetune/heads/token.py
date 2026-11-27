@@ -1,16 +1,23 @@
-"""Token-classification heads: span tagging for `ner` and word tagging for `pos`.
+"""Token-classification heads: span tagging for `ner` and `keyphrase`, word tagging for `pos`.
 
-Both heads work on character offsets. A NER example's text and a POS example's
-words joined by spaces are tokenized with their offsets and cut into windows of
-at most `max_length` tokens, so a long document is tagged whole. Each token is
-then matched to the gold span or word its characters fall in.
+Every head works on character offsets. A NER or keyphrase example's text and
+a POS example's words joined by spaces are tokenized with their offsets and
+cut into windows of at most `max_length` tokens, so a long document is tagged
+whole. Each token is then matched to the gold span or word its characters
+fall in.
 
 NER tags every token in BIO form (B-X opens a span of label X, I-X continues
-it, O is outside), and predicted tags turn back into character spans scored by
-strict span F1. POS tags only the first token of each word, and the tag
-predicted there is the word's tag, scored by token accuracy.
+it, O is outside), and predicted tags decode back into character spans scored
+by `score_spans`. POS tags only the first token of each word, and the tag
+predicted there decodes to the word's tag, scored by `score_tags`.
+
+Keyphrase tagging is NER tagging with one tag type over every occurrence of a
+gold keyphrase; its decoded phrases are ranked by mean tag probability and
+scored by `score_keyphrases`.
 """
 
+import math
+import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -18,8 +25,8 @@ from typing import Any
 import numpy as np
 from transformers import AutoModelForTokenClassification
 
-from slm4ie.evaluation.scoring import Counts, macro_f1, score_document, token_accuracy
-from slm4ie.finetune.heads.base import IGNORE_INDEX, MODEL_INPUTS, Feature, TaskHead, label_index, register_head
+from slm4ie.evaluation.scoring import normalise_text, score_keyphrases, score_spans, score_tags
+from slm4ie.finetune.heads.base import IGNORE_INDEX, Feature, TaskHead, label_index, model_inputs, register_head
 
 # ===============================
 # Constants
@@ -27,6 +34,8 @@ from slm4ie.finetune.heads.base import IGNORE_INDEX, MODEL_INPUTS, Feature, Task
 
 OUTSIDE = "O"
 NO_OWNER = -1
+# the one tag type of the keyphrase head
+KEYPHRASE_LABEL = "KEY"
 
 # ===============================
 # Heads
@@ -38,6 +47,7 @@ class SpanTaggingHead(TaskHead):
 
     model_class = AutoModelForTokenClassification
     primary_metric = "span_f1"
+    scorer = staticmethod(score_spans)
 
     def output_names(self, labels: Sequence[Any]) -> list[str]:
         """Return O, then B- and I- of every entity label.
@@ -95,14 +105,14 @@ class SpanTaggingHead(TaskHead):
             features.append({**window, "labels": tags})
         return features
 
-    def score(
+    def decode(
         self,
         examples: Sequence[Mapping[str, Any]],
         features: Sequence[Feature],
         logits: Sequence[np.ndarray],
         labels: Sequence[Any],
-    ) -> dict[str, float]:
-        """Turn predicted BIO tags into spans and score them by strict span F1.
+    ) -> list[list[dict[str, Any]]]:
+        """Turn predicted BIO tags into character spans of each document.
 
         An I-X tag after a token outside a span of label X opens a new span. A
         span open at the end of a window continues into the next window of the
@@ -115,45 +125,93 @@ class SpanTaggingHead(TaskHead):
             labels: The entry's entity labels.
 
         Returns:
-            `span_f1`, `span_relaxed_f1` and `span_partial_f1`, the micro F1
-            pooled over documents under the strict, relaxed and partial-overlap
-            match rules, and `span_macro_f1`, the strict F1 averaged over labels.
+            One list of `{"start", "end", "label"}` spans per document, empty
+            for a document with no window or no predicted span.
         """
-        # decode each window's tags into character spans of its document
-        names = self.output_names(labels)
-        predicted, current = defaultdict(list), {}
-        for feature, row in zip(features, logits):
-            index = feature["example"]
-            for tag, offset in zip(row[: len(feature["input_ids"])].argmax(-1), feature["offsets"]):
-                name = names[int(tag)]
-                if offset is None:
-                    continue
-                if name == OUTSIDE:
-                    current[index] = None
-                    continue
-                prefix, label = name.split("-", 1)
-                span = current.get(index)
-                if prefix == "I" and span is not None and span["label"] == label:
-                    span["end"] = offset[1]
-                    continue
-                start, text = offset[0], examples[index]["text"]
-                # some tokenizers count the space before a word into its token
-                while start < offset[1] and text[start].isspace():
-                    start += 1
-                current[index] = {"start": start, "end": offset[1], "label": label}
-                predicted[index].append(current[index])
+        decoded = _decode_bio(examples, features, logits, self.output_names(labels))
+        return [[span for span, _ in spans] for spans in decoded]
 
-        # score every document, windowless ones included
-        scores = [score_document(predicted[index], example["spans"]) for index, example in enumerate(examples)]
-        strict = sum((score.strict for score in scores), Counts())
-        relaxed = sum((score.relaxed for score in scores), Counts())
-        partial = sum((score.partial for score in scores), Counts())
-        return {
-            "span_f1": strict.f1,
-            "span_relaxed_f1": relaxed.f1,
-            "span_partial_f1": partial.f1,
-            "span_macro_f1": macro_f1(scores),
-        }
+
+class KeyphraseHead(SpanTaggingHead):
+    """Tags keyphrase occurrences in BIO form with one tag type and ranks the phrases it finds.
+
+    The family is label-free: the head tags one fixed type and reads no label set.
+    """
+
+    primary_metric = "f1_at_m"
+    scorer = staticmethod(score_keyphrases)
+
+    def output_names(self, labels: Sequence[Any] | None) -> list[str]:
+        """Return O and the B- and I- tags of the one keyphrase type.
+
+        Args:
+            labels: The entry's label values; unused.
+
+        Returns:
+            The BIO tag names.
+        """
+        return super().output_names([KEYPHRASE_LABEL])
+
+    def encode(
+        self, examples: Sequence[Mapping[str, Any]], tokenizer: Any, labels: Sequence[Any] | None, max_length: int
+    ) -> list[Feature]:
+        """Tag every occurrence of each gold keyphrase in its text, then window and tag as NER does.
+
+        An occurrence is a case-insensitive match on whole words; where two
+        overlap, the longer keyphrase keeps its occurrence.
+
+        Args:
+            examples: Keyphrase examples, each `{"id", "text", "keyphrases"}`.
+            tokenizer: A fast HuggingFace tokenizer.
+            labels: The entry's label values; unused.
+            max_length: Most tokens per window.
+
+        Returns:
+            One feature per window.
+        """
+        tagged = [
+            {
+                "id": example["id"],
+                "text": example["text"],
+                "spans": _occurrences(example["text"], example["keyphrases"]),
+            }
+            for example in examples
+        ]
+        return super().encode(tagged, tokenizer, [KEYPHRASE_LABEL], max_length)
+
+    def decode(
+        self,
+        examples: Sequence[Mapping[str, Any]],
+        features: Sequence[Feature],
+        logits: Sequence[np.ndarray],
+        labels: Sequence[Any] | None,
+    ) -> list[list[str]]:
+        """Rank each document's tagged phrases by their mean tag probability.
+
+        A phrase's score is the mean probability of the tag predicted at each
+        of its tokens. Phrases equal after the scorer's `normalise_text`
+        merge, keeping the best-scored surface form and score; a phrase with
+        no word left after it is dropped.
+
+        Args:
+            examples: Keyphrase examples.
+            features: The windows, in `encode` order.
+            logits: One array of per-token logits per window.
+            labels: The entry's label values; unused.
+
+        Returns:
+            One list of keyphrases per document, best first.
+        """
+        ranked = []
+        for example, spans in zip(examples, _decode_bio(examples, features, logits, self.output_names(labels))):
+            scores, surfaces = {}, {}
+            for span, probabilities in spans:
+                phrase = example["text"][span["start"] : span["end"]]
+                key, score = normalise_text(phrase), float(np.mean(probabilities))
+                if key and score > scores.get(key, -math.inf):
+                    scores[key], surfaces[key] = score, phrase
+            ranked.append([surfaces[key] for key in sorted(scores, key=scores.get, reverse=True)])
+        return ranked
 
 
 class WordTaggingHead(TaskHead):
@@ -161,6 +219,7 @@ class WordTaggingHead(TaskHead):
 
     model_class = AutoModelForTokenClassification
     primary_metric = "token_accuracy"
+    scorer = staticmethod(score_tags)
 
     def encode(
         self, examples: Sequence[Mapping[str, Any]], tokenizer: Any, labels: Sequence[Any], max_length: int
@@ -207,16 +266,14 @@ class WordTaggingHead(TaskHead):
             features.append({**window, "labels": tags, "first_tokens": first_tokens})
         return features
 
-    def score(
+    def decode(
         self,
         examples: Sequence[Mapping[str, Any]],
         features: Sequence[Feature],
         logits: Sequence[np.ndarray],
         labels: Sequence[Any],
-    ) -> dict[str, float]:
-        """Read each word's tag off its first token and score by token accuracy.
-
-        A word with no token of its own is never right.
+    ) -> list[list[Any]]:
+        """Read each word's tag off its first token.
 
         Args:
             examples: POS examples.
@@ -225,13 +282,14 @@ class WordTaggingHead(TaskHead):
             labels: The entry's tags.
 
         Returns:
-            `token_accuracy`, pooled over every word of every sentence.
+            One tag per word of each sentence; `None` for a word with no token
+            of its own, which the scorer counts as wrong.
         """
         predicted = [[None] * len(example["words"]) for example in examples]
         for feature, row in zip(features, logits):
             for position, word in feature["first_tokens"]:
                 predicted[feature["example"]][word] = labels[int(row[position].argmax())]
-        return {"token_accuracy": token_accuracy(predicted, [example["tags"] for example in examples])}
+        return predicted
 
 
 # ===============================
@@ -257,10 +315,63 @@ def _tokenize_windows(tokenizer: Any, texts: list[str], max_length: int) -> list
     for index in range(len(encoded["input_ids"])):
         sequence_ids = encoded.sequence_ids(index)
         offsets = [None if seq is None else tuple(o) for o, seq in zip(encoded["offset_mapping"][index], sequence_ids)]
-        window = {key: encoded[key][index] for key in MODEL_INPUTS if key in encoded}
+        window = model_inputs(encoded, index)
         window.update(example=encoded["overflow_to_sample_mapping"][index], offsets=offsets)
         windows.append(window)
     return windows
+
+
+def _decode_bio(
+    examples: Sequence[Mapping[str, Any]],
+    features: Sequence[Feature],
+    logits: Sequence[np.ndarray],
+    names: list[str],
+) -> list[list[tuple[dict[str, Any], list[float]]]]:
+    """Decode predicted BIO tags into character spans, each with its tokens' tag probabilities.
+
+    Returns one list per document of `({"start", "end", "label"}, probabilities)`
+    pairs, where `probabilities` holds the softmax probability of the tag
+    predicted at each token of the span.
+    """
+    predicted, current = defaultdict(list), {}
+    for feature, row in zip(features, logits):
+        index, tokens = feature["example"], row[: len(feature["input_ids"])]
+        probabilities = np.exp(tokens - tokens.max(-1, keepdims=True))
+        probabilities = (probabilities / probabilities.sum(-1, keepdims=True)).max(-1)
+        for tag, probability, offset in zip(tokens.argmax(-1), probabilities, feature["offsets"]):
+            name = names[int(tag)]
+            if offset is None:
+                continue
+            if name == OUTSIDE:
+                current[index] = None
+                continue
+            prefix, label = name.split("-", 1)
+            span = current.get(index)
+            if prefix == "I" and span is not None and span[0]["label"] == label:
+                span[0]["end"] = offset[1]
+                span[1].append(float(probability))
+                continue
+            start, text = offset[0], examples[index]["text"]
+            # some tokenizers count the space before a word into its token
+            while start < offset[1] and text[start].isspace():
+                start += 1
+            current[index] = ({"start": start, "end": offset[1], "label": label}, [float(probability)])
+            predicted[index].append(current[index])
+
+    # one span list per document, windowless ones included
+    return [predicted[index] for index in range(len(examples))]
+
+
+def _occurrences(text: str, phrases: Sequence[str]) -> list[dict[str, Any]]:
+    """Find the non-overlapping whole-word occurrences of phrases in a text, longer phrases first."""
+    taken = []
+    for phrase in sorted(
+        {phrase.strip() for phrase in phrases if phrase.strip()}, key=lambda phrase: (-len(phrase), phrase)
+    ):
+        for match in re.finditer(rf"(?<!\w){re.escape(phrase)}(?!\w)", text, flags=re.IGNORECASE):
+            if all(match.end() <= start or end <= match.start() for start, end in taken):
+                taken.append(match.span())
+    return [{"start": start, "end": end, "label": KEYPHRASE_LABEL} for start, end in sorted(taken)]
 
 
 def _owners(length: int, ranges: list[tuple[int, int]]) -> list[int]:
@@ -282,3 +393,4 @@ def _token_owner(owners: list[int], offset: tuple[int, int]) -> int:
 
 register_head("ner", SpanTaggingHead())
 register_head("pos", WordTaggingHead())
+register_head("keyphrase", KeyphraseHead())

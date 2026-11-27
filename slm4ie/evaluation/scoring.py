@@ -1,4 +1,17 @@
-"""Scores for the task registry: span F1 for NER, token accuracy, accuracy and macro F1.
+"""Scores for the task registry: spans, tags, labels, choices, relations, answer strings and keyphrases.
+
+Each task family has one public scorer, found by `scorer_for(family)`, that
+takes the examples of one split and one prediction per example, aligned by
+position, and returns named scores in [0, 1]. Any approach (a fine-tuned head,
+a zero-shot backend) is scored the same way once it answers in the family's
+prediction shape: a span list (`score_spans`), a tag list (`score_tags`), a
+label (`score_labels`), a choice index (`score_choices`), a relation list
+(`score_relations`), an answer string (`score_extractive_qa`) or a ranked
+keyphrase list (`score_keyphrases`).
+
+Answer strings and keyphrases are compared after one normalisation,
+`normalise_text`, as the SQuAD 2.0 script does it but without its English article removal: lowercase,
+drop every Unicode punctuation and symbol character, collapse whitespace.
 
 Token accuracy scores part-of-speech tagging, pooled over every word of every
 sentence. Accuracy and per-class macro F1 score the classification families.
@@ -27,9 +40,13 @@ replacement, since spans in one document are not independent; the paired
 variant redraws the same documents for two systems and keeps the difference.
 """
 
-from collections import defaultdict
+import functools
+import inspect
+import unicodedata
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from numbers import Integral
 from typing import Any
 
 import numpy as np
@@ -42,6 +59,9 @@ N_RESAMPLES = 10_000
 SEED = 0
 CONFIDENCE = 0.95
 RESAMPLE_CHUNK = 1_000
+
+# ranks cut off for keyphrase F1@k, beside F1@M over every prediction
+KEYPHRASE_CUTOFFS = (5, 10)
 
 # ===============================
 # Result types
@@ -276,7 +296,7 @@ def accuracy(predicted: Sequence[Any], gold: Sequence[Any]) -> float:
     Raises:
         ValueError: If the two sequences differ in length.
     """
-    _check_same_length(predicted, gold)
+    _check_aligned(gold, predicted)
     return sum(a == b for a, b in zip(predicted, gold)) / len(gold) if gold else 0.0
 
 
@@ -295,7 +315,7 @@ def classification_macro_f1(predicted: Sequence[Any], gold: Sequence[Any]) -> fl
     Raises:
         ValueError: If the two sequences differ in length.
     """
-    _check_same_length(predicted, gold)
+    _check_aligned(gold, predicted)
     classes = set(predicted) | set(gold)
     scores = [
         _f1(
@@ -306,6 +326,320 @@ def classification_macro_f1(predicted: Sequence[Any], gold: Sequence[Any]) -> fl
         for label in classes
     ]
     return sum(scores) / len(scores) if scores else 0.0
+
+
+# ===============================
+# Text normalisation
+# ===============================
+
+
+def normalise_text(text: str) -> str:
+    """Normalise an answer string or keyphrase the way the QA and keyphrase scorers compare them.
+
+    Args:
+        text: The string.
+
+    Returns:
+        The string lowercased, without Unicode punctuation and symbol
+        characters, its whitespace collapsed to single spaces.
+    """
+    kept = "".join(char for char in text.lower() if unicodedata.category(char)[0] not in "PS")
+    return " ".join(kept.split())
+
+
+# ===============================
+# Family scorers
+# ===============================
+
+Scorer = Callable[..., dict[str, float]]
+
+
+def score_spans(examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any]) -> dict[str, float]:
+    """Score one span list per example against its gold spans (`ner`).
+
+    Args:
+        examples: NER examples, each with an `id` and gold `spans`.
+        predictions: One list of `{"start": int, "end": int, "label": str}` spans per example.
+
+    Returns:
+        `span_f1`, `span_relaxed_f1` and `span_partial_f1`, the micro F1 pooled
+        over examples under the strict, relaxed and partial-overlap match
+        rules, and `span_macro_f1`, the strict F1 averaged over labels.
+
+    Raises:
+        ValueError: If the counts differ, or a prediction is missing or not a span list.
+    """
+    _check_aligned(examples, predictions)
+    scores = []
+    for example, spans in zip(examples, predictions):
+        if not _is_list(spans) or not all(_is_span(item) for item in spans):
+            raise ValueError(f"example {example['id']!r} has prediction {spans!r}, not a list of spans")
+        scores.append(score_document(spans, example["spans"]))
+
+    return {
+        "span_f1": sum((score.strict for score in scores), Counts()).f1,
+        "span_relaxed_f1": sum((score.relaxed for score in scores), Counts()).f1,
+        "span_partial_f1": sum((score.partial for score in scores), Counts()).f1,
+        "span_macro_f1": macro_f1(scores),
+    }
+
+
+def score_tags(examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any]) -> dict[str, float]:
+    """Score one tag list per example, one tag per word (`pos`).
+
+    A word tagged `None`, one the model gave no tag, is never right.
+
+    Args:
+        examples: POS examples, each with an `id` and gold `tags`.
+        predictions: One list of tags per example, as long as its `tags`.
+
+    Returns:
+        `token_accuracy`, pooled over every word of every example.
+
+    Raises:
+        ValueError: If the counts differ, or a prediction is missing or not one tag per word.
+    """
+    _check_aligned(examples, predictions)
+    for example, tags in zip(examples, predictions):
+        if not _is_list(tags) or len(tags) != len(example["tags"]):
+            raise ValueError(
+                f"example {example['id']!r} has prediction {tags!r}, not a list of {len(example['tags'])} tags"
+            )
+    return {"token_accuracy": token_accuracy(predictions, [example["tags"] for example in examples])}
+
+
+def score_labels(examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any]) -> dict[str, float]:
+    """Score one label per example (the classification families).
+
+    Args:
+        examples: Examples, each with an `id` and a gold `label`.
+        predictions: One label per example, a string, boolean or integer.
+
+    Returns:
+        `accuracy` and `macro_f1` over the labels.
+
+    Raises:
+        ValueError: If the counts differ, or a prediction is missing or not a single label.
+    """
+    _check_aligned(examples, predictions)
+    for example, label in zip(examples, predictions):
+        if not isinstance(label, str | Integral):
+            raise ValueError(f"example {example['id']!r} has prediction {label!r}, not a single label")
+    gold = [example["label"] for example in examples]
+    return {"accuracy": accuracy(predictions, gold), "macro_f1": classification_macro_f1(predictions, gold)}
+
+
+def score_choices(examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any]) -> dict[str, float]:
+    """Score one choice index per example (`commonsense`, `reading_mc`).
+
+    An example's choices are its `choices` list, or else its `choice1`,
+    `choice2`, ... fields.
+
+    Args:
+        examples: Examples, each with an `id`, its choices and the gold choice index as `label`.
+        predictions: One choice index per example.
+
+    Returns:
+        `accuracy` and `macro_f1` over the choice indices.
+
+    Raises:
+        ValueError: If the counts differ, or a prediction is missing or not an index among its choices.
+    """
+    _check_aligned(examples, predictions)
+    predicted = []
+    for example, index in zip(examples, predictions):
+        n_choices = (
+            len(example["choices"]) if "choices" in example else sum(key.startswith("choice") for key in example)
+        )
+        if isinstance(index, bool) or not isinstance(index, Integral) or not 0 <= int(index) < n_choices:
+            raise ValueError(f"example {example['id']!r} has prediction {index!r}, not one of {n_choices} choices")
+        predicted.append(int(index))
+    gold = [int(example["label"]) for example in examples]
+    return {"accuracy": accuracy(predicted, gold), "macro_f1": classification_macro_f1(predicted, gold)}
+
+
+def score_relations(
+    examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any], *, gold_entities: bool
+) -> dict[str, float]:
+    """Score one relation list per example against its gold relations (`relation`).
+
+    A predicted relation is strictly right when its head span, tail span (each
+    start, end and entity label) and relation label all equal a gold
+    relation's. A relation repeated in one prediction counts once.
+
+    Args:
+        examples: Relation examples, each with an `id`, gold `entities` and gold `relations`.
+        predictions: One list of `{"head": span, "tail": span, "label": str}`
+            relations per example, each span `{"start": int, "end": int, "label": str}`.
+        gold_entities: True when the approach labels pairs of the gold mentions,
+            so every predicted span must be a gold mention of its example;
+            False when it finds the mentions itself (end to end).
+
+    Returns:
+        `relation_f1`, the strict micro F1 pooled over examples, and
+        `relation_macro_f1`, the strict F1 averaged over relation labels. End to
+        end adds `relation_boundary_f1`, which ignores the entity labels.
+
+    Raises:
+        ValueError: If the counts differ, a prediction is missing or not a
+            relation list, or, with gold entities, a predicted span is no gold
+            mention of its example.
+    """
+    _check_aligned(examples, predictions)
+    strict, boundary, by_label = Counts(), Counts(), defaultdict(Counts)
+    for example, relations in zip(examples, predictions):
+        # check the prediction's shape and, with gold entities, its spans
+        if not _is_list(relations) or not all(_is_relation(item) for item in relations):
+            raise ValueError(f"example {example['id']!r} has prediction {relations!r}, not a list of relations")
+        mentions = {mention["id"]: _as_tuple(mention) for mention in example["entities"]}
+        if gold_entities:
+            _check_gold_arguments(example["id"], relations, set(mentions.values()))
+
+        # count strict, boundary and per-label matches
+        predicted = {(_as_tuple(item["head"]), _as_tuple(item["tail"]), item["label"]) for item in relations}
+        gold = {(mentions[link["head"]], mentions[link["tail"]], link["label"]) for link in example["relations"]}
+        strict += _set_counts(predicted, gold)
+        boundary += _set_counts({_unlabelled(r) for r in predicted}, {_unlabelled(r) for r in gold})
+        for label in {r[2] for r in predicted | gold}:
+            by_label[label] += _set_counts({r for r in predicted if r[2] == label}, {r for r in gold if r[2] == label})
+
+    scores = {
+        "relation_f1": strict.f1,
+        "relation_macro_f1": _mean([counts.f1 for counts in by_label.values()]),
+    }
+    if not gold_entities:
+        scores["relation_boundary_f1"] = boundary.f1
+    return scores
+
+
+def score_extractive_qa(examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any]) -> dict[str, float]:
+    """Score one answer string per example as SQuAD 2.0 does (`extractive_qa`).
+
+    Each answer scores exact match and token-overlap F1 against its
+    best-matching gold answer, after normalisation. An unanswerable question,
+    one with no gold answer, scores 1 only for the empty answer. A kind of
+    question absent from the split scores 0 on its split keys, as `accuracy`
+    does on no examples, so every key is always present and in [0, 1].
+
+    Args:
+        examples: Extractive QA examples, each with an `id` and gold `answers`.
+        predictions: One answer string per example; the empty string means no answer.
+
+    Returns:
+        `exact_match` and `f1` averaged over examples, and the same two scores
+        over the answerable questions (`has_answer_exact_match`,
+        `has_answer_f1`) and the unanswerable ones (`no_answer_exact_match`,
+        `no_answer_f1`).
+
+    Raises:
+        ValueError: If the counts differ, or a prediction is missing or not a string.
+    """
+    _check_aligned(examples, predictions)
+    exact, overlap, answerable = [], [], []
+    for example, answer in zip(examples, predictions):
+        if not isinstance(answer, str):
+            raise ValueError(f"example {example['id']!r} has prediction {answer!r}, not an answer string")
+        # gold answers with no word left after normalisation are dropped, as in SQuAD 2.0
+        golds = [text for text in (normalise_text(gold["text"]) for gold in example["answers"]) if text] or [""]
+        predicted = normalise_text(answer)
+        exact.append(max(float(predicted == gold) for gold in golds))
+        overlap.append(max(_token_f1(predicted, gold) for gold in golds))
+        answerable.append(bool(example["answers"]))
+
+    scores = {"exact_match": _mean(exact), "f1": _mean(overlap)}
+    for kind, is_answerable in (("has_answer", True), ("no_answer", False)):
+        scores[f"{kind}_exact_match"] = _mean([s for s, a in zip(exact, answerable) if a == is_answerable])
+        scores[f"{kind}_f1"] = _mean([s for s, a in zip(overlap, answerable) if a == is_answerable])
+    return scores
+
+
+def score_keyphrases(examples: Sequence[Mapping[str, Any]], predictions: Sequence[Any]) -> dict[str, float]:
+    """Score one ranked keyphrase list per example (`keyphrase`).
+
+    Predicted and gold keyphrases are normalised, and a keyphrase repeated
+    after normalisation counts once, at its first rank; one with no word left
+    is dropped. F1@k takes the top k predictions and counts missing ranks as
+    wrong (Chan et al., 2019); F1@M takes every prediction. Each is averaged
+    over examples.
+
+    Args:
+        examples: Keyphrase examples, each with an `id`, its `text` and gold `keyphrases`.
+        predictions: One list of keyphrase strings per example, best first.
+
+    Returns:
+        `f1_at_5`, `f1_at_10` and `f1_at_m`, and `gold_in_text`, the share of
+        gold keyphrases, pooled over examples, that occur as whole words of
+        the normalised text: the most a tagging approach can find.
+
+    Raises:
+        ValueError: If the counts differ, or a prediction is missing or not a list of strings.
+    """
+    _check_aligned(examples, predictions)
+    by_cutoff = defaultdict(list)
+    in_text = n_gold = 0
+    for example, phrases in zip(examples, predictions):
+        if not _is_list(phrases) or not all(isinstance(phrase, str) for phrase in phrases):
+            raise ValueError(f"example {example['id']!r} has prediction {phrases!r}, not a list of keyphrases")
+        ranked = _unique_normalised(phrases)
+        gold = set(_unique_normalised(example["keyphrases"]))
+
+        # score the top k and every prediction
+        for cutoff in KEYPHRASE_CUTOFFS:
+            by_cutoff[f"f1_at_{cutoff}"].append(_f1(len(gold.intersection(ranked[:cutoff])), cutoff, len(gold)))
+        by_cutoff["f1_at_m"].append(_f1(len(gold.intersection(ranked)), len(ranked), len(gold)))
+
+        # count gold keyphrases reachable in the text
+        text = f" {normalise_text(example['text'])} "
+        in_text += sum(f" {phrase} " in text for phrase in gold)
+        n_gold += len(gold)
+
+    scores = {key: _mean(values) for key, values in by_cutoff.items()}
+    return scores | {"gold_in_text": in_text / n_gold if n_gold else 0.0}
+
+
+# the scorer of each task family, by the shape its predictions take
+FAMILY_SCORERS: dict[str, Scorer] = {
+    "ner": score_spans,
+    "pos": score_tags,
+    **dict.fromkeys(("sentiment", "nli", "qa", "coref", "wsd", "entity_sentiment", "topic"), score_labels),
+    **dict.fromkeys(("commonsense", "reading_mc"), score_choices),
+    "relation": score_relations,
+    "extractive_qa": score_extractive_qa,
+    "keyphrase": score_keyphrases,
+}
+
+
+def scorer_for(family: str, **options: Any) -> Scorer:
+    """Return the scorer of a task family.
+
+    Args:
+        family: The task family, the first part of a registry key.
+        **options: Keyword arguments bound into the scorer, for a scorer that
+            takes a setting beside the examples and predictions, such as
+            `gold_entities` for `relation`.
+
+    Returns:
+        A function `(examples, predictions) -> dict[str, float]`; the family's
+        scorer itself when no option is given.
+
+    Raises:
+        KeyError: If the family has no scorer.
+        ValueError: If the family's scorer needs a setting that `options` does not give.
+    """
+    if family not in FAMILY_SCORERS:
+        raise KeyError(f"task family '{family}' has no scorer; families with one: {sorted(FAMILY_SCORERS)}")
+    scorer = FAMILY_SCORERS[family]
+
+    # a keyword-only parameter with no default is a setting the caller must give
+    required = [
+        name
+        for name, parameter in inspect.signature(scorer).parameters.items()
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY and parameter.default is inspect.Parameter.empty
+    ]
+    missing = [name for name in required if name not in options]
+    if missing:
+        raise ValueError(f"the scorer of task family '{family}' needs the option(s) {missing}; got {sorted(options)}")
+    return functools.partial(scorer, **options) if options else scorer
 
 
 # ===============================
@@ -396,10 +730,77 @@ def _find_free(text: str, surface: str, origin: int, taken: list[tuple[int, int]
     return start
 
 
-def _check_same_length(predicted: Sequence[Any], gold: Sequence[Any]) -> None:
-    """Raise when predictions and gold labels differ in number."""
-    if len(predicted) != len(gold):
-        raise ValueError(f"{len(predicted)} predictions but {len(gold)} gold labels")
+def _check_aligned(examples: Sequence[Any], predictions: Sequence[Any]) -> None:
+    """Raise when there is not exactly one prediction per example."""
+    if len(predictions) != len(examples):
+        raise ValueError(f"{len(predictions)} predictions for {len(examples)} examples")
+
+
+def _is_list(value: Any) -> bool:
+    """Tell whether a prediction is a sequence of items, not a string or a mapping."""
+    return isinstance(value, Sequence) and not isinstance(value, str | bytes)
+
+
+def _is_span(value: Any) -> bool:
+    """Tell whether a value is a `{"start": int, "end": int, "label": str}` span."""
+    return (
+        isinstance(value, Mapping)
+        and isinstance(value.get("start"), Integral)
+        and isinstance(value.get("end"), Integral)
+        and isinstance(value.get("label"), str)
+    )
+
+
+def _is_relation(value: Any) -> bool:
+    """Tell whether a value is a `{"head": span, "tail": span, "label": str}` relation."""
+    return (
+        isinstance(value, Mapping)
+        and _is_span(value.get("head"))
+        and _is_span(value.get("tail"))
+        and isinstance(value.get("label"), str)
+    )
+
+
+def _check_gold_arguments(
+    example_id: str, relations: Sequence[Mapping[str, Any]], mentions: set[tuple[int, int, str]]
+) -> None:
+    """Raise when a predicted relation argument is no gold mention of its example."""
+    for item in relations:
+        for argument in (item["head"], item["tail"]):
+            if _as_tuple(argument) not in mentions:
+                raise ValueError(
+                    f"example {example_id!r} has predicted span {argument!r}, not one of its gold mentions"
+                )
+
+
+def _unlabelled(relation: tuple[tuple[int, int, str], tuple[int, int, str], str]) -> tuple[int, int, int, int, str]:
+    """Drop the entity labels of a relation tuple, keeping both spans' offsets and the relation label."""
+    (head_start, head_end, _), (tail_start, tail_end, _), label = relation
+    return (head_start, head_end, tail_start, tail_end, label)
+
+
+def _set_counts(predicted: set[Any], gold: set[Any]) -> Counts:
+    """Count exact matches between a predicted and a gold set."""
+    return Counts(len(predicted & gold), len(predicted), len(gold))
+
+
+def _unique_normalised(phrases: Iterable[str]) -> list[str]:
+    """Normalise phrases, keep the first of each, and drop those with no word left."""
+    return [phrase for phrase in dict.fromkeys(normalise_text(p) for p in phrases) if phrase]
+
+
+def _token_f1(predicted: str, gold: str) -> float:
+    """Token-overlap F1 of two normalised strings; 1 when both are empty, 0 when only one is."""
+    predicted_tokens, gold_tokens = predicted.split(), gold.split()
+    if not predicted_tokens or not gold_tokens:
+        return float(predicted_tokens == gold_tokens)
+    common = sum((Counter(predicted_tokens) & Counter(gold_tokens)).values())
+    return _f1(common, len(predicted_tokens), len(gold_tokens))
+
+
+def _mean(values: Sequence[float]) -> float:
+    """Average a list of scores; 0 when it is empty."""
+    return sum(values) / len(values) if values else 0.0
 
 
 def _as_tuple(span: Mapping[str, Any]) -> tuple[int, int, str]:

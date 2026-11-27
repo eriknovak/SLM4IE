@@ -1,0 +1,6 @@
+{"id": "tiny:0", "text": "Vlada je sprejela odličen zakon, Vlada je pohvaljena.", "mentions": [{"start": 0, "end": 5}, {"start": 33, "end": 38}], "entity_label": "ORG", "label": "positive"}
+{"id": "tiny:1", "text": "Janez Novak je bil obsojen zaradi goljufije.", "mentions": [{"start": 0, "end": 11}], "entity_label": "PER", "label": "negative"}
+{"id": "tiny:2", "text": "Krka je danes objavila poročilo.", "mentions": [{"start": 0, "end": 4}], "entity_label": "ORG", "label": "neutral"}
+{"id": "tiny:3", "text": "Ana je zmagala na tekmi in Ana je prejela nagrado.", "mentions": [{"start": 0, "end": 3}, {"start": 27, "end": 30}], "entity_label": "PER", "label": "positive"}
+{"id": "tiny:4", "text": "Podjetje Petrol je zaradi slabega poslovanja odpustilo veliko delavcev in izgubilo zaupanje vlagateljev.", "mentions": [{"start": 9, "end": 15}], "entity_label": "ORG", "label": "negative"}
+{"id": "tiny:5", "text": "Marko je v torek prišel v Ljubljano.", "mentions": [{"start": 0, "end": 5}], "entity_label": "PER", "label": "neutral"}

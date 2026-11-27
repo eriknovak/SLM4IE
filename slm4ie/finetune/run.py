@@ -32,12 +32,12 @@ import torch
 from tqdm import tqdm
 from transformers import AutoTokenizer, PreTrainedTokenizerFast, get_linear_schedule_with_warmup, set_seed
 
-from slm4ie.data.tasks.config import TaskEntry, TasksRoots, resolve_output_dir
+from slm4ie.data.tasks.config import LABEL_FREE_FAMILIES, TaskEntry, TasksRoots, resolve_output_dir
 from slm4ie.data.tasks.run import target_splits
 from slm4ie.data.tasks.splits import SPLIT_TEST, SPLIT_TRAIN, SPLIT_VAL, iter_jsonl, outputs_for_splits
 from slm4ie.finetune.config import FinetuneSettings
 from slm4ie.finetune.heads import TaskHead, get_head
-from slm4ie.finetune.heads.base import Feature
+from slm4ie.finetune.heads.base import MODEL_INPUTS, Feature
 
 # ===============================
 # Logging
@@ -99,7 +99,8 @@ def finetune(
     """Fine-tune an encoder on an entry, keep the best epoch on val and score test.
 
     Args:
-        entry: The task registry entry; its role must keep a train split.
+        entry: The task registry entry; its role must keep a train split, and it declares
+            labels unless its family is label-free, whose heads get `None` for them.
         encoder: The encoder, by HuggingFace name or local path.
         settings: The run's settings.
         roots: The task registry roots; the splits are read under `roots.tasks`.
@@ -113,7 +114,8 @@ def finetune(
 
     Raises:
         ValueError: If the entry writes no train, val or test split, naming the
-            entry and its role, or an example's label is not among its labels.
+            entry and its role, if a labelled family's entry declares no labels, or if
+            an example's label is not among its labels.
         KeyError: If no task head is registered for the entry's family.
         FileNotFoundError: If a split file is missing.
     """
@@ -121,8 +123,10 @@ def finetune(
         raise ValueError(
             f"entry '{entry.key}' with role '{entry.role}' writes no {unwritten} split; it cannot be fine-tuned"
         )
-    if not entry.labels:
-        raise ValueError(f"entry '{entry.key}' declares no labels; fine-tuning needs its label set")
+    if not entry.labels and entry.task not in LABEL_FREE_FAMILIES:
+        raise ValueError(
+            f"entry '{entry.key}' declares no labels; fine-tuning family '{entry.task}' needs its label set"
+        )
 
     # read the splits
     head = get_head(entry.task)
@@ -225,7 +229,7 @@ def _train(
     head: TaskHead,
     features: Mapping[str, list[Feature]],
     examples: Mapping[str, list[dict[str, Any]]],
-    labels: Sequence[Any],
+    labels: Sequence[Any] | None,
     tokenizer: Any,
     settings: FinetuneSettings,
     on_epoch: Callable[[int, Mapping[str, float]], None] | None,
@@ -257,7 +261,7 @@ def _train(
         for index, batch in enumerate(tqdm(batches, desc=f"epoch {epoch}", leave=False)):
             inputs = {k: v.to(network.device) for k, v in head.collate(batch, tokenizer.pad_token_id).items()}
             with _autocast(network.device, settings.precision):
-                loss = network(**inputs).loss / settings.gradient_accumulation
+                loss = head.loss(network, inputs) / settings.gradient_accumulation
             loss.backward()
 
             # step at every accumulation boundary and after the last batch
@@ -287,9 +291,10 @@ def _predict(
     logits = []
     with torch.no_grad():
         for batch in _batches(features, settings.eval_batch_size):
-            inputs = {k: v.to(network.device) for k, v in head.collate(batch, pad_id).items() if k != "labels"}
+            batch_inputs = head.collate(batch, pad_id)
+            inputs = {k: v.to(network.device) for k, v in batch_inputs.items() if k in MODEL_INPUTS}
             with _autocast(network.device, settings.precision):
-                output = network(**inputs).logits
+                output = head.forward_logits(network, inputs)
             logits.extend(output.float().cpu().numpy())
     return logits
 

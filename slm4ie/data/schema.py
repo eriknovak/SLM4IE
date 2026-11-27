@@ -213,6 +213,90 @@ class Document:
 
 
 # ===============================
+# Task span and prediction shapes
+# ===============================
+
+
+class CharSpan(TypedDict):
+    """A character span in an example's text.
+
+    Attributes:
+        start: Character offset of the first character.
+        end: Character offset one past the last character (exclusive).
+    """
+
+    start: int
+    end: int
+
+
+class Span(CharSpan):
+    """A labelled character span: an NER span or a relation argument.
+
+    This is the shape `ner` predictions take, one list per example, and the
+    shape of each argument in a `PredictedRelation`.
+
+    Attributes:
+        label: Entity label of the span.
+    """
+
+    label: str
+
+
+class EntityMention(Span):
+    """A gold entity mention in a `RelationExample`.
+
+    Attributes:
+        id: Mention identifier, unique within its example; relations point at
+            mentions through it.
+    """
+
+    id: str
+
+
+class RelationLink(TypedDict):
+    """A gold relation between two mentions of a `RelationExample`.
+
+    Attributes:
+        head: `id` of the head mention.
+        tail: `id` of the tail mention.
+        label: Relation label.
+    """
+
+    head: str
+    tail: str
+    label: str
+
+
+class PredictedRelation(TypedDict):
+    """A predicted relation, the prediction shape of the `relation` family.
+
+    The arguments are spans rather than mention ids, so an approach that finds
+    its own mentions answers in the same shape as one given the gold mentions.
+
+    Attributes:
+        head: Head argument span with its entity label.
+        tail: Tail argument span with its entity label.
+        label: Relation label.
+    """
+
+    head: Span
+    tail: Span
+    label: str
+
+
+class Answer(TypedDict):
+    """A gold answer of an `ExtractiveQaExample`.
+
+    Attributes:
+        text: Answer text, verbatim from the context.
+        start: Character offset of the answer in the context.
+    """
+
+    text: str
+    start: int
+
+
+# ===============================
 # Task example schemas
 # ===============================
 
@@ -350,3 +434,118 @@ class PosExample(TypedDict):
     id: str
     words: list[str]
     tags: list[str]
+
+
+class RelationExample(TypedDict):
+    """A single relation-extraction example.
+
+    The gold mentions are kept in every example, so one entry serves both
+    scoring settings: labelling pairs of the gold mentions, and finding the
+    mentions end to end. A prediction is a list of `PredictedRelation` per
+    example.
+
+    Attributes:
+        id: Example identifier.
+        text: Raw text.
+        entities: Gold entity mentions, character offsets into `text`.
+        relations: Gold relations between mentions, by mention id.
+    """
+
+    id: str
+    text: str
+    entities: list[EntityMention]
+    relations: list[RelationLink]
+
+
+class EntitySentimentExample(TypedDict):
+    """A single sentiment-toward-an-entity example.
+
+    A prediction is one label per example.
+
+    Attributes:
+        id: Example identifier.
+        text: Raw text.
+        mentions: Character spans of every mention of the target entity.
+        entity_label: Entity label of the target entity.
+        label: Sentiment toward the entity: `"negative"`, `"neutral"` or
+            `"positive"`.
+    """
+
+    id: str
+    text: str
+    mentions: list[CharSpan]
+    entity_label: str
+    label: str
+
+
+class ExtractiveQaExample(TypedDict):
+    """A single extractive question-answering example (SQuAD 2.0 style).
+
+    A prediction is one answer string per example; the empty string means the
+    context holds no answer.
+
+    Attributes:
+        id: Example identifier.
+        context: Passage the answer is taken from.
+        question: Question text.
+        answers: Gold answers; an empty list marks a question with no answer
+            in the context.
+    """
+
+    id: str
+    context: str
+    question: str
+    answers: list[Answer]
+
+
+class KeyphraseExample(TypedDict):
+    """A single keyphrase-extraction example.
+
+    A prediction is a list of keyphrase strings per example, ranked best
+    first.
+
+    Attributes:
+        id: Example identifier.
+        text: Raw text.
+        keyphrases: Gold keyphrases; some need not occur verbatim in `text`.
+    """
+
+    id: str
+    text: str
+    keyphrases: list[str]
+
+
+class ReadingMcExample(TypedDict):
+    """A single multiple-choice reading-comprehension example.
+
+    A prediction is one choice index per example.
+
+    Attributes:
+        id: Example identifier.
+        passage: Passage text.
+        question: Question text.
+        choices: Candidate answers; their number is not fixed.
+        label: Index of the correct choice in `choices`.
+    """
+
+    id: str
+    passage: str
+    question: str
+    choices: list[str]
+    label: int
+
+
+class TopicExample(TypedDict):
+    """A single topic-classification example, shaped as `SentimentExample`.
+
+    A prediction is one label per example.
+
+    Attributes:
+        id: Example identifier.
+        text: Raw text.
+        label: One of the dataset's declared `labels`.
+    """
+
+    id: str
+    text: str
+    label: str
