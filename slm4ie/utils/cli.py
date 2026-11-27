@@ -2,8 +2,9 @@
 
 Every CLI in this repo selects work the same way (positional keys or `--all`),
 resolves a config path against the project root, and writes per-key logs under
-`logs/<name>/<timestamp>/`. These helpers own that shape so each script only
-declares what is genuinely its own.
+`logs/<name>/<timestamp>/`. A script that logs to MLflow can also take tags as
+repeated `--tag KEY=VALUE` through `add_tags` and `parse_tags`. These helpers
+own that shape so each script only declares what is genuinely its own.
 
 Helpers only: nothing here parses `sys.argv`, exits, or defines a `main`, so
 `slm4ie` stays an importable library.
@@ -70,6 +71,38 @@ def add_workers(parser: argparse.ArgumentParser, help_text: str) -> None:
         help_text: Help text describing what the workers do for this command.
     """
     parser.add_argument("--max-workers", type=int, default=0, help=help_text)
+
+
+def add_tags(parser: argparse.ArgumentParser) -> None:
+    """Add the repeatable `--tag KEY=VALUE` MLflow tag flag to `parser`.
+
+    Args:
+        parser: Parser to extend.
+    """
+    parser.add_argument(
+        "--tag", action="append", default=[], metavar="KEY=VALUE", help="MLflow tag, repeatable, such as tier=scratch"
+    )
+
+
+def parse_tags(pairs: list[str]) -> dict[str, str]:
+    """Turn the `--tag KEY=VALUE` arguments into a tag dict.
+
+    Args:
+        pairs: The raw `KEY=VALUE` strings, in the order given; a later key wins.
+
+    Returns:
+        The tags; each value is the text after the first `=`.
+
+    Raises:
+        ValueError: If a pair has no `=` or an empty key, naming the pair.
+    """
+    tags = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            raise ValueError(f"--tag takes KEY=VALUE, got {pair!r}")
+        tags[key] = value
+    return tags
 
 
 def resolve_config(explicit: Path | None, *relative_parts: str) -> Path:

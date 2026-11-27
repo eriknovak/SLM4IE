@@ -236,7 +236,7 @@ extraction writes two files per dataset under `extracted/`:
 - `<key>.jsonl` — text + `source` / `domain` / `doc_id` / `uid` / `native_id` / `metadata`, consumed both by curation's stage 0 (which lifts it into datatrove's `Document` shape) and by the task converters. `doc_id` is unique within the dataset (extraction drops a repeat with identical text and fails on one with different text), `uid` is `<key>:<doc_id>`, and `native_id` is the raw source's own identifier when it has one.
 - `<key>.annotations.jsonl.gz` — gzipped per-document annotations as parallel arrays (`forms`, `lemmas`, `upos`, `feats`, `space_after`, `sentences`), kept separate to avoid loading them during text-only training. A CoNLL-U source whose tokens carry `NER=` IOB tags also gets `spans`: one `[start, end, label]` triple per entity, where `start`/`end` are character offsets into `text` (`end` exclusive, so `text[start:end]` is the entity surface) and `label` is upper-case (`PER`, `LOC`, `ORG`, `MISC`, `DERIV-PER`). An annotated document without entities carries `spans: []`; a source without the tag has no `spans` key.
 
-The downstream task converters (`spans`, `sentiment`, `superglue`) join these
+The downstream task converters (`spans`, `sentiment`, `pos`, `superglue`) join these
 two files on the fly via `slm4ie.data.extract.records.iter_joined_records`, so no
 intermediate merged file is materialized.
 
@@ -275,16 +275,28 @@ writes to `tasks/<task>/<dataset>/<split>.jsonl.gz` using a task-family schema
 (TypedDicts in [`slm4ie/data/schema.py`](../slm4ie/data/schema.py)). Each entry
 declares:
 
-- `role` — `finetune_and_eval` or `held_out`; the registry, not directory placement, enforces train/test isolation across families. A `held_out` entry never writes a `train` split (records are re-bucketed, not dropped).
+- `role` — `finetune_and_eval`, `held_out` or `finetune_only`; the registry, not directory placement, enforces train/test isolation across families. A `held_out` entry never writes a `train` split (records are re-bucketed, not dropped). A `finetune_only` entry keeps train, val and test for per-entry fine-tuning, yet counts as `held_out` in the isolation check, so no zero-shot training mix reads it.
 - `source` — `{kind: extracted, keys: […]}` for document-shaped sources joined via `extracted/`, or `{kind: raw, keys: […]}` for task-native bundles (SuperGLUE-SL) read straight from `raw/`. An extracted source may add `exclude: […]`: catalog keys whose documents are dropped by `doc_id` (`ner/suk` excludes `ssj500k`).
 - `splits`, `labels`, `suite`, `language`, `license`.
+- `split_on` (optional) — assigns splits from a document metadata field for sources with a published split (`spans` and `pos` converters). Its `otherwise` may be one split or a list; documents that reach a list are hash-split across it by document id. `ner/slavicner` keeps US Election 2020 as test and hash-splits the other topics into train and val.
 
-Source isolation is checked when the registry loads, before anything is
-written: a `finetune_and_eval` and a `held_out` entry of the same task may not
-read the same key, and neither side's key may contain the other's (the
-`contains` relation in `download.yaml`, followed transitively) unless that side
-excludes the contained key. A violation fails with both entry names and the
-containing key.
+Source isolation is checked when the registry loads, before anything is written:
+a `finetune_and_eval` entry and a `held_out` or `finetune_only` entry of the
+same task may not read the same key, and neither side's key may contain the
+other's (the `contains` relation in `download.yaml`, followed transitively)
+unless that side excludes the contained key. A violation fails with both entry
+names and the containing key.
+
+The `pos` family (`PosExample`: `{id, words, tags}`, id `<doc>:s<n>`) is built by
+the `pos` converter for `pos/ssj500k`, `pos/suk` and `pos/janes_tag`. Each takes
+the role of the NER entry from the same source, and the hash split keys on the
+document id, so one document's sentences share a split. A sentence whose word
+and tag counts differ is refused and counted.
+
+`ner/suk`, `ner/janes_tag`, `ner/slavicner` and `sentiment/twitter_15eu_sl` are
+`finetune_only` and take the standard 70/15/15 hash split (`slavicner` as above).
+`sentiment/twitter_15eu_sl` has no download source yet, so it stays unbuilt. The
+SuperGLUE entries switch roles after #53.
 
 Adding a new task dataset is a one-entry edit to `tasks.yaml`; the appropriate
 converter (defaulted by the `converters:` map at the top of the file) will pick
@@ -306,3 +318,51 @@ uv run python scripts/prepare_datasets.py tasks --all --variant googlemt
 Existing outputs are skipped unless `--force` is passed, and `--max-workers`
 gives per-entry parallelism. Only the GLiNER-compatible schema is produced for
 span tasks.
+
+## Per-entry fine-tuning
+
+`scripts/finetune_encoders.py` trains a pretrained encoder with a task head on
+one entry's train split, picks the checkpoint on its val split and scores it on
+its test split (library code in `slm4ie/finetune/`; needs the `evaluation`
+group). The shared fine-tuning config,
+[`configs/evaluation/finetune.yaml`](../configs/evaluation/finetune.yaml), sets
+the learning rates, seeds, epochs and per-family overrides; the
+encoders come from `--encoder` or an experiment dial (`--dial`) merged over the
+shared file. The `run` subcommand does the work. Entries come as positional keys or `--all`; `--all` skips entries whose split
+files are missing, with a warning and a count, while a named entry with missing
+files fails. Each encoder, entry, learning rate and seed is one MLflow run
+named `<encoder>-<task>-<dataset>-lr<lr>-seed<seed>`.
+
+```bash
+# Print the planned runs without training
+uv run --group evaluation python scripts/finetune_encoders.py run pos/ssj500k \
+    --encoder EMBEDDIA/sloberta --dry-run
+
+# Every built entry
+uv run --group evaluation python scripts/finetune_encoders.py run --all \
+    --encoder <name> --experiment slm4ie/<slug> --tag tier=local
+```
+
+The `search` subcommand runs a hyperparameter search instead, from a `search`
+block that a dial supplies. Each encoder and entry gets one Optuna study: a
+`grid` sampler runs every combination of the listed values, for an ablation
+table, and a `tpe` sampler draws a fixed number of trials with Optuna's
+Tree-structured Parzen Estimator, optionally pruning trials whose per-epoch val
+score falls below the median. Trials train with the family's first seed and are
+picked on val; test is never scored inside a study. The best setting is then
+fine-tuned once per seed and scored on test. The study lives in `--storage` (or
+`$OPTUNA_STORAGE`), so a stopped search resumes. With `--experiment`, each
+study is one MLflow parent run with a child run per trial and per final seed;
+the parent logs the best setting and the final seeds' mean and standard
+deviation of each test score.
+
+```bash
+# Print the planned studies and trials without training
+uv run --group evaluation python scripts/finetune_encoders.py search pos/ssj500k \
+    --encoder EMBEDDIA/sloberta --dial <dial>.yaml --dry-run
+
+# Run them, stored for resumption
+uv run --group evaluation python scripts/finetune_encoders.py search pos/ssj500k \
+    --encoder EMBEDDIA/sloberta --dial <dial>.yaml --storage sqlite:////abs/path/optuna.db \
+    --experiment slm4ie/<slug> --tag tier=local
+```

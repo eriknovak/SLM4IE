@@ -1,4 +1,8 @@
-"""Mention alignment, span F1 scoring and document bootstrap intervals for zero-shot NER.
+"""Scores for the task registry: span F1 for NER, token accuracy, accuracy and macro F1.
+
+Token accuracy scores part-of-speech tagging, pooled over every word of every
+sentence. Accuracy and per-class macro F1 score the classification families.
+The rest of this module aligns and scores NER mentions, as follows.
 
 A model answers with mention strings and labels. Each mention is first aligned
 to a character span of the text, in reading order; a mention with no free
@@ -230,6 +234,81 @@ def macro_f1(scores: Iterable[DocumentScore]) -> float:
 
 
 # ===============================
+# Token and classification scoring
+# ===============================
+
+
+def token_accuracy(predicted: Sequence[Sequence[Any]], gold: Sequence[Sequence[Any]]) -> float:
+    """Share of tokens whose predicted tag equals the gold tag, pooled over sentences (POS).
+
+    Args:
+        predicted: One tag sequence per sentence.
+        gold: Gold tag sequences, one per sentence, each as long as its prediction.
+
+    Returns:
+        The pooled token accuracy; 0 when there are no tokens.
+
+    Raises:
+        ValueError: If the sentence counts differ, or a sentence's tag counts differ.
+    """
+    if len(predicted) != len(gold):
+        raise ValueError(f"{len(predicted)} predicted sentences but {len(gold)} gold sentences")
+
+    correct = total = 0
+    for index, (tags, gold_tags) in enumerate(zip(predicted, gold)):
+        if len(tags) != len(gold_tags):
+            raise ValueError(f"sentence {index} has {len(tags)} predicted tags but {len(gold_tags)} gold tags")
+        correct += sum(a == b for a, b in zip(tags, gold_tags))
+        total += len(gold_tags)
+    return correct / total if total else 0.0
+
+
+def accuracy(predicted: Sequence[Any], gold: Sequence[Any]) -> float:
+    """Share of examples whose predicted label equals the gold label.
+
+    Args:
+        predicted: One label per example.
+        gold: Gold labels, one per example.
+
+    Returns:
+        The accuracy; 0 when there are no examples.
+
+    Raises:
+        ValueError: If the two sequences differ in length.
+    """
+    _check_same_length(predicted, gold)
+    return sum(a == b for a, b in zip(predicted, gold)) / len(gold) if gold else 0.0
+
+
+def classification_macro_f1(predicted: Sequence[Any], gold: Sequence[Any]) -> float:
+    """Average per-class F1 over every class in the gold labels or the predictions.
+
+    A class that is gold but never predicted scores 0.
+
+    Args:
+        predicted: One label per example.
+        gold: Gold labels, one per example.
+
+    Returns:
+        The mean per-class F1; 0 when there are no examples.
+
+    Raises:
+        ValueError: If the two sequences differ in length.
+    """
+    _check_same_length(predicted, gold)
+    classes = set(predicted) | set(gold)
+    scores = [
+        _f1(
+            sum(a == b == label for a, b in zip(predicted, gold)),
+            sum(a == label for a in predicted),
+            sum(b == label for b in gold),
+        )
+        for label in classes
+    ]
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+# ===============================
 # Bootstrap intervals
 # ===============================
 
@@ -315,6 +394,12 @@ def _find_free(text: str, surface: str, origin: int, taken: list[tuple[int, int]
     while start != -1 and any(start < end and begin < start + len(surface) for begin, end in taken):
         start = text.find(surface, start + 1)
     return start
+
+
+def _check_same_length(predicted: Sequence[Any], gold: Sequence[Any]) -> None:
+    """Raise when predictions and gold labels differ in number."""
+    if len(predicted) != len(gold):
+        raise ValueError(f"{len(predicted)} predictions but {len(gold)} gold labels")
 
 
 def _as_tuple(span: Mapping[str, Any]) -> tuple[int, int, str]:

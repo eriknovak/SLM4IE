@@ -23,8 +23,12 @@ from slm4ie.utils.parallel import WorkerSettings, parse_worker_settings
 # ===============================
 
 _KEY_PATTERN = re.compile(r"^[a-z]+/[a-z0-9_]+$")
-_VALID_ROLES = {"finetune_and_eval", "held_out"}
+_VALID_ROLES = {"finetune_and_eval", "held_out", "finetune_only"}
+# roles kept out of every zero-shot training mix
+_ISOLATED_ROLES = {"held_out", "finetune_only"}
 _VALID_KINDS = {"extracted", "raw"}
+# converters that read an entry's `split_on`
+_SPLIT_ON_CONVERTERS = {"spans", "pos"}
 
 # ===============================
 # Config classes
@@ -82,21 +86,24 @@ class SplitOn:
     Attributes:
         field: The `Document.metadata` field read.
         values: Split name -> the field values that go to it.
-        otherwise: The split of a document whose value is in no list.
+        otherwise: Where a document whose value is in no list goes: one split
+            name, or a tuple of split names the run loop hash-splits the
+            document across by its id.
     """
 
     field: str
     values: dict[str, list[str]]
-    otherwise: str
+    otherwise: str | tuple[str, ...]
 
-    def split_of(self, metadata: dict[str, Any]) -> str:
+    def split_of(self, metadata: dict[str, Any]) -> str | tuple[str, ...]:
         """Return the split of a document from its metadata.
 
         Args:
             metadata: The document's metadata.
 
         Returns:
-            The split name.
+            The split name, or the tuple of splits to hash the document across
+            when its value falls to a list-valued `otherwise`.
 
         Raises:
             KeyError: If the metadata lacks the field, which would otherwise
@@ -115,7 +122,9 @@ class TaskEntry:
     Attributes:
         task: First segment of the entry key (e.g. `"ner"`).
         dataset: Second segment of the entry key (e.g. `"ssj500k"`).
-        role: `"finetune_and_eval"` or `"held_out"`.
+        role: `"finetune_and_eval"`, `"held_out"` or `"finetune_only"`. A
+            `finetune_only` entry keeps its train split for per-entry
+            fine-tuning but is isolated like a `held_out` one.
         source: Source descriptor.
         splits: Mapping from split name (`"train"` / `"val"` /
             `"test"`) to the output filename for that split.
@@ -129,12 +138,12 @@ class TaskEntry:
             `"spans"`). Defaults from the registry's
             `converters:` map and may be overridden per entry.
         split_on: Optional metadata-field split replacing the hash split,
-            for a source that publishes its own split; `spans` only.
+            for a source that publishes its own split; `spans` and `pos` only.
     """
 
     task: str
     dataset: str
-    role: Literal["finetune_and_eval", "held_out"]
+    role: Literal["finetune_and_eval", "held_out", "finetune_only"]
     source: EntrySource
     splits: dict[str, str]
     labels: list[Any] | None
@@ -143,6 +152,11 @@ class TaskEntry:
     license: str
     converter: str
     split_on: SplitOn | None = None
+
+    @property
+    def key(self) -> str:
+        """The entry's registry key, `<task>/<dataset>`."""
+        return f"{self.task}/{self.dataset}"
 
 
 @dataclasses.dataclass
@@ -187,8 +201,8 @@ def load_tasks_config(yaml_path: Path, download_config: Path | None = None) -> T
         ValueError: If the YAML structure violates any registry
             invariant (missing fields, malformed keys, unknown role
             or source kind, empty source keys, a malformed `workers`
-            section, etc.), or a training and a
-            held-out entry of one task share documents (see
+            section, etc.), or a training and a held-out or
+            fine-tune-only entry of one task share documents (see
             `check_source_isolation`).
         KeyError: If an entry's task has no default converter in the
             `converters:` map and no per-entry `converter:`
@@ -233,7 +247,8 @@ def load_tasks_config(yaml_path: Path, download_config: Path | None = None) -> T
 def check_source_isolation(entries: list[TaskEntry], contains: dict[str, set[str]]) -> None:
     """Reject a training and a held-out entry of one task whose sources share documents.
 
-    Two such entries may not read the same source key, and no key on one side
+    A `finetune_only` entry counts as held out. Two such entries may not read
+    the same source key, and no key on one side
     may contain (transitively) a key on the other unless that side excludes
     the contained key's documents.
 
@@ -248,12 +263,12 @@ def check_source_isolation(entries: list[TaskEntry], contains: dict[str, set[str
     # pair every training entry with the held-out entries of its task
     problems: list[str] = []
     train = [e for e in entries if e.role == "finetune_and_eval"]
-    held = [e for e in entries if e.role == "held_out"]
+    held = [e for e in entries if e.role in _ISOLATED_ROLES]
     for a in train:
         for b in held:
             if a.task != b.task:
                 continue
-            pair = f"{a.task}/{a.dataset} (finetune_and_eval) and {b.task}/{b.dataset} (held_out)"
+            pair = f"{a.key} (finetune_and_eval) and {b.key} ({b.role})"
             for x in a.source.keys:
                 for y in b.source.keys:
                     if x == y:
@@ -451,7 +466,7 @@ def _parse_split_on(key: str, raw: Any, splits: dict[str, str], role: str, conve
         raw: Raw `split_on` mapping, or None.
         splits: The entry's declared splits.
         role: The entry's role; a `held_out` entry may not name `train`.
-        converter: The entry's converter; only `spans` reads `split_on`.
+        converter: The entry's converter; only `spans` and `pos` read `split_on`.
 
     Returns:
         Parsed `SplitOn`, or None when the block is absent.
@@ -462,14 +477,21 @@ def _parse_split_on(key: str, raw: Any, splits: dict[str, str], role: str, conve
     """
     if raw is None:
         return None
-    if converter != "spans":
-        raise ValueError(f"Entry {key!r} `split_on` needs the `spans` converter; got {converter!r}.")
+    if converter not in _SPLIT_ON_CONVERTERS:
+        raise ValueError(
+            f"Entry {key!r} `split_on` needs one of the converters {sorted(_SPLIT_ON_CONVERTERS)}; got {converter!r}."
+        )
     if not isinstance(raw, dict) or not isinstance(raw.get("field"), str) or not isinstance(raw.get("values"), dict):
         raise ValueError(f"Entry {key!r} `split_on` must map `field`, `values` and `otherwise`.")
     values = {str(split): [str(v) for v in listed] for split, listed in raw["values"].items()}
     otherwise = raw.get("otherwise")
+    if isinstance(otherwise, list):
+        if not otherwise:
+            raise ValueError(f"Entry {key!r} `split_on.otherwise` must name at least one split.")
+        otherwise = tuple(otherwise)
+    fallback = list(otherwise) if isinstance(otherwise, tuple) else [otherwise]
     allowed = {s for s in splits if not (role == "held_out" and s == "train")}
-    for split in [*values, otherwise]:
+    for split in [*values, *fallback]:
         if split not in allowed:
             raise ValueError(f"Entry {key!r} `split_on` names split {split!r}, not among {sorted(allowed)}.")
     return SplitOn(field=raw["field"], values=values, otherwise=otherwise)

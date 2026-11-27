@@ -1,0 +1,3 @@
+{"id": "tiny:3", "premise": "Prižgal sem luč.", "choice1": "Soba je postala temna.", "choice2": "Soba je postala svetla.", "question": "effect", "label": 1}
+{"id": "tiny:4", "premise": "Rastlina je ovenela.", "choice1": "Nihče je ni zalival.", "choice2": "Dobro so jo zalivali.", "question": "cause", "label": 0}
+{"id": "tiny:5", "premise": "Zamudil sem avtobus.", "choice1": "Prišel sem pozno.", "choice2": "Prišel sem zgodaj.", "question": "effect", "label": 0}

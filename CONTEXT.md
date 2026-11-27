@@ -263,8 +263,8 @@ task-native bundles do.
 _Avoid_: source type, mode
 
 **Task family**:
-A group of entries sharing one output schema: spans, sentiment, and the
-SuperGLUE subtasks.
+A group of entries sharing one output schema: spans, part-of-speech tags,
+sentiment, and the SuperGLUE subtasks.
 _Avoid_: task type, benchmark family
 
 **Converter**:
@@ -273,8 +273,21 @@ _Avoid_: adapter, parser, transformer
 
 **Role**:
 The field on an entry that fixes train/test isolation: `finetune_and_eval` keeps
-every split, `held_out` drops train.
+every split, `held_out` drops train, and `finetune_only` keeps train for
+per-entry fine-tuning while staying held out from every zero-shot training mix.
+The source-isolation check treats `finetune_only` as `held_out`.
 _Avoid_: split policy, usage, mode
+
+**Per-entry fine-tuning**:
+Training a pretrained encoder with a task head on one entry's train split,
+choosing the checkpoint on its val split and scoring it on its test split.
+_Avoid_: downstream training, probing, transfer
+
+**Hyperparameter search**:
+One Optuna study per encoder and entry that picks the fine-tuning settings on
+the val split, by grid or by TPE, and then scores the best setting on the test
+split once per seed. Each attempted setting is a trial.
+_Avoid_: sweep, tuning run, HPO
 
 **Split policy**:
 How a converter's yielded key becomes an output split: hashed across the target

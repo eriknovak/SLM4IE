@@ -6,6 +6,7 @@ before calling `slm4ie.data.tasks.run.get_converter`.
 """
 
 from slm4ie.data.tasks.converters import (  # noqa: F401
+    pos,
     sentiment,
     spans,
     superglue,

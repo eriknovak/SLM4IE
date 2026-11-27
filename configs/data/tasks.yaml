@@ -15,15 +15,18 @@
 #   entries      Map of <task>/<dataset> -> entry spec. The key IS the output dir.
 #
 # Entry fields:
-#   role         finetune_and_eval | held_out — enforces train/test isolation.
-#                held_out drops the train split (writes only val/test); the
-#                converter never emits a train.jsonl.gz for a held_out entry.
+#   role         finetune_and_eval | held_out | finetune_only — enforces
+#                train/test isolation. held_out drops the train split (writes
+#                only val/test); the converter never emits a train.jsonl.gz for
+#                a held_out entry. finetune_only keeps train for per-entry
+#                fine-tuning, is isolated like held_out, and never enters a
+#                zero-shot training mix.
 #   source       kind (extracted | raw) + keys (source dataset keys) + optional
 #                exclude (catalog keys whose documents are dropped by doc_id;
-#                extracted only). A finetune_and_eval and a held_out entry of
-#                one task may not share a key, nor may one side's key contain
-#                (download.yaml `contains`) the other's unless excluded; the
-#                registry fails to load otherwise.
+#                extracted only). A finetune_and_eval entry and a held_out or
+#                finetune_only entry of one task may not share a key, nor may
+#                one side's key contain (download.yaml `contains`) the other's
+#                unless excluded; the registry fails to load otherwise.
 #                Optional annotated_in (catalog keys whose annotations mark
 #                which documents carry the layer: only doc_ids with entity
 #                spans there are kept; extracted only). Optional
@@ -31,8 +34,9 @@
 #                in a comment; extracted only).
 #   split_on     Optional; assign splits from a document metadata field instead
 #                of the id hash: field, values ({split: [field values]}),
-#                otherwise (split for the rest). For a source with a published
-#                split; `spans` converter only.
+#                otherwise (split for the rest, or a list of splits the rest is
+#                hash-split across by document id). For a source with a
+#                published split; `spans` and `pos` converters only.
 #   splits       Split name -> output filename.
 #   labels       Label set for the task.
 #   suite        Parent benchmark suite, or null.
@@ -64,6 +68,7 @@ mlflow:                           # see Notes: mlflow
 # Default converter per task family; override per entry with `converter:`.
 converters:
   ner: spans
+  pos: pos
   sentiment: sentiment
   nli: superglue
   qa: superglue
@@ -85,36 +90,64 @@ entries:
     license: cc-by-sa-4.0
 
   ner/suk:
-    role: held_out               # held_out -> train dropped (val/test only)
+    role: finetune_only
     # SUK integrates ssj500k, which ner/ssj500k trains on; drop those documents.
     source: { kind: extracted, keys: [suk], exclude: [ssj500k] }
-    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
     language: sl
     license: cc-by-sa-4.0
 
   ner/janes_tag:
-    role: held_out
+    role: finetune_only
     source: { kind: extracted, keys: [janes_tag] }
-    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [PER, LOC, ORG, MISC, DERIV-PER]
     suite: null
     language: sl
     license: cc-by-sa-4.0
 
   ner/slavicner:
-    role: held_out
+    role: finetune_only
     # covid-19/sl/sl-124 is a municipality table read as one 5,425-character
     # sentence with 212 mentions; its answer outgrows the 2,048-token cap
     source: { kind: extracted, keys: [slavicner], exclude_doc_ids: [covid-19/sl/sl-124] }
-    splits: { val: val.jsonl.gz, test: test.jsonl.gz }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     # the paper's single-topic-out split: US Election 2020 is the test topic
-    split_on: { field: topic, values: { test: [us_election_2020] }, otherwise: val }
+    split_on: { field: topic, values: { test: [us_election_2020] }, otherwise: [train, val] }
     labels: [PER, ORG, LOC, EVT, PRO]
     suite: null
     language: sl
     license: research-only
+
+  pos/ssj500k:
+    role: finetune_and_eval
+    source: { kind: extracted, keys: [ssj500k] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    labels: [ADJ, ADP, ADV, AUX, CCONJ, DET, INTJ, NOUN, NUM, PART, PRON, PROPN, PUNCT, SCONJ, SYM, VERB, X]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  pos/suk:
+    role: finetune_only
+    # SUK integrates ssj500k, which pos/ssj500k trains on; drop those documents.
+    source: { kind: extracted, keys: [suk], exclude: [ssj500k] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    labels: [ADJ, ADP, ADV, AUX, CCONJ, DET, INTJ, NOUN, NUM, PART, PRON, PROPN, PUNCT, SCONJ, SYM, VERB, X]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
+
+  pos/janes_tag:
+    role: finetune_only
+    source: { kind: extracted, keys: [janes_tag] }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
+    labels: [ADJ, ADP, ADV, AUX, CCONJ, DET, INTJ, NOUN, NUM, PART, PRON, PROPN, PUNCT, SCONJ, SYM, VERB, X]
+    suite: null
+    language: sl
+    license: cc-by-sa-4.0
 
   sentiment/sentinews:
     role: finetune_and_eval
@@ -126,9 +159,9 @@ entries:
     license: cc-by-sa-4.0
 
   sentiment/twitter_15eu_sl:
-    role: held_out
+    role: finetune_only
     source: { kind: raw, keys: [twitter_sentiment_15eu] }
-    splits: { test: test.jsonl.gz }
+    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
     labels: [negative, neutral, positive]
     suite: null
     language: sl

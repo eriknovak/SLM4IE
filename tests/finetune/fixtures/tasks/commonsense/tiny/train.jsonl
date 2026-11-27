@@ -1,0 +1,6 @@
+{"id": "tiny:0", "premise": "Moški je padel.", "choice1": "Spodrsnilo mu je.", "choice2": "Zapel je pesem.", "question": "cause", "label": 0}
+{"id": "tiny:1", "premise": "Okno je bilo odprto.", "choice1": "Soba se je ohladila.", "choice2": "Soba se je segrela.", "question": "effect", "label": 0}
+{"id": "tiny:2", "premise": "Deklica je jokala.", "choice1": "Dobila je darilo.", "choice2": "Izgubila je igračo.", "question": "cause", "label": 1}
+{"id": "tiny:3", "premise": "Prižgal sem luč.", "choice1": "Soba je postala temna.", "choice2": "Soba je postala svetla.", "question": "effect", "label": 1}
+{"id": "tiny:4", "premise": "Rastlina je ovenela.", "choice1": "Nihče je ni zalival.", "choice2": "Dobro so jo zalivali.", "question": "cause", "label": 0}
+{"id": "tiny:5", "premise": "Zamudil sem avtobus.", "choice1": "Prišel sem pozno.", "choice2": "Prišel sem zgodaj.", "question": "effect", "label": 0}

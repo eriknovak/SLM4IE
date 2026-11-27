@@ -96,6 +96,19 @@ def git_commit() -> str | None:
         return None
 
 
+def git_branch() -> str | None:
+    """Return the checked-out git branch for reproducibility tagging.
+
+    Returns:
+        The branch name (`HEAD` when detached), or None when unavailable.
+    """
+    try:
+        command = ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        return subprocess.check_output(command, stderr=subprocess.DEVNULL).decode().strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 def _is_remote_store(uri: str) -> bool:
     """Return whether a tracking URI points at a remote HTTP(S) server.
 

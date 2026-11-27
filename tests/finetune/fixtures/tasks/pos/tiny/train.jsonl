@@ -1,0 +1,6 @@
+{"id": "tiny:0:s0", "words": ["Ana", "bere", "knjigo", "."], "tags": ["PROPN", "VERB", "NOUN", "PUNCT"]}
+{"id": "tiny:0:s1", "words": ["Janez", "živi", "v", "Ljubljani", "."], "tags": ["PROPN", "VERB", "ADP", "PROPN", "PUNCT"]}
+{"id": "tiny:1:s0", "words": ["Velika", "hiša", "stoji", "ob", "reki", "."], "tags": ["ADJ", "NOUN", "VERB", "ADP", "NOUN", "PUNCT"]}
+{"id": "tiny:2:s0", "words": ["Maja", "piše", "dolgo", "pismo", "."], "tags": ["PROPN", "VERB", "ADJ", "NOUN", "PUNCT"]}
+{"id": "tiny:3:s0", "words": ["Pes", "teče", "po", "travniku", "."], "tags": ["NOUN", "VERB", "ADP", "NOUN", "PUNCT"]}
+{"id": "tiny:4:s0", "words": ["Stara", "mačka", "spi", "."], "tags": ["ADJ", "NOUN", "VERB", "PUNCT"]}
