@@ -5,7 +5,7 @@ Importing this package registers every backend with the registry in `base`; buil
 only when a `transformers` backend is built.
 """
 
-from slm4ie.evaluation.backends import claude, huggingface, vllm  # noqa: F401
+from slm4ie.evaluation.backends import claude, huggingface, openrouter, vllm  # noqa: F401
 from slm4ie.evaluation.backends.base import (
     MAX_NEW_TOKENS,
     ChatBackend,

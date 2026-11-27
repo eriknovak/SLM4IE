@@ -1,0 +1,64 @@
+# passages-sources.yaml — Where round 1's real passages come from and how they are drawn (D3).
+#
+# Read by: scripts/screen_silver_llms.py draw --configs-dir <its folder>
+#          draws each set with slm4ie/silver/passages.py::draw_passages.
+#
+# Top-level keys:
+#   seed         Seed of every draw.
+#   corpus_tier  Folder of the curated corpus the sources are read from, under the data root.
+#   sets         Map of set name -> set spec. The set name is stored on every passage.
+#
+# Set spec fields:
+#   domain       `medical` or `scientific`; picks the label set (labels-domains.yaml).
+#   native       True when the source was written in Slovene; only native sets
+#                serve as the reference for natural Slovene.
+#   source       Source folder under the corpus tier.
+#   count        Passages to draw.
+#   wrapped      True when the source wraps lines inside a paragraph.
+#   doctypes     Keep only documents whose `doctype` is listed; omitted keeps all.
+#   udc_prefix   Keep only documents whose UDC class starts with one of these:
+#                004 computing, 5 natural sciences, 61 medicine, 62 to 69 engineering
+#                and technology.
+#   metadata_equals
+#                Keep only documents whose metadata fields equal these values.
+#   group_field  Metadata field whose leading name groups documents; one passage
+#                per group, so no two passages describe one medicine.
+#   cue_words    Lowercase word stems of the domain's working vocabulary.
+#   min_cues     Fewest distinct cue stems a passage must contain (default 1).
+#
+# Notes:
+#   A passage is 100 to 300 words of body prose, one per document
+#   (slm4ie/silver/passages.py holds the rule).
+
+seed: 13
+corpus_tier: pretrain/06_sentence_dedup
+
+sets:
+  science-theses:
+    domain: scientific
+    native: true
+    source: oss
+    count: 10
+    wrapped: false
+    doctypes: [Diplomsko delo, Magistrsko delo, Doktorska disertacija, Izvirni znanstveni članek]
+    udc_prefix: ["004", "5", "62", "63", "66", "67", "68", "69"]
+    cue_words: [metod, vzorc, rezultat, meritv, izmer, podatk, algorit, eksperiment, statisti, model]
+    min_cues: 3
+  medical-theses:
+    domain: medical
+    native: true
+    source: oss
+    count: 5
+    wrapped: false
+    doctypes: [Diplomsko delo, Magistrsko delo, Doktorska disertacija, Izvirni znanstveni članek, Strokovni članek]
+    udc_prefix: ["61"]
+    cue_words: [bolnik, pacient, zdravljen, bolezn, zdravil]
+  medicine-descriptions:
+    domain: medical
+    native: false
+    source: povejmo_vemo_med
+    count: 5
+    wrapped: true
+    metadata_equals: {source: CBZ}
+    group_field: file_name
+    cue_words: [bolnik, odmer, zdravljen]

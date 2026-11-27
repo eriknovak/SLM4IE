@@ -1,0 +1,169 @@
+# briefs-passages.yaml — Round 1's writing briefs, one derived from each real passage (D3).
+#
+# Read by: scripts/screen_silver_llms.py preview | make | check | rate --configs-dir <its folder>
+#          each brief fills the writing prompt (prompts-jobs.yaml).
+#
+# Top-level keys:
+#   briefs       List of brief specs, in passage order.
+#
+# Brief spec fields:
+#   brief_id     Name of the brief, stored on every written example.
+#   passage_id   The real passage the brief is paired with; both share the text
+#                type, the topic and the length, and none of the wording.
+#   domain       `medical` or `scientific`; picks the label set.
+#   text_type    What kind of text to write and where it would appear.
+#   topic        What the text is about, in English so that no Slovene phrasing
+#                is handed to the model.
+#   words        Target length in words, the paired passage's length rounded to ten.
+#   labels       Labels the text must contain at least one mention of.
+#
+# Notes:
+#   Across each domain's ten briefs every label of the domain is asked for at
+#   least once, so the rule check on label coverage can be read per label.
+
+briefs:
+  # scientific, paired with the thesis passages
+  - brief_id: sci-01
+    passage_id: "oss:oss-838160#435"
+    domain: scientific
+    text_type: methods section of a mechanical engineering thesis
+    topic: calculating the heat losses of a low-energy house heated by a heat pump, following a named standard and using named calculation software
+    words: 140
+    labels: [Task, Method, Software, Resource, Parameter, Value]
+  - brief_id: sci-02
+    passage_id: "oss:oss-838593#126"
+    domain: scientific
+    text_type: background section of a computer science thesis
+    topic: techniques for improving how search engines rank a website, and how their effect is measured
+    words: 190
+    labels: [Task, Method, Metric, Software, Result]
+  - brief_id: sci-03
+    passage_id: "oss:oss-11751093#188"
+    domain: scientific
+    text_type: related-work section of a computer security thesis
+    topic: detecting malicious software with signatures, heuristics and machine learning, with a named collection of samples and reported detection scores
+    words: 110
+    labels: [Task, Method, Dataset, Metric, Value]
+  - brief_id: sci-04
+    passage_id: "oss:oss-847162#35"
+    domain: scientific
+    text_type: research-methods section of a transport engineering thesis
+    topic: analysing safety on a national railway network with remote traffic control, from official accident statistics
+    words: 100
+    labels: [Task, Method, Dataset, Metric, Resource]
+  - brief_id: sci-05
+    passage_id: "oss:oss-38027#261"
+    domain: scientific
+    text_type: experimental section of a mechanical engineering thesis
+    topic: producing a patient-specific surgical guide by additive manufacturing from a three-dimensional model, and checking its fit
+    words: 120
+    labels: [Method, Material, Software, Resource, Parameter, Value, Result]
+  - brief_id: sci-06
+    passage_id: "oss:oss-7174#200"
+    domain: scientific
+    text_type: methods section of a thesis in decision support systems
+    topic: evaluating alternatives with a qualitative multi-criteria decision model built in a named tool
+    words: 140
+    labels: [Task, Method, Software, Parameter, Result]
+  - brief_id: sci-07
+    passage_id: "oss:oss-837477#87"
+    domain: scientific
+    text_type: design section of an information systems thesis
+    topic: choosing a development approach and a database server for a small records application
+    words: 120
+    labels: [Task, Method, Software, Resource, Dataset]
+  - brief_id: sci-08
+    passage_id: "oss:oss-846065#68"
+    domain: scientific
+    text_type: system description in an energy management thesis
+    topic: collecting measurements from meters and controllers into a database for later energy analyses
+    words: 120
+    labels: [Task, Dataset, Resource, Parameter, Value, Metric]
+  - brief_id: sci-09
+    passage_id: "oss:oss-6345#199"
+    domain: scientific
+    text_type: theory section of a database thesis
+    topic: dimensional modelling of a data warehouse and its effect on query response times
+    words: 110
+    labels: [Method, Software, Metric, Value, Result]
+  - brief_id: sci-10
+    passage_id: "oss:oss-848183#151"
+    domain: scientific
+    text_type: methods section of a business informatics thesis
+    topic: modelling and simulating a business process with a named modelling tool to compare the current and the redesigned process
+    words: 110
+    labels: [Task, Method, Software, Material, Parameter, Result]
+
+  # medical, paired with the thesis passages
+  - brief_id: med-01
+    passage_id: "oss:oss-25171#726"
+    domain: medical
+    text_type: empirical section of a health sciences thesis reporting interviews
+    topic: what lay people and a pharmacist think about proving that an alternative therapy works, compared with a clinical trial of a medicine
+    words: 120
+    labels: [Condition, Drug, Procedure, Provider, Gender, Observation]
+  - brief_id: med-02
+    passage_id: "oss:oss-10946255#213"
+    domain: medical
+    text_type: nursing thesis chapter on care of older people
+    topic: daily care of an older patient with dementia in a care home, including dressing, continence and aids
+    words: 110
+    labels: [Condition, Observation, Device, Place of Service, Provider, Language]
+  - brief_id: med-03
+    passage_id: "oss:oss-11742123#722"
+    domain: medical
+    text_type: advisory chapter of a special-education thesis
+    topic: regular eye examinations of children with a genetic syndrome, from birth onwards, and what the examinations look for
+    words: 100
+    labels: [Condition, Procedure, Measurement, Meas Value, Provider, Visit]
+  - brief_id: med-04
+    passage_id: "oss:oss-7979158#110"
+    domain: medical
+    text_type: theory chapter of a psychology thesis
+    topic: how a developmental disorder is diagnosed, in a study of families from a named region and ethnic minority
+    words: 120
+    labels: [Condition, Procedure, Observation, Ethnicity, Geography, Race]
+  - brief_id: med-05
+    passage_id: "oss:oss-10794375#6"
+    domain: medical
+    text_type: report from a professional oncology meeting
+    topic: treatment before surgery for a cancer of the digestive tract, with tissue sampling and the place of each treatment
+    words: 120
+    labels: [Condition, Procedure, Modifier, Drug, Specimen, Spec Anatomic Site]
+
+  # medical, paired with the medicine descriptions
+  - brief_id: med-06
+    passage_id: "povejmo_vemo_med:idx-00000000006166#19"
+    domain: medical
+    text_type: patient information leaflet of a herbal medicine
+    topic: what to watch for while taking a medicine for tired legs, and its possible side effects
+    words: 120
+    labels: [Drug, Condition, Route, Provider, Device, Observation]
+  - brief_id: med-07
+    passage_id: "povejmo_vemo_med:idx-00000000014963#27"
+    domain: medical
+    text_type: instructions for health professionals in a medicine's product description
+    topic: preparing and diluting a cancer medicine for infusion, with volumes, concentrations and storage limits
+    words: 270
+    labels: [Drug, Route, Unit, Measurement, Meas Value Operator, Device]
+  - brief_id: med-08
+    passage_id: "povejmo_vemo_med:idx-00000000016570#39"
+    domain: medical
+    text_type: dosing section of a medicine's product description
+    topic: using an immunosuppressant in older patients and in children, with dose adjustment and monitoring of kidney function
+    words: 110
+    labels: [Drug, Condition, Measurement, Meas Value, Unit, Gender]
+  - brief_id: med-09
+    passage_id: "povejmo_vemo_med:idx-00000000004753#0"
+    domain: medical
+    text_type: composition and indication section of a medicine's product description
+    topic: a fixed combination of two pain medicines in one tablet, who may use it, and what the patient pays for it
+    words: 110
+    labels: [Drug, Unit, Condition, Route, Payer, Currency]
+  - brief_id: med-10
+    passage_id: "povejmo_vemo_med:idx-00000000009170#29"
+    domain: medical
+    text_type: pharmacology section of a medicine's product description
+    topic: how a medicine that lowers stomach acid works, its effect on a hormone level, and what happens on overdose in hospital
+    words: 160
+    labels: [Drug, Spec Anatomic Site, Measurement, Meas Value, Route, Visit]

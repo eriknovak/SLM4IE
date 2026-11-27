@@ -1,0 +1,13 @@
+model,role,usd_per_million_input,usd_per_million_output,calls,input_tokens,output_tokens,projected_usd
+anthropic/claude-opus-5.5,screened,4.0,20.0,40,40000,30000,0.76
+anthropic/claude-sonnet-5.5,screened,2.0,10.0,40,40000,30000,0.38
+anthropic/claude-haiku-5.5,screened,0.1,0.5,40,40000,30000,0.02
+openai/gpt-6.2-sol,screened,2.0,10.0,40,40000,30000,0.38
+openai/gpt-6-luna,screened,0.1,0.5,40,40000,30000,0.02
+google/gemini-4-carbon,screened,2.0,10.0,40,40000,30000,0.38
+google/gemini-4-hydrogen,screened,1.5,7.5,40,40000,30000,0.28
+mistralai/mistral-large-4-0,screened,0.7,2.1,40,40000,30000,0.09
+qwen/qwen4-max,screened,1.425,4.275,40,40000,30000,0.19
+deepseek/deepseek-v4.1-flash-1017,screened,0.3,1.2,40,40000,30000,0.05
+anthropic/claude-fable-5.2,judge,8.0,40.0,400,720000,200000,13.76
+google/gemini-4-neon,judge,3.0,15.0,400,720000,200000,5.16

@@ -1,0 +1,8 @@
+field,type,distinct,values
+brief_id,text,20,
+passage_id,text,20,
+domain,categorical,2,scientific; medical
+text_type,text,20,
+topic,text,20,
+words,numeric,,
+labels,categorical,33,Method; Task; Condition; Software; Drug

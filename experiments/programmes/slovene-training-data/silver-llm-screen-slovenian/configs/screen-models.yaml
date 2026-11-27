@@ -1,0 +1,144 @@
+# screen-models.yaml — The models round 1 screens, the judges that rate them, and the spend limits (D1, D2, D5).
+#
+# Read by: scripts/screen_silver_llms.py make | check | rate | sheet --configs-dir <its folder>
+#          builds one OpenRouter backend per model through
+#          slm4ie/evaluation/backends::get_backend("openrouter", ...).
+#
+# Top-level keys:
+#   limits       Spend limits in US dollars, summed from the cost each call reports.
+#   sampling     Settings held fixed for every screened model.
+#   models       Map of variant name -> model spec. The name is the variant
+#                declared in variants.yaml and names the model in every table.
+#   judges       Map of judge name -> model spec, same fields as a model.
+#
+# Limit fields:
+#   round_usd        Most a round may spend; the runner refuses the call that would pass it.
+#   experiment_usd   Most all rounds may spend together.
+#
+# Sampling fields:
+#   seed             Sent with every call to a model that accepts a seed.
+#   temperature      Sent with every call to a model that accepts a temperature.
+#   reasoning_effort Reasoning strength asked of every model, one level for all
+#                    except a model whose spec names the level it supports.
+#   max_tokens       Most tokens a reply may hold, reasoning included. The spend guard
+#                    prices each call as if its reply used all of them.
+#
+# Model spec fields:
+#   display_name     The model's product name, as the record's prose writes it.
+#   model            The model's OpenRouter identifier.
+#   family           The provider family; the person's rating sample is balanced over it (D2).
+#   accepts_seed, accepts_temperature
+#                    Optional, default true. False for a model OpenRouter lists without
+#                    the setting: the backend asks only for providers that accept every
+#                    setting sent, so sending it would leave the model no provider.
+#   reasoning_effort Optional. The level sent in place of the fixed one, for a model
+#                    that does not support the fixed level.
+#   usd_per_million_input, usd_per_million_output
+#                    List prices on 2026-11-20, for the dry-run projection only.
+#                    The spend that counts is the cost each call reports.
+#
+# Notes:
+#   The reference model of the shortlist rule (D7) is the costliest screened
+#   model, read from the output price here.
+#   The settings each model accepts and its reasoning levels are OpenRouter's
+#   model listing of 2026-11-27. Mistral Large 4 supports only high or no
+#   reasoning; OpenRouter turns a low request into high, so it runs at high.
+#   Claude models ignore a reasoning-token limit, so the effort level is the
+#   one reasoning setting held across all models.
+
+limits:
+  round_usd: 30
+  experiment_usd: 110
+
+sampling:
+  seed: 13
+  temperature: 0.0
+  reasoning_effort: low
+  max_tokens: 16000
+
+models:
+  claude-opus-5-5:
+    display_name: Claude Opus 5.5
+    model: anthropic/claude-opus-5.5
+    family: anthropic
+    usd_per_million_input: 4.0
+    usd_per_million_output: 20.0
+    accepts_seed: false
+    accepts_temperature: false
+  claude-sonnet-5-5:
+    display_name: Claude Sonnet 5.5
+    model: anthropic/claude-sonnet-5.5
+    family: anthropic
+    usd_per_million_input: 2.0
+    usd_per_million_output: 10.0
+    accepts_seed: false
+    accepts_temperature: false
+  claude-haiku-5-5:
+    display_name: Claude Haiku 5.5
+    model: anthropic/claude-haiku-5.5
+    family: anthropic
+    usd_per_million_input: 0.1
+    usd_per_million_output: 0.5
+    accepts_seed: false
+    accepts_temperature: false
+  gpt-6-2-sol:
+    display_name: GPT-6.2 Sol
+    model: openai/gpt-6.2-sol
+    family: openai
+    usd_per_million_input: 2.0
+    usd_per_million_output: 10.0
+    accepts_temperature: false
+  gpt-6-luna:
+    display_name: GPT-6 Luna
+    model: openai/gpt-6-luna
+    family: openai
+    usd_per_million_input: 0.1
+    usd_per_million_output: 0.5
+    accepts_temperature: false
+  gemini-4-carbon:
+    display_name: Gemini 4 Carbon
+    model: google/gemini-4-carbon
+    family: google
+    usd_per_million_input: 2.0
+    usd_per_million_output: 10.0
+  gemini-4-hydrogen:
+    display_name: Gemini 4 Hydrogen
+    model: google/gemini-4-hydrogen
+    family: google
+    usd_per_million_input: 1.5
+    usd_per_million_output: 7.5
+  mistral-large-4:
+    display_name: Mistral Large 4
+    model: mistralai/mistral-large-4-0
+    family: mistral
+    usd_per_million_input: 0.7
+    usd_per_million_output: 2.1
+    reasoning_effort: high
+  qwen4-max:
+    display_name: Qwen4 Max
+    model: qwen/qwen4-max
+    family: qwen
+    usd_per_million_input: 1.425
+    usd_per_million_output: 4.275
+  deepseek-v4-1-flash:
+    display_name: DeepSeek V4.1 Flash
+    model: deepseek/deepseek-v4.1-flash-1017
+    family: deepseek
+    usd_per_million_input: 0.3
+    usd_per_million_output: 1.2
+
+judges:
+  claude-fable-5-2:
+    display_name: Claude Fable 5.2
+    model: anthropic/claude-fable-5.2
+    family: anthropic
+    usd_per_million_input: 8.0
+    usd_per_million_output: 40.0
+    accepts_seed: false
+    accepts_temperature: false
+  gemini-4-neon:
+    display_name: Gemini 4 Neon
+    model: google/gemini-4-neon
+    family: google
+    usd_per_million_input: 3.0
+    usd_per_million_output: 15.0

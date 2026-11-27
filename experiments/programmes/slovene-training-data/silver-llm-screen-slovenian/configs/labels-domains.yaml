@@ -1,0 +1,139 @@
+# labels-domains.yaml — The entity labels of the two domains, with a definition and Slovene examples each (D6).
+#
+# Read by: scripts/screen_silver_llms.py make | check | rate | sheet --configs-dir <its folder>
+#          every label's definition and examples reach the model in the prompt's
+#          label list; the label names are the only labels an answer may use.
+#
+# Top-level keys:
+#   domains      Map of domain name (`medical`, `scientific`) -> domain spec.
+#
+# Domain spec fields:
+#   source       Where the label set comes from, read by no code.
+#   labels       Label -> label spec, in prompt order.
+#
+# Label spec fields:
+#   description  What the label covers, in one or two sentences.
+#   examples     Slovene mentions that carry the label.
+#
+# Notes:
+#   The medical labels are the domains of the OMOP common data model that name
+#   something a text can mention, with the domain names of the vocabulary
+#   release of 2026-02-27 (OHDSI Vocabulary-v5.0 wiki, vocabulary statistics).
+#   Left out: the combined domains (such as Condition/Meas), which only
+#   non-standard source concepts carry, and the domains that organise a
+#   database or a bill (Metadata, Type Concept, Relationship, Note, Condition
+#   Status, Episode, Cost, Revenue Code, Plan, Plan Stop Reason, Sponsor).
+#   Modifier is kept on the project owner's list although the release's
+#   statistics show no concept in it.
+
+domains:
+  medical:
+    source: OMOP common data model, standardized vocabularies, release 2026-02-27
+    labels:
+      Condition:
+        description: A disease, disorder, injury, sign or symptom.
+        examples: [sladkorna bolezen tipa 2, pljučnica, glavobol, zlom kolka]
+      Drug:
+        description: A medicine, vaccine or other biologic, by active substance or brand name.
+        examples: [paracetamol, Lekadol, inzulin, cepivo proti gripi]
+      Procedure:
+        description: An activity a health professional carries out to diagnose or treat a patient.
+        examples: [operacija kolena, magnetna resonanca, odvzem krvi, kemoterapija]
+      Modifier:
+        description: A word or phrase that narrows a procedure, such as its side, extent or approach.
+        examples: [levostranska, laparoskopska, delna, ponovna]
+      Measurement:
+        description: A laboratory test, vital sign or other standardised examination that yields a result.
+        examples: [krvni tlak, hemoglobin, telesna temperatura, raven holesterola]
+      Meas Value:
+        description: A result of a measurement given as a category rather than a number.
+        examples: [pozitiven, negativen, zvišan, v mejah normale]
+      Meas Value Operator:
+        description: A word or sign that places a result relative to a limit.
+        examples: [več kot, manj kot, "<", "≥"]
+      Unit:
+        description: A unit of measure attached to a dose or a result.
+        examples: [mg, mmol/l, ml, "°C"]
+      Observation:
+        description: >-
+          A clinical fact about the patient that is no condition, procedure, drug or measurement:
+          social and family history, habits, allergies, living conditions.
+        examples: [kadilec, družinska anamneza raka dojke, alergija na penicilin, živi sam]
+      Device:
+        description: An implant, instrument, piece of equipment or medical supply.
+        examples: [srčni spodbujevalnik, kateter, inzulinska črpalka, obvezilni material]
+      Specimen:
+        description: A biological sample taken from a patient.
+        examples: [vzorec krvi, urin, bris žrela, biopsija jeter]
+      Spec Anatomic Site:
+        description: The part of the body a sample is taken from, or that a condition or procedure concerns.
+        examples: [levo koleno, želodec, zgornji pljučni reženj, hrbtenica]
+      Route:
+        description: The way a medicine is given.
+        examples: [peroralno, intravensko, podkožno, v obliki inhalacij]
+      Visit:
+        description: The kind of contact between a patient and the health service.
+        examples: [ambulantni pregled, hospitalizacija, obisk na domu, sprejem na urgenci]
+      Place of Service:
+        description: The kind of place where care is given.
+        examples: [zdravstveni dom, splošna bolnišnica, urgentni center, lekarna]
+      Provider:
+        description: A kind of health professional or a medical specialty.
+        examples: [družinski zdravnik, kardiolog, medicinska sestra, fizioterapevt]
+      Gender:
+        description: The gender or sex of a patient.
+        examples: [moški, ženska, bolnica, deček]
+      Race:
+        description: The race of a patient, where a text states it.
+        examples: [belec, temnopolta bolnica, azijskega porekla]
+      Ethnicity:
+        description: The ethnic or national group of a patient, where a text states it.
+        examples: [Rom, pripadnica italijanske narodne skupnosti, albanskega rodu]
+      Language:
+        description: A language a patient speaks or needs care in.
+        examples: [slovenščina, znakovni jezik, govori samo albansko]
+      Geography:
+        description: A country, region or place named for where a patient lives, travelled or was treated.
+        examples: [Slovenija, Prekmurje, podsaharska Afrika, Ljubljana]
+      Payer:
+        description: An organisation or scheme that pays for care.
+        examples: [ZZZS, dopolnilno zdravstveno zavarovanje, samoplačnik, Vzajemna]
+      Currency:
+        description: A currency named with a price or cost of care.
+        examples: [evro, EUR, ameriški dolar]
+
+  scientific:
+    source: SciERC and SciREX label sets, extended by the project
+    labels:
+      Task:
+        description: A problem or goal the work addresses.
+        examples: [razvrščanje besedil, napovedovanje porabe energije, prepoznavanje imenskih entitet]
+      Method:
+        description: A procedure, model, algorithm or technique used to carry out the work.
+        examples: [metoda podpornih vektorjev, analiza variance, polstrukturirani intervju, kromatografija]
+      Dataset:
+        description: A named or described collection of data the work uses or produces.
+        examples: [korpus Gigafida, anketa o porabi gospodinjstev, vzorec 312 dijakov]
+      Metric:
+        description: A measure by which a result is scored or compared.
+        examples: [točnost, mera F1, Cronbachov alfa, povprečna absolutna napaka]
+      Material:
+        description: A physical substance, sample or object studied or used in an experiment.
+        examples: [titanov dioksid, vzorci tal, celične kulture, jeklo S355]
+      Software:
+        description: A named program, library, programming language or tool.
+        examples: [SPSS, Python, MATLAB, programski paket R]
+      Resource:
+        description: >-
+          A named resource the work relies on that is no dataset, software or material:
+          equipment, infrastructure, a standard, a lexicon or a funding source.
+        examples: [superračunalnik Vega, masni spektrometer, standard ISO 9001, Sloleks]
+      Parameter:
+        description: A named setting or variable of a method or an experiment.
+        examples: [stopnja učenja, velikost vzorca, temperatura žarjenja, stopnja značilnosti]
+      Value:
+        description: A number, with its unit where one is given, that a parameter or a metric takes.
+        examples: ["0,05", 300 °C, 87,4 %, n = 120]
+      Result:
+        description: A stated finding or outcome of the work, as a short phrase.
+        examples: [statistično značilna razlika, izboljšanje za 4 odstotne točke, hipotezo zavrnemo]

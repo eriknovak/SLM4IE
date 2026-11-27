@@ -1,0 +1,34 @@
+variants:
+  claude-opus-5-5:
+    round: R1
+    what: Claude Opus 5.5 makes the examples, the costliest screened model
+  claude-sonnet-5-5:
+    round: R1
+    what: Claude Sonnet 5.5 makes the examples
+  claude-haiku-5-5:
+    round: R1
+    what: Claude Haiku 5.5 makes the examples, a low-price model
+  gpt-6-2-sol:
+    round: R1
+    what: GPT-6.2 Sol makes the examples
+  gpt-6-luna:
+    round: R1
+    what: GPT-6 Luna makes the examples, a low-price model
+  gemini-4-carbon:
+    round: R1
+    what: Gemini 4 Carbon makes the examples
+  gemini-4-hydrogen:
+    round: R1
+    what: Gemini 4 Hydrogen makes the examples
+  mistral-large-4:
+    round: R1
+    what: Mistral Large 4 makes the examples, a model from a European provider
+  qwen4-max:
+    round: R1
+    what: Qwen4 Max makes the examples
+  deepseek-v4-1-flash:
+    round: R1
+    what: DeepSeek V4.1 Flash makes the examples, a low-price model
+  real-text:
+    round: R1
+    what: the real passages themselves, rated blind beside the written ones as the reference for natural Slovene

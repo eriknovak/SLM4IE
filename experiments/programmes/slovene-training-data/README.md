@@ -58,6 +58,8 @@ Can the project assemble, from open sources, a Slovene dataset large and clean e
   - **Standing**: answered, [curation-quality-slovenian:F1], [curation-quality-slovenian:F2], [curation-quality-slovenian:F3], [curation-quality-slovenian:F7]
 - **Filter tuning per source**: whether settings chosen per source let each content filter drop what it targets, and mostly bad text — [curation-thresholds-slovenian:H1], [curation-thresholds-slovenian:H2], [curation-thresholds-slovenian:H3], [curation-thresholds-slovenian:H4], [curation-thresholds-slovenian:H5], [curation-thresholds-slovenian:Q1]
   - **Standing**: open
+- **Models that make the examples**: which hosted LLMs write and label Slovene medical and scientific text well enough to build extraction examples, and at what cost — [silver-llm-screen-slovenian:Q1], [silver-llm-screen-slovenian:Q2], [silver-llm-screen-slovenian:Q3]
+  - **Standing**: open
 - **Provenance of the text**: how much of the supply was written in Slovene rather than translated or generated — [data-landscape-slovenian:F1], [data-landscape-slovenian:F6]
   - **Standing**: answered, [data-landscape-slovenian:F1], [data-landscape-slovenian:F6]
 

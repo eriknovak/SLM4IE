@@ -1,0 +1,34 @@
+domain,label,briefs
+scientific,Method,9
+scientific,Task,8
+scientific,Software,7
+scientific,Resource,5
+scientific,Parameter,5
+scientific,Value,5
+scientific,Metric,5
+scientific,Result,5
+scientific,Dataset,4
+scientific,Material,2
+medical,Condition,8
+medical,Drug,7
+medical,Procedure,4
+medical,Provider,4
+medical,Observation,4
+medical,Measurement,4
+medical,Route,4
+medical,Device,3
+medical,Meas Value,3
+medical,Unit,3
+medical,Gender,2
+medical,Visit,2
+medical,Spec Anatomic Site,2
+medical,Place of Service,1
+medical,Language,1
+medical,Ethnicity,1
+medical,Geography,1
+medical,Race,1
+medical,Modifier,1
+medical,Specimen,1
+medical,Meas Value Operator,1
+medical,Payer,1
+medical,Currency,1

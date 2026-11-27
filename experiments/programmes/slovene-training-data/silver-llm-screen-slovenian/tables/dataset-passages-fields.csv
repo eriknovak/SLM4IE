@@ -1,0 +1,9 @@
+field,type,distinct,values
+set,categorical,3,science-theses; medical-theses; medicine-descriptions
+domain,categorical,2,scientific; medical
+native,categorical,2,True; False
+passage_id,text,20,
+doc_id,text,20,
+group,categorical,3,ciklosporin; zaracet; pantoprazol
+text,text,20,
+words,numeric,,

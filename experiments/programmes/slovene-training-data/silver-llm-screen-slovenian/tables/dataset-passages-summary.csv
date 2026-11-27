@@ -1,0 +1,5 @@
+statistic,value,note
+passages,20,real passages written by people
+sets,3,science-theses; medical-theses; medicine-descriptions
+documents,20,source documents
+mean_words,129.1,words per passage

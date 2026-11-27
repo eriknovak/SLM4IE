@@ -63,9 +63,9 @@ def test_peak_gpu_memory_is_none_by_default():
     assert FakeBackend("m").peak_gpu_memory_bytes() is None
 
 
-def test_registry_lists_the_three_backends():
-    """Registry lists the three backends."""
-    assert available_backends() == ["claude", "transformers", "vllm"]
+def test_registry_lists_the_four_backends():
+    """Registry lists the four backends."""
+    assert available_backends() == ["claude", "openrouter", "transformers", "vllm"]
 
 
 def test_get_backend_builds_by_name_with_options():

@@ -1,0 +1,4 @@
+set,domain,native,passages,mean_words,min_words,max_words
+science-theses,scientific,true,10,125.5,101,187
+medical-theses,medical,true,5,112,102,119
+medicine-descriptions,medical,false,5,153.4,106,274

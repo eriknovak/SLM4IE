@@ -1,0 +1,98 @@
+# prompts-jobs.yaml — The prompts of the two jobs and of the judges, held fixed for every model (D2, D4).
+#
+# Read by: scripts/screen_silver_llms.py make | rate | sheet --configs-dir <its folder>
+#          slm4ie/silver/make.py fills the job prompts, slm4ie/silver/rate.py the judge prompt;
+#          the person's rating sheet copies the judge prompt's numbered judgements.
+#
+# Top-level keys:
+#   annotate     The labelling job: a model labels a real passage.
+#   write        The writing job: a model writes a passage with its labels from a brief.
+#   judge        The rating of one output by a judge model, blind to its maker.
+#
+# Prompt fields:
+#   system       The system turn.
+#   user         The user turn. Placeholders in braces are filled per call:
+#                  {labels}     the domain's labels, one per line, as
+#                               `- <label>: <description> Examples: <examples>.`
+#                  {label_names} the label names, comma-separated
+#                  {text}       the passage to label or to rate
+#                  {text_type}, {topic}, {words}, {required_labels}
+#                               the brief's fields (write only)
+#                  {mentions}   the output's mentions, numbered from 1 (judge only)
+#
+# Notes:
+#   Every answer is one JSON object, decoded against a schema the code builds.
+#   The prompts are written in English and ask for Slovene, so that no Slovene
+#   phrasing of ours reaches a model. They were drafted before any scored item
+#   was shown to a model and are tuned only on passages outside the scored 20.
+
+annotate:
+  system: You annotate entities in Slovene medical and scientific text. You answer with JSON only.
+  user: |-
+    Find every mention of the entity types below in the Slovene text and give each one a label from this list:
+
+    {labels}
+
+    Rules:
+    - Copy each mention exactly as it is written in the text, character for character, in the same inflected form and letter case. Do not translate, correct, lemmatise or shorten it.
+    - A mention is the shortest phrase that names the entity, without the words or punctuation around it.
+    - List every occurrence: a mention written three times is listed three times.
+    - List the mentions in the order they appear in the text.
+    - Use only the labels in the list. If the text holds no entity, answer with an empty list.
+
+    Answer with one JSON object of this shape and nothing else:
+    {{"mentions": [{{"text": "<mention copied from the text>", "label": "<one of {label_names}>"}}]}}
+
+    Text:
+    {text}
+
+write:
+  system: You are a Slovene domain expert who writes realistic Slovene professional text and annotates its entities. You answer with JSON only.
+  user: |-
+    Write a passage in Slovene and label its entities.
+
+    The passage:
+    - Text type: {text_type}
+    - Topic: {topic}
+    - Length: about {words} words
+    - It must read as if a Slovene expert wrote it for this kind of document: correct grammar and spelling, the terminology Slovene professionals use, and the style of the text type. It is not a translation and does not explain itself to the reader.
+    - Invent concrete, plausible details (names of methods, tools, medicines, values, units) rather than writing in general terms.
+    - It must contain at least one mention of each of these entity types: {required_labels}
+
+    Then label every mention of the entity types below in your passage:
+
+    {labels}
+
+    Rules for the labels:
+    - Copy each mention exactly as it is written in your passage, in the same inflected form and letter case.
+    - A mention is the shortest phrase that names the entity.
+    - List every occurrence, in the order the mentions appear.
+    - Use only the labels in the list.
+
+    Answer with one JSON object of this shape and nothing else:
+    {{"text": "<the passage>", "mentions": [{{"text": "<mention copied from the passage>", "label": "<one of {label_names}>"}}]}}
+
+judge:
+  system: You are a Slovene language editor and domain expert who reviews Slovene professional text and its entity annotation. You answer with JSON only.
+  user: |-
+    Review the Slovene text below and the entity mentions annotated in it. You do not know who wrote or annotated it.
+
+    The entity types and their definitions:
+
+    {labels}
+
+    Text:
+    {text}
+
+    Annotated mentions:
+    {mentions}
+
+    Give five judgements.
+    1. errors: list every error of Slovene grammar, spelling, inflection, word choice or punctuation in the text. Quote each erroneous phrase exactly and give its correction. Do not list style preferences, and do not list leftovers of document layout such as page headers or reference numbers.
+    2. naturalness: how natural the text reads to a Slovene professional of the field, from 1 to 5. 5 reads as written by a Slovene expert; 3 is correct but stiff or translation-like in places; 1 is clearly machine-made or translated.
+    3. realism: how plausible the content is for its kind of document, from 1 to 5. 5 could come from a real document; 3 is plausible but generic; 1 is implausible or wrong for the field.
+    4. mentions: for every numbered mention, whether its label is correct by the definitions and whether its span is the shortest phrase that names the entity.
+    5. missed: every entity of the listed types that the text contains and the annotation does not, copied exactly from the text, with its label.
+
+    Answer with one JSON object of this shape and nothing else:
+    {{"errors": [{{"phrase": "<quoted from the text>", "correction": "<corrected phrase>"}}], "naturalness": <1-5>, "realism": <1-5>, "mentions": [{{"number": <mention number>, "label_correct": <true|false>, "span_correct": <true|false>}}], "missed": [{{"text": "<copied from the text>", "label": "<one of {label_names}>"}}]}}
