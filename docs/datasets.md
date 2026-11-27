@@ -292,11 +292,12 @@ datasets.
 | [SentiNews 1.0](https://www.clarin.si/repository/xmlui/handle/11356/1110)     | CLARIN.SI | SA                                        | Slovene news sentiment with three-level annotations (sentence, paragraph, document) and 3-class labels. Directly downloadable. License: CC BY-SA 4.0. Convert to evaluation JSONL with `prepare_datasets.py tasks`.                                                                                              |
 | [Sloleks 3.1](https://www.clarin.si/repository/xmlui/handle/11356/2080)       | CLARIN.SI | TOKENIZER                                 | Slovenian inflectional lexicon (lemmas + word forms with MULTEXT-East V6 / JOS MSDs). **Tokenizer / morphology evaluation only** — intentionally absent from `extract.yaml`, never enters the pretraining corpus. Distributed as TEI XML. License: CC BY-SA 4.0. Convert with `prepare_datasets.py tokenization`. |
 
-Task roles: `ner/suk`, `ner/janes_tag`, `ner/slavicner` and
-`sentiment/twitter_15eu_sl` are `finetune_only` (train, val and test, never in a
-zero-shot training mix); `pos/ssj500k`, `pos/suk` and `pos/janes_tag` copy the
-role of the NER entry on the same source. The Twitter source has no download
-entry yet. See [Task datasets](data-pipeline.md#task-datasets). Every entry
+Task roles: `ner/suk`, `ner/janes_tag` and `ner/slavicner` are `finetune_only`
+(train, val and test, never in a zero-shot training mix); `pos/ssj500k`, `pos/suk`
+and `pos/janes_tag` copy the role of the NER entry on the same source. The Twitter
+sentiment corpus of 15 European languages (CLARIN.SI 11356/1054, CC BY-SA 4.0) is
+not used: its Slovenian file holds 112,832 tweet ids with labels and no texts. See
+[Task datasets](data-pipeline.md#task-datasets). Every entry
 with train, val and test is a target of per-entry fine-tuning: an encoder is
 trained on its train split, picked on val and scored on test; see
 [Per-entry fine-tuning](data-pipeline.md#per-entry-fine-tuning).

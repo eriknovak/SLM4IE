@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+import pytest
 import yaml
 
 from slm4ie.data.tasks.run import convert_tasks
@@ -43,21 +44,6 @@ def _read_jsonl_gz(path: Path) -> List[Dict[str, Any]]:
     return out
 
 
-def _write_sentinews_tsv(path: Path, rows: List[Dict[str, str]], columns: List[str]) -> None:
-    """Write a tab-separated SentiNews-style file at *path*.
-
-    Args:
-        path: Output TSV path.
-        rows: Row dicts; missing columns become empty strings.
-        columns: Column header order.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        fh.write("\t".join(columns) + "\n")
-        for row in rows:
-            fh.write("\t".join(row.get(c, "") for c in columns) + "\n")
-
-
 def _make_extracted_layout(tmp_path: Path, dataset_key: str, records: List[Dict[str, Any]]) -> Path:
     """Build a tasks.yaml + matching ``extracted/<key>.jsonl`` source tree.
 
@@ -92,45 +78,6 @@ def _make_extracted_layout(tmp_path: Path, dataset_key: str, records: List[Dict[
                 "suite": None,
                 "language": "sl",
                 "license": "cc-by-sa-4.0",
-            },
-        },
-    }
-    config_path = tmp_path / "tasks.yaml"
-    config_path.write_text(yaml.safe_dump(tasks_yaml))
-    return config_path
-
-
-def _make_raw_layout(tmp_path: Path, dataset_key: str, rows: List[Dict[str, str]], columns: List[str]) -> Path:
-    """Build a tasks.yaml pointing at a SentiNews-style raw TSV.
-
-    Args:
-        tmp_path: pytest tmp_path root.
-        dataset_key: Subdirectory name under ``raw/<key>/``.
-        rows: TSV rows.
-        columns: TSV column order.
-
-    Returns:
-        Path to the written tasks.yaml.
-    """
-    extracted = tmp_path / "extracted"
-    raw = tmp_path / "raw"
-    tasks_root = tmp_path / "tasks"
-    extracted.mkdir(parents=True, exist_ok=True)
-    tasks_root.mkdir(parents=True, exist_ok=True)
-    _write_sentinews_tsv(raw / dataset_key / "SentiNews_document-level.txt", rows, columns)
-
-    tasks_yaml = {
-        "roots": {"extracted": str(extracted), "raw": str(raw), "tasks": str(tasks_root)},
-        "converters": {"sentiment": "sentiment"},
-        "entries": {
-            f"sentiment/{dataset_key}": {
-                "role": "held_out",
-                "source": {"kind": "raw", "keys": [dataset_key]},
-                "splits": {"test": "test.jsonl.gz"},
-                "labels": ["negative", "neutral", "positive"],
-                "suite": None,
-                "language": "sl",
-                "license": "cc-by-4.0",
             },
         },
     }
@@ -198,23 +145,20 @@ class TestConvertExtracted:
         assert sample["label"] in {"negative", "neutral", "positive"}
 
 
-class TestConvertRaw:
-    """End-to-end tests for the `raw` single-split source path."""
+class TestRejectRaw:
+    """The sentiment family reads extracted sources only."""
 
-    def test_raw_records_go_to_single_split(self, tmp_path: Path) -> None:
-        """A single declared split collects every raw record."""
-        rows = [
-            {"nid": "1", "content": "Lepo.", "sentiment": "positive"},
-            {"nid": "2", "content": "Slabo.", "sentiment": "negative"},
-            {"nid": "3", "content": "OK.", "sentiment": "neutral"},
-        ]
-        config_path = _make_raw_layout(tmp_path, "twitter_sentiment_15eu", rows, ["nid", "content", "sentiment"])
-        convert_tasks(config_path, entry_keys=["sentiment/twitter_sentiment_15eu"], max_workers=1)
+    def test_raw_source_entry_is_reported_failed(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        """An entry with `source.kind: raw` fails on its source kind, not on a missing file."""
+        config_path = _make_extracted_layout(tmp_path, "tweets", [])
+        config = yaml.safe_load(config_path.read_text())
+        config["entries"]["sentiment/tweets"]["source"]["kind"] = "raw"
+        config_path.write_text(yaml.safe_dump(config))
+        tsv = tmp_path / "raw" / "tweets" / "tweets.tsv"
+        tsv.parent.mkdir(parents=True)
+        tsv.write_text("id\tcontent\tsentiment\n1\tLepo.\tpositive\n", encoding="utf-8")
 
-        out_dir = tmp_path / "tasks" / "sentiment" / "twitter_sentiment_15eu"
-        assert not (out_dir / "train.jsonl.gz").exists()
-        records = _read_jsonl_gz(out_dir / "test.jsonl.gz")
-        assert len(records) == 3
-        assert {r["label"] for r in records} == {"negative", "neutral", "positive"}
-        for record in records:
-            assert set(record.keys()) == {"id", "text", "label"}
+        summary = convert_tasks(config_path, entry_keys=["sentiment/tweets"], max_workers=1)
+
+        assert summary.failed == ["sentiment/tweets"]
+        assert "sentiment/tweets has source kind 'raw'" in caplog.text

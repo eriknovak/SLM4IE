@@ -4,20 +4,15 @@ Turns SA datasets into `SentimentExample` rows:
 
     {"id": "<source>:<doc_id>", "text": "<...>", "label": "negative"}
 
-Two source kinds are supported:
-
-* `kind: extracted` -- reads `<roots.extracted>/<key>.jsonl` (SentiNews).
-* `kind: raw` -- reads SentiNews-format TSV files from `<roots.raw>/<key>/`
-  (the held-out Twitter dataset).
+Only `kind: extracted` sources are read, from `<roots.extracted>/<key>.jsonl`
+(SentiNews); any other source kind is refused.
 
 The split policy is HASH: the run loop buckets each record by a deterministic hash
 of its stable id. A single-split entry (e.g. a held-out `test`-only dataset)
 therefore lands entirely in that one split without any special-casing here.
 """
 
-import csv
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 from slm4ie.data.schema import SentimentExample
@@ -116,89 +111,6 @@ def _iter_extracted(
         yield example_id, example
 
 
-def _iter_raw_sentinews_format(
-    source_dir: Path,
-    dataset: str,
-    allow: set | None,
-) -> Iterator[tuple[str, SentimentExample]]:
-    """Yield `(stable_id, example)` from SentiNews-format TSV files.
-
-    The held-out Twitter sentiment dataset ships in the same
-    `SentiNews_<level>-level.txt` layout, so a single TSV reader covers both.
-
-    Args:
-        source_dir: Directory containing `SentiNews_*-level.*` files.
-        dataset: Dataset name used to synthesize record ids.
-        allow: Optional allow-list of canonical labels.
-
-    Yields:
-        `(stable_id, SentimentExample)` pairs.
-
-    Raises:
-        FileNotFoundError: If no SentiNews-format files are present.
-    """
-    # collect the input files
-    candidates: list[Path] = []
-    for pattern in ("SentiNews_*-level.*", "*.tsv", "*.txt"):
-        candidates.extend(sorted(source_dir.glob(pattern)))
-    seen: set = set()
-    files: list[Path] = []
-    for path in candidates:
-        if path.is_file() and path not in seen:
-            files.append(path)
-            seen.add(path)
-    if not files:
-        raise FileNotFoundError(f"No sentiment input files found in {source_dir}.")
-
-    # read the rows of each file
-    text_keys = ("content", "text", "sentence", "paragraph", "tweet")
-    index = 0
-    for path in files:
-        with path.open(encoding="utf-8", newline="") as fh:
-            reader = csv.DictReader(fh, delimiter="\t")
-            for row in reader:
-                text = next((row[k] for k in text_keys if row.get(k)), None)
-                raw_label = row.get("sentiment") or row.get("label") or row.get("polarity")
-                if text is None:
-                    continue
-                label = normalize_label(raw_label, allow)
-                if label is None:
-                    continue
-                example_id = synthesize_id(
-                    {"id": row.get("nid") or row.get("doc_id") or row.get("id")},
-                    dataset,
-                    index,
-                )
-                example: SentimentExample = SentimentExample(id=example_id, text=text, label=label)
-                index += 1
-                yield example_id, example
-
-
-def _iter_raw(
-    entry: TaskEntry,
-    roots: TasksRoots,
-    allow: set | None,
-) -> Iterator[tuple[str, SentimentExample]]:
-    """Yield `(stable_id, example)` pairs from raw sentiment sources.
-
-    Args:
-        entry: Sentiment task entry with `source.kind == 'raw'`.
-        roots: Filesystem roots.
-        allow: Optional allow-list of canonical labels.
-
-    Yields:
-        `(stable_id, SentimentExample)` pairs.
-
-    Raises:
-        FileNotFoundError: If a source directory is missing.
-    """
-    for key in entry.source.keys:
-        source_dir = roots.raw / key
-        if not source_dir.is_dir():
-            raise FileNotFoundError(f"Raw source for {entry.task}/{entry.dataset}: {source_dir} is not a directory.")
-        yield from _iter_raw_sentinews_format(source_dir, entry.dataset, allow)
-
-
 # ===============================
 # Converter class
 # ===============================
@@ -231,16 +143,15 @@ class SentimentConverter(TaskConverter):
             `(stable_id, example)` pairs for the HASH split policy.
 
         Raises:
-            ValueError: If the entry source kind is unknown.
+            ValueError: If the entry source kind is not `extracted`.
         """
         allow = label_allow_set(entry)
 
-        if entry.source.kind == "extracted":
-            record_iter = _iter_extracted(entry, roots, allow)
-        elif entry.source.kind == "raw":
-            record_iter = _iter_raw(entry, roots, allow)
-        else:
-            raise ValueError(f"Unknown source kind {entry.source.kind!r} for {entry.task}/{entry.dataset}.")
+        if entry.source.kind != "extracted":
+            raise ValueError(
+                f"Sentiment entry {entry.task}/{entry.dataset} has source kind {entry.source.kind!r}; "
+                "only 'extracted' is supported."
+            )
 
-        for split_key, example in record_iter:
+        for split_key, example in _iter_extracted(entry, roots, allow):
             yield split_key, dict(example)

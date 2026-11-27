@@ -158,15 +158,6 @@ entries:
     language: sl
     license: cc-by-sa-4.0
 
-  sentiment/twitter_15eu_sl:
-    role: finetune_only
-    source: { kind: raw, keys: [twitter_sentiment_15eu] }
-    splits: { train: train.jsonl.gz, val: val.jsonl.gz, test: test.jsonl.gz }
-    labels: [negative, neutral, positive]
-    suite: null
-    language: sl
-    license: cc-by-4.0
-
   # --- SuperGLUE-SL subtasks --------------------------------------------
   nli/cb:
     role: held_out               # held_out -> train dropped (val/test only)
