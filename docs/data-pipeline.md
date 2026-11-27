@@ -293,10 +293,14 @@ the role of the NER entry from the same source, and the hash split keys on the
 document id, so one document's sentences share a split. A sentence whose word
 and tag counts differ is refused and counted.
 
-`ner/suk`, `ner/janes_tag`, `ner/slavicner` and `sentiment/twitter_15eu_sl` are
-`finetune_only` and take the standard 70/15/15 hash split (`slavicner` as above).
-`sentiment/twitter_15eu_sl` has no download source yet, so it stays unbuilt. The
-SuperGLUE entries switch roles after #53.
+`ner/suk`, `ner/janes_tag` and `ner/slavicner` are `finetune_only` and take the
+standard 70/15/15 hash split (`slavicner` as above). The SuperGLUE entries switch
+roles after #53.
+
+The registry has no Twitter sentiment entry. The Twitter sentiment corpus of 15
+European languages ([CLARIN.SI 11356/1054](https://www.clarin.si/repository/xmlui/handle/11356/1054))
+ships tweet ids and labels only. Its texts can be fetched only through the paid X
+API, and many of the 2013–2015 tweets are likely deleted, so the entry was dropped (#74).
 
 Adding a new task dataset is a one-entry edit to `tasks.yaml`; the appropriate
 converter (defaulted by the `converters:` map at the top of the file) will pick
