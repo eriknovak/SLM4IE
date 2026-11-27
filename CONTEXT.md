@@ -263,9 +263,23 @@ task-native bundles do.
 _Avoid_: source type, mode
 
 **Task family**:
-A group of entries sharing one output schema: spans, part-of-speech tags,
-sentiment, and the SuperGLUE subtasks.
+A group of entries sharing one example schema, one prediction shape and one
+scoring function: spans, part-of-speech tags, sentiment, the SuperGLUE
+subtasks, relations, entity sentiment, extractive QA, keyphrases, reading
+comprehension and topics.
 _Avoid_: task type, benchmark family
+
+**Label-free family**:
+A task family whose entries declare no label set, since its answers are text
+taken from the input rather than labels: extractive QA and keyphrases.
+_Avoid_: unlabelled family, open-label family
+
+**Prediction shape**:
+The form every approach answers a task family in, whether a fine-tuned head,
+GLiNER, a System One model or a generative LLM: a list of spans, a label, a
+choice index, an answer string. The family's scoring function reads only this,
+never logits or prompts, so scores from different approaches compare.
+_Avoid_: output format, answer format
 
 **Converter**:
 The backend that turns one task family's entries into its schema.

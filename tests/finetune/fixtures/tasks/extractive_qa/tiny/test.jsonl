@@ -1,0 +1,3 @@
+{"id": "tiny:9", "context": "Banka je odprta do petih.", "question": "Do kdaj je banka odprta?", "answers": [{"text": "do petih", "start": 16}]}
+{"id": "tiny:10", "context": "Pes je spal na vrtu.", "question": "Kaj je jedla mačka?", "answers": []}
+{"id": "tiny:11", "context": "Ana je spila kavo z mlekom.", "question": "Kaj je spila Ana?", "answers": [{"text": "kavo z mlekom", "start": 13}]}

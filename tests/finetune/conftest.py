@@ -52,7 +52,7 @@ def settings() -> "FinetuneSettings":
 def fixture_entry() -> Callable[..., TaskEntry]:
     """Return a builder of the registry entry of a fixture under `fixtures/tasks/<task>/tiny/`."""
 
-    def build(task: str, labels: list, role: str = "finetune_only") -> TaskEntry:
+    def build(task: str, labels: list | None, role: str = "finetune_only") -> TaskEntry:
         return TaskEntry(
             task=task,
             dataset="tiny",

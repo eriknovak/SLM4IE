@@ -1,12 +1,12 @@
 """Post-hoc MLflow tracking for the task converters.
 
-Shared by the three task-family converters (`spans`, `sentiment`,
-`superglue`). After a converter writes its selected `<task>/<dataset>`
-entries, it logs one MLflow run per dataset under the `slm4ie/data/tasks`
-experiment, keyed by a content digest of the dataset's split files and
-upserted (skip unless `force`). One run per dataset -- rather than one per
-converter invocation -- gives each task dataset its own digest and lineage
-handle, which the contamination audit and future eval runs declare as an input.
+Shared by every task-family converter backend under `converters/`. After a
+converter writes its selected `<task>/<dataset>` entries, it logs one MLflow
+run per dataset under the `slm4ie/data/tasks` experiment, keyed by a content
+digest of the dataset's split files and upserted (skip unless `force`). One
+run per dataset -- rather than one per converter invocation -- gives each
+task dataset its own digest and lineage handle, which the contamination audit
+and future eval runs declare as an input.
 
 The tracking is deliberately light: per-split row counts and a combined label
 distribution as metrics, the entry metadata as params, a
@@ -53,7 +53,10 @@ def _record_labels(record: dict[str, Any]) -> list[str]:
 
     Handles a top-level `label` (sentiment / NLI / QA / ...) and per-span
     labels (`spans` from the NER family, as `{"label": ...}` dicts or
-    `[start, end, label]` triples).
+    `[start, end, label]` triples), and per-relation labels (`relations` from
+    the relation family). Families without labels (extractive QA, keyphrase)
+    yield nothing; a reading-comprehension choice index counts as its label,
+    as a commonsense one does.
 
     Args:
         record: A parsed task JSONL record.
@@ -72,6 +75,11 @@ def _record_labels(record: dict[str, Any]) -> list[str]:
             labels.append(str(span["label"]))
         elif isinstance(span, (list, tuple)) and len(span) >= 3:
             labels.append(str(span[2]))
+
+    # per-relation labels
+    for relation in record.get("relations") or []:
+        if isinstance(relation, dict) and "label" in relation:
+            labels.append(str(relation["label"]))
     return labels
 
 

@@ -1,0 +1,3 @@
+{"id": "tiny:0", "passage": "Ana je zjutraj spila kavo in odšla v službo z avtobusom.", "question": "Kako je Ana šla v službo?", "choices": ["Z avtobusom.", "Peš.", "Z avtom."], "label": 0}
+{"id": "tiny:1", "passage": "Marko je v soboto obiskal babico, ki živi na vasi.", "question": "Kdaj je Marko obiskal babico?", "choices": ["V petek.", "V nedeljo.", "V soboto.", "V ponedeljek."], "label": 2}
+{"id": "tiny:2", "passage": "Pes je lajal, ker je pred vrati stal poštar.", "question": "Zakaj je pes lajal?", "choices": ["Bil je lačen.", "Pred vrati je stal poštar."], "label": 1}

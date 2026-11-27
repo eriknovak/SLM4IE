@@ -298,9 +298,81 @@ and tag counts differ is refused and counted.
 `sentiment/twitter_15eu_sl` has no download source yet, so it stays unbuilt. The
 SuperGLUE entries switch roles after #53.
 
-Adding a new task dataset is a one-entry edit to `tasks.yaml`; the appropriate
-converter (defaulted by the `converters:` map at the top of the file) will pick
-it up.
+### Task families
+
+A task family fixes three things every approach shares: the example schema the
+converters write, the prediction shape every approach answers in, and one
+scoring function in [`slm4ie/evaluation/scoring.py`](../slm4ie/evaluation/scoring.py).
+A fine-tuned head, a GLiNER model, a System One model or a generative LLM is
+scored the same way once it turns its output into the family's prediction
+shape. `scorer_for(family)` returns a family's scorer; every scorer takes one
+split's examples and predictions, aligned by position, returns named scores in
+[0, 1], and raises naming the example id when a prediction is missing or has
+the wrong shape. A fine-tuning head decodes its logits into the same shape and
+scores through the same function, so its test score equals the shared one.
+
+| Family | Example schema (`schema.py`) | Prediction per example | Scores |
+| --- | --- | --- | --- |
+| `ner` | `NerExample` `{id, text, spans}` | list of spans `{start, end, label}` | `span_f1`, `span_relaxed_f1`, `span_partial_f1`, `span_macro_f1` |
+| `pos` | `PosExample` `{id, words, tags}` | one tag per word | `token_accuracy` |
+| `sentiment` | `SentimentExample` `{id, text, label}` | one label | `accuracy`, `macro_f1` |
+| `nli`, `qa`, `coref`, `wsd` | the SuperGLUE-SL TypedDicts | one label | `accuracy`, `macro_f1` |
+| `commonsense` | `CommonsenseCopaExample` `{id, premise, choice1, choice2, question, label}` | one choice index | `accuracy`, `macro_f1` |
+| `relation` | `RelationExample` `{id, text, entities, relations}` | list of relations `{head, tail, label}`, each end a span `{start, end, label}` | `relation_f1`, `relation_macro_f1`; end to end also `relation_boundary_f1` |
+| `entity_sentiment` | `EntitySentimentExample` `{id, text, mentions, entity_label, label}` | one label: `negative`, `neutral` or `positive` | `accuracy`, `macro_f1` |
+| `extractive_qa` | `ExtractiveQaExample` `{id, context, question, answers}` | one answer string; `""` means no answer | `exact_match`, `f1`, and both for `has_answer_*` and `no_answer_*` questions |
+| `keyphrase` | `KeyphraseExample` `{id, text, keyphrases}` | ranked list of strings | `f1_at_5`, `f1_at_10`, `f1_at_m`, `gold_in_text` |
+| `reading_mc` | `ReadingMcExample` `{id, passage, question, choices, label}` | one choice index | `accuracy`, `macro_f1` |
+| `topic` | `TopicExample` `{id, text, label}` | one label | `accuracy`, `macro_f1` |
+
+The six families added for the benchmark collection, in more detail:
+
+- `relation` keeps the gold entity mentions (`{start, end, label, id}`) in every
+  example and links them by mention id (`{head, tail, label}`). One entry
+  serves two settings. With gold entities (`scorer_for("relation",
+  gold_entities=True)`) a prediction labels pairs of gold mentions, and a
+  predicted span that is not a gold mention is an error. End to end
+  (`gold_entities=False`) a prediction must also find the mentions. Asking
+  for the relation scorer without the setting raises a `ValueError`. Strict F1
+  needs both spans, both entity labels and the relation label to match;
+  boundary F1 ignores the entity labels.
+- `entity_sentiment` carries one target entity, its mentions as character spans
+  and its entity label.
+- `extractive_qa` gives each gold answer as `{text, start}`, the start a
+  character offset into the context, and marks an unanswerable question with
+  an empty `answers` list.
+  It is scored as SQuAD 2.0 is, against the best-matching gold answer, after
+  lowercasing and removing punctuation and extra whitespace. The English
+  article removal of the SQuAD script is not applied.
+- `keyphrase` matches keyphrases after lowercasing and normalising punctuation
+  and whitespace. `gold_in_text` is the share of gold keyphrases whose
+  normalised form occurs as whole words of the text, the most a tagging
+  approach can reach.
+- `reading_mc` takes any number of choices; `commonsense` shares its head.
+- `topic` has the shape of `sentiment` and differs only in its family name and
+  label set.
+
+`extractive_qa` and `keyphrase` are label-free: their entries declare no
+`labels`. Every other family fails to load without them, the error naming the
+entry. The six new converter slots in `tasks.yaml` name converters that come
+with each family's first dataset entry; a slot is resolved only when an entry
+uses it.
+
+Which approaches can answer each new family:
+
+| Family | Fine-tuned head | GLiNER | System One | Generative LLM |
+| --- | --- | --- | --- | --- |
+| `relation` | yes: pair classification over the gold mentions | yes: end to end | yes: gold entities, the relation label as the choice | yes |
+| `entity_sentiment` | yes: sequence classification, mentions marked | no | yes | yes |
+| `extractive_qa` | yes: start and end prediction | yes: the answer as a span | yes: posed as a choice among candidate spans | yes |
+| `keyphrase` | yes: tags keyphrase occurrences | yes: keyphrases as spans | no | yes |
+| `reading_mc` | yes: multiple choice | no | yes | yes |
+| `topic` | yes: sequence classification | no | yes | yes |
+
+Adding a new task dataset of a family whose converter exists is a one-entry
+edit to `tasks.yaml`; the converter (defaulted by the `converters:` map at the
+top of the file) will pick it up. The first entry of a new family also adds its
+converter under `slm4ie/data/tasks/converters/`.
 
 ```bash
 # Every entry in the registry, whatever its family

@@ -65,6 +65,28 @@ class TestProfile:
         assert profile["total_rows"] == 3
         assert profile["label_distribution"] == {"positive": 2, "negative": 1}
 
+    def test_relation_family_counts_relation_labels(self, tmp_path: Path):
+        """A relation split reports its rows and the distribution of relation labels."""
+        out = tmp_path / "tasks" / "relation" / "demo"
+        rows = [
+            {"id": "1", "text": "a", "entities": [], "relations": [{"label": "works_for"}, {"label": "located_in"}]},
+            {"id": "2", "text": "b", "entities": [], "relations": [{"label": "works_for"}]},
+        ]
+        _write_split(out / "test.jsonl.gz", rows)
+        profile = tt.profile_task_dataset(out, {"test": "test.jsonl.gz"})
+        assert (profile["split_rows"], profile["label_distribution"]) == (
+            {"test": 2},
+            {"works_for": 2, "located_in": 1},
+        )
+
+    def test_new_family_rows_without_labels(self, tmp_path: Path):
+        """A label-free family reports row counts and an empty distribution."""
+        out = tmp_path / "tasks" / "keyphrase" / "demo"
+        _write_split(out / "test.jsonl.gz", [{"id": "1", "text": "a", "keyphrases": ["x"]}] * 2)
+        profile = tt.profile_task_dataset(out, {"test": "test.jsonl.gz"})
+        assert profile["split_rows"] == {"test": 2}
+        assert profile["label_distribution"] == {}
+
 
 class TestLogTaskDataset:
     """Enabled-path logging against a temporary SQLite store."""

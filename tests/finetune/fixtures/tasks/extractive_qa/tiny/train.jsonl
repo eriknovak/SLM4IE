@@ -1,0 +1,6 @@
+{"id": "tiny:0", "context": "Ana Horvat živi v Ljubljani.", "question": "Kje živi Ana?", "answers": [{"text": "v Ljubljani", "start": 16}]}
+{"id": "tiny:1", "context": "Marko je v soboto obiskal babico.", "question": "Kdaj je Marko obiskal babico?", "answers": [{"text": "v soboto", "start": 9}]}
+{"id": "tiny:2", "context": "Vreme je bilo lepo ves dan.", "question": "Kdo je zmagal?", "answers": []}
+{"id": "tiny:3", "context": "Luka dela pri podjetju Krka, ki ima sedež v Novem mestu in zaposluje več tisoč ljudi po vsem svetu.", "question": "Kje ima Krka sedež?", "answers": [{"text": "v Novem mestu", "start": 42}]}
+{"id": "tiny:4", "context": "Mojca je kupila nov avto.", "question": "Kaj je kupila Mojca?", "answers": [{"text": "nov avto", "start": 16}]}
+{"id": "tiny:5", "context": "Peter je včeraj igral nogomet.", "question": "Kaj je igral Peter?", "answers": [{"text": "nogomet", "start": 22}]}

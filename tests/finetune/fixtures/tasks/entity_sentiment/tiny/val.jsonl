@@ -1,0 +1,3 @@
+{"id": "tiny:6", "text": "Luka je odlično vodil ekipo.", "mentions": [{"start": 0, "end": 4}], "entity_label": "PER", "label": "positive"}
+{"id": "tiny:7", "text": "Gorenje je izgubilo veliko denarja.", "mentions": [{"start": 0, "end": 7}], "entity_label": "ORG", "label": "negative"}
+{"id": "tiny:8", "text": "Mojca je danes v službi.", "mentions": [{"start": 0, "end": 5}], "entity_label": "PER", "label": "neutral"}

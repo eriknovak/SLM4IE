@@ -1,0 +1,3 @@
+{"id": "tiny:6", "context": "Nina je šla v trgovino.", "question": "Kam je šla Nina?", "answers": [{"text": "v trgovino", "start": 12}]}
+{"id": "tiny:7", "context": "Janez je bil bolan.", "question": "Koliko je star Janez?", "answers": []}
+{"id": "tiny:8", "context": "Tina je v ponedeljek odpotovala v Maribor, kjer je obiskala prijateljico in si ogledala staro mestno jedro.", "question": "Kam je odpotovala Tina?", "answers": [{"text": "v Maribor", "start": 32}]}

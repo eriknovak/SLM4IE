@@ -11,13 +11,18 @@ from slm4ie.finetune.run import finetune  # noqa: E402
 # Test Data
 # ===============================
 
-# one fixture per head kind: span tagging, word tagging, sequence pair, multiple choice
-# the scores each head reports, the checkpoint score first, and its labels
+# each head kind's scores, checkpoint score first, and its labels
 HEAD_KINDS = {
     "ner": (["span_f1", "span_relaxed_f1", "span_partial_f1"], ["PER", "LOC", "ORG"]),
     "pos": (["token_accuracy"], ["ADJ", "ADP", "NOUN", "PROPN", "PUNCT", "VERB"]),
     "nli": (["macro_f1"], ["entailment", "contradiction"]),
     "commonsense": (["accuracy"], [0, 1]),
+    "reading_mc": (["accuracy", "macro_f1"], [0, 1, 2, 3]),
+    "relation": (["relation_f1", "relation_macro_f1"], ["works_at", "located_in"]),
+    "entity_sentiment": (["macro_f1", "accuracy"], ["negative", "neutral", "positive"]),
+    "topic": (["macro_f1", "accuracy"], ["sport", "politika", "gospodarstvo"]),
+    "extractive_qa": (["f1", "exact_match", "has_answer_f1", "no_answer_f1"], None),
+    "keyphrase": (["f1_at_m", "f1_at_5", "f1_at_10", "gold_in_text"], None),
 }
 
 # ===============================
@@ -44,6 +49,12 @@ def test_finetune_refuses_entry_without_train_split(tiny_encoder, roots, setting
 
     with pytest.raises(ValueError, match=r"nli/tiny.*held_out"):
         finetune(held_out, tiny_encoder, settings, roots, device="cpu")
+
+
+def test_finetune_refuses_labelled_entry_without_labels(tiny_encoder, roots, settings, fixture_entry):
+    """A labelled family's entry that declares no labels is refused, the error naming the entry."""
+    with pytest.raises(ValueError, match=r"nli/tiny.*no labels"):
+        finetune(fixture_entry("nli", None), tiny_encoder, settings, roots, device="cpu")
 
 
 def test_finetune_falls_back_to_tokenizer_json_when_mapped_class_fails(

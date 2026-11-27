@@ -1,5 +1,7 @@
 """Tests for slm4ie.evaluation.scoring."""
 
+import functools
+
 import pytest
 
 from slm4ie.evaluation.scoring import (
@@ -11,7 +13,15 @@ from slm4ie.evaluation.scoring import (
     f1_interval,
     macro_f1,
     paired_difference_interval,
+    score_choices,
     score_document,
+    score_extractive_qa,
+    score_keyphrases,
+    score_labels,
+    score_relations,
+    score_spans,
+    score_tags,
+    scorer_for,
     token_accuracy,
 )
 
@@ -362,3 +372,316 @@ def test_classification_macro_f1_averages_classes_equally():
 def test_classification_macro_f1_scores_a_never_predicted_class_zero():
     """A gold class the model never predicts drags the average down."""
     assert classification_macro_f1(["a", "a"], ["a", "b"]) == pytest.approx((2 / 3 + 0) / 2)
+
+
+# ===============================
+# Family scorers
+# ===============================
+
+
+def test_score_spans_reports_the_four_span_scores():
+    """One exact span, one boundary error and one missed span across two examples."""
+    examples = [
+        {"id": "d1", "text": "Janez Novak je iz Kranja.", "spans": [span(0, 11, "PER"), span(18, 24, "LOC")]},
+        {"id": "d2", "text": "Ana", "spans": [span(0, 3, "PER")]},
+    ]
+    predictions = [[span(0, 11, "PER"), span(18, 25, "LOC")], []]
+    # strict hits PER only; the wider LOC span is a relaxed and a partial hit
+    assert score_spans(examples, predictions) == pytest.approx(
+        {
+            "span_f1": 2 * 1 / 5,
+            "span_relaxed_f1": 2 * 2 / 5,
+            "span_partial_f1": 2 * 2 / 5,
+            "span_macro_f1": (2 * 1 / 3 + 0) / 2,
+        }
+    )
+
+
+def test_score_tags_pools_words_and_counts_an_untagged_word_wrong():
+    """Three of the five words are right; a word with no tag is wrong."""
+    examples = [
+        {"id": "s1", "words": ["a", "b"], "tags": ["NOUN", "VERB"]},
+        {"id": "s2", "words": ["c", "d", "e"], "tags": ["ADJ", "VERB", "NOUN"]},
+    ]
+    predictions = [["NOUN", "VERB"], ["ADJ", None, "ADP"]]
+    assert score_tags(examples, predictions) == pytest.approx({"token_accuracy": 3 / 5})
+
+
+def test_score_labels_of_perfect_predictions_score_one():
+    """Every label right scores 1 on both scores."""
+    examples = [{"id": str(i), "label": label} for i, label in enumerate(["a", "a", "b"])]
+    assert score_labels(examples, ["a", "a", "b"]) == pytest.approx({"accuracy": 1.0, "macro_f1": 1.0})
+
+
+def test_score_labels_reports_accuracy_and_macro_f1():
+    """Class a has F1 0.8 and class b has F1 2/3."""
+    examples = [{"id": str(i), "label": label} for i, label in enumerate(["a", "a", "b", "b"])]
+    assert score_labels(examples, ["a", "a", "b", "a"]) == pytest.approx(
+        {"accuracy": 3 / 4, "macro_f1": (0.8 + 2 / 3) / 2}
+    )
+
+
+CHOICE_EXAMPLES = [
+    {"id": "c1", "choice1": "x", "choice2": "y", "label": 0},
+    {"id": "c2", "choice1": "x", "choice2": "y", "label": 1},
+    {"id": "r1", "choices": ["p", "q", "r", "s"], "label": 3},
+]
+
+
+def test_score_choices_of_perfect_predictions_score_one():
+    """Every choice right scores 1 on both scores."""
+    assert score_choices(CHOICE_EXAMPLES, [0, 1, 3]) == pytest.approx({"accuracy": 1.0, "macro_f1": 1.0})
+
+
+def test_score_choices_reads_two_choice_and_list_choice_examples():
+    """COPA's two named choices and a choice list both take an index; two of three are right."""
+    # class 0 F1 2/3, class 1 F1 0, class 3 F1 1
+    assert score_choices(CHOICE_EXAMPLES, [0, 0, 3]) == pytest.approx(
+        {"accuracy": 2 / 3, "macro_f1": (2 / 3 + 0 + 1) / 3}
+    )
+
+
+# ===============================
+# Relation scorer
+# ===============================
+
+RELATION_TEXT = "Ana Novak dela pri NLB v Ljubljani."
+ANA, NLB, LJUBLJANA = span(0, 9, "PER"), span(19, 22, "ORG"), span(25, 34, "LOC")
+RELATION_EXAMPLE = {
+    "id": "r1",
+    "text": RELATION_TEXT,
+    "entities": [{**ANA, "id": "m1"}, {**NLB, "id": "m2"}, {**LJUBLJANA, "id": "m3"}],
+    "relations": [
+        {"head": "m1", "tail": "m2", "label": "works_for"},
+        {"head": "m2", "tail": "m3", "label": "located_in"},
+    ],
+}
+
+
+def relation(head: dict, tail: dict, label: str) -> dict:
+    """Build one predicted relation in the relation family's prediction shape."""
+    return {"head": head, "tail": tail, "label": label}
+
+
+PERFECT_RELATIONS = [relation(ANA, NLB, "works_for"), relation(NLB, LJUBLJANA, "located_in")]
+# one right relation and one wrong pair labelled works_for
+PARTIAL_RELATIONS = [relation(ANA, NLB, "works_for"), relation(ANA, LJUBLJANA, "works_for")]
+
+
+@pytest.mark.parametrize(
+    ("predictions", "expected"),
+    [
+        (PERFECT_RELATIONS, {"relation_f1": 1.0, "relation_macro_f1": 1.0}),
+        ([], {"relation_f1": 0.0, "relation_macro_f1": 0.0}),
+        # works_for has 1 hit of 2 predicted and 1 gold, located_in is missed
+        (PARTIAL_RELATIONS, {"relation_f1": 2 * 1 / 4, "relation_macro_f1": (2 * 1 / 3 + 0) / 2}),
+    ],
+    ids=["perfect", "empty", "partial"],
+)
+def test_score_relations_with_gold_entities(predictions, expected):
+    """Pairs of gold mentions score strict micro F1 and macro F1 over relation labels."""
+    assert score_relations([RELATION_EXAMPLE], [predictions], gold_entities=True) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("predictions", "expected"),
+    [
+        (PERFECT_RELATIONS, {"relation_f1": 1.0, "relation_macro_f1": 1.0, "relation_boundary_f1": 1.0}),
+        ([], {"relation_f1": 0.0, "relation_macro_f1": 0.0, "relation_boundary_f1": 0.0}),
+        # a head span one character short misses under every rule
+        (
+            [relation(span(0, 8, "PER"), NLB, "works_for"), relation(NLB, LJUBLJANA, "located_in")],
+            {"relation_f1": 2 * 1 / 4, "relation_macro_f1": (0 + 1) / 2, "relation_boundary_f1": 2 * 1 / 4},
+        ),
+    ],
+    ids=["perfect", "empty", "partial"],
+)
+def test_score_relations_end_to_end(predictions, expected):
+    """Found mentions score strict micro F1, macro F1 and boundary F1."""
+    assert score_relations([RELATION_EXAMPLE], [predictions], gold_entities=False) == pytest.approx(expected)
+
+
+def test_score_relations_boundary_f1_ignores_entity_labels():
+    """A relation with the right spans but a wrong entity label is a boundary hit only."""
+    predictions = [[relation(span(0, 9, "ORG"), NLB, "works_for"), relation(NLB, LJUBLJANA, "located_in")]]
+    scores = score_relations([RELATION_EXAMPLE], predictions, gold_entities=False)
+    assert scores["relation_f1"] == pytest.approx(2 * 1 / 4)
+    assert scores["relation_boundary_f1"] == pytest.approx(1.0)
+
+
+def test_score_relations_with_gold_entities_refuses_a_non_gold_span():
+    """With gold entities, an argument that is no gold mention raises with the example id."""
+    with pytest.raises(ValueError, match="'r1'"):
+        score_relations([RELATION_EXAMPLE], [[relation(span(0, 3, "PER"), NLB, "works_for")]], gold_entities=True)
+
+
+# ===============================
+# Extractive QA scorer
+# ===============================
+
+
+def test_score_extractive_qa_scores_answerable_and_unanswerable_questions():
+    """A partly right answer and a correct abstention, scored overall and by kind."""
+    examples = [
+        {"id": "q1", "context": "", "question": "", "answers": [{"text": "glavno mesto Slovenije", "start": 0}]},
+        {"id": "q2", "context": "", "question": "", "answers": []},
+    ]
+    # both predicted words are among the three gold words: precision 1, recall 2/3, F1 0.8
+    expected = {
+        "exact_match": 1 / 2,
+        "f1": (0.8 + 1) / 2,
+        "has_answer_exact_match": 0.0,
+        "has_answer_f1": 0.8,
+        "no_answer_exact_match": 1.0,
+        "no_answer_f1": 1.0,
+    }
+    assert score_extractive_qa(examples, ["mesto Slovenije", ""]) == pytest.approx(expected)
+
+
+def test_score_extractive_qa_takes_the_best_gold_answer_and_keeps_articles():
+    """Case, Slovene quotes and spacing are normalised away; an English article is not."""
+    examples = [
+        {
+            "id": "q1",
+            "context": "",
+            "question": "",
+            "answers": [{"text": "x", "start": 0}, {"text": "Ljubljana", "start": 0}],
+        },
+        {"id": "q2", "context": "", "question": "", "answers": [{"text": "Ljubljana", "start": 0}]},
+    ]
+    scores = score_extractive_qa(examples, ["  „LJUBLJANA“! ", "the Ljubljana"])
+    assert scores["exact_match"] == pytest.approx(1 / 2)
+    assert scores["f1"] == pytest.approx((1 + 2 / 3) / 2)
+
+
+def test_score_extractive_qa_scores_no_answer_to_an_answerable_question_zero():
+    """The empty answer to a question with a gold answer misses on every score."""
+    examples = [{"id": "q1", "context": "", "question": "", "answers": [{"text": "Bled", "start": 0}]}]
+    expected = {
+        "exact_match": 0.0,
+        "f1": 0.0,
+        "has_answer_exact_match": 0.0,
+        "has_answer_f1": 0.0,
+        "no_answer_exact_match": 0.0,
+        "no_answer_f1": 0.0,
+    }
+    assert score_extractive_qa(examples, [""]) == pytest.approx(expected)
+
+
+def test_score_extractive_qa_scores_a_kind_with_no_questions_zero():
+    """A split with no unanswerable question reports 0 for that kind, not a gap."""
+    examples = [{"id": "q1", "context": "", "question": "", "answers": [{"text": "Bled", "start": 0}]}]
+    scores = score_extractive_qa(examples, ["Bled"])
+    assert scores["has_answer_exact_match"] == 1.0
+    assert scores["no_answer_exact_match"] == scores["no_answer_f1"] == 0.0
+
+
+# ===============================
+# Keyphrase scorer
+# ===============================
+
+
+def test_score_keyphrases_of_perfect_predictions_score_one_at_m():
+    """Every gold keyphrase predicted scores F1@M 1, while F1@5 and F1@10 count the empty ranks as wrong."""
+    examples = [{"id": "k1", "text": "Volitve in vlada.", "keyphrases": ["volitve", "vlada"]}]
+    # 2 hits of 2 gold: F1@5 = 4 / (5 + 2), F1@10 = 4 / (10 + 2)
+    assert score_keyphrases(examples, [["Volitve", "vlada"]]) == pytest.approx(
+        {"f1_at_5": 4 / 7, "f1_at_10": 4 / 12, "f1_at_m": 1.0, "gold_in_text": 1.0}
+    )
+
+
+def test_score_keyphrases_reports_f1_at_5_10_and_m_after_normalising():
+    """Duplicates after normalisation count once; F1@5 and F1@10 treat missing ranks as wrong."""
+    examples = [{"id": "k1", "text": "", "keyphrases": ["Volitve", "vlada", "parlament", "koalicija"]}]
+    ranked = ["volitve", "VOLITVE!", "šport", "Vlada", "vreme", "kultura", "parlament"]
+    # deduplicated: volitve, šport, vlada, vreme, kultura, parlament; 2 hits in the top 5, 3 in all 6
+    assert score_keyphrases(examples, [ranked]) == pytest.approx(
+        {"f1_at_5": 2 * 2 / 9, "f1_at_10": 2 * 3 / 14, "f1_at_m": 2 * 3 / 10, "gold_in_text": 0.0}
+    )
+
+
+def test_score_keyphrases_of_empty_predictions_scores_zero_and_the_share_in_the_text():
+    """Empty predictions score 0; a gold keyphrase counts as in the text as whole words, not as part of a word."""
+    examples = [
+        {"id": "k1", "text": "Vlada je sprejela proračun.", "keyphrases": ["vlada", "proračun", "volitve"]},
+        {"id": "k2", "text": "Vladimir je odstopil.", "keyphrases": ["vlad"]},
+    ]
+    assert score_keyphrases(examples, [[], []]) == pytest.approx(
+        {"f1_at_5": 0.0, "f1_at_10": 0.0, "f1_at_m": 0.0, "gold_in_text": 2 / 4}
+    )
+
+
+# ===============================
+# Shape and length errors
+# ===============================
+
+
+@pytest.mark.parametrize(
+    ("scorer", "example", "prediction"),
+    [
+        (score_spans, {"id": "bad", "text": "Ana", "spans": []}, None),
+        (score_spans, {"id": "bad", "text": "Ana", "spans": []}, [{"start": 0, "label": "PER"}]),
+        (score_tags, {"id": "bad", "words": ["a", "b"], "tags": ["X", "Y"]}, ["X"]),
+        (score_labels, {"id": "bad", "label": "a"}, None),
+        (score_labels, {"id": "bad", "label": "a"}, ["a"]),
+        (score_choices, {"id": "bad", "choice1": "x", "choice2": "y", "label": 0}, 2),
+        (score_choices, {"id": "bad", "choices": ["x", "y"], "label": 0}, "0"),
+        (functools.partial(score_relations, gold_entities=False), {**RELATION_EXAMPLE, "id": "bad"}, None),
+        (functools.partial(score_relations, gold_entities=False), {**RELATION_EXAMPLE, "id": "bad"}, [{"head": ANA}]),
+        (score_extractive_qa, {"id": "bad", "context": "", "question": "", "answers": []}, None),
+        (score_keyphrases, {"id": "bad", "text": "", "keyphrases": []}, "vlada"),
+    ],
+)
+def test_missing_or_misshapen_prediction_raises_naming_the_example(scorer, example, prediction):
+    """A missing or wrongly shaped prediction raises with the example id."""
+    with pytest.raises(ValueError, match="'bad'"):
+        scorer([example], [prediction])
+
+
+def test_prediction_count_unlike_example_count_raises():
+    """Predictions align by position, so a missing tail is an error."""
+    with pytest.raises(ValueError, match="1 predictions for 2 examples"):
+        score_labels([{"id": "a", "label": "x"}, {"id": "b", "label": "x"}], ["x"])
+
+
+@pytest.mark.parametrize(
+    ("family", "scorer"),
+    [
+        ("ner", score_spans),
+        ("pos", score_tags),
+        ("sentiment", score_labels),
+        ("nli", score_labels),
+        ("qa", score_labels),
+        ("coref", score_labels),
+        ("wsd", score_labels),
+        ("entity_sentiment", score_labels),
+        ("topic", score_labels),
+        ("commonsense", score_choices),
+        ("reading_mc", score_choices),
+        ("extractive_qa", score_extractive_qa),
+        ("keyphrase", score_keyphrases),
+    ],
+)
+def test_scorer_for_returns_the_family_scorer(family, scorer):
+    """Each family maps to the scorer of its prediction shape."""
+    assert scorer_for(family) is scorer
+
+
+def test_scorer_for_binds_the_relation_setting():
+    """The relation scorer with gold entities bound takes only examples and predictions."""
+    scorer = scorer_for("relation", gold_entities=True)
+    assert scorer([RELATION_EXAMPLE], [PERFECT_RELATIONS]) == pytest.approx(
+        {"relation_f1": 1.0, "relation_macro_f1": 1.0}
+    )
+
+
+def test_scorer_for_relation_without_its_setting_raises_naming_it():
+    """The relation scorer needs `gold_entities`, so asking for it without one raises with the family and option."""
+    with pytest.raises(ValueError, match="'relation'.*gold_entities"):
+        scorer_for("relation")
+
+
+def test_scorer_for_unknown_family_raises_naming_it():
+    """A family with no scorer raises with its name."""
+    with pytest.raises(KeyError, match="'dependency'"):
+        scorer_for("dependency")

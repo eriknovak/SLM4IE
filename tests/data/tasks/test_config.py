@@ -106,7 +106,7 @@ def _ner_entry(role: str, keys: list, exclude: Optional[list] = None) -> dict:
         "role": role,
         "source": source,
         "splits": splits,
-        "labels": None,
+        "labels": ["PER"],
         "suite": None,
         "language": "sl",
         "license": "cc-by-4.0",
@@ -121,7 +121,7 @@ def _write_registry(tmp_path: Path, entries: dict, catalog: Optional[dict] = Non
     path = tmp_path / "tasks.yaml"
     body = {
         "roots": {"extracted": "x", "raw": "r", "tasks": "t"},
-        "converters": {"ner": "spans"},
+        "converters": {"ner": "spans", "extractive_qa": "extractive_qa"},
         "entries": entries,
     }
     path.write_text(yaml.safe_dump(body))
@@ -147,6 +147,22 @@ def test_finetune_only_role_is_accepted(tmp_path: Path) -> None:
     path = _write_registry(tmp_path, {"ner/a": _ner_entry("finetune_only", ["small"])}, _CATALOG_FOR_WORKERS)
     entry = load_tasks_config(path, tmp_path / "download.yaml").entries[0]
     assert (entry.role, "train" in entry.splits) == ("finetune_only", True)
+
+
+def test_label_free_family_loads_without_labels(tmp_path: Path) -> None:
+    """An `extractive_qa` entry loads with no `labels`."""
+    qa = {**_ner_entry("finetune_and_eval", ["small"]), "labels": None}
+    path = _write_registry(tmp_path, {"extractive_qa/a": qa}, _CATALOG_FOR_WORKERS)
+    assert load_tasks_config(path, tmp_path / "download.yaml").entries[0].labels is None
+
+
+@pytest.mark.parametrize("labels", [None, []])
+def test_labelled_family_without_labels_is_refused(tmp_path: Path, labels: list | None) -> None:
+    """An `ner` entry with null or empty `labels` is refused, the error naming the entry."""
+    entry = {**_ner_entry("finetune_and_eval", ["small"]), "labels": labels}
+    path = _write_registry(tmp_path, {"ner/a": entry}, _CATALOG_FOR_WORKERS)
+    with pytest.raises(ValueError, match="ner/a"):
+        load_tasks_config(path, tmp_path / "download.yaml")
 
 
 _CATALOG = {
